@@ -11,7 +11,7 @@
 
 A desktop application that lets a GM load their own TTRPG PDFs (rules, sourcebooks, lore), take structured notes, and query an AI agent for rules answers and lore lookups — with source citations on every response. The LLM backend is configurable at setup: cloud API or local via Ollama.
 
-The backend is structured as a standalone HTTP service from day one, embedded inside the desktop app. This makes a future cloud or mobile deployment a deployment decision, not an architectural rewrite.
+The backend runs in-process with the Tauri app, using IPC commands for request/response and Tauri events for streaming. All external dependencies (database, vector store, file storage) are behind traits, so a future cloud or mobile deployment means extracting the service layer into an HTTP server — a tactical extraction, not a rewrite.
 
 ---
 
@@ -29,7 +29,7 @@ The app must run on Windows, Linux, and macOS with no complicated setup. It need
 |-----------|------------------------|-------------------------|---------------------|
 | Binary size | ~8–15 MB | ~200 MB | Small but 3× codebase |
 | Runtime required | None (WebView2 on Win, built-in elsewhere) | Bundled Node | None |
-| Rust ecosystem fit | Native — PDF, embeddings, SQLite, LanceDB | Needs FFI or re-implementation | N/A |
+| Rust ecosystem fit | Native — PDF, embeddings, SurrealDB | Needs FFI or re-implementation | N/A |
 | Setup for user | Double-click installer | Double-click installer | Double-click installer |
 | Memory footprint | Low | ~300 MB base | Low |
 
@@ -37,25 +37,40 @@ The app must run on Windows, Linux, and macOS with no complicated setup. It need
 
 **Consequences:**
 - Backend logic lives in Rust; frontend in TypeScript/Svelte.
-- The frontend communicates with the backend via HTTP (`fetch`) — **not** Tauri IPC commands. See ADR-005.
+- The frontend communicates with the backend via **Tauri IPC commands** (type-safe, zero-serialization-cost) and **Tauri events** for streaming responses. See ADR-005.
 - WebView2 must be present on Windows (auto-installed by the Tauri bootstrapper).
 
 ---
 
-## ADR-002: Vector Store — LanceDB (Embedded)
+## ADR-002: Unified Store — SurrealDB (Relational + Vector + Graph)
 
 **Status:** Proposed
 
+### Context
+
+The app needs relational storage (campaigns, sources, entities, sessions), vector storage (embedding chunks for RAG), and graph relationships (entity-to-entity links). Traditionally this means three storage engines — a pattern that complicates backups, transactional consistency, and deployment.
+
 ### Options Considered
 
-| Dimension | LanceDB | sqlite-vec | Qdrant (embedded) |
-|-----------|---------|------------|-------------------|
-| Rust support | Native (`lancedb` crate) | Via `rusqlite` | Via REST/gRPC |
-| Metadata filtering | First-class (columnar) | Basic SQL | Full |
-| Multi-collection | Yes (tables) | Separate virtual tables | Yes |
-| Cloud offering | LanceDB Cloud | No | Qdrant Cloud |
+| Dimension | SurrealDB | SQLite + LanceDB | SQLite + sqlite-vec |
+|-----------|-----------|------------------|---------------------|
+| Stores | Relational + vector + graph (unified) | Relational + vector (split) | Relational + vector (sqlx extension) |
+| Rust SDK | Native (`surrealdb` crate) | `sqlx` + `lancedb` | `sqlx` + rusqlite |
+| Graph edges | Native (RELATION tables) | Manual JOINs on entity_links | Manual JOINs on entity_links |
+| Vector indexes | MTREE index (COSINE distance) | Columnar ANN | Via sqlite-vec extension |
+| Cloud path | SurrealDB Cloud | LanceDB Cloud + PostgreSQL | PostgreSQL + pgvector |
+| Test isolation | In-memory engine (`mem::Db`) | Two temp dirs (sqlx::test + tmpdir) | sqlx::test (single DB) |
+| Transactional consistency | Single store — atomic updates | Two stores — no cross-store tx | Single DB — atomic updates |
+| Migration tooling | SurrealQL schema definitions | sqlx migrations (UP + DOWN) | sqlx migrations |
+| Learning curve | SurrealQL (new dialect) | SQL + LanceDB API | SQL + sqlite-vec |
 
-**Decision:** LanceDB for vector storage; SQLite (via `sqlx`) for relational data. LanceDB's cloud offering provides a direct migration path when moving to cloud hosting (ADR-005).
+**Decision:** SurrealDB as the single store for relational data, vector indexes, and graph edges. The unified engine simplifies the architecture (one backup, one connection, one migrations system) and enables graph traversal that would otherwise require manual JOIN chains or application-level traversal code.
+
+**Consequences:**
+- The project uses **SurrealQL** instead of SQL. No compile-time query validation (unlike `sqlx::query!`), so query errors are caught in tests rather than at compile time.
+- Embedded mode uses RocksDB under the hood — first `cargo build` is slower (~30–60 s for the C++ transitive build).
+- The `VectorStore` trait is retained for abstraction, but its SurrealDB implementation is the primary; a future `QdrantCloud` implementation can be added when the cloud path is needed.
+- Schema migrations use SurrealQL `DEFINE` statements in ordered `.surql` files, applied at startup. SurrealDB's schema changes are mostly additive — no rollback mechanism (unlike sqlx's UP/DOWN migrations).
 
 ---
 
@@ -73,7 +88,9 @@ The app must run on Windows, Linux, and macOS with no complicated setup. It need
 
 **Decision:** `fastembed-rs` as the default. Optional override to use cloud embedding API in settings.
 
-**Critical constraint:** The embedding model is baked into the vector index. Switching models requires full re-indexing. The settings screen must warn the user. Store the model identifier alongside each LanceDB table so a mismatch is detectable at startup.
+**Critical constraint:** The embedding model is baked into the vector index. Switching models requires full re-indexing. The settings screen must warn the user and provide a batch re-index workflow: show which sources are affected, allow one-click re-index with progress, and clean up orphaned old chunks.
+
+Store the model identifier alongside each table in SurrealDB so a mismatch is detectable at startup. The re-index orchestration handles: (1) detecting affected sources, (2) queuing them for re-indexing, (3) purging old chunks, and (4) streaming progress per source so the GM can see where the process stands.
 
 ---
 
@@ -97,43 +114,47 @@ pub trait LlmProvider: Send + Sync {
 |----------------|-------|
 | `OpenAIProvider` | OpenAI API, configurable `base_url` → also covers Azure OpenAI, OpenRouter |
 | `AnthropicProvider` | Anthropic Messages API via `reqwest` |
-| `OllamaProvider` | Reuses `OpenAIProvider` with `base_url = http://localhost:11434` |
+| `OllamaProvider` | Native Ollama client speaking Ollama's `/api/chat` wire format (NDJSON streaming with `done: true` sentinel, `keep_alive`/`low_vram`/`num_ctx` params — not an OpenAI-compatible passthrough) |
 
 The provider is resolved at startup from config and injected as `Arc<dyn LlmProvider>` into the service layer. In tests, replaced with `MockLlmProvider` (via `mockall`).
 
+**Note:** A previous version of this ADR listed `OllamaProvider` as reusing `OpenAIProvider` with a `base_url` swap. This is incorrect — Ollama's API differs from OpenAI's in streaming format (NDJSON vs SSE), response schemas (`done`/`done_reason` fields), and provider-specific parameters. Each provider has its own wire-format client.
+
 ---
 
-## ADR-005: Cloud-Readiness — Axum Sidecar Architecture
+## ADR-005: Architecture — Tauri IPC + SurrealDB Embedded
 
 **Status:** Proposed
 
 ### Context
 
-The GM wants to eventually run the backend on a server and interact via a mobile client. The architecture must support this without a rewrite. The risk is building a desktop app that is too coupled to the local process model (Tauri IPC, filesystem paths baked into handlers) to extract into a server.
+The GM wants to eventually run the backend on a server and interact via a mobile client. The architecture must support this without a rewrite. The risk is building a desktop app too coupled to the local process model to extract into a server.
 
 ### Decision
 
-The Rust backend is structured as a standalone **`axum` HTTP server** from the start. In desktop mode, Tauri spawns it on a random localhost port and injects that port into the WebView. The Svelte frontend communicates with the backend using standard `fetch()` calls — it has no awareness of whether it's talking to localhost or a remote server.
+The Rust backend runs **in-process** with Tauri. The frontend communicates via:
+- **Tauri IPC commands** (`#[tauri::command]`) for request/response operations (CRUD, settings, PDF upload). Each command delegates to the service layer — the handler is a thin adapter.
+- **Tauri events** for streaming operations (agent responses, ingestion progress). The streaming source (e.g., an `LlmProvider::stream` response channel) emits events into the Tauri event loop, which delivers them directly to the WebView.
+
+The service layer is organized around traits (`LlmProvider`, `VectorStore`, `BlobStore`) so that extracting into a cloud server later means replacing the IPC handlers with axum handlers — the service layer itself doesn't change.
 
 ```
 Desktop (v1)                        Cloud (vN)
 ─────────────────────────           ─────────────────────────────────────
-Tauri shell                         Mobile web app / Tauri Mobile
-  └─ spawns axum server             Browser or native WebView
-       on localhost:PORT    →           └─ points to https://api.example.com
-  └─ injects PORT into
-       WebView env
-  └─ Svelte app calls
-       http://localhost:PORT
+Tauri shell                         Tauri Mobile / static web app
+  └─ Rust backend in-process          └─ axum HTTP server (extracted
+  └─ IPC commands (CRUD)                  service layer + new handlers)
+  └─ Tauri events (streaming)          └─ SurrealDB Cloud or alternative
+  └─ SurrealDB embedded                  └─ JWT auth middleware
 ```
 
-**Migration steps from desktop to cloud (no rewrite required):**
-1. Extract the axum binary into its own Docker container.
-2. Swap storage: SQLite → PostgreSQL (sqlx feature flag), LanceDB embedded → LanceDB Cloud or Qdrant Cloud (behind the `VectorStore` trait).
-3. Add auth middleware to the axum router (JWT / session cookies).
-4. Ship the Svelte frontend as a static web app; or wrap in Tauri Mobile.
+**Migration steps from desktop to cloud:**
+1. Extract the service layer into a standalone axum binary. The IPC handlers become axum route handlers; the trait boundaries are already in place.
+2. Swap storage: SurrealDB embedded → SurrealDB Cloud (different connection string, same SurrealQL queries).
+3. Add auth middleware (JWT) to the axum router.
+4. Ship the Svelte frontend as a static web app, or wrap in Tauri Mobile.
 
-### VectorStore Trait (for cloud swap)
+### Core Traits
 
 ```rust
 #[async_trait]
@@ -143,48 +164,61 @@ pub trait VectorStore: Send + Sync {
         -> Result<Vec<SearchResult>>;
     async fn delete(&self, table: &str, ids: Vec<String>) -> Result<()>;
 }
-// Implementations: LanceDbLocal, LanceDbCloud, QdrantCloud
+// Implementations: SurrealDbVector, QdrantCloud (future)
+
+#[async_trait]
+pub trait BlobStore: Send + Sync {
+    async fn store(&self, path: &str, data: &[u8]) -> Result<()>;
+    async fn retrieve(&self, path: &str) -> Result<Vec<u8>>;
+    async fn delete(&self, path: &str) -> Result<()>;
+}
+// Implementations: LocalFileStore (Phase 1–3), S3Store (Phase 4)
 ```
 
-### Storage Migration Path
+### Storage Path
 
 | Layer | Desktop | Cloud |
 |-------|---------|-------|
-| Relational | SQLite | PostgreSQL (same `sqlx` queries — keep SQL ANSI-compatible, no SQLite-isms) |
-| Vector | LanceDB embedded | LanceDB Cloud or Qdrant Cloud |
-| File storage (PDFs) | Local filesystem | S3 / GCS (abstract behind a `BlobStore` trait) |
+| Relational + Vector + Graph | SurrealDB embedded (RocksDB) | SurrealDB Cloud (same SurrealQL) |
+| File storage (PDFs) | Local filesystem via `BlobStore` | S3 / GCS via `BlobStore` |
 | Auth | None (single-user) | JWT issued at login |
 
-### axum API Surface
+### Tauri IPC API Surface
 
 ```
-REST
-  POST   /api/campaigns
-  GET    /api/campaigns
-  GET    /api/campaigns/:id
-  PUT    /api/campaigns/:id
-  DELETE /api/campaigns/:id
+// Campaigns
+#[tauri::command] create_campaign(name, system) -> Campaign
+#[tauri::command] get_campaigns() -> Vec<Campaign>
+#[tauri::command] get_campaign(id) -> Campaign
+#[tauri::command] update_campaign(id, name, system) -> Campaign
+#[tauri::command] delete_campaign(id) -> ()
 
-  POST   /api/campaigns/:id/sources          (upload PDF → triggers ingestion)
-  GET    /api/campaigns/:id/sources
-  DELETE /api/campaigns/:id/sources/:sid
+// Sources (PDFs)
+#[tauri::command] upload_source(campaign_id, file_path) -> Source
+#[tauri::command] get_sources(campaign_id) -> Vec<Source>
+#[tauri::command] delete_source(campaign_id, source_id) -> ()
 
-  POST   /api/campaigns/:id/entities
-  GET    /api/campaigns/:id/entities
-  PUT    /api/campaigns/:id/entities/:eid
-  DELETE /api/campaigns/:id/entities/:eid
+// Entities
+#[tauri::command] create_entity(campaign_id, entity_type, name, ...) -> Entity
+#[tauri::command] get_entities(campaign_id) -> Vec<Entity>
+// ... etc
 
-  POST   /api/campaigns/:id/sessions
-  GET    /api/campaigns/:id/sessions
-  PUT    /api/campaigns/:id/sessions/:sid
+// Sessions
+// Settings
 
-  GET    /api/settings
-  PUT    /api/settings
-
-WebSocket
-  WS     /ws/campaigns/:id/chat              (streaming agent responses + citations)
-  WS     /ws/campaigns/:id/ingest/:source_id (streaming ingestion progress)
+// Streaming — uses Tauri events, not commands:
+//   app.on_event(|source| { … }) — agent response tokens
+//   app.on_event(|source| { … }) — ingestion progress
 ```
+
+### Connectivity & Offline
+
+The app detects network status at startup and during operation:
+- If using a cloud LLM provider (OpenAI/Anthropic) and the network is down, surface a clear error in the chat UI: "Network unavailable — switch to Ollama in Settings or retry."
+- If using Ollama locally, no network dependency — works fully offline.
+- SurrealDB embedded is always local — no network dependency for storage.
+- PDF ingestion is always local — no network dependency.
+- Feature to auto-detect network loss and suggest switching to a local provider is planned for Phase 2.
 
 ---
 
@@ -194,7 +228,7 @@ WebSocket
 
 ### Philosophy
 
-Tests are written **before or alongside** implementation (TDD). The trait-based design (ADR-004, ADR-005) is the enabler: every service boundary is mockable, so unit tests never hit the network or filesystem. Integration tests use real storage with isolated temp directories / in-memory databases. E2E tests drive the full app via its HTTP API and the browser.
+Tests are written **before or alongside** implementation (TDD). The trait-based design (ADR-004, ADR-005) is the enabler: every service boundary is mockable, so unit tests never hit the network or filesystem. Integration tests use real storage with isolated in-memory databases. E2E tests drive the full app via the Tauri IPC layer (backend E2E) or WebDriver (full UI).
 
 ### Rust — Unit Tests
 
@@ -205,6 +239,8 @@ Location: `#[cfg(test)]` modules inside each source file.
   - `MockLlmProvider` — returns deterministic responses without hitting an API.
   - `MockVectorStore` — returns pre-set search results.
   - `MockBlobStore` — simulates file storage.
+
+**Note:** Prefer in-memory real implementations over mockall where practical. An in-memory `HashMap`-backed `VectorStore` catches more real bugs than a mock and produces less brittle test setup. Use mocks only for external I/O that's genuinely costly to simulate (LLM API, filesystem).
 - Assertion crate: `pretty_assertions` for readable diffs on complex types.
 
 ```toml
@@ -239,22 +275,25 @@ mod tests {
 Location: `tests/` directory (compiled as separate crates by Cargo).
 
 - Test the full service stack against **real storage** in isolated environments:
-  - SQLite: use `sqlx::test` macro — creates a fresh in-memory DB per test, runs migrations automatically.
-  - LanceDB: create a `tempdir` per test, drop on cleanup.
-  - fastembed: use a small stub model or skip embedding in integration tests by injecting a `MockVectorStore`.
-- Test the axum router using `axum-test` (no real port binding needed):
-  ```rust
-  let app = build_router(services);
-  let client = TestClient::new(app);
-  let res = client.post("/api/campaigns").json(&payload).await;
-  assert_eq!(res.status(), StatusCode::CREATED);
-  ```
+  - SurrealDB: use the in-memory engine (`mem::Db`) — run schema setup per test, drop on completion.
+  - fastembed: use a small stub model or skip embedding by injecting a `MockVectorStore`. At least one integration test should exercise real fastembed with a small model (e.g., `all-MiniLM-L6-v2`, ~80 MB) to catch dimension errors and API mismatches.
+- Test the service layer directly (no HTTP layer): construct services with real SurrealDB in-memory, call methods, assert results.
 - `cargo test --test '*'` runs all integration tests.
+
+```rust
+// Integration test pattern
+async fn setup_test_db() -> Surreal<Any> {
+    let db = Surreal::new::<mem::Db>().await.unwrap();
+    db.use_ns("test").use_db("test").await.unwrap();
+    // Run schema definitions
+    db.query(include_str!("../migrations/001_schema.surql")).await.unwrap();
+    db
+}
+```
 
 ```toml
 [dev-dependencies]
-axum-test = "15"
-sqlx = { version = "0.7", features = ["sqlite", "test"] }
+surrealdb = { version = "2", features = ["kv-mem"] }
 tempfile = "3"
 ```
 
@@ -264,7 +303,8 @@ Tool: **Vitest** + `@testing-library/svelte`.
 
 - Unit tests: utility functions, API client wrappers, date formatters, citation parsers.
 - Component tests: render a component with props, assert DOM output, simulate user events.
-- Mock the backend API using `msw` (Mock Service Worker) — intercepts `fetch()` calls, returns fixtures.
+- Mock the backend API using MSW (Mock Service Worker) or by wrapping Tauri IPC calls in a test harness.
+- **Coverage target:** ≥ 70% on components (not just utilities — the hard parts are rendering, streaming state, and error recovery).
 
 ```bash
 pnpm test            # watch mode
@@ -273,22 +313,22 @@ pnpm test --run      # CI mode (no watch)
 
 ### E2E Tests — Full App
 
-Tool: **Playwright** against the running axum server directly (backend E2E) and optionally the full Tauri app via `tauri-driver` (UI E2E).
+Tool: **Playwright** against the backend service layer (backend E2E) and optionally the full Tauri app via `tauri-driver` (UI E2E).
 
 **Backend E2E (fast, no UI):**
-- Spin up the axum server with a test database.
-- Drive via HTTP and WebSocket using Playwright's `request` API.
+- Construct the service layer with a real SurrealDB in-memory database.
+- Drive via the service API directly (no IPC layer — test the service, not the glue).
 - Cover: full PDF ingestion flow → query → citation returned.
-- Run in CI on every PR (moderate cost).
+- Run in CI on every PR.
 
 **UI E2E via tauri-driver (slow, full stack):**
 - Requires a built Tauri app; run via WebDriver protocol.
 - Cover: happy paths only — load PDF, ask question, read response.
-- Run in CI on merge to main only (expensive).
+- Run on Linux only in CI on merge to main (expand matrix when platform-specific bugs emerge).
 
 ```bash
 # Backend E2E
-pnpm playwright test tests/e2e/backend/
+cargo test --test e2e
 
 # Full UI E2E (requires built app)
 pnpm playwright test tests/e2e/ui/
@@ -296,15 +336,23 @@ pnpm playwright test tests/e2e/ui/
 
 ### Test Data & Fixtures
 
-- PDF fixtures: use a small, freely licensed PDF (e.g., an SRD excerpt or a synthetic test PDF) committed to the repo under `tests/fixtures/`.
+- **PDF fixtures:** A diverse suite of small (2–3 page) PDFs covering the extraction edge cases the app will face:
+  - `single-column-text.pdf` — clean, simple text extraction (happy path)
+  - `multi-column.pdf` — two-column body text to validate reading-order handling
+  - `tables.pdf` — proficiency tables, spell lists, equipment tables
+  - `scanned.pdf` — image-only PDF to validate graceful failure or OCR notice
+  - `stat-block.pdf` — monster/NPC stat block with mixed positioning
+  - Free licensing: SRD excerpts, synthetic PDFs generated programmatically
 - LLM responses: all LLM calls in tests go through `MockLlmProvider`; fixture responses stored as JSON in `tests/fixtures/llm/`.
-- Database fixtures: SQL seed files in `tests/fixtures/db/`.
+- Database fixtures: SurrealQL seed files in `tests/fixtures/db/`.
 
 ### Coverage
 
-- Rust: `cargo-llvm-cov` for line coverage. Target: **≥ 80% on the service layer** (chunker, retrieval, agent, prompt builder). No coverage target on glue code.
-- Frontend: Vitest's built-in Istanbul coverage. Target: **≥ 70% on utility modules**.
+- Rust: `cargo-llvm-cov` for line coverage. Setup in Phase 1 (one `Cargo.toml` addition + CI step). Target: **≥ 80% on the service layer** (chunker, retrieval, agent, prompt builder). No coverage target on glue code.
+- Frontend: Vitest's built-in Istanbul coverage. Target: **≥ 70% on key components** (streaming chat UI, entity forms, citation display).
 - Coverage reports generated in CI and uploaded as artifacts; not used as a hard gate (quality over metric-gaming).
+
+**Note:** Coverage tooling (`cargo-llvm-cov`) is set up in Phase 1, not deferred. Targets are aspirational — measurement from day one prevents surprises later.
 
 ---
 
@@ -384,6 +432,114 @@ All CI steps are defined as reusable composite actions so they're runnable local
 
 ---
 
+## ADR-008: Markdown Vault Sync — Bidirectional Filesystem Sync
+
+**Status:** Proposed
+
+### Context
+
+GMs want to reuse and edit their campaign notes in other tools, particularly Obsidian, with changes flowing in both directions — edits made in Obsidian appear in Chronacle and vice versa. Notes are stored as Markdown strings in SurrealDB (`entity.notes`, `session.notes`).
+
+### Decision
+
+Introduce a **`VaultSyncService`** that keeps a user-configured directory of `.md` files in bidirectional sync with SQLite. The user can point the sync target at any existing folder, including a live Obsidian vault.
+
+**Vault directory layout:**
+
+```
+<vault_root>/
+  <campaign-slug>/
+    sessions/
+      001-the-awakening.md
+      002-shadows-of-the-keep.md
+    entities/
+      npc/
+        seraphina-aldric.md
+      location/
+        the-iron-tower.md
+      faction/
+      creature/
+      item/
+      event/
+      player_character/
+      misc/
+```
+
+**File format — YAML frontmatter + Markdown body:**
+
+```markdown
+---
+id: "ent_abc123"
+name: "Seraphina Aldric"
+type: "npc"
+campaign: "Shadows of Valdris"
+is_gm_only: false
+created_at: "2026-05-28T14:00:00Z"
+updated_at: "2026-05-28T18:32:00Z"
+---
+
+Seraphina is the half-elven archivist of the Iron Tower...
+```
+
+Session files include `session_number`, `title`, and `date_played` in frontmatter. The `id` field is the stable link between a file and its DB row; it must not be removed or changed by the user.
+
+**Sync behaviour — Chronacle → vault (outbound):**
+
+| Event | Action |
+|-------|--------|
+| Note saved in Chronacle | Write / overwrite the `.md` file; suppress the inbound file-watch event for that write |
+| Entity / session deleted | Delete the `.md` file |
+| Entity / session renamed | Delete old file, write new file with updated slug |
+| Campaign renamed | Rename the campaign slug folder |
+| Vault path configured | Full reconcile pass: write any file missing or older than `updated_at` |
+
+**Sync behaviour — vault → Chronacle (inbound):**
+
+| Event | Action |
+|-------|--------|
+| `.md` file modified | Parse frontmatter; if `id` matches a known entity/session, update `notes` + `name` in SurrealDB and re-index in SurrealDB |
+| `.md` file created (no `id` in frontmatter, inside a known campaign/type folder) | Create new entity or session in SurrealDB; write back the assigned `id` into the frontmatter |
+| `.md` file deleted | Soft-delete: mark `vault_deleted = TRUE` on the record in SurrealDB; surface a "restore or confirm delete" prompt in Chronacle UI |
+| `.md` file moved within vault | If destination folder maps to a different entity type, update `entity_type` in SurrealDB; slug is cosmetic only |
+| `.md` file with unknown `id` or outside campaign folders | Ignored — not managed by Chronacle |
+
+**Conflict resolution (both sides modified before sync could propagate):**
+
+- Last-write-wins based on `updated_at` (SurrealDB) vs. file mtime.
+- If the delta is under 5 seconds (simultaneous edit), Chronacle surfaces a conflict card in the UI showing both versions; the GM picks one or merges manually.
+- The losing version is written to `<file>.conflict.<timestamp>.md` in the same folder so no content is ever silently discarded.
+
+**`is_gm_only` notes:** Written to the vault by default (the vault is on the GM's own machine). The `vault_include_gm_only` setting (default `true`) lets the GM opt out when sharing their vault.
+
+**Loop-prevention:** Outbound writes set an in-memory `pending_write` guard (keyed by file path + content hash) that causes the file-watcher to skip the next inbound event for that path, preventing write → watch → write cycles.
+
+### Implementation
+
+- `VaultSyncService` holds `vault_root: Option<PathBuf>` and a `notify::RecommendedWatcher` that watches the vault directory recursively.
+- **Outbound:** `async fn on_note_saved(&self, event: NoteEvent) -> Result<()>` — called by entity/session service layers after every successful DB write.
+- **Inbound:** the `notify` watcher emits events into a debounced channel (100 ms); a background task drains the channel, parses changed files, and calls the entity/session service to apply updates.
+- Vault path is persisted in the `setting` table under `vault_sync_path`; set via a Tauri IPC command.
+- A `vault_deleted` field is added to `entity` and `session` records to track soft-deletes from the vault.
+- The service is tested by writing files to a temp directory and driving the watcher directly — no `FileStore` abstraction needed (mock at the `VaultSyncService` boundary instead).
+
+### New migration required
+
+```surql
+-- Add vault_deleted field to entity and session tables
+DEFINE FIELD vault_deleted ON entity TYPE bool DEFAULT false;
+DEFINE FIELD vault_deleted ON session TYPE bool DEFAULT false;
+```
+
+### Consequences
+
+- The `notify` crate is added to approved crates (see Crate & Tool Summary); it uses OS-native APIs (`inotify`, FSEvents, ReadDirectoryChangesW) with no polling overhead.
+- `serde_yaml` is added for frontmatter parsing and serialisation.
+- Inbound changes trigger SurrealDB re-indexing of the updated note, so vault-edited notes remain searchable without any manual action in Chronacle.
+- Deletions from the vault are intentionally non-destructive (soft-delete + UI prompt) to prevent accidental data loss from a misplaced `rm`.
+- **Implementation note:** File I/O uses `tokio::fs` directly, tested by writing to a temp directory. No `FileStore` abstraction is needed — the `VaultSyncService` trait itself provides the test boundary.
+
+---
+
 ## System Architecture
 
 ```
@@ -401,161 +557,164 @@ All CI steps are defined as reusable composite actions so they're runnable local
 │  │  │        Campaign Switcher + Settings               │  │   │
 │  │  └──────────────────────────────────────────────────┘  │   │
 │  │                                                       │   │
-│  │    All API calls: fetch("http://localhost:{PORT}/...")  │   │
-│  └──────────────────────────┬────────────────────────────┘   │
-│                             │ HTTP + WebSocket                │
-│  ┌──────────────────────────▼────────────────────────────┐   │
-│  │                  axum HTTP Server                      │   │
-│  │              (spawned by Tauri on startup)             │   │
+│  │    All IPC: invoke("command_name", { args })           │   │
+│  │    Events:  app.listen("event_name", callback)          │   │
+│  └──────────────────────┬───────────────────────────────┘   │
+│                         │ Tauri IPC commands + events        │
+│  ┌──────────────────────▼───────────────────────────────┐   │
+│  │              Rust Backend (in-process)                 │   │
 │  │                                                       │   │
 │  │  ┌──────────────────────────────────────────────────┐ │   │
-│  │  │                 Agent Service                    │ │   │
-│  │  │  query → retrieve → build context →              │ │   │
-│  │  │  LLM call → stream response + citations          │ │   │
+│  │  │           #[tauri::command] handlers              │ │   │
+│  │  │  (thin adapters → delegate to services)          │ │   │
 │  │  └───────┬───────────────────────────────────┬──────┘ │   │
 │  │          │                                   │        │   │
 │  │  ┌───────▼────────┐            ┌─────────────▼──────┐ │   │
-│  │  │  Retrieval Svc │            │   LLM Provider     │ │   │
-│  │  │ (VectorStore   │            │ (Arc<dyn LlmProv>) │ │   │
-│  │  │  trait)        │            └────────────────────┘ │   │
-│  │  └───────┬────────┘                                   │   │
-│  │          │                                            │   │
-│  │  ┌───────▼────────┐  ┌────────────────────────────┐  │   │
-│  │  │  LanceDB        │  │  SQLite / PostgreSQL        │  │   │
-│  │  │  (VectorStore   │  │  (sqlx — same queries)     │  │   │
-│  │  │   trait impl)   │  │                            │  │   │
-│  │  └────────────────┘  └────────────────────────────┘  │   │
+│  │  │   Agent Svc    │            │  Entity/Session    │ │   │
+│  │  │  query→retrieve│            │  CRUD services     │ │   │
+│  │  │  →LLM→stream   │            │                    │ │   │
+│  │  └───────┬────────┘            └──────────┬─────────┘ │   │
+│  │          │                                 │          │   │
+│  │  ┌───────▼─────────────────────────────────▼──────┐   │   │
+│  │  │              SurrealDB Embedded                  │   │   │
+│  │  │  (RocksDB: relational + vector + graph)        │   │   │
+│  │  │  Tables: campaign, source, chunk, entity,       │   │   │
+│  │  │  session, setting, relates_to, message          │   │   │
+│  │  │  Vector index: chunk.embedding (MTREE, COSINE) │   │   │
+│  │  └────────────────────────────────────────────────┘   │   │
 │  │                                                       │   │
 │  │  ┌──────────────────────────────────────────────────┐ │   │
 │  │  │             PDF Ingestion Pipeline                │ │   │
 │  │  │  pdfium-render → chunk → fastembed →              │ │   │
-│  │  │  VectorStore::upsert (background tokio task)      │ │   │
+│  │  │  SurrealDB chunk upsert (background task)         │ │   │
+│  │  │  Error recovery: checkpoint per page batch,       │ │   │
+│  │  │  resume on crash, index_status tracks state       │ │   │
+│  │  └──────────────────────────────────────────────────┘ │   │
+│  │                                                       │   │
+│  │  ┌──────────────────────────────────────────────────┐ │   │
+│  │  │         Vault Sync Service (ADR-008)              │ │   │
+│  │  │  notify watcher ↔ SurrealDB via entity/session   │ │   │
+│  │  │  services; bidirectional with conflict detect    │ │   │
 │  │  └──────────────────────────────────────────────────┘ │   │
 │  └───────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────┘
 
-App data dir: ~/.local/share/ttrpg-gm-agent/
-  ├── db.sqlite                      (→ postgres:// in cloud)
-  ├── lancedb/{campaign_id}/         (→ LanceDB Cloud in cloud)
-  │   ├── chunks/
-  │   └── notes/
-  ├── pdfs/{source_id}/              (→ S3/GCS in cloud)
-  └── embeddings_cache/              (fastembed model)
+App data dir: ~/.local/share/chronacle/
+  ├── surreal.db/                     (RocksDB data directory)
+  ├── pdfs/{source_id}/               (stored PDF files)
+  └── embeddings_cache/               (fastembed model)
 
-Cloud deployment: extract axum binary → container → point frontend to HTTPS URL
+Cloud deployment: extract service layer → axum binary → SurrealDB Cloud → container
 Mobile:           same Svelte frontend → Tauri Mobile or static web app
 ```
 
 ---
 
-## Data Model (SQLite / PostgreSQL)
+## Data Model (SurrealDB)
 
-```sql
+SurrealDB unifies relational, vector, and graph storage. All data lives in a single embedded RocksDB store with SurrealQL schemas.
+
+```surql
 -- Core
-CREATE TABLE campaigns (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    system      TEXT,
-    created_at  INTEGER NOT NULL,
-    updated_at  INTEGER NOT NULL
-);
+DEFINE TABLE campaign SCHEMAFULL;
+DEFINE FIELD name ON campaign TYPE string;
+DEFINE FIELD system ON campaign TYPE string;
+DEFINE FIELD created_at ON campaign TYPE datetime;
+DEFINE FIELD updated_at ON campaign TYPE datetime;
 
--- PDFs
-CREATE TABLE sources (
-    id           TEXT PRIMARY KEY,
-    campaign_id  TEXT REFERENCES campaigns(id),  -- NULL = global/shared across campaigns
-    filename     TEXT NOT NULL,
-    display_name TEXT NOT NULL,
-    source_type  TEXT NOT NULL CHECK(source_type IN ('rules', 'lore', 'supplement')),
-    page_count   INTEGER,
-    indexed_at   INTEGER,
-    index_status TEXT NOT NULL DEFAULT 'pending'
-        CHECK(index_status IN ('pending', 'indexing', 'done', 'error')),
-    embed_model  TEXT           -- model identifier used at index time; mismatch triggers warning
-);
+-- PDF sources
+DEFINE TABLE source SCHEMAFULL;
+DEFINE FIELD campaign ON source TYPE record<campaign> | NULL;  -- NULL = global/shared
+DEFINE FIELD filename ON source TYPE string;
+DEFINE FIELD display_name ON source TYPE string;
+DEFINE FIELD source_type ON source TYPE string
+  ASSERT $value IN ['rules', 'lore', 'supplement'];
+DEFINE FIELD page_count ON source TYPE int;
+DEFINE FIELD indexed_at ON source TYPE datetime;
+DEFINE FIELD index_status ON source TYPE string
+  ASSERT $value IN ['pending', 'indexing', 'done', 'error'];
+DEFINE FIELD embed_model ON source TYPE string;  -- model identifier; mismatch at startup triggers warning
 
--- Structured entities
-CREATE TABLE entities (
-    id           TEXT PRIMARY KEY,
-    campaign_id  TEXT NOT NULL REFERENCES campaigns(id),
-    entity_type  TEXT NOT NULL CHECK(entity_type IN (
-                     'npc', 'location', 'faction', 'creature',
-                     'item', 'event', 'player_character', 'misc')),
-    name         TEXT NOT NULL,
-    summary      TEXT,
-    notes        TEXT,          -- free-form markdown; indexed into LanceDB
-    is_gm_only   BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at   INTEGER NOT NULL,
-    updated_at   INTEGER NOT NULL
-);
+-- Ingested text chunks (with vector index for RAG)
+DEFINE TABLE chunk SCHEMAFULL;
+DEFINE FIELD source ON chunk TYPE record<source>;
+DEFINE FIELD campaign ON chunk TYPE record<campaign>;
+DEFINE FIELD text ON chunk TYPE string;
+DEFINE FIELD page_start ON chunk TYPE int;
+DEFINE FIELD page_end ON chunk TYPE int;
+DEFINE FIELD section_heading ON chunk TYPE string;
+DEFINE FIELD source_type ON chunk TYPE string;
+DEFINE FIELD is_gm_only ON chunk TYPE bool;
+DEFINE FIELD embedding ON chunk TYPE array<float>;
+DEFINE FIELD embed_model ON chunk TYPE string;
+
+-- Vector index on chunk embeddings
+DEFINE INDEX chunk_embedding_idx ON chunk FIELDS embedding
+  MTREE DIMENSION 768 DIST COSINE;
+
+-- Structured entities (NPCs, locations, factions, creatures, items, events, PCs, misc)
+DEFINE TABLE entity SCHEMAFULL;
+DEFINE FIELD campaign ON entity TYPE record<campaign>;
+DEFINE FIELD entity_type ON entity TYPE string
+  ASSERT $value IN ['npc', 'location', 'faction', 'creature', 'item', 'event', 'player_character', 'misc'];
+DEFINE FIELD name ON entity TYPE string;
+DEFINE FIELD summary ON entity TYPE string;
+DEFINE FIELD notes ON entity TYPE string;          -- free-form markdown; indexed for RAG
+DEFINE FIELD created_at ON entity TYPE datetime;
+DEFINE FIELD updated_at ON entity TYPE datetime;
 
 -- Event-specific temporal attributes (populated only when entity_type = 'event')
--- In-world dates are free-form strings — the GM knows their calendar.
-CREATE TABLE event_details (
-    entity_id           TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
-    -- Temporal positioning
-    date_start          TEXT,       -- in-world date, free-form: "15 Mirtul 1492 DR"
-    date_end            TEXT,       -- NULL for point-in-time events
-    is_ongoing          BOOLEAN NOT NULL DEFAULT FALSE,
-    -- Relative ordering (for when exact in-world dates are unknown/fuzzy)
-    sequence_index      INTEGER,    -- lower = earlier; manually assigned by GM
-    -- Grouping
-    era                 TEXT,       -- e.g. "Before the Cataclysm", "Year of the Dragon"
-    -- Real-world anchoring
-    session_id          TEXT REFERENCES sessions(id),  -- session where this occurred/was revealed
-    -- Duration character
-    duration_label      TEXT        -- e.g. "3 days", "an instant", "decades"
-);
--- Notes: sequence_index enables relative timeline ordering independent of any calendar system.
--- era enables grouping events across multiple calendars or fuzzy time periods.
--- date_start/date_end are opaque strings — no date parsing — the Agent uses them verbatim.
+DEFINE FIELD date_start ON entity TYPE string;     -- in-world date, free-form: "15 Mirtul 1492 DR"
+DEFINE FIELD date_end ON entity TYPE string;       -- NULL for point-in-time events
+DEFINE FIELD is_ongoing ON entity TYPE bool DEFAULT false;
+DEFINE FIELD sequence_index ON entity TYPE int;    -- lower = earlier; manual ordering
+DEFINE FIELD era ON entity TYPE string;            -- e.g. "Before the Cataclysm"
+DEFINE FIELD session ON entity TYPE record<session>;  -- session where this occurred
+DEFINE FIELD duration_label ON entity TYPE string; -- e.g. "3 days", "an instant"
 
--- Player characters
-CREATE TABLE player_character_details (
-    entity_id        TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
-    player_name      TEXT NOT NULL,   -- real name of the player
-    character_class  TEXT,            -- free-form: "Paladin / Warlock", "Fighter 5 / Rogue 3"
-    character_level  INTEGER,
-    status           TEXT NOT NULL DEFAULT 'active'
-        CHECK(status IN ('active', 'retired', 'deceased', 'missing', 'on_hiatus'))
-    -- All other PC details go in entities.notes (backstory, inventory, relationships, etc.)
-    -- Mark entities.is_gm_only = TRUE for backstory secrets the player hasn't revealed
-);
+-- Player character fields (populated only when entity_type = 'player_character')
+DEFINE FIELD player_name ON entity TYPE string;
+DEFINE FIELD character_class ON entity TYPE string;
+DEFINE FIELD character_level ON entity TYPE int;
+DEFINE FIELD status ON entity TYPE string
+  ASSERT $value IN ['active', 'retired', 'deceased', 'missing', 'on_hiatus'];
 
 -- Sessions
-CREATE TABLE sessions (
-    id             TEXT PRIMARY KEY,
-    campaign_id    TEXT NOT NULL REFERENCES campaigns(id),
-    session_number INTEGER,
-    title          TEXT,
-    date_played    TEXT,          -- ISO date of the real-world session
-    notes          TEXT,          -- free-form markdown
-    is_gm_only     BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at     INTEGER NOT NULL
-);
+DEFINE TABLE session SCHEMAFULL;
+DEFINE FIELD campaign ON session TYPE record<campaign>;
+DEFINE FIELD session_number ON session TYPE int;
+DEFINE FIELD title ON session TYPE string;
+DEFINE FIELD date_played ON session TYPE string;   -- ISO date of the real-world session
+DEFINE FIELD notes ON session TYPE string;          -- free-form markdown
+DEFINE FIELD created_at ON session TYPE datetime;
 
--- Entity relationships
-CREATE TABLE entity_links (
-    from_id   TEXT REFERENCES entities(id) ON DELETE CASCADE,
-    to_id     TEXT REFERENCES entities(id) ON DELETE CASCADE,
-    rel_type  TEXT NOT NULL,   -- "allied_with", "located_in", "member_of", "caused_by", etc.
-    notes     TEXT,
-    PRIMARY KEY (from_id, to_id, rel_type)
-);
+-- Chat messages (Phase 1 — persistent, non-searchable history)
+DEFINE TABLE message SCHEMAFULL;
+DEFINE FIELD campaign ON message TYPE record<campaign>;
+DEFINE FIELD role ON message TYPE string ASSERT $value IN ['user', 'assistant', 'system'];
+DEFINE FIELD content ON message TYPE string;
+DEFINE FIELD citations ON message TYPE array<object>;  -- [{source_name, page, text_excerpt}]
+DEFINE FIELD created_at ON message TYPE datetime;
 
--- Settings
-CREATE TABLE settings (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-    -- Keys: llm_provider, llm_model, llm_api_key (encrypted at rest),
-    --       llm_base_url, embedding_backend, active_campaign_id
-);
+-- Graph edges (entity-to-entity relationships)
+DEFINE TABLE relates_to TYPE RELATION SCHEMAFULL FROM entity TO entity;
+DEFINE FIELD rel_type ON relates_to TYPE string;    -- "allied_with", "located_in", "member_of", etc.
+DEFINE FIELD notes ON relates_to TYPE string;
+
+-- Key-value settings
+DEFINE TABLE setting SCHEMAFULL;
+DEFINE FIELD value ON setting TYPE string;
+-- Keys: llm_provider, llm_model, llm_api_key (encrypted at rest),
+--       llm_base_url, embedding_backend, active_campaign_id,
+--       vault_sync_path, vault_include_gm_only
 ```
 
-**Timeline queries the Agent can answer** using event_details:
-- "What happened before the Cataclysm?" → `WHERE era = 'Before the Cataclysm'`
+**Note on timestamps:** All datetime fields use SurrealDB's `datetime` type (RFC 3339 / ISO 8601). This avoids the ambiguity of Unix epoch integers (seconds vs milliseconds) and is forward-compatible with SurrealDB Cloud. The vault sync frontmatter uses the same format.
+
+**Timeline queries the Agent can answer** using event fields:
+- "What happened before the Cataclysm?" → `era = 'Before the Cataclysm'`
 - "List events in order" → `ORDER BY sequence_index`
-- "What happened in session 4?" → join `event_details.session_id` → sessions
+- "What happened in session 4?" → `session = $session_record_id`
 - "Was event X before event Y?" → compare `sequence_index`
 
 ---
@@ -575,20 +734,24 @@ Identify headings via font-size heuristics / regex
   │
   ▼ Chunker
 Sliding window: ~400 tokens, 80-token overlap
-Each chunk tagged: source_id, page_start, page_end,
-                   section_heading, campaign_id, source_type, is_gm_only
+Each chunk tagged: source, campaign, page_start, page_end,
+                   section_heading, source_type, is_gm_only, embed_model
   │
   ▼ fastembed (nomic-embed-text-v1.5, 768-dim)
 Batch embed (async, ~500/s on CPU)
   │
-  ▼ VectorStore::upsert
-Table: {campaign_id}/chunks
-Streamed progress events → WebSocket → frontend progress bar
+  ▼ SurrealDB chunk upsert (batch insert)
+Index: chunk_embedding_idx (MTREE, COSINE)
+  │
+  ▼ Update source.index_status = 'done'
+Streamed progress events → Tauri events → frontend progress bar
 ```
+
+**Error recovery:** The ingestion pipeline checkpoints progress per page batch. If a crash occurs mid-ingestion, `source.index_status` stays at `'indexing'` and the pipeline can resume from the last checkpointed page on retry. Partial chunks from a failed run are cleaned up by comparing the persisted checkpoint against what's in the `chunk` table.
 
 ### Notes Indexing
 
-Entity notes and session notes → chunked → embedded → `{campaign_id}/notes` table. Re-indexed on save (debounced 2 s). PC backstory notes marked `is_gm_only` are tagged in LanceDB accordingly.
+Entity notes and session notes → chunked → embedded → `chunk` table (tagged with source reference). Re-indexed on save (debounced 2 s). In Phase 1, `is_gm_only` is always `false` (deferred to Phase 2).
 
 ### Query & Retrieval
 
@@ -598,18 +761,19 @@ User query
   ▼ fastembed (same model — consistency is critical)
 Query vector
   │
-  ▼ VectorStore::search
-Filter: campaign_id ∈ {active_campaign, global}
-        (is_gm_only unfiltered — GM sees all)
-Top-20 candidates from chunks + notes tables
+  ▼ SurrealDB vector search
+SELECT * FROM chunk
+  WHERE campaign = $active_campaign OR campaign IS NULL
+  ORDER BY embedding <|1|> $query_vector
+  LIMIT 20
   │
-  ▼ (v2) Cross-encoder rerank
-  │
-  ▼ Top-8 chunks selected
+  ▼ Top-8 chunks selected (ANN only — no cross-encoder until Phase 3)
 Each carries: text, source name, page range, section heading
   │
   ▼ Context builder → LLM prompt
 ```
+
+**Note:** Cross-encoder reranking is deferred. Top-k ANN is evaluated against a test set of 50 real TTRPG queries in Phase 1. If retrieval recall@5 is below 70%, cross-encoder is added in Phase 3. If above 85%, it ships as-is.
 
 ### System Prompt
 
@@ -631,8 +795,11 @@ INSTRUCTIONS:
 
 ## GM-Secret Handling
 
+**Deferred to Phase 2.** In Phase 1, everything is GM-visible (single-user app). The data model has no `is_gm_only` field until Phase 2, when player-facing features (export, player-safe view) require it.
+
+When implemented in Phase 2:
 - `is_gm_only` flag on: entities, sessions, sources, player_character backstory notes.
-- LanceDB chunks from GM-secret sources inherit `is_gm_only = TRUE` at index time.
+- SurrealDB chunks from GM-secret sources inherit `is_gm_only = TRUE` at index time.
 - Retrieval never filters out GM-secret chunks (single-user GM app).
 - Responses that drew from GM-secret chunks are visually flagged in the UI (shield icon / distinct border).
 - The LLM is instructed to mark GM-secret-derived content so future player-safe export can strip it.
@@ -641,10 +808,10 @@ INSTRUCTIONS:
 
 ## Multi-Campaign Support
 
-- LanceDB is partitioned by `campaign_id` (separate tables per campaign).
-- Sources: `campaign_id = NULL` → global (rules PDFs reused across campaigns); otherwise campaign-scoped.
-- Retrieval searches: `global chunks + campaign chunks + campaign notes`.
-- Switching campaigns is instant (in-memory pointer swap + UI update).
+- SurrealDB filters by campaign record links: `campaign = $active_campaign OR campaign IS NULL` (NULL = global).
+- Sources: `campaign = NULL` → global (rules PDFs reused across campaigns); otherwise campaign-scoped.
+- Retrieval searches: global chunks + campaign chunks + campaign note chunks.
+- Switching campaigns updates the active campaign pointer; queries use the new filter automatically.
 
 ---
 
@@ -656,20 +823,25 @@ Testing is not a phase — it is part of every phase from day one. No feature sh
 
 Goal: Load a PDF, ask a rules question, get a cited answer.
 
-- [ ] Tauri + axum scaffold (random port, injected into WebView)
+- [ ] Tauri scaffold with IPC commands and event system
 - [ ] `LlmProvider` trait + `OpenAIProvider` + `AnthropicProvider` + `OllamaProvider`
-- [ ] `VectorStore` trait + `LanceDbLocal` implementation
+- [ ] `VectorStore` trait + `SurrealDbVector` implementation
+- [ ] `BlobStore` trait + `LocalFileStore` implementation
+- [ ] SurrealDB embedded setup (RocksDB) + schema via `.surql` migration files
 - [ ] Settings screen: LLM provider config
-- [ ] SQLite schema + sqlx migrations
-- [ ] PDF ingestion pipeline with WebSocket progress streaming
+- [ ] PDF ingestion pipeline with Tauri event progress streaming
+- [ ] **Ingestion error recovery:** checkpoint per page batch; resume from last checkpoint on retry; cleanup partial chunks on failure
 - [ ] fastembed integration (first-run model download with onboarding screen)
 - [ ] Chunker with section detection
 - [ ] Basic chat UI with streaming responses + citation rendering
+- [ ] **Chat history:** `message` table in SurrealDB, persist + display on page load
+- [ ] **Coverage tooling:** `cargo-llvm-cov` setup in CI from day one
 - **Tests shipped with Phase 1:**
   - Unit: chunker, section detector, prompt builder, citation parser
-  - Integration: full ingest → query cycle using fixture PDF + MockLlmProvider
-  - E2E backend: POST source → wait for index → POST query → assert citation in response
-  - CI: fmt, clippy, unit, integration, e2e-backend
+  - Integration: full ingest → query cycle using diverse PDF fixture suite (`single-column`, `multi-column`, `tables`, `stat-block`, `scanned`) + `MockLlmProvider`
+  - Integration: at least one test with real fastembed (small model ~80 MB) to catch dimension errors
+  - Backend E2E: service-layer test with real SurrealDB in-memory — ingest → query → assert citation
+  - CI: fmt, clippy, unit, integration, e2e-backend, cargo-llvm-cov
 
 Milestone: "Ask the rulebook a question and get a cited answer."
 
@@ -681,14 +853,15 @@ Goal: Multi-campaign support, hybrid notes, lore retrieval.
 - [ ] Entity manager (NPC, location, faction, creature, item, misc)
 - [ ] `event` entity type + temporal fields UI (timeline view)
 - [ ] `player_character` entity type with player name / class / status
-- [ ] Entity notes editor (markdown, `is_gm_only` toggle)
-- [ ] Notes indexing pipeline
+- [ ] Entity notes editor (markdown)
+- [ ] **`is_gm_only` introduced:** add field to source, entity, session; propagate to chunks at index time; visual indicators in chat (shield icon / distinct border)
+- [ ] Notes indexing pipeline (entity + session notes → chunk → embed → SurrealDB)
 - [ ] Global vs campaign-scoped sources
-- [ ] GM-secret visual indicators in chat
+- [ ] Keyboard-first shortcuts (GM is at the table)
 - **Tests shipped with Phase 2:**
   - Unit: event ordering logic, entity CRUD service
-  - Integration: notes indexing → retrieval, is_gm_only propagation into LanceDB
-  - E2E backend: create campaign → add NPC + event → query → assert both appear in response
+  - Integration: notes indexing → retrieval, is_gm_only propagation into vector index
+  - Backend E2E: create campaign → add NPC + event → query → assert both appear in response
   - Component tests: entity form validation, GM-secret toggle
 
 Milestone: "Run a full session, take notes on NPCs and events, ask a lore question and get cited answers from both the sourcebook and your own notes."
@@ -698,21 +871,21 @@ Milestone: "Run a full session, take notes on NPCs and events, ask a lore questi
 Goal: Production quality, power-user features.
 
 - [ ] Session log timeline view
-- [ ] Entity relationship graph (visualisation)
+- [ ] Entity relationship graph (SurrealDB `relates_to` graph edges → visualisation)
 - [ ] Source enable/disable toggle per query
-- [ ] Persistent chat history (searchable per campaign)
+- [ ] Searchable chat history (full-text search on `message.content`)
 - [ ] Export: session summary → markdown / PDF
-- [ ] Cross-encoder reranking (Phase 1 uses ANN only)
-- [ ] Keyboard-first shortcuts (GM is at the table)
-- [ ] `cargo-llvm-cov` coverage reporting in CI
+- [ ] Markdown vault sync (ADR-008): bidirectional `.md` sync with a user-configured folder (Obsidian-compatible); inbound file-watch via `notify`; conflict detection with `.conflict.<ts>.md` preservation; soft-delete on vault file removal; `vault_include_gm_only` toggle; startup reconcile pass
+- [ ] **Cross-encoder reranking:** only if Phase 1 retrieval recall@5 measured below 70%. If above 85%, skip.
+- [ ] Campaign rename UI (update slug, vault folder name)
 
 ### Phase 4 — Cloud / Mobile
 
 Goal: Deploy backend as a server; access from mobile.
 
-- [ ] sqlx feature flag: `sqlite` → `postgres`; test suite runs against both
-- [ ] `LanceDbCloud` or `QdrantCloud` implementation of `VectorStore` trait
-- [ ] `BlobStore` trait + S3 implementation for PDF storage
+- [ ] Extract service layer into standalone axum HTTP server; Tauri IPC handlers become axum route handlers (same trait boundaries, new thin adapters)
+- [ ] SurrealDB embedded → SurrealDB Cloud (different connection string, same SurrealQL queries)
+- [ ] `S3Store` implementation of `BlobStore` trait for PDF storage
 - [ ] Auth middleware (JWT) on the axum router
 - [ ] Docker image for the axum server
 - [ ] Svelte frontend deployed as static web app
@@ -727,10 +900,12 @@ Goal: Deploy backend as a server; access from mobile.
 | PDF text extraction quality varies (multi-column, scanned) | Use `pdfium-render`; add "preview extracted text" view so GMs can spot bad extractions before indexing |
 | fastembed first-run download (~250 MB) looks like a hang | Dedicated onboarding screen: "Downloading AI model (one time)" with a real progress bar |
 | Embedding model locked in after indexing | Store model ID in `sources.embed_model`; detect mismatch at startup; offer re-index with a warning |
-| SQLite → PostgreSQL query incompatibilities | Use ANSI SQL only; run the integration test suite against PostgreSQL in CI from Phase 3 onward |
-| axum port conflict on desktop | Bind to port 0 (OS assigns) and pass the assigned port to the WebView; retry on bind failure |
+| SurrealDB embedded RocksDB compile time | Expected on first build (~30–60 s for C++ transitive); mitigated by caching CI builds via `sccache` or GitHub Actions cache |
+| SurrealQL learning curve (no compile-time query validation) | Mitigated by comprehensive integration tests using SurrealDB in-memory engine; all queries exercised in test suite before hitting production |
+| Embedding model locked in after indexing | Store model ID in `source.embed_model` and `chunk.embed_model`; detect mismatch at startup; offer re-index with a warning and provide a batch re-index workflow |
 | Context window overflow with many chunks | Count tokens before sending; surface a warning in the UI; let the GM limit sources per query |
 | LLM hallucinating rules despite strict prompt | Track retrieval scores; show a low-confidence indicator when the top chunk similarity is below a threshold |
+| Vector index performance at scale (>100K chunks) | SurrealDB's MTREE index performs well at moderate scale; if needed, add a `QdrantCloud` implementation behind the `VectorStore` trait — no data model changes required |
 
 ---
 
@@ -741,18 +916,17 @@ Goal: Deploy backend as a server; access from mobile.
 | Purpose | Crate |
 |---------|-------|
 | Desktop app framework | `tauri` 2.x |
-| HTTP server | `axum` |
+| Unified store (relational + vector + graph) | `surrealdb` (embedded, `kv-rocksdb` feature) |
 | PDF text extraction | `pdfium-render` |
-| SQLite / PostgreSQL | `sqlx` (feature flags) |
-| Vector store | `lancedb` |
 | Local embeddings | `fastembed` |
-| OpenAI / Ollama LLM | `async-openai` |
-| HTTP client (Anthropic) | `reqwest` |
+| OpenAI LLM | `async-openai` |
+| HTTP client (Anthropic, Ollama) | `reqwest` |
 | Async runtime | `tokio` |
 | Serialisation | `serde` + `serde_json` |
 | Unique IDs | `uuid` |
 | Mocking in tests | `mockall` |
-| Test HTTP client | `axum-test` |
+| YAML frontmatter (vault sync) | `serde_yaml` |
+| Filesystem watcher (vault sync) | `notify` |
 | Coverage | `cargo-llvm-cov` |
 | Audit | `cargo-audit`, `cargo-deny` |
 
@@ -763,7 +937,7 @@ Goal: Deploy backend as a server; access from mobile.
 | Framework | Svelte 5 + TypeScript |
 | Build | Vite |
 | Unit / component tests | Vitest + `@testing-library/svelte` |
-| API mocking in tests | `msw` (Mock Service Worker) |
+| API mocking in tests | `msw` (Mock Service Worker) — intercepts Tauri IPC calls in the WebView |
 | E2E tests | Playwright |
 | Linting | ESLint + `@typescript-eslint` + `eslint-plugin-svelte` |
 | Formatting | Prettier + `prettier-plugin-svelte` |
