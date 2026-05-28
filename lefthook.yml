@@ -1,0 +1,29 @@
+# Leverage hooks (https://github.com/evilmartians/lefthook)
+#
+# ADR-007: Pre-commit checks run in parallel.
+
+pre-commit:
+  parallel: true
+  commands:
+    rustfmt:
+      glob: "*.rs"
+      run: cargo fmt --check
+      stage_fixed: true
+    clippy:
+      glob: "*.rs"
+      run: cargo clippy --all-targets --all-features -- -D warnings
+    prettier:
+      glob: "*.{ts,svelte,json,css,md,yaml,yml}"
+      run: npx prettier --check {staged_files}
+      stage_fixed: true
+    eslint:
+      glob: "*.{ts,svelte}"
+      run: npx eslint {staged_files}
+
+commit-msg:
+  commands:
+    text-width:
+      run: |
+        if [ "$(wc -c <<< "$(head -1 "$1")")" -gt 73 ]; then
+          echo "Commit subject too long (max 72 chars)" >&2; exit 1
+        fi
