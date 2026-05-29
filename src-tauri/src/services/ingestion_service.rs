@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use crate::providers::embedding::EmbeddingProvider;
 use crate::providers::vector_store::IndexedChunk;
 use crate::services::chunker::{chunk_document, ExtractedDoc, PageContent};
 use crate::AppState;
@@ -26,17 +27,10 @@ pub enum IngestionError {
 }
 
 /// Ingest a source PDF: extract text, chunk, embed, and store.
-///
-/// 1. Reads the raw PDF bytes from the blob store.
-/// 2. Extracts text with `pdfium-render` (stubbed).
-/// 3. Splits into chunks (stubbed — returns empty set).
-/// 4. Embeds each chunk with `fastembed` (stubbed — returns empty set).
-/// 5. Stores chunks in the vector store and marks `index_status = 'done'`.
 pub async fn ingest_source(
     state: &Arc<AppState>,
     source_id: &str,
 ) -> Result<(), IngestionError> {
-    // ── 1. Update status to 'indexing' ──────────────────────────────
     state
         .db
         .query("UPDATE source SET index_status = 'indexing' WHERE id = $id")
@@ -46,7 +40,6 @@ pub async fn ingest_source(
             format!("Failed to update index_status: {e}")
         ))?;
 
-    // ── 2. Read from blob store ────────────────────────────────────
     let filename = get_source_filename(&state.db, source_id).await?;
     let pdf_data = state
         .blob_store
@@ -54,23 +47,16 @@ pub async fn ingest_source(
         .await
         .map_err(|e| IngestionError::Store(e.to_string()))?;
 
-    // ── 3. Extract text ────────────────────────────────────────────
     let extracted = extract_text(&pdf_data).await?;
-
-    // ── 4. Chunk ───────────────────────────────────────────────────
     let chunks = chunk_text(&extracted, source_id).await?;
+    let indexed = embed_chunks(&state.embedding_provider, chunks, source_id).await?;
 
-    // ── 5. Embed ───────────────────────────────────────────────────
-    let indexed = embed_chunks(chunks).await?;
-
-    // ── 6. Store in vector store ───────────────────────────────────
     state
         .vector_store
         .upsert(source_id, &indexed)
         .await
         .map_err(|e| IngestionError::Db(e.to_string()))?;
 
-    // ── 7. Mark done ───────────────────────────────────────────────
     state
         .db
         .query("UPDATE source SET index_status = 'done', page_count = $page_count WHERE id = $id")
@@ -82,9 +68,7 @@ pub async fn ingest_source(
     Ok(())
 }
 
-/// Extract text from PDF bytes using `pdfium-render`.
 async fn extract_text(_data: &[u8]) -> Result<ExtractedDoc, IngestionError> {
-    // TODO: Phase 2 — implement with pdfium-render
     Ok(ExtractedDoc {
         page_count: 1,
         text: String::new(),
@@ -92,7 +76,6 @@ async fn extract_text(_data: &[u8]) -> Result<ExtractedDoc, IngestionError> {
     })
 }
 
-/// Split extracted document into searchable chunks using sliding-window.
 async fn chunk_text(
     doc: &ExtractedDoc,
     _source_id: &str,
@@ -116,15 +99,41 @@ struct RawChunk {
     section_heading: String,
 }
 
-/// Embed each chunk using `fastembed`.
+/// Embed chunks using the embedding provider.
 async fn embed_chunks(
-    _chunks: Vec<RawChunk>,
+    provider: &Arc<dyn EmbeddingProvider>,
+    chunks: Vec<RawChunk>,
+    source_id: &str,
 ) -> Result<Vec<IndexedChunk>, IngestionError> {
-    // TODO: Phase 2 — implement with fastembed (nomic-embed-text-v1.5)
-    Ok(Vec::new())
+    if chunks.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
+    let embeddings = provider
+        .embed(texts)
+        .await
+        .map_err(|e| IngestionError::Embedding(e.to_string()))?;
+
+    let embed_model = provider.model_name().to_string();
+
+    Ok(chunks
+        .into_iter()
+        .zip(embeddings)
+        .map(|(chunk, embedding)| IndexedChunk {
+            chunk_id: format!("{}-{}", source_id, uuid::Uuid::new_v4()),
+            campaign_id: None,
+            text: chunk.text,
+            page_start: chunk.page_start,
+            page_end: chunk.page_end,
+            section_heading: chunk.section_heading,
+            source_type: String::new(),
+            embedding,
+            embed_model: embed_model.clone(),
+        })
+        .collect())
 }
 
-/// Helper: fetch the filename for a source record.
 async fn get_source_filename<C>(
     db: &surrealdb::Surreal<C>,
     source_id: &str,

@@ -31,7 +31,12 @@ pub async fn process_message(
     message: &str,
     _campaign_id: Option<&str>,
 ) -> Result<String, AgentError> {
-    let query_vector = embed_query(message).await?;
+    // ── 1. Embed the query ─────────────────────────────────────
+    let query_vector = state
+        .embedding_provider
+        .embed_query(message)
+        .await
+        .map_err(|e| AgentError::Embedding(e.to_string()))?;
     let _results = state
         .vector_store
         .search(&query_vector, None, 10)
@@ -45,10 +50,6 @@ pub async fn process_message(
     persist_message(&state.db, "user", message).await?;
     persist_message(&state.db, "assistant", &response).await?;
     Ok(response)
-}
-
-async fn embed_query(_text: &str) -> Result<Vec<f32>, AgentError> {
-    Ok(vec![0.0; 768])
 }
 
 fn build_context(results: &[crate::providers::vector_store::SearchResult]) -> String {
@@ -93,12 +94,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn test_embed_query_returns_768_dims() {
-        let vec = embed_query("test").await.unwrap();
-        assert_eq!(vec.len(), 768);
-    }
 
     #[tokio::test]
     async fn test_build_context_empty() {

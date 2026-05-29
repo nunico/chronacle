@@ -5,6 +5,8 @@ pub mod providers;
 pub mod schema;
 pub mod services;
 
+use providers::embedding::EmbeddingProvider;
+
 /// Shared application state managed by Tauri.
 ///
 /// `DbBackend` is `surrealdb::engine::local::Db` (the local SurrealDB
@@ -14,6 +16,7 @@ pub struct AppState {
     pub llm_provider: Arc<dyn providers::llm_provider::LlmProvider>,
     pub vector_store: Arc<dyn providers::vector_store::VectorStore>,
     pub blob_store: Arc<dyn providers::blob_store::BlobStore>,
+    pub embedding_provider: Arc<dyn providers::embedding::EmbeddingProvider>,
 }
 
 /// Determines the application data directory, creating it if needed.
@@ -75,11 +78,30 @@ pub async fn run() {
         providers::blob_store::LocalFileStore::new(pdfs_dir),
     );
 
+    // Try to initialize fastembed; fall back to a mock if model not cached.
+    let embedding_provider: Arc<dyn providers::embedding::EmbeddingProvider> =
+        match providers::embedding::FastEmbedProvider::try_new() {
+            Ok(p) => {
+                eprintln!("Embedding model '{}' ready ({} dim)", p.model_name(), p.dimension());
+                Arc::new(p)
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: Embedding model not available — {}. \
+                     Chat and PDF ingestion will fail until the model \
+                     is downloaded on first use.",
+                    e
+                );
+                Arc::new(providers::embedding::MockEmbeddingProvider::new(768))
+            }
+        };
+
     let state = Arc::new(AppState {
         db,
         llm_provider,
         vector_store,
         blob_store,
+        embedding_provider,
     });
 
     tauri::Builder::default()
