@@ -166,6 +166,7 @@ pub async fn upload_source(
 #[derive(Debug, Deserialize)]
 pub struct ChatRequest {
     pub message: String,
+    #[allow(dead_code)]
     pub campaign_id: Option<String>,
 }
 

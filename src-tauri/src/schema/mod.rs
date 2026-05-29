@@ -75,7 +75,7 @@ mod tests {
             .expect("Schema migration should succeed");
 
         // ── Verify tables were created ──────────────────────────────
-        let mut res = db
+        let _res = db
             .query("INFO FOR DB")
             .await
             .expect("INFO FOR DB should work");

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::providers::embedding::EmbeddingProvider;
 use crate::providers::vector_store::IndexedChunk;
-use crate::services::chunker::{chunk_document, ExtractedDoc, PageContent};
+use crate::services::chunker::{chunk_document, ExtractedDoc};
 use crate::AppState;
 use surrealdb::Connection;
 

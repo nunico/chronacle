@@ -39,7 +39,6 @@ pub trait EmbeddingProvider: Send + Sync {
 /// FastEmbed-backed implementation using nomic-embed-text-v1.5.
 pub struct FastEmbedProvider {
     model: Mutex<TextEmbedding>,
-    model_kind: EmbeddingModel,
     dim: usize,
     name: &'static str,
 }
@@ -67,7 +66,6 @@ impl FastEmbedProvider {
 
         Ok(Self {
             model: Mutex::new(model),
-            model_kind,
             dim,
             name,
         })
