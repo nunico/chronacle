@@ -59,3 +59,27 @@ export async function chatSend(
     request: { message, campaignId },
   });
 }
+
+/**
+ * Current LLM provider status returned from the backend.
+ */
+export interface LlmProviderStatus {
+  provider_type: string;
+  model: string;
+  api_key_configured: boolean;
+}
+
+/**
+ * Get the current LLM provider configuration status.
+ */
+export async function getLlmProviderStatus(): Promise<LlmProviderStatus> {
+  return invoke<LlmProviderStatus>('get_llm_provider_status');
+}
+
+/**
+ * Re-read settings from the database and reconstruct the LLM provider at
+ * runtime. Returns the active provider type name on success.
+ */
+export async function reconfigureLlmProvider(): Promise<string> {
+  return invoke<string>('reconfigure_llm_provider');
+}

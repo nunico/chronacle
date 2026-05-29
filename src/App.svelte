@@ -2,14 +2,15 @@
   import { onMount } from 'svelte';
   import { chatSend, getChatHistory } from './lib/commands';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import SettingsPage from './SettingsPage.svelte';
 
+  let currentPage = $state<'chat' | 'settings'>('chat');
   let messages = $state<Array<{ role: string; content: string }>>([]);
   let input = $state('');
   let isLoading = $state(false);
   let currentResponse = $state('');
 
   onMount(async () => {
-    // Load chat history from backend on page load
     try {
       const history = await getChatHistory(null);
       messages = history;
@@ -59,13 +60,21 @@
   }
 </script>
 
-<div class="app-container">
-  <header>
-    <h1>Chronacle</h1>
-    <span class="tagline">TTRPG GM Assistant</span>
-  </header>
+<header>
+  <h1>Chronacle</h1>
+  <span class="tagline">TTRPG GM Assistant</span>
+  <nav>
+    <button class="nav-btn" class:active={currentPage === 'chat'} onclick={() => (currentPage = 'chat')}>
+      Chat
+    </button>
+    <button class="nav-btn" class:active={currentPage === 'settings'} onclick={() => (currentPage = 'settings')}>
+      Settings
+    </button>
+  </nav>
+</header>
 
-  <main>
+<main>
+  {#if currentPage === 'chat'}
     <div class="chat-container">
       {#if messages.length === 0 && !isLoading}
         <div class="welcome">
@@ -103,25 +112,12 @@
         {isLoading ? 'Thinking…' : 'Send'}
       </button>
     </div>
-  </main>
-
-  <footer>
-    <button onclick={() => alert('Settings page — coming in Phase 1')}>
-      Settings
-    </button>
-  </footer>
-</div>
+  {:else}
+    <SettingsPage />
+  {/if}
+</main>
 
 <style>
-  .app-container {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    max-width: 900px;
-    margin: 0 auto;
-    padding: 0 1rem;
-  }
-
   header {
     text-align: center;
     padding: 1rem 0;
@@ -138,6 +134,36 @@
   .tagline {
     font-size: 0.8rem;
     color: var(--text-muted);
+  }
+
+  header nav {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+
+  .nav-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.35rem 1rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.85rem;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .nav-btn:hover {
+    background: var(--bg-assistant);
+    color: var(--text);
+  }
+
+  .nav-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
   }
 
   main {
@@ -204,7 +230,7 @@
   }
 
   .streaming::after {
-    content: '▊';
+    content: '\258A';
     animation: blink 0.8s step-end infinite;
   }
 
@@ -253,25 +279,5 @@
   .input-area button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-
-  footer {
-    padding: 0.75rem 0;
-    border-top: 1px solid var(--border);
-    text-align: center;
-  }
-
-  footer button {
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0.4rem 1rem;
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.85rem;
-  }
-
-  footer button:hover {
-    background: var(--bg-assistant);
   }
 </style>

@@ -10,27 +10,34 @@ use tauri::State;
 pub async fn get_settings(
     state: State<'_, Arc<AppState>>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
-    let mut response = state
-        .db
-        .query("SELECT * FROM setting")
-        .await
-        .map_err(|e| format!("Database query failed: {e}"))?;
-
-    #[derive(Deserialize)]
-    struct Row {
-        id: surrealdb::sql::Thing,
-        value: String,
-    }
-
-    let rows: Vec<Row> = response
-        .take(0)
-        .map_err(|e| format!("Failed to parse settings: {e}"))?;
-
+    let rows = get_all_settings(&state.db).await?;
     let map = rows
         .into_iter()
         .map(|r| (r.id.id.to_string(), r.value))
         .collect();
     Ok(map)
+}
+
+/// Helper: query all settings from the DB.
+async fn get_all_settings(
+    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+) -> Result<Vec<SettingRow>, String> {
+    let mut response = db
+        .query("SELECT * FROM setting")
+        .await
+        .map_err(|e| format!("Database query failed: {e}"))?;
+
+    let rows: Vec<SettingRow> = response
+        .take(0)
+        .map_err(|e| format!("Failed to parse settings: {e}"))?;
+
+    Ok(rows)
+}
+
+#[derive(Deserialize)]
+struct SettingRow {
+    id: surrealdb::sql::Thing,
+    value: String,
 }
 
 /// A chat-message row returned from the database.
@@ -267,4 +274,54 @@ pub async fn chat_send(
     });
 
     Ok(())
+}
+
+/// Response payload for the LLM provider status.
+#[derive(Debug, Clone, Serialize)]
+pub struct LlmProviderStatus {
+    pub provider_type: String,
+    pub model: String,
+    pub api_key_configured: bool,
+}
+
+/// Returns the current LLM provider configuration status.
+#[tauri::command]
+pub async fn get_llm_provider_status(
+    state: State<'_, Arc<AppState>>,
+) -> Result<LlmProviderStatus, String> {
+    let settings = get_all_settings(&state.db).await?;
+    let map: std::collections::HashMap<String, String> =
+        settings.into_iter().map(|r| (r.id.id.to_string(), r.value)).collect();
+
+    Ok(LlmProviderStatus {
+        provider_type: map.get("llm_provider").cloned().unwrap_or_else(|| "openai".into()),
+        model: map.get("llm_model").cloned().unwrap_or_default(),
+        api_key_configured: map
+            .get("llm_api_key")
+            .map(|k| !k.is_empty())
+            .unwrap_or(false),
+    })
+}
+
+/// Re-read settings from the database and reconstruct the LLM provider at
+/// runtime. Returns the active provider type name on success.
+#[tauri::command]
+pub async fn reconfigure_llm_provider(
+    state: State<'_, Arc<AppState>>,
+) -> Result<String, String> {
+    // Read fresh settings from the DB
+    let settings = get_all_settings(&state.db).await?;
+    let map: std::collections::HashMap<String, String> =
+        settings.into_iter().map(|r| (r.id.id.to_string(), r.value)).collect();
+
+    let new_provider = crate::build_llm_provider_from_map(&map);
+    let provider_type = crate::provider_type_name(&new_provider);
+
+    // Swap the provider under the write lock
+    *state
+        .llm_provider
+        .write()
+        .map_err(|e| format!("Failed to acquire write lock: {e}"))? = new_provider;
+
+    Ok(provider_type.to_string())
 }

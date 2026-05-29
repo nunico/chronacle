@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 mod commands;
 pub mod providers;
@@ -6,14 +7,18 @@ pub mod schema;
 pub mod services;
 
 use providers::embedding::EmbeddingProvider;
+use providers::llm_provider::{AnthropicProvider, LlmProvider, OllamaProvider, OpenAIProvider};
 
 /// Shared application state managed by Tauri.
 ///
 /// `DbBackend` is `surrealdb::engine::local::Db` (the local SurrealDB
 /// connection type that works with both RocksDB and in-memory engines).
+///
+/// `llm_provider` is behind a `RwLock` so the settings page can swap
+/// providers at runtime without restarting the app.
 pub struct AppState {
     pub db: surrealdb::Surreal<surrealdb::engine::local::Db>,
-    pub llm_provider: Arc<dyn providers::llm_provider::LlmProvider>,
+    pub llm_provider: RwLock<Arc<dyn LlmProvider>>,
     pub vector_store: Arc<dyn providers::vector_store::VectorStore>,
     pub blob_store: Arc<dyn providers::blob_store::BlobStore>,
     pub embedding_provider: Arc<dyn providers::embedding::EmbeddingProvider>,
@@ -58,13 +63,6 @@ pub async fn run() {
         .expect("Failed to run schema migrations");
 
     // ── Build service dependencies ──────────────────────────────────
-    let llm_provider: Arc<dyn providers::llm_provider::LlmProvider> = Arc::new(
-        providers::llm_provider::OpenAIProvider::new(
-            String::new(),
-            String::new(),
-        ),
-    );
-
     let vector_store: Arc<dyn providers::vector_store::VectorStore> = Arc::new(
         providers::vector_store::SurrealDbVector::new(db.clone()),
     );
@@ -96,9 +94,15 @@ pub async fn run() {
             }
         };
 
+    // Construct the LLM provider from persisted settings, falling back to
+    // OpenAI (no-op if no API key is configured).
+    let llm_provider = build_llm_provider_from_db(&db).await;
+    let provider_name = provider_type_name(&llm_provider);
+    eprintln!("LLM provider '{}' initialised", provider_name);
+
     let state = Arc::new(AppState {
         db,
-        llm_provider,
+        llm_provider: RwLock::new(llm_provider),
         vector_store,
         blob_store,
         embedding_provider,
@@ -113,7 +117,39 @@ pub async fn run() {
             commands::upload_source,
             commands::chat_send,
             commands::get_chat_history,
+            commands::reconfigure_llm_provider,
+            commands::get_llm_provider_status,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");
+}
+
+/// Read LLM settings from the database and construct the correct provider.
+async fn build_llm_provider_from_db(
+    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+) -> Arc<dyn LlmProvider> {
+    let settings = match services::settings_service::get_all(db).await {
+        Ok(s) => s.into_iter().map(|s| (s.key, s.value)).collect::<HashMap<_, _>>(),
+        Err(_) => HashMap::new(),
+    };
+
+    build_llm_provider_from_map(&settings)
+}
+
+pub(crate) fn build_llm_provider_from_map(settings: &HashMap<String, String>) -> Arc<dyn LlmProvider> {
+    let provider = settings.get("llm_provider").map(|s| s.as_str()).unwrap_or("openai");
+    let api_key = settings.get("llm_api_key").cloned().unwrap_or_default();
+    let model = settings.get("llm_model").cloned().unwrap_or_default();
+    let base_url = settings.get("llm_base_url").cloned().unwrap_or_default();
+
+    match provider {
+        "anthropic" => Arc::new(AnthropicProvider::new(api_key, model)),
+        "ollama" => Arc::new(OllamaProvider::new(base_url, model)),
+        _ => Arc::new(OpenAIProvider::new(api_key, model)),
+    }
+}
+
+/// Return a short human-readable provider type name.
+pub(crate) fn provider_type_name(provider: &Arc<dyn LlmProvider>) -> &'static str {
+    provider.provider_type()
 }

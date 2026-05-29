@@ -37,6 +37,10 @@ pub trait LlmProvider: Send + Sync {
         system_prompt: &str,
         messages: &[ChatMessage],
     ) -> Result<mpsc::Receiver<Result<String, LlmError>>, LlmError>;
+
+    /// Return a short identifier for this provider type, e.g. "openai",
+    /// "anthropic", or "ollama".
+    fn provider_type(&self) -> &'static str;
 }
 
 /// A no-op LLM provider for tests and placeholder state.
@@ -47,6 +51,10 @@ pub struct NoopProvider;
 
 #[async_trait]
 impl LlmProvider for NoopProvider {
+    fn provider_type(&self) -> &'static str {
+        "noop"
+    }
+
     async fn chat_stream(
         &self,
         _system_prompt: &str,
@@ -347,10 +355,15 @@ impl OpenAIProvider {
             base_url: base,
         }
     }
+
 }
 
 #[async_trait]
 impl LlmProvider for OpenAIProvider {
+    fn provider_type(&self) -> &'static str {
+        "openai"
+    }
+
     async fn chat_stream(
         &self,
         system_prompt: &str,
@@ -459,6 +472,10 @@ impl AnthropicProvider {
 
 #[async_trait]
 impl LlmProvider for AnthropicProvider {
+    fn provider_type(&self) -> &'static str {
+        "anthropic"
+    }
+
     async fn chat_stream(
         &self,
         system_prompt: &str,
@@ -585,6 +602,10 @@ impl OllamaProvider {
 
 #[async_trait]
 impl LlmProvider for OllamaProvider {
+    fn provider_type(&self) -> &'static str {
+        "ollama"
+    }
+
     async fn chat_stream(
         &self,
         system_prompt: &str,

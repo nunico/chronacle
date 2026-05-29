@@ -66,9 +66,15 @@ pub async fn stream_response(
         content: message.to_string(),
     }];
 
-    state
+    // Clone the current provider out of the RwLock so the streaming task
+    // doesn't hold the lock for the entire response.
+    let llm = state
         .llm_provider
-        .chat_stream(&system_prompt, &chat_messages)
+        .read()
+        .map_err(|e| AgentError::Llm(format!("Lock error: {e}")))?
+        .clone();
+
+    llm.chat_stream(&system_prompt, &chat_messages)
         .await
         .map_err(|e| AgentError::Llm(e.to_string()))
 }
