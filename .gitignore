@@ -34,3 +34,4 @@ lcov.info
 .env
 .env.local
 .env.*.local
+src-tauri/.fastembed_cache/
