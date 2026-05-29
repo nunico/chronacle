@@ -35,6 +35,19 @@ export async function uploadSource(
 }
 
 /**
+ * Retrieve chat history from the message table.
+ *
+ * @param campaignId  Optional campaign filter; null returns global messages.
+ */
+export async function getChatHistory(
+  campaignId: string | null,
+): Promise<Array<{ role: string; content: string }>> {
+  return invoke<Array<{ role: string; content: string }>>('get_chat_history', {
+    campaignId,
+  });
+}
+
+/**
  * Send a chat message to the AI agent (streaming response is delivered
  * via the `chat-token` event).
  */

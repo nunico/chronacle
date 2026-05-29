@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { invoke } from '@tauri-apps/api/core';
+  import { chatSend, getChatHistory } from './lib/commands';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
   let messages = $state<Array<{ role: string; content: string }>>([]);
@@ -11,9 +11,7 @@
   onMount(async () => {
     // Load chat history from backend on page load
     try {
-      const history = await invoke<Array<{ role: string; content: string }>>('get_chat_history', {
-        campaignId: null as string | null,
-      });
+      const history = await getChatHistory(null);
       messages = history;
     } catch (e) {
       console.error('Failed to load chat history:', e);
@@ -44,12 +42,7 @@
         }
       });
 
-      await invoke('chat_send', {
-        request: {
-          message: text,
-          campaignId: null,
-        },
-      });
+      await chatSend(text, null);
     } catch (e) {
       console.error('Chat send failed:', e);
       isLoading = false;

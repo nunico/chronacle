@@ -33,6 +33,48 @@ pub async fn get_settings(
     Ok(map)
 }
 
+/// A chat-message row returned from the database.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessageRow {
+    pub role: String,
+    pub content: String,
+}
+
+/// Returns chat history from the `message` table, ordered by creation time.
+///
+/// When `campaign_id` is `Some`, only messages for that campaign are returned.
+/// When `None`, all messages are returned.
+#[tauri::command]
+pub async fn get_chat_history(
+    state: State<'_, Arc<AppState>>,
+    campaign_id: Option<String>,
+) -> Result<Vec<ChatMessageRow>, String> {
+    let sql = match &campaign_id {
+        Some(cid) => {
+            let safe_id = cid.replace('`', "``");
+            format!(
+                "SELECT role, content, created_at FROM message WHERE campaign = campaign:`{safe_id}` ORDER BY created_at ASC"
+            )
+        }
+        None => {
+            "SELECT role, content, created_at FROM message ORDER BY created_at ASC"
+                .to_string()
+        }
+    };
+
+    let mut response = state
+        .db
+        .query(sql)
+        .await
+        .map_err(|e| format!("Failed to query chat history: {e}"))?;
+
+    let rows: Vec<ChatMessageRow> = response
+        .take(0)
+        .map_err(|e| format!("Failed to parse chat history: {e}"))?;
+
+    Ok(rows)
+}
+
 /// Upserts a single setting by key.
 #[tauri::command]
 pub async fn update_setting(

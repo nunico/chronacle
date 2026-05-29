@@ -90,6 +90,7 @@ pub async fn run() {
             commands::update_setting,
             commands::upload_source,
             commands::chat_send,
+            commands::get_chat_history,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");

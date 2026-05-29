@@ -26,54 +26,35 @@ pub enum AgentError {
 }
 
 /// Run the full RAG pipeline for a user message.
-///
-/// Returns a string with the LLM's response (including citations). In Phase 2
-/// this will return a full `ChatResponse` with structured citation data.
 pub async fn process_message(
     state: &Arc<AppState>,
     message: &str,
     _campaign_id: Option<&str>,
 ) -> Result<String, AgentError> {
-    // ── 1. Embed the query ─────────────────────────────────────
     let query_vector = embed_query(message).await?;
-
-    // ── 2. Retrieve relevant chunks ────────────────────────────
     let _results = state
         .vector_store
         .search(&query_vector, None, 10)
         .await
         .map_err(|e| AgentError::Retrieval(e.to_string()))?;
-
-    // ── 3. Build context ───────────────────────────────────────
     let _context = build_context(&_results);
-
-    // ── 4. Call LLM ────────────────────────────────────────────
-    // TODO: Phase 2 — build system prompt with context, call LLM,
-    //       stream response back to caller.
     let response = format!(
         "[Agent response not yet implemented — Phase 1 stub. \
          Your question was: \"{message}\"]"
     );
-
-    // ── 5. Persist message ─────────────────────────────────────
     persist_message(&state.db, "user", message).await?;
     persist_message(&state.db, "assistant", &response).await?;
-
     Ok(response)
 }
 
-/// Embed a query string using `fastembed` (nomic-embed-text-v1.5).
 async fn embed_query(_text: &str) -> Result<Vec<f32>, AgentError> {
-    // TODO: Phase 2 — implement with fastembed
     Ok(vec![0.0; 768])
 }
 
-/// Build a context-augmented prompt from search results.
 fn build_context(results: &[crate::providers::vector_store::SearchResult]) -> String {
     if results.is_empty() {
         return String::new();
     }
-
     let mut ctx = String::from("Relevant source material:\n\n");
     for (i, r) in results.iter().enumerate() {
         ctx.push_str(&format!(
@@ -97,6 +78,7 @@ where
         "CREATE message SET
             role = $role,
             content = $content,
+            campaign = NONE,
             citations = [],
             created_at = time::now()",
     )
@@ -122,5 +104,77 @@ mod tests {
     async fn test_build_context_empty() {
         let ctx = build_context(&[]);
         assert!(ctx.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_persist_and_retrieve_messages() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+
+        // Create relaxed message table for testing
+        db.query(
+            "DEFINE TABLE message SCHEMAFULL;
+             DEFINE FIELD role ON message TYPE string;
+             DEFINE FIELD content ON message TYPE string;
+             DEFINE FIELD citations ON message TYPE array<object>;
+             DEFINE FIELD created_at ON message TYPE datetime;",
+        )
+        .await
+        .unwrap();
+
+        persist_message(&db, "user", "question").await.unwrap();
+        persist_message(&db, "assistant", "response").await.unwrap();
+
+        let mut response = db
+            .query("SELECT role, content, created_at FROM message ORDER BY created_at ASC")
+            .await
+            .unwrap();
+
+        #[derive(serde::Deserialize)]
+        struct Row {
+            role: String,
+            content: String,
+        }
+
+        let rows: Vec<Row> = response.take(0).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(&rows[0].role, "user");
+        assert_eq!(&rows[0].content, "question");
+        assert_eq!(&rows[1].role, "assistant");
+        assert_eq!(&rows[1].content, "response");
+    }
+
+    #[tokio::test]
+    async fn test_chat_history_empty_when_no_messages() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+
+        db.query(
+            "DEFINE TABLE message SCHEMAFULL;
+             DEFINE FIELD role ON message TYPE string;
+             DEFINE FIELD content ON message TYPE string;
+             DEFINE FIELD citations ON message TYPE array<object>;
+             DEFINE FIELD created_at ON message TYPE datetime;",
+        )
+        .await
+        .unwrap();
+
+        let mut response = db
+            .query("SELECT role, content, created_at FROM message ORDER BY created_at ASC")
+            .await
+            .unwrap();
+
+        #[derive(serde::Deserialize)]
+        struct Row {
+            role: String,
+            content: String,
+        }
+
+        let rows: Vec<Row> = response.take(0).unwrap();
+        assert!(rows.is_empty());
     }
 }

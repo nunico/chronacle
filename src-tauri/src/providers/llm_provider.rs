@@ -37,6 +37,23 @@ pub trait LlmProvider: Send + Sync {
     ) -> Result<mpsc::Receiver<Result<String, LlmError>>, LlmError>;
 }
 
+/// A no-op LLM provider for tests and placeholder state.
+///
+/// Used when constructing `AppState` without a real provider configured.
+/// Always returns an error so callers are forced to configure properly.
+pub struct NoopProvider;
+
+#[async_trait]
+impl LlmProvider for NoopProvider {
+    async fn chat_stream(
+        &self,
+        _system_prompt: &str,
+        _messages: &[ChatMessage],
+    ) -> Result<tokio::sync::mpsc::Receiver<Result<String, LlmError>>, LlmError> {
+        Err(LlmError::Config("No LLM provider configured".to_string()))
+    }
+}
+
 /// Provider that uses the OpenAI chat-completion API.
 pub struct OpenAIProvider {
     api_key: String,
