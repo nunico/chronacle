@@ -166,7 +166,6 @@ pub async fn upload_source(
 #[derive(Debug, Deserialize)]
 pub struct ChatRequest {
     pub message: String,
-    #[allow(dead_code)]
     pub campaign_id: Option<String>,
 }
 
@@ -177,65 +176,37 @@ pub struct ChatToken {
     pub done: bool,
 }
 
-/// Sends a user message to the AI agent and emits streaming tokens via Tauri
-/// events.
+/// Sends a user message through the full RAG pipeline and emits streaming
+/// tokens via Tauri events.
 ///
-/// The command returns immediately after kicking off the stream. Tokens are
-/// delivered one-by-one through the `chat-token` event. When the stream
-/// completes a final event with `done: true` is emitted.
+/// Pipeline:
+///   1. Embed the query → search vector store → build context
+///   2. Stream the LLM response token-by-token via `chat-token` events
+///   3. On completion, persist the assistant message with parsed citations
+///
+/// The command returns immediately; the pipeline runs in a background task.
 #[tauri::command]
 pub async fn chat_send(
     app_handle: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
     request: ChatRequest,
 ) -> Result<(), String> {
-    let llm = state.llm_provider.clone();
     let app = app_handle.clone();
+    let state_ref = state.inner().clone();
+    let message = request.message;
+    let campaign_id = request.campaign_id;
 
-    // Spawn the streaming work so the command returns immediately
+    // Spawn so the command returns immediately — tokens come via events
     tokio::spawn(async move {
-        let system_prompt = "You are a helpful TTRPG Game Master's assistant. \
-            Answer questions about the rules based on the provided source material. \
-            Always cite your sources.";
-
-        let messages = vec![crate::providers::llm_provider::ChatMessage {
-            role: "user".to_string(),
-            content: request.message,
-        }];
-
-        match llm.chat_stream(system_prompt, &messages).await {
-            Ok(mut rx) => {
-                while let Some(token_result) = rx.recv().await {
-                    match token_result {
-                        Ok(token) => {
-                            let _ = app.emit(
-                                "chat-token",
-                                ChatToken {
-                                    token,
-                                    done: false,
-                                },
-                            );
-                        }
-                        Err(e) => {
-                            let _ = app.emit(
-                                "chat-token",
-                                ChatToken {
-                                    token: format!("[Error: {e}]"),
-                                    done: true,
-                                },
-                            );
-                            return;
-                        }
-                    }
-                }
-                let _ = app.emit(
-                    "chat-token",
-                    ChatToken {
-                        token: String::new(),
-                        done: true,
-                    },
-                );
-            }
+        // Run the RAG pipeline
+        let mut rx = match crate::services::agent_service::stream_response(
+            &state_ref,
+            &message,
+            campaign_id.as_deref(),
+        )
+        .await
+        {
+            Ok(rx) => rx,
             Err(e) => {
                 let _ = app.emit(
                     "chat-token",
@@ -244,8 +215,55 @@ pub async fn chat_send(
                         done: true,
                     },
                 );
+                return;
+            }
+        };
+
+        // Stream tokens to the frontend while collecting the full response
+        let mut full_response = String::new();
+        while let Some(token_result) = rx.recv().await {
+            match token_result {
+                Ok(token) => {
+                    full_response.push_str(&token);
+                    let _ = app.emit(
+                        "chat-token",
+                        ChatToken {
+                            token,
+                            done: false,
+                        },
+                    );
+                }
+                Err(e) => {
+                    let _ = app.emit(
+                        "chat-token",
+                        ChatToken {
+                            token: format!("[Error: {e}]"),
+                            done: true,
+                        },
+                    );
+                    return;
+                }
             }
         }
+
+        // Persist the full assistant response with parsed citations
+        if let Err(e) = crate::services::agent_service::persist_assistant_message(
+            &state_ref.db,
+            &full_response,
+        )
+        .await
+        {
+            eprintln!("Failed to persist assistant message: {e}");
+        }
+
+        // Signal completion
+        let _ = app.emit(
+            "chat-token",
+            ChatToken {
+                token: String::new(),
+                done: true,
+            },
+        );
     });
 
     Ok(())

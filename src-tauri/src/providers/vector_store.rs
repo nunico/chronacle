@@ -5,6 +5,7 @@ use async_trait::async_trait;
 pub struct SearchResult {
     pub chunk_id: String,
     pub source_id: String,
+    pub source_name: String,
     pub text: String,
     pub page_start: i64,
     pub page_end: i64,
@@ -162,6 +163,7 @@ where
             "SELECT
                 id,
                 source,
+                source.filename AS source_name,
                 text,
                 page_start,
                 page_end,
@@ -185,6 +187,7 @@ where
         struct RawResult {
             id: surrealdb::sql::Thing,
             source: surrealdb::sql::Thing,
+            source_name: Option<String>,
             text: String,
             page_start: i64,
             page_end: i64,
@@ -202,6 +205,7 @@ where
             .map(|r| SearchResult {
                 chunk_id: r.id.to_string(),
                 source_id: r.source.to_string(),
+                source_name: r.source_name.unwrap_or_else(|| r.source.to_string()),
                 text: r.text,
                 page_start: r.page_start,
                 page_end: r.page_end,
