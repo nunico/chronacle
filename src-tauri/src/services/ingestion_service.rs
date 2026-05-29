@@ -5,6 +5,8 @@
 
 use std::sync::Arc;
 
+use crate::providers::vector_store::IndexedChunk;
+use crate::services::chunker::{chunk_document, ExtractedDoc, PageContent};
 use crate::AppState;
 use surrealdb::Connection;
 
@@ -80,48 +82,44 @@ pub async fn ingest_source(
     Ok(())
 }
 
-/// Metadata from text extraction.
-struct ExtractedDoc {
-    page_count: usize,
-    _text: String,
-    _pages: Vec<PageContent>,
-}
-
-struct PageContent {
-    _page_num: usize,
-    _text: String,
-}
-
 /// Extract text from PDF bytes using `pdfium-render`.
 async fn extract_text(_data: &[u8]) -> Result<ExtractedDoc, IngestionError> {
     // TODO: Phase 2 — implement with pdfium-render
     Ok(ExtractedDoc {
         page_count: 1,
-        _text: String::new(),
-        _pages: vec![],
+        text: String::new(),
+        pages: vec![],
     })
 }
 
-/// Split extracted text into searchable chunks.
+/// Split extracted document into searchable chunks using sliding-window.
 async fn chunk_text(
-    _doc: &ExtractedDoc,
+    doc: &ExtractedDoc,
     _source_id: &str,
 ) -> Result<Vec<RawChunk>, IngestionError> {
-    // TODO: Phase 2 — implement semantic / sliding-window chunking
-    Ok(Vec::new())
+    let chunks = chunk_document(doc);
+    Ok(chunks
+        .into_iter()
+        .map(|c| RawChunk {
+            text: c.text,
+            page_start: c.page_start,
+            page_end: c.page_end,
+            section_heading: c.section_heading,
+        })
+        .collect())
 }
 
 struct RawChunk {
-    _text: String,
-    _page_start: i64,
-    _page_end: i64,
-    _section_heading: String,
+    text: String,
+    page_start: i64,
+    page_end: i64,
+    section_heading: String,
 }
 
 /// Embed each chunk using `fastembed`.
 async fn embed_chunks(
     _chunks: Vec<RawChunk>,
-) -> Result<Vec<crate::providers::vector_store::IndexedChunk>, IngestionError> {
+) -> Result<Vec<IndexedChunk>, IngestionError> {
     // TODO: Phase 2 — implement with fastembed (nomic-embed-text-v1.5)
     Ok(Vec::new())
 }
