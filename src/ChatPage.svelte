@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { chatSend, getChatHistory, type Campaign } from './lib/commands';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
@@ -18,6 +18,8 @@
   let isLoading = $state(false);
   let currentResponse = $state('');
 
+  let unlistenListener: UnlistenFn | null = null;
+
   onMount(async () => {
     try {
       const history = await getChatHistory(activeCampaignId);
@@ -25,6 +27,25 @@
     } catch (e) {
       console.error('Failed to load chat history:', e);
     }
+
+    // Register a persistent listener for streaming chat tokens.
+    // Chat_send returns immediately (it spawns a background task), so the
+    // listener must outlive the invoke call.
+    unlistenListener = await listen<{ token: string; done: boolean }>('chat-token', (event) => {
+      if (event.payload.done) {
+        if (currentResponse) {
+          messages = [...messages, { role: 'assistant', content: currentResponse }];
+        }
+        currentResponse = '';
+        isLoading = false;
+      } else {
+        currentResponse += event.payload.token;
+      }
+    });
+  });
+
+  onDestroy(() => {
+    if (unlistenListener) unlistenListener();
   });
 
   /** Render message content with citation badges */
@@ -46,27 +67,11 @@
     isLoading = true;
     currentResponse = '';
 
-    let unlisten: UnlistenFn | null = null;
-
     try {
-      unlisten = await listen<{ token: string; done: boolean }>('chat-token', (event) => {
-        if (event.payload.done) {
-          if (currentResponse) {
-            messages = [...messages, { role: 'assistant', content: currentResponse }];
-          }
-          currentResponse = '';
-          isLoading = false;
-        } else {
-          currentResponse += event.payload.token;
-        }
-      });
-
       await chatSend(text, activeCampaignId);
     } catch (e) {
       console.error('Chat send failed:', e);
       isLoading = false;
-    } finally {
-      if (unlisten) unlisten();
     }
   }
 

@@ -136,7 +136,6 @@ where
         "CREATE message SET
             role = $role,
             content = $content,
-            campaign = NONE,
             citations = [],
             created_at = time::now()",
     )
@@ -183,7 +182,6 @@ where
         "CREATE message SET \
          role = 'assistant', \
          content = $content, \
-         campaign = NONE, \
          citations = [{cit_surql}], \
          created_at = time::now()"
     );
