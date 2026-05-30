@@ -380,3 +380,94 @@ async fn test_full_ingest_and_query_cycle() {
         "at least one result should contain 'fighter'"
     );
 }
+
+#[tokio::test]
+async fn test_custom_provider_crud() {
+    let db = setup_db().await;
+
+    // Create a custom provider
+    let created = chronacle_lib::services::custom_provider_service::create(
+        &db, "TestProvider", "openai",
+        "https://test.api.com/v1", "sk-test-123",
+    ).await.expect("create should succeed");
+    assert_eq!(created.name, "TestProvider");
+    assert_eq!(created.provider_type, "openai");
+
+    // Add models
+    let model1 = chronacle_lib::services::custom_provider_service::add_model(
+        &db, &created.id, "gpt-4o", "GPT-4o",
+    ).await.expect("add model should succeed");
+    assert_eq!(model1.model_id, "gpt-4o");
+    assert_eq!(model1.display_name, "GPT-4o");
+
+    let _model2 = chronacle_lib::services::custom_provider_service::add_model(
+        &db, &created.id, "claude-3-haiku", "Claude 3 Haiku",
+    ).await.expect("add model should succeed");
+
+    // Get models
+    let models = chronacle_lib::services::custom_provider_service::get_models(&db, &created.id)
+        .await.expect("get models should succeed");
+    assert_eq!(models.len(), 2);
+
+    // Get all providers
+    let all = chronacle_lib::services::custom_provider_service::get_all(&db)
+        .await.expect("get all should succeed");
+    assert!(!all.is_empty());
+    assert!(all.iter().any(|p| p.name == "TestProvider"));
+
+    // Delete a model
+    chronacle_lib::services::custom_provider_service::remove_model(&db, &model1.id)
+        .await.expect("remove model should succeed");
+    let models_after = chronacle_lib::services::custom_provider_service::get_models(&db, &created.id)
+        .await.expect("get models after delete should succeed");
+    assert_eq!(models_after.len(), 1);
+    assert_eq!(models_after[0].model_id, "claude-3-haiku");
+
+    // Delete the provider (should cascade-delete models)
+    chronacle_lib::services::custom_provider_service::delete(&db, &created.id)
+        .await.expect("delete should succeed");
+    let after_delete = chronacle_lib::services::custom_provider_service::get_all(&db)
+        .await.expect("get all after delete should succeed");
+    assert!(after_delete.iter().all(|p| p.id != created.id), "provider should be deleted");
+
+    // Models should also be gone (cascade delete)
+    let models_final = chronacle_lib::services::custom_provider_service::get_models(&db, &created.id)
+        .await.expect("get models after provider delete should succeed");
+    assert!(models_final.is_empty(), "models should be cascade-deleted");
+}
+
+#[tokio::test]
+async fn test_custom_provider_duplicate_name() {
+    let db = setup_db().await;
+
+    chronacle_lib::services::custom_provider_service::create(
+        &db, "Duplicate", "openai",
+        "https://api1.com", "key1",
+    ).await.expect("first create should succeed");
+
+    let result = chronacle_lib::services::custom_provider_service::create(
+        &db, "Duplicate", "anthropic",
+        "https://api2.com", "key2",
+    ).await;
+    assert!(result.is_err(), "duplicate name should fail");
+}
+
+#[tokio::test]
+async fn test_custom_provider_update() {
+    let db = setup_db().await;
+
+    let created = chronacle_lib::services::custom_provider_service::create(
+        &db, "UpdateMe", "openai",
+        "https://old.api.com", "old-key",
+    ).await.expect("create should succeed");
+
+    let updated = chronacle_lib::services::custom_provider_service::update(
+        &db, &created.id, "UpdatedName", "anthropic",
+        "https://new.api.com", "new-key",
+    ).await.expect("update should succeed");
+
+    assert_eq!(updated.name, "UpdatedName");
+    assert_eq!(updated.provider_type, "anthropic");
+    assert_eq!(updated.base_url, "https://new.api.com");
+    assert_eq!(updated.api_key, "new-key");
+}

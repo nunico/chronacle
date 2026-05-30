@@ -99,7 +99,7 @@ pub async fn create(
     base_url: &str,
     api_key: &str,
 ) -> Result<CustomProvider, String> {
-    let id = uuid::Uuid::new_v4().to_string();
+    let id = uuid::Uuid::new_v4().to_string().replace('-', "");
     let mut response = db.query(
         "CREATE custom_provider SET
             id = $id,
@@ -221,7 +221,7 @@ pub async fn add_model(
     model_id: &str,
     display_name: &str,
 ) -> Result<CustomProviderModel, String> {
-    let id = uuid::Uuid::new_v4().to_string();
+    let id = uuid::Uuid::new_v4().to_string().replace('-', "");
     let mut response = db.query(
         "CREATE custom_provider_model SET
             id = $id,
