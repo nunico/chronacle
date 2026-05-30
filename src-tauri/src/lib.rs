@@ -119,6 +119,13 @@ pub async fn run() {
             commands::get_chat_history,
             commands::reconfigure_llm_provider,
             commands::get_llm_provider_status,
+            commands::get_custom_providers,
+            commands::create_custom_provider,
+            commands::update_custom_provider,
+            commands::delete_custom_provider,
+            commands::get_provider_models,
+            commands::add_provider_model,
+            commands::remove_provider_model,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");
@@ -133,19 +140,56 @@ async fn build_llm_provider_from_db(
         Err(_) => HashMap::new(),
     };
 
-    build_llm_provider_from_map(&settings)
+    build_llm_provider_from_map(&settings, Some(db)).await
 }
 
-pub(crate) fn build_llm_provider_from_map(settings: &HashMap<String, String>) -> Arc<dyn LlmProvider> {
+pub(crate) async fn build_llm_provider_from_map(
+    settings: &HashMap<String, String>,
+    db: Option<&surrealdb::Surreal<surrealdb::engine::local::Db>>,
+) -> Arc<dyn LlmProvider> {
     let provider = settings.get("llm_provider").map(|s| s.as_str()).unwrap_or("openai");
     let api_key = settings.get("llm_api_key").cloned().unwrap_or_default();
     let model = settings.get("llm_model").cloned().unwrap_or_default();
     let base_url = settings.get("llm_base_url").cloned().unwrap_or_default();
 
+    // Check for custom provider prefix ("custom:ProviderName")
+    if let Some(custom_name) = provider.strip_prefix("custom:") {
+        if let Some(db) = db {
+            match build_custom_provider(db, custom_name, &model).await {
+                Ok(p) => return p,
+                Err(e) => {
+                    eprintln!("Warning: custom provider '{custom_name}' not found ({e}), falling back to OpenAI");
+                }
+            }
+        }
+    }
+
     match provider {
-        "anthropic" => Arc::new(AnthropicProvider::new(api_key, model)),
+        "anthropic" => Arc::new(AnthropicProvider::with_base_url(api_key, model, base_url)),
         "ollama" => Arc::new(OllamaProvider::new(base_url, model)),
         _ => Arc::new(OpenAIProvider::new(api_key, model)),
+    }
+}
+
+async fn build_custom_provider(
+    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+    name: &str,
+    model: &str,
+) -> Result<Arc<dyn LlmProvider>, String> {
+    let providers = crate::services::custom_provider_service::get_all(db).await?;
+
+    let cp = providers.into_iter()
+        .find(|p| p.name == name)
+        .ok_or_else(|| format!("Custom provider '{name}' not found"))?;
+
+    match cp.provider_type.as_str() {
+        "openai" => Ok(Arc::new(OpenAIProvider::with_base_url(
+            cp.api_key, model.to_string(), cp.base_url,
+        ))),
+        "anthropic" => Ok(Arc::new(AnthropicProvider::with_base_url(
+            cp.api_key, model.to_string(), cp.base_url,
+        ))),
+        _ => Err(format!("Unknown provider type: {}", cp.provider_type)),
     }
 }
 

@@ -377,7 +377,7 @@ pub async fn reconfigure_llm_provider(
     let map: std::collections::HashMap<String, String> =
         settings.into_iter().map(|r| (r.id.id.to_string(), r.value)).collect();
 
-    let new_provider = crate::build_llm_provider_from_map(&map);
+    let new_provider = crate::build_llm_provider_from_map(&map, Some(&state.db)).await;
     let provider_type = crate::provider_type_name(&new_provider);
 
     // Swap the provider under the write lock
