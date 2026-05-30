@@ -126,6 +126,13 @@ pub async fn run() {
             commands::get_provider_models,
             commands::add_provider_model,
             commands::remove_provider_model,
+            commands::get_campaigns,
+            commands::get_campaign,
+            commands::create_campaign,
+            commands::update_campaign,
+            commands::delete_campaign,
+            commands::get_sources,
+            commands::delete_source,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");

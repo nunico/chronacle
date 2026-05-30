@@ -1,11 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { chatSend, getChatHistory, uploadSource } from './lib/commands';
+  import { chatSend, getChatHistory, uploadSource, getCampaigns, type Campaign } from './lib/commands';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { open } from '@tauri-apps/plugin-dialog';
   import SettingsPage from './SettingsPage.svelte';
+  import CampaignsPage from './CampaignsPage.svelte';
 
-  let currentPage = $state<'chat' | 'settings'>('chat');
+  type Page = 'chat' | 'campaigns' | 'settings';
+
+  let currentPage = $state<Page>('chat');
   let messages = $state<Array<{ role: string; content: string }>>([]);
   let input = $state('');
   let isLoading = $state(false);
@@ -15,12 +18,20 @@
   let uploadStatus = $state('');
   let uploadedSourceName = $state('');
 
+  // Campaign-aware chat
+  let campaigns = $state<Campaign[]>([]);
+  let activeCampaignId = $state<string | null>(null);
+
   onMount(async () => {
     try {
-      const history = await getChatHistory(null);
+      const [history, campaignList] = await Promise.all([
+        getChatHistory(null),
+        getCampaigns(),
+      ]);
       messages = history;
+      campaigns = campaignList;
     } catch (e) {
-      console.error('Failed to load chat history:', e);
+      console.error('Failed to load initial data:', e);
     }
   });
 
@@ -66,7 +77,7 @@
         },
       );
 
-      await uploadSource(path, name, 'rules');
+      await uploadSource(path, name, 'rules', activeCampaignId ?? undefined);
     } catch (e) {
       uploadStatus = `Failed: ${e}`;
       console.error('Upload failed:', e);
@@ -79,7 +90,6 @@
 
   /** Render message content with citation badges */
   function renderContent(text: string): string {
-    // Replace [Source: "name", p.N] or [Source: "name"] with styled HTML
     return text.replace(
       /\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+))?\]/g,
       (_, name: string, page: string | undefined) => {
@@ -112,7 +122,7 @@
         }
       });
 
-      await chatSend(text, null);
+      await chatSend(text, activeCampaignId);
     } catch (e) {
       console.error('Chat send failed:', e);
       isLoading = false;
@@ -127,6 +137,11 @@
       sendMessage();
     }
   }
+
+  function getActiveCampaignName(): string {
+    if (!activeCampaignId) return 'Global';
+    return campaigns.find((c) => c.id === activeCampaignId)?.name ?? 'Unknown';
+  }
 </script>
 
 <header>
@@ -135,6 +150,9 @@
   <nav>
     <button class="nav-btn" class:active={currentPage === 'chat'} onclick={() => (currentPage = 'chat')}>
       Chat
+    </button>
+    <button class="nav-btn" class:active={currentPage === 'campaigns'} onclick={() => (currentPage = 'campaigns')}>
+      Campaigns
     </button>
     <button class="nav-btn" class:active={currentPage === 'settings'} onclick={() => (currentPage = 'settings')}>
       Settings
@@ -184,6 +202,25 @@
     </div>
 
     <div class="input-area">
+      <div class="input-header">
+        <div class="campaign-context">
+          Context: <strong>{getActiveCampaignName()}</strong>
+          {#if campaigns.length > 0}
+            <select
+              bind:value={activeCampaignId}
+              onchange={() => {
+                // Reload chat history when campaign changes
+                getChatHistory(activeCampaignId).then((h) => (messages = h)).catch(console.error);
+              }}
+            >
+              <option value={null}>Global</option>
+              {#each campaigns as c}
+                <option value={c.id}>{c.name}</option>
+              {/each}
+            </select>
+          {/if}
+        </div>
+      </div>
       <textarea
         bind:value={input}
         onkeydown={handleKeydown}
@@ -195,6 +232,8 @@
         {isLoading ? 'Thinking…' : 'Send'}
       </button>
     </div>
+  {:else if currentPage === 'campaigns'}
+    <CampaignsPage />
   {:else}
     <SettingsPage />
   {/if}
@@ -323,12 +362,35 @@
 
   .input-area {
     display: flex;
+    flex-direction: column;
     gap: 0.5rem;
-    align-items: flex-end;
+  }
+
+  .input-header {
+    display: flex;
+    justify-content: flex-start;
+  }
+
+  .campaign-context {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .campaign-context select {
+    font-size: 0.8rem;
+    padding: 0.15rem 0.3rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-input);
+    color: var(--text);
+    font-family: inherit;
   }
 
   .input-area textarea {
-    flex: 1;
+    flex: none;
     padding: 0.6rem 0.8rem;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -343,7 +405,8 @@
     opacity: 0.6;
   }
 
-  .input-area button {
+  .input-area > button {
+    align-self: flex-end;
     padding: 0.6rem 1.5rem;
     border: none;
     border-radius: 6px;
@@ -355,11 +418,11 @@
     white-space: nowrap;
   }
 
-  .input-area button:hover:not(:disabled) {
+  .input-area > button:hover:not(:disabled) {
     background: var(--accent-hover);
   }
 
-  .input-area button:disabled {
+  .input-area > button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }

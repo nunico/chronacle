@@ -26,11 +26,13 @@ export async function uploadSource(
   filePath: string,
   displayName?: string,
   sourceType?: string,
+  campaignId?: string,
 ): Promise<Record<string, unknown>> {
   return invoke('upload_source', {
     filePath,
     displayName: displayName ?? null,
     sourceType: sourceType ?? null,
+    campaignId: campaignId ?? null,
   });
 }
 
@@ -157,4 +159,66 @@ export async function addProviderModel(
 
 export async function removeProviderModel(id: string): Promise<void> {
   return invoke('remove_provider_model', { id });
+}
+
+// ── Campaign Types & Commands ──────────────────────────────────────────
+
+export interface Campaign {
+  id: string;
+  name: string;
+  system: string;
+}
+
+export async function getCampaigns(): Promise<Campaign[]> {
+  return invoke<Campaign[]>('get_campaigns');
+}
+
+export async function getCampaign(id: string): Promise<Campaign> {
+  return invoke<Campaign>('get_campaign', { id });
+}
+
+export async function updateCampaign(
+  id: string,
+  name: string,
+  system: string,
+): Promise<Campaign> {
+  return invoke<Campaign>('update_campaign', { id, name, system });
+}
+
+export async function createCampaign(name: string, system: string): Promise<Campaign> {
+  return invoke<Campaign>('create_campaign', { name, system });
+}
+
+export async function deleteCampaign(id: string): Promise<void> {
+  return invoke('delete_campaign', { id });
+}
+
+// ── Source (PDF) Types & Commands ─────────────────────────────────────
+
+export interface Source {
+  id: string;
+  filename: string;
+  display_name: string;
+  source_type: string;
+  page_count: number;
+  index_status: string;
+  embed_model: string;
+  campaign_id: string | null;
+}
+
+/**
+ * Get sources, optionally filtered by campaign.
+ * - Pass `"*"` or `""` for all sources
+ * - Pass `null` for global (non-campaign) sources
+ * - Pass a campaign ID for campaign-specific sources
+ */
+export async function getSources(campaignId: string | null): Promise<Source[]> {
+  return invoke<Source[]>('get_sources', { campaignId });
+}
+
+/**
+ * Delete a source, its blob data, and all associated chunks.
+ */
+export async function deleteSource(id: string): Promise<void> {
+  return invoke('delete_source', { id });
 }

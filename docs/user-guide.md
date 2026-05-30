@@ -139,7 +139,15 @@ Now that you have an AI provider set up, it's time to load your books.
 
 ### How to upload a PDF
 
-Click the **Upload** button (usually a "+" icon or "Add Book" button). Select one or more PDF files from your computer. Chronacle will start processing them one at a time.
+Click the **Upload PDF** button at the top of the screen. A file dialog will open — select one or more PDF files from your computer. Chronacle will start processing them one at a time.
+
+You can choose which **campaign** a PDF belongs to before uploading:
+
+1. Make sure the correct campaign is selected in the **campaign context** dropdown (visible below the chat input when a campaign exists).
+2. Click **Upload PDF** — the PDF will be tagged with that campaign.
+3. If no campaign is selected, the PDF is uploaded as a **Global Source**, available in all campaigns.
+
+This is useful when you run multiple game systems or campaigns. For example, you might upload the Player's Handbook to a "Curse of Strahd" campaign and keep a different set of books for your "Homebrew World" campaign.
 
 ### What happens during ingestion
 
@@ -163,13 +171,93 @@ Chronacle works with **text-based PDFs** — that is, PDFs where the text is alr
 
 ---
 
+## Managing Campaigns
+
+Campaigns let you organise your rulebooks by game. Each campaign can have its own set of PDF sources, and when you ask a question, Chronacle will search only the books belonging to that campaign (plus any global sources shared across all campaigns).
+
+### What is a campaign?
+
+A **campaign** is a container for your game's resources — rulebooks, notes, and chat history. You might create one campaign per actual table you run:
+
+- "Curse of Strahd" — with the Player's Handbook, Curse of Strahd module, and Xanathar's Guide
+- "Homebrew World" — with the Player's Handbook and Dungeon Master's Guide
+- "Call of Cthulhu" — with the Call of Cthulhu rulebook and a campaign scenario
+
+A **Global Source** is a PDF that isn't tied to any campaign. It's searchable from every campaign. The Player's Handbook often works well as a global source since it's useful in every game.
+
+### The Campaigns page
+
+Click the **Campaigns** button at the top to open the campaign manager. This page has two panels:
+
+- **Left sidebar** — shows all your campaigns plus a "Global Sources" entry.
+- **Main area** — shows all PDF sources belonging to the selected campaign.
+
+### Creating a campaign
+
+1. On the **Campaigns** page, click **+ New** in the sidebar.
+2. Enter a **Campaign name** (e.g., "Curse of Strahd").
+3. Enter the **Game system** (e.g., "D&D 5e" or "Call of Cthulhu 7e") — this is just for reference; it doesn't affect how Chronacle works.
+4. Click **Create**.
+
+The new campaign appears in the sidebar. You can now upload PDFs to it.
+
+### Switching campaigns
+
+On the **Chat** page, a **context selector** shows which campaign you're currently in:
+
+> Context: **Global**
+>
+> [▼ Select campaign...]
+
+- **Global** — search all global (non-campaign) sources. This is the default.
+- **A specific campaign** — search that campaign's sources plus all global sources.
+
+When you switch campaigns, the chat history reloads to show only messages from that campaign.
+
+### Managing sources in a campaign
+
+Click on any campaign (or "Global Sources") in the sidebar to see its PDFs.
+
+Each source card shows:
+- The **filename** and **display name**
+- The **index status** — `pending`, `indexing`, `done`, or `error`
+- The **page count**
+- A **delete** button (appears on hover)
+
+To **delete a source**, hover over its card and click the ✖ button. This removes the PDF, its index, and all associated chunks from Chronacle.
+
+### Deleting a campaign
+
+Hover over a campaign in the sidebar and click the ✖ button that appears. This permanently deletes the campaign and all its sources, indexed chunks, and messages. You'll be asked to confirm before the deletion happens.
+
+> 💡 **Tip:** You can't undo deleting a campaign. Make sure you don't need the data anymore, or back up your Chronacle data directory first.
+
+---
+
+## Organising Your Library
+
+The source list on the Campaigns page gives you a clear view of everything you've loaded. Each source card has a colored **status badge**:
+
+- 🟢 **done** — The PDF was successfully indexed and is ready for questions.
+- 🟡 **pending / indexing** — Chronacle is still processing this PDF. Wait a moment and refresh.
+- 🔴 **error** — Something went wrong during ingestion. The PDF might be scanned (image-only) or corrupted.
+
+If a source has an **error** status, try re-uploading it or check that the file is a text-based PDF.
+
+---
+
 ## Asking Questions
 
 Once your rulebooks are loaded, the chat area is your main tool. Think of it like messaging a very knowledgeable assistant who has read every book you've loaded.
 
 ### How to ask
 
-Type your question in the text box at the bottom and press Enter. You can ask anything that you'd normally look up in a rulebook:
+Type your question in the text box at the bottom and press Enter. Before you ask, check the **context selector** above the input — it shows which campaign's sources Chronacle will search:
+
+- **Global** — searches only global (non-campaign) sources.
+- **A specific campaign** — searches that campaign's sources plus global sources.
+
+You can ask anything that you'd normally look up in a rulebook:
 
 - "What are the requirements for casting a ritual spell?"
 - "How does the Rogue's Sneak Attack work?"
@@ -219,10 +307,11 @@ If the AI gives an answer **without a citation**, it might be making a guess bas
 
 Every conversation you have with Chronacle is saved automatically. When you close the app and open it again, your previous chats will be waiting for you.
 
+- **Chat history is per-campaign.** When you switch campaigns using the context selector, Chronacle loads only that campaign's messages. Switching back restores the previous campaign's messages.
 - **Your conversations stay on your computer.** They are not sent anywhere or shared with anyone.
-- **Each chat appears in a sidebar** or a list. You can click on a previous chat to continue where you left off.
-- **You can start a new chat** at any time — useful when you switch to a different campaign or want to ask about a different topic.
-- **You can delete old chats** if you want to clean things up. Look for a small menu or right-click option on the chat name.
+- **You can start a new chat** at any time by switching to a different campaign.
+
+> 💡 **Tip:** Global messages (with no campaign selected) are shared across all campaigns. Use campaign-specific chat to keep different games' conversations separate.
 
 ---
 
@@ -300,6 +389,10 @@ This glossary explains the technical terms used in this guide. If you see a word
 **Custom Provider** — An AI service that you configure yourself in Chronacle, rather than using one of the built-in options (OpenAI, Anthropic, Ollama). You give it a name, enter its web address, and tell it which models to use. This is useful for third-party services and self-hosted AI servers.
 
 **Base URL** — The web address where an AI service lives. For example, Ollama's base URL is `http://localhost:11434`, which means it's running on your own computer. For a cloud service, it would be something like `https://api.openai.com/v1`. You'll need to enter this when setting up a Custom Provider.
+
+**Campaign** — A container for your game's resources: rulebooks, chat history, and notes. Each campaign has its own set of PDF sources and its own conversation history. You can switch between campaigns to keep different games separate.
+
+**Global Source** — A PDF that isn't tied to any campaign. It's searchable from every campaign, making it useful for core rulebooks like the Player's Handbook that you use across all your games.
 
 ---
 

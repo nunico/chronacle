@@ -116,11 +116,10 @@ async fn openai_parse_sse(
                                             .pointer("/choices/0/delta/content")
                                             .and_then(|v| v.as_str())
                                         {
-                                            if !content.is_empty() {
-                                                if tx.send(Ok(content.to_string())).await.is_err()
-                                                {
-                                                    return; // receiver dropped
-                                                }
+                                            if !content.is_empty()
+                                                && tx.send(Ok(content.to_string())).await.is_err()
+                                            {
+                                                return; // receiver dropped
                                             }
                                         }
                                     }
@@ -203,10 +202,10 @@ async fn anthropic_parse_sse(
                                         .pointer("/delta/text")
                                         .and_then(|v| v.as_str())
                                     {
-                                        if !text.is_empty() {
-                                            if tx.send(Ok(text.to_string())).await.is_err() {
-                                                return;
-                                            }
+                                        if !text.is_empty()
+                                            && tx.send(Ok(text.to_string())).await.is_err()
+                                        {
+                                            return;
                                         }
                                     }
                                 }
@@ -267,10 +266,10 @@ async fn ollama_parse_ndjson(
                                         .pointer("/message/content")
                                         .and_then(|v| v.as_str())
                                     {
-                                        if !content.is_empty() {
-                                            if tx.send(Ok(content.to_string())).await.is_err() {
-                                                return;
-                                            }
+                                        if !content.is_empty()
+                                            && tx.send(Ok(content.to_string())).await.is_err()
+                                        {
+                                            return;
                                         }
                                     }
 

@@ -156,8 +156,7 @@ where
 
         let campaign_filter = match campaign_id {
             Some(cid) => format!(
-                "WHERE campaign = {} OR campaign IS NULL",
-                format!("campaign:`{cid}`")
+                "WHERE campaign = campaign:`{cid}` OR campaign IS NULL",
             ),
             None => "WHERE campaign IS NULL".to_string(),
         };

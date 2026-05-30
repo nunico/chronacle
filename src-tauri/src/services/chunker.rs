@@ -9,7 +9,6 @@
 ///
 /// Chunks respect section boundaries: when a section break falls within the
 /// overlap region, the chunk is split at the heading instead.
-
 use std::sync::LazyLock;
 
 use regex::Regex;

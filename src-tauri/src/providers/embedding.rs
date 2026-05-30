@@ -2,7 +2,6 @@
 ///
 /// Phase 1 uses `fastembed` with `nomic-embed-text-v1.5` (768-dim).
 /// The model is downloaded lazily on first use and cached locally.
-
 use async_trait::async_trait;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use std::sync::Mutex;

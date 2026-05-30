@@ -11,7 +11,6 @@
 /// dependency order:
 /// - `001_initial.surql` — Phase 1 tables, fields, indexes
 /// - `002_*.surql` — future migrations
-
 use std::path::Path;
 
 /// Run all pending schema migrations against the given database.

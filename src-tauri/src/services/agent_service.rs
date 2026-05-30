@@ -8,7 +8,6 @@
 ///
 /// The caller receives token chunks. After the channel is exhausted
 /// the caller should persist the assistant message with parsed citations.
-
 use tokio::sync::mpsc;
 
 use std::sync::Arc;
@@ -379,6 +378,7 @@ mod tests {
             .await
             .unwrap();
         #[derive(serde::Deserialize)]
+        #[expect(dead_code)]
         struct Msg {
             role: String,
             content: String,
@@ -411,6 +411,7 @@ mod tests {
             .unwrap();
 
         #[derive(serde::Deserialize)]
+        #[expect(dead_code)]
         struct Row {
             role: String,
             content: String,

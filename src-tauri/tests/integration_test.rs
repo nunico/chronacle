@@ -3,7 +3,6 @@
 /// These tests exercise the service layer directly against an in-memory
 /// SurrealDB instance. They do **not** go through Tauri IPC — that is
 /// covered by the E2E test suite.
-
 use chronacle_lib::schema;
 use std::sync::{Arc, RwLock};
 
@@ -55,6 +54,7 @@ async fn test_campaign_crud() {
 
     // Take result to verify it worked
     #[derive(serde::Deserialize)]
+    #[expect(dead_code)]
     struct CampaignCreated {
         id: surrealdb::sql::Thing,
     }
@@ -67,6 +67,7 @@ async fn test_campaign_crud() {
         .unwrap();
 
     #[derive(serde::Deserialize)]
+    #[expect(dead_code)]
     struct CampaignRow {
         id: surrealdb::sql::Thing,
         name: String,
@@ -99,6 +100,7 @@ async fn test_source_crud() {
 
     // Take result to verify
     #[derive(serde::Deserialize)]
+    #[expect(dead_code)]
     struct SourceCreated {
         id: surrealdb::sql::Thing,
     }
@@ -106,7 +108,7 @@ async fn test_source_crud() {
     assert_eq!(created.len(), 1);
 
     // Update status
-    let mut res = db
+    db
         .query("UPDATE source:src1 SET index_status = 'done', campaign = NULL")
         .await
         .unwrap();
@@ -299,6 +301,7 @@ async fn test_full_ingest_and_query_cycle() {
         .await
         .expect("debug query 2");
     #[derive(serde::Deserialize, Debug)]
+    #[expect(dead_code)]
     struct ChunkRow {
         id: surrealdb::sql::Thing,
         text: String,

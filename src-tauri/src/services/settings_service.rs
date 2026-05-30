@@ -3,7 +3,6 @@
 /// Settings are stored as key-value pairs in the `setting` SurrealDB table.
 /// Keys match the `setting` keys defined in ADR-002 (e.g. `llm_provider`,
 /// `llm_model`, `embedding_backend`, `active_campaign_id`).
-
 use serde::{Deserialize, Serialize};
 use surrealdb::Connection;
 

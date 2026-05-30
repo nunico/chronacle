@@ -57,6 +57,13 @@ pub struct CustomProviderResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct CampaignResponse {
+    pub id: String,
+    pub name: String,
+    pub system: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ProviderModelResponse {
     pub id: String,
     pub provider_id: String,
@@ -128,6 +135,7 @@ pub async fn upload_source(
     file_path: String,
     display_name: Option<String>,
     source_type: Option<String>,
+    campaign_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let path = std::path::PathBuf::from(&file_path);
     let filename = path
@@ -152,20 +160,41 @@ pub async fn upload_source(
         .await
         .map_err(|e| format!("Failed to store blob: {e}"))?;
 
-    // Insert source record
-    let mut response = state
-        .db
-        .query(
+    // Insert source record with optional campaign
+    // Build the query based on whether a campaign_id was provided
+    let source_sql = match &campaign_id {
+        Some(cid) => {
+            let safe_id = cid.replace('`', "``");
+            format!(
+                "CREATE source SET
+                    id = $id,
+                    campaign = campaign:`{safe_id}`,
+                    filename = $filename,
+                    display_name = $display_name,
+                    source_type = $source_type,
+                    page_count = 0,
+                    indexed_at = time::now(),
+                    index_status = 'pending',
+                    embed_model = $embed_model"
+            )
+        }
+        None => {
             "CREATE source SET
                 id = $id,
+                campaign = NULL,
                 filename = $filename,
                 display_name = $display_name,
                 source_type = $source_type,
                 page_count = 0,
                 indexed_at = time::now(),
                 index_status = 'pending',
-                embed_model = $embed_model",
-        )
+                embed_model = $embed_model"
+                .to_string()
+        }
+    };
+    let mut response = state
+        .db
+        .query(source_sql)
         .bind(("id", source_id.to_owned()))
         .bind(("filename", filename.to_owned()))
         .bind(("display_name", display_name.to_owned()))
@@ -507,4 +536,192 @@ pub async fn remove_provider_model(
     id: String,
 ) -> Result<(), String> {
     crate::services::custom_provider_service::remove_model(&state.db, &id).await
+}
+
+// ── Source Commands ──────────────────────────────────────────────────
+
+/// Response payload for a source record.
+#[derive(Debug, Clone, Serialize)]
+pub struct SourceResponse {
+    pub id: String,
+    pub filename: String,
+    pub display_name: String,
+    pub source_type: String,
+    pub page_count: i64,
+    pub index_status: String,
+    pub embed_model: String,
+    pub campaign_id: Option<String>,
+}
+
+/// Returns sources, optionally filtered by campaign.
+///
+/// When `campaign_id` is `None`, returns all global (non-campaign) sources.
+/// Pass an empty string to get all sources regardless of campaign.
+#[tauri::command]
+pub async fn get_sources(
+    state: State<'_, Arc<AppState>>,
+    campaign_id: Option<String>,
+) -> Result<Vec<SourceResponse>, String> {
+    let sql = match &campaign_id {
+        // Empty string = all sources
+        Some(cid) if cid.is_empty() || cid == "*" => {
+            "SELECT * FROM source ORDER BY display_name ASC".to_string()
+        }
+        Some(cid) => {
+            let safe_id = cid.replace('`', "``");
+            format!(
+                "SELECT * FROM source WHERE campaign = campaign:`{safe_id}` ORDER BY display_name ASC"
+            )
+        }
+        None => {
+            "SELECT * FROM source WHERE campaign IS NULL ORDER BY display_name ASC".to_string()
+        }
+    };
+    let mut response = state
+        .db
+        .query(sql)
+        .await
+        .map_err(|e| format!("Failed to query sources: {e}"))?;
+
+    #[derive(Deserialize)]
+    struct SourceRow {
+        id: surrealdb::sql::Thing,
+        filename: String,
+        display_name: String,
+        source_type: String,
+        page_count: i64,
+        index_status: String,
+        embed_model: String,
+        campaign: Option<surrealdb::sql::Thing>,
+    }
+
+    let rows: Vec<SourceRow> = response
+        .take(0)
+        .map_err(|e| format!("Failed to parse sources: {e}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| SourceResponse {
+            id: r.id.id.to_string(),
+            filename: r.filename,
+            display_name: r.display_name,
+            source_type: r.source_type,
+            page_count: r.page_count,
+            index_status: r.index_status,
+            embed_model: r.embed_model,
+            campaign_id: r.campaign.map(|c| c.id.to_string()),
+        })
+        .collect())
+}
+
+/// Delete a source, its blob data, and all associated chunks.
+#[tauri::command]
+pub async fn delete_source(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<(), String> {
+    // Check source exists before deleting
+    let mut exists = state
+        .db
+        .query("SELECT count() FROM source WHERE id = type::thing('source', $id) GROUP ALL")
+        .bind(("id", id.clone()))
+        .await
+        .map_err(|e| format!("Failed to query source: {e}"))?;
+
+    #[derive(Deserialize)]
+    struct CountRow {
+        count: i64,
+    }
+    let counts: Vec<CountRow> = exists
+        .take(0)
+        .map_err(|e| format!("Failed to parse source count: {e}"))?;
+
+    if counts.first().map(|c| c.count).unwrap_or(0) > 0 {
+        // Delete blob
+        state
+            .blob_store
+            .delete(&id)
+            .await
+            .map_err(|e| format!("Failed to delete blob: {e}"))?;
+
+        // Delete vector chunks
+        state
+            .vector_store
+            .delete_by_source(&id)
+            .await
+            .map_err(|e| format!("Failed to delete chunks: {e}"))?;
+
+        // Delete source record
+        state
+            .db
+            .query("DELETE type::thing('source', $id)")
+            .bind(("id", id))
+            .await
+            .map_err(|e| format!("Failed to delete source: {e}"))?;
+    }
+
+    Ok(())
+}
+
+// ── Campaign Commands ────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_campaigns(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<CampaignResponse>, String> {
+    let campaigns = crate::services::campaign_service::get_all(&state.db).await?;
+    Ok(campaigns.into_iter().map(|c| CampaignResponse {
+        id: c.id, name: c.name, system: c.system,
+    }).collect())
+}
+
+#[tauri::command]
+pub async fn get_campaign(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<CampaignResponse, String> {
+    let campaign = crate::services::campaign_service::get_by_id(&state.db, &id).await?;
+    Ok(CampaignResponse {
+        id: campaign.id, name: campaign.name, system: campaign.system,
+    })
+}
+
+#[tauri::command]
+pub async fn create_campaign(
+    state: State<'_, Arc<AppState>>,
+    name: String,
+    system: String,
+) -> Result<CampaignResponse, String> {
+    if name.trim().is_empty() {
+        return Err("Campaign name is required".to_string());
+    }
+    let campaign = crate::services::campaign_service::create(
+        &state.db, name.trim(), system.trim(),
+    ).await?;
+    Ok(CampaignResponse {
+        id: campaign.id, name: campaign.name, system: campaign.system,
+    })
+}
+
+#[tauri::command]
+pub async fn update_campaign(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    name: String,
+    system: String,
+) -> Result<CampaignResponse, String> {
+    let campaign = crate::services::campaign_service::update(
+        &state.db, &id, &name, &system,
+    ).await?;
+    Ok(CampaignResponse {
+        id: campaign.id, name: campaign.name, system: campaign.system,
+    })
+}
+
+#[tauri::command]
+pub async fn delete_campaign(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<(), String> {
+    crate::services::campaign_service::delete(&state.db, &id).await
 }

@@ -2,7 +2,6 @@
 ///
 /// Phase 1: extracts text from PDF using `pdf-extract`, chunks via sliding-window
 /// section-aware chunker, embeds via fastembed, and stores in SurrealDB.
-
 use std::sync::Arc;
 
 use crate::providers::embedding::EmbeddingProvider;
