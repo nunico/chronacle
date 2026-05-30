@@ -203,14 +203,33 @@ pub async fn upload_source(
         .await
         .map_err(|e| format!("Failed to create source record: {e}"))?;
 
-    let created: Vec<serde_json::Value> = response
+    // Confirm the CREATE query succeeded. Use a struct that only extracts
+    // the id to avoid SurrealDB's record-link (Thing) serialization issues
+    // with serde_json::Value.
+    #[derive(Deserialize)]
+    struct CreatedSource {
+        #[expect(dead_code)]
+        id: surrealdb::sql::Thing,
+    }
+
+    let created: Vec<CreatedSource> = response
         .take(0)
         .map_err(|e| format!("Failed to parse created source: {e}"))?;
 
-    let source = created
-        .into_iter()
-        .next()
-        .unwrap_or(serde_json::json!({ "id": source_id }));
+    if created.is_empty() {
+        return Err("No source record was created".to_string());
+    }
+
+    // Build a JSON-safe response that avoids SurrealDB's internal types
+    let source_json = serde_json::json!({
+        "id": source_id,
+        "filename": filename,
+        "display_name": display_name,
+        "source_type": source_type,
+        "index_status": "pending",
+        "embed_model": embed_model,
+        "campaign_id": campaign_id,
+    });
 
     // Run the ingestion pipeline
     let state_ref = state.inner().clone();
@@ -236,7 +255,7 @@ pub async fn upload_source(
                     "progress": 1.0,
                 }),
             );
-            Ok(source)
+            Ok(source_json)
         }
         Err(e) => {
             // Mark source as errored
