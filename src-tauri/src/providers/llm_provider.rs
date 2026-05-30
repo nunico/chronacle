@@ -450,6 +450,7 @@ impl LlmProvider for OpenAIProvider {
 pub struct AnthropicProvider {
     api_key: String,
     model: String,
+    base_url: String,
 }
 
 impl AnthropicProvider {
@@ -466,6 +467,33 @@ impl AnthropicProvider {
             } else {
                 model
             },
+            base_url: "https://api.anthropic.com/v1".to_string(),
+        }
+    }
+
+    /// Create a new Anthropic provider with a custom base URL (for
+    /// Anthropic-compatible third-party services).
+    pub fn with_base_url(api_key: String, model: String, base_url: String) -> Self {
+        let base = if base_url.is_empty() {
+            "https://api.anthropic.com/v1".to_string()
+        } else {
+            let trimmed = base_url.trim_end_matches('/').to_string();
+            // Remove /messages suffix if accidentally included (e.g. user
+            // pasted the full Anthropic endpoint URL as base URL).
+            if trimmed.ends_with("/messages") {
+                trimmed.trim_end_matches("/messages").to_string()
+            } else {
+                trimmed
+            }
+        };
+        Self {
+            api_key,
+            model: if model.is_empty() {
+                "claude-3-5-haiku-20241022".to_string()
+            } else {
+                model
+            },
+            base_url: base,
         }
     }
 }
@@ -489,7 +517,7 @@ impl LlmProvider for AnthropicProvider {
 
         let (tx, rx) = mpsc::channel(64);
         let client = Client::new();
-        let url = "https://api.anthropic.com/v1/messages".to_string();
+        let url = format!("{}/messages", self.base_url);
         let model = self.model.clone();
         let api_key = self.api_key.clone();
         let system = system_prompt.to_string();
@@ -710,6 +738,39 @@ mod tests {
         let provider = AnthropicProvider::new("sk-ant-test".to_string(), String::new());
         assert!(provider.api_key == "sk-ant-test");
         assert!(provider.model == "claude-3-5-haiku-20241022");
+        assert!(provider.base_url == "https://api.anthropic.com/v1");
+    }
+
+    #[tokio::test]
+    async fn test_anthropic_with_base_url() {
+        let provider = AnthropicProvider::with_base_url(
+            "sk-ant-test".to_string(),
+            "claude-3-opus-20240229".to_string(),
+            "https://custom.anthropic.com/v1".to_string(),
+        );
+        assert!(provider.api_key == "sk-ant-test");
+        assert!(provider.model == "claude-3-opus-20240229");
+        assert!(provider.base_url == "https://custom.anthropic.com/v1");
+    }
+
+    #[tokio::test]
+    async fn test_anthropic_with_base_url_trailing_slash() {
+        let provider = AnthropicProvider::with_base_url(
+            "sk-ant-test".to_string(),
+            String::new(),
+            "https://custom.anthropic.com/v1/".to_string(),
+        );
+        assert!(provider.base_url == "https://custom.anthropic.com/v1");
+    }
+
+    #[tokio::test]
+    async fn test_anthropic_with_base_url_empty_falls_back() {
+        let provider = AnthropicProvider::with_base_url(
+            "sk-ant-test".to_string(),
+            String::new(),
+            String::new(),
+        );
+        assert!(provider.base_url == "https://api.anthropic.com/v1");
     }
 
     #[tokio::test]
