@@ -19,6 +19,8 @@
   let error = $state('');
   let loading = $state(true);
   let sourceLoading = $state(false);
+  let deletingSourceId = $state<string | null>(null);
+  let deletingCampaignId = $state<string | null>(null);
 
   onMount(() => {
     loadCampaigns();
@@ -68,6 +70,8 @@
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this campaign and all its sources?')) return;
+    deletingCampaignId = id;
+    error = '';
     try {
       await deleteCampaign(id);
       if (selectedCampaignId === id) {
@@ -77,16 +81,22 @@
       await loadCampaigns();
     } catch (e) {
       error = String(e);
+    } finally {
+      deletingCampaignId = null;
     }
   }
 
   async function handleDeleteSource(id: string) {
     if (!confirm('Delete this source and all its indexed chunks?')) return;
+    deletingSourceId = id;
+    error = '';
     try {
       await deleteSource(id);
       await loadSources(selectedCampaignId);
     } catch (e) {
       error = String(e);
+    } finally {
+      deletingSourceId = null;
     }
   }
 </script>
@@ -144,9 +154,14 @@
           <button
             class="delete-btn"
             title="Delete campaign"
+            disabled={deletingCampaignId === campaign.id}
             onclick={() => handleDelete(campaign.id)}
           >
-            ✖
+            {#if deletingCampaignId === campaign.id}
+              <span class="spinner-small"></span>
+            {:else}
+              ✖
+            {/if}
           </button>
         </div>
       {/each}
@@ -184,9 +199,14 @@
             <button
               class="delete-source-btn"
               title="Delete source"
+              disabled={deletingSourceId === source.id}
               onclick={() => handleDeleteSource(source.id)}
             >
-              ✖
+              {#if deletingSourceId === source.id}
+                <span class="spinner-small"></span>
+              {:else}
+                ✖
+              {/if}
             </button>
           </div>
         {/each}
@@ -369,6 +389,11 @@
     line-height: 1;
   }
 
+  .delete-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
   .main-area {
     flex: 1;
     overflow-y: auto;
@@ -473,8 +498,28 @@
     line-height: 1;
   }
 
-  .source-card:hover .delete-source-btn {
+  .source-card:hover .delete-source-btn:not(:disabled) {
     opacity: 1;
+  }
+
+  .delete-source-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .spinner-small {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: #e74c3c;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 
   .source-type {
