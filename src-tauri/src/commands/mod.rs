@@ -104,11 +104,9 @@ pub async fn update_setting(
 
 /// Uploads a source PDF file, storing it in the blob store and triggering
 /// ingestion (extraction → chunking → embedding).
-///
-/// For Phase 1 the ingestion pipeline is a stub that marks the source as
-/// `pending`; full processing will be wired in a later iteration.
 #[tauri::command]
 pub async fn upload_source(
+    app_handle: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
     file_path: String,
     display_name: Option<String>,
@@ -163,10 +161,58 @@ pub async fn upload_source(
         .take(0)
         .map_err(|e| format!("Failed to parse created source: {e}"))?;
 
-    Ok(created
+    let source = created
         .into_iter()
         .next()
-        .unwrap_or(serde_json::json!({"id": source_id})))
+        .unwrap_or(serde_json::json!({ "id": source_id }));
+
+    // Run the ingestion pipeline
+    let state_ref = state.inner().clone();
+    let sid = source_id.clone();
+    let handle = app_handle.clone();
+    // Run ingestion synchronously in the command so the caller waits for completion
+    let _ = handle.emit(
+        "ingestion-progress",
+        serde_json::json!({
+            "source_id": &sid,
+            "status": "indexing",
+            "progress": 0.0,
+        }),
+    );
+
+    match crate::services::ingestion_service::ingest_source(&state_ref, &sid).await {
+        Ok(()) => {
+            let _ = handle.emit(
+                "ingestion-progress",
+                serde_json::json!({
+                    "source_id": &sid,
+                    "status": "done",
+                    "progress": 1.0,
+                }),
+            );
+            Ok(source)
+        }
+        Err(e) => {
+            // Mark source as errored
+            let err_msg = e.to_string();
+            eprintln!("Ingestion failed for source {sid}: {err_msg}");
+            let _ = state_ref
+                .db
+                .query("UPDATE source SET index_status = 'error' WHERE id = type::thing('source', $id)")
+                .bind(("id", sid.clone()))
+                .await;
+            let _ = handle.emit(
+                "ingestion-error",
+                serde_json::json!({
+                    "source_id": &sid,
+                    "error": &err_msg,
+                }),
+            );
+            // Return the source record so the user can see it even on partial failure
+            // but surface the error
+            Err(format!("PDF ingestion failed: {err_msg}"))
+        }
+    }
 }
 
 /// Chat message request payload.

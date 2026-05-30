@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { chatSend, getChatHistory } from './lib/commands';
+  import { chatSend, getChatHistory, uploadSource } from './lib/commands';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import { open } from '@tauri-apps/plugin-dialog';
   import SettingsPage from './SettingsPage.svelte';
 
   let currentPage = $state<'chat' | 'settings'>('chat');
@@ -9,6 +10,10 @@
   let input = $state('');
   let isLoading = $state(false);
   let currentResponse = $state('');
+  let isUploading = $state(false);
+  let uploadProgress = $state(0);
+  let uploadStatus = $state('');
+  let uploadedSourceName = $state('');
 
   onMount(async () => {
     try {
@@ -18,6 +23,70 @@
       console.error('Failed to load chat history:', e);
     }
   });
+
+  async function selectAndUploadPdf() {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (!selected) return;
+
+    const path = selected as string;
+    const name = path.split('/').pop()?.split('\\').pop() || 'document.pdf';
+    isUploading = true;
+    uploadProgress = 0;
+    uploadStatus = 'Uploading…';
+    uploadedSourceName = name;
+
+    let unlistenProgress: UnlistenFn | null = null;
+    let unlistenError: UnlistenFn | null = null;
+
+    try {
+      unlistenProgress = await listen<{ source_id: string; status: string; progress: number }>(
+        'ingestion-progress',
+        (event) => {
+          uploadProgress = Math.round(event.payload.progress * 100);
+          switch (event.payload.status) {
+            case 'indexing':
+              uploadStatus = 'Indexing PDF…';
+              break;
+            case 'done':
+              uploadStatus = 'Ready!';
+              uploadProgress = 100;
+              break;
+          }
+        },
+      );
+
+      unlistenError = await listen<{ source_id: string; error: string }>(
+        'ingestion-error',
+        (event) => {
+          uploadStatus = `Error: ${event.payload.error}`;
+          console.error('Ingestion error:', event.payload.error);
+        },
+      );
+
+      await uploadSource(path, name, 'rules');
+    } catch (e) {
+      uploadStatus = `Failed: ${e}`;
+      console.error('Upload failed:', e);
+    } finally {
+      if (unlistenProgress) unlistenProgress();
+      if (unlistenError) unlistenError();
+      isUploading = false;
+    }
+  }
+
+  /** Render message content with citation badges */
+  function renderContent(text: string): string {
+    // Replace [Source: "name", p.N] or [Source: "name"] with styled HTML
+    return text.replace(
+      /\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+))?\]/g,
+      (_, name: string, page: string | undefined) => {
+        return `<span class="citation-badge" title="Source: ${name}${page ? `, p.${page}` : ''}">${name}${page ? ` p.${page}` : ''}</span>`;
+      },
+    );
+  }
 
   async function sendMessage() {
     const text = input.trim();
@@ -70,7 +139,21 @@
     <button class="nav-btn" class:active={currentPage === 'settings'} onclick={() => (currentPage = 'settings')}>
       Settings
     </button>
+    <button class="upload-btn" onclick={selectAndUploadPdf} disabled={isUploading}>
+      {isUploading ? 'Uploading…' : 'Upload PDF'}
+    </button>
   </nav>
+  {#if isUploading || uploadStatus}
+    <div class="upload-status">
+      <span class="upload-filename">{uploadedSourceName}</span>
+      <span class="upload-progress-text">{uploadStatus}</span>
+      {#if isUploading}
+        <div class="progress-bar">
+          <div class="progress-fill" style="width: {uploadProgress}%"></div>
+        </div>
+      {/if}
+    </div>
+  {/if}
 </header>
 
 <main>
@@ -79,7 +162,7 @@
       {#if messages.length === 0 && !isLoading}
         <div class="welcome">
           <p>Welcome to Chronacle, your TTRPG Game Master's assistant.</p>
-          <p class="hint">Upload rulebook PDFs on the Settings page, then ask questions here.</p>
+          <p class="hint">Upload a PDF rulebook using the Upload button above, then ask questions here.</p>
         </div>
       {/if}
 
@@ -87,14 +170,14 @@
         {#each messages as msg (msg.role + msg.content)}
           <div class="message {msg.role}">
             <div class="role-label">{msg.role === 'user' ? 'You' : 'Chronacle'}</div>
-            <div class="content">{msg.content}</div>
+            <div class="content">{@html renderContent(msg.content)}</div>
           </div>
         {/each}
 
         {#if isLoading && currentResponse}
           <div class="message assistant">
             <div class="role-label">Chronacle</div>
-            <div class="content streaming">{currentResponse}</div>
+            <div class="content streaming">{@html renderContent(currentResponse)}</div>
           </div>
         {/if}
       </div>
@@ -279,5 +362,74 @@
   .input-area button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .upload-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 0.35rem 1rem;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.85rem;
+    transition: background 0.15s;
+  }
+
+  .upload-btn:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+
+  .upload-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .upload-status {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-align: center;
+  }
+
+  .upload-filename {
+    font-weight: 600;
+    margin-right: 0.5rem;
+  }
+
+  .upload-progress-text {
+    color: var(--accent);
+  }
+
+  .progress-bar {
+    margin: 0.3rem auto 0;
+    width: 200px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.3s ease;
+  }
+
+  .citation-badge {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    margin: 0 0.15rem;
+    line-height: 1.4;
+    user-select: none;
+  }
+
+  .citation-badge:hover {
+    filter: brightness(1.15);
   }
 </style>

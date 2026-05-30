@@ -26,23 +26,14 @@ pub enum VectorStoreError {
 }
 
 /// Trait abstracting vector index operations over SurrealDB.
-///
-/// All methods are asynchronous and accept `&self` so implementations can
-/// share a pooled or cloned database handle.
 #[async_trait]
 pub trait VectorStore: Send + Sync {
-    /// Insert or update a batch of indexed chunks.
     async fn upsert(
         &self,
         source_id: &str,
         chunks: &[IndexedChunk],
     ) -> Result<(), VectorStoreError>;
 
-    /// Search for the `limit` nearest neighbours to `query_vector`.
-    ///
-    /// When `campaign_id` is `Some` the search is scoped to that campaign
-    /// plus global sources (`campaign IS NULL`). When `None` only global
-    /// sources are searched.
     async fn search(
         &self,
         query_vector: &[f32],
@@ -50,7 +41,6 @@ pub trait VectorStore: Send + Sync {
         limit: u64,
     ) -> Result<Vec<SearchResult>, VectorStoreError>;
 
-    /// Remove all chunks belonging to `source_id`.
     async fn delete_by_source(&self, source_id: &str) -> Result<(), VectorStoreError>;
 }
 
@@ -69,9 +59,6 @@ pub struct IndexedChunk {
 }
 
 /// SurrealDB-backed implementation of [`VectorStore`].
-///
-/// Stores chunk records in the `chunk` table and uses SurrealDB's built-in
-/// MTREE vector index for ANN search.
 pub struct SurrealDbVector<C: surrealdb::Connection> {
     db: surrealdb::Surreal<C>,
 }
@@ -93,8 +80,6 @@ where
         chunks: &[IndexedChunk],
     ) -> Result<(), VectorStoreError> {
         for chunk in chunks {
-            // SurrealDB requires arrays as SurrealQL literals for the
-            // embedding field. We build the query string inline.
             let vec_str = chunk
                 .embedding
                 .iter()
@@ -104,27 +89,44 @@ where
 
             let embedding_field = format!("[{}]", vec_str);
 
-            let sql = format!(
-                "CREATE chunk SET
-                    id = $id,
-                    source = $source_id,
-                    campaign = $campaign_id,
-                    text = $text,
-                    page_start = $page_start,
-                    page_end = $page_end,
-                    section_heading = $section_heading,
-                    source_type = $source_type,
-                    embedding = {},
-                    embed_model = $embed_model",
-                embedding_field
-            );
+            // Build query: omit campaign for global chunks to avoid schema validation
+            // (DEFINE FIELD campaign ON chunk TYPE record<campaign> without | NULL)
+            let sql = match &chunk.campaign_id {
+                Some(cid) => format!(
+                    "CREATE chunk SET
+                        id = $id,
+                        source = type::thing('source', $source_id),
+                        campaign = campaign:`{cid}`,
+                        text = $text,
+                        page_start = $page_start,
+                        page_end = $page_end,
+                        section_heading = $section_heading,
+                        source_type = $source_type,
+                        embedding = {},
+                        embed_model = $embed_model",
+                    embedding_field,
+                ),
+                None => format!(
+                    "CREATE chunk SET
+                        id = $id,
+                        source = type::thing('source', $source_id),
+                        campaign = NULL,
+                        text = $text,
+                        page_start = $page_start,
+                        page_end = $page_end,
+                        section_heading = $section_heading,
+                        source_type = $source_type,
+                        embedding = {},
+                        embed_model = $embed_model",
+                    embedding_field,
+                ),
+            };
 
-            let _ = self
+            self
                 .db
                 .query(sql)
                 .bind(("id", chunk.chunk_id.clone()))
                 .bind(("source_id", source_id.to_owned()))
-                .bind(("campaign_id", chunk.campaign_id.clone()))
                 .bind(("text", chunk.text.clone()))
                 .bind(("page_start", chunk.page_start))
                 .bind(("page_end", chunk.page_end))
@@ -132,7 +134,9 @@ where
                 .bind(("source_type", chunk.source_type.clone()))
                 .bind(("embed_model", chunk.embed_model.clone()))
                 .await
-                .map_err(|e| VectorStoreError::Db(e.to_string()))?;
+                .map_err(|e| VectorStoreError::Db(e.to_string()))?
+                .check()
+                .map_err(|e| VectorStoreError::Db(format!("Chunk upsert error: {e}")))?;
         }
 
         Ok(())
@@ -152,11 +156,10 @@ where
 
         let campaign_filter = match campaign_id {
             Some(cid) => format!(
-                "WHERE campaign = {} OR campaign IS NONE",
-                // SurrealQL record links: campaign:uuid
+                "WHERE campaign = {} OR campaign IS NULL",
                 format!("campaign:`{cid}`")
             ),
-            None => "WHERE campaign IS NONE".to_string(),
+            None => "WHERE campaign IS NULL".to_string(),
         };
 
         let sql = format!(
@@ -193,7 +196,28 @@ where
             page_end: i64,
             section_heading: String,
             source_type: String,
+            #[serde(deserialize_with = "deserialize_distance")]
             distance: f64,
+        }
+
+        fn deserialize_distance<'de, D>(deserializer: D) -> Result<f64, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            #[derive(serde::Deserialize)]
+            #[serde(untagged)]
+            enum Num {
+                F64(f64),
+                I64(i64),
+                Bool(#[allow(dead_code)] bool),
+                String(String),
+            }
+            match serde::Deserialize::deserialize(deserializer)? {
+                Num::F64(v) => Ok(v),
+                Num::I64(v) => Ok(v as f64),
+                Num::Bool(_) => Ok(f64::MAX),
+                Num::String(s) => Ok(s.parse::<f64>().unwrap_or(f64::MAX)),
+            }
         }
 
         let raw: Vec<RawResult> = response
@@ -218,9 +242,11 @@ where
 
     async fn delete_by_source(&self, source_id: &str) -> Result<(), VectorStoreError> {
         self.db
-            .query("DELETE chunk WHERE source = $source_id")
+            .query("DELETE chunk WHERE source = type::thing('source', $source_id)")
             .bind(("source_id", source_id.to_owned()))
             .await
+            .map_err(|e| VectorStoreError::Db(e.to_string()))?
+            .check()
             .map_err(|e| VectorStoreError::Db(e.to_string()))?;
 
         Ok(())
@@ -238,7 +264,6 @@ mod tests {
             .unwrap();
         db.use_ns("test").use_db("test").await.unwrap();
 
-        // Create the chunk table so search query references an existing table
         db.query(
             "DEFINE TABLE chunk SCHEMAFULL;
              DEFINE FIELD embedding ON chunk TYPE array<float>;"
@@ -249,7 +274,6 @@ mod tests {
         let store = SurrealDbVector::new(db);
         let results = store.search(&[0.0; 768], None, 10).await;
 
-        // Should succeed and return empty results
         assert!(results.is_ok());
         assert!(results.unwrap().is_empty());
     }

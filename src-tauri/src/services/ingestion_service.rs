@@ -1,13 +1,13 @@
 /// Ingestion service — orchestrates PDF extraction, chunking, and embedding.
 ///
-/// Phase 1 provides the full pipeline skeleton; the actual PDF-extraction and
-/// embedding calls are stubbed and will be wired in a later iteration.
+/// Phase 1: extracts text from PDF using `pdf-extract`, chunks via sliding-window
+/// section-aware chunker, embeds via fastembed, and stores in SurrealDB.
 
 use std::sync::Arc;
 
 use crate::providers::embedding::EmbeddingProvider;
 use crate::providers::vector_store::IndexedChunk;
-use crate::services::chunker::{chunk_document, ExtractedDoc};
+use crate::services::chunker::{chunk_document, ExtractedDoc, PageContent};
 use crate::AppState;
 use surrealdb::Connection;
 
@@ -33,7 +33,7 @@ pub async fn ingest_source(
 ) -> Result<(), IngestionError> {
     state
         .db
-        .query("UPDATE source SET index_status = 'indexing' WHERE id = $id")
+        .query("UPDATE source SET index_status = 'indexing' WHERE id = type::thing('source', $id)")
         .bind(("id", source_id.to_owned()))
         .await
         .map_err(|e| IngestionError::Db(
@@ -48,7 +48,7 @@ pub async fn ingest_source(
         .map_err(|e| IngestionError::Store(e.to_string()))?;
 
     let extracted = extract_text(&pdf_data).await?;
-    let chunks = chunk_text(&extracted, source_id).await?;
+    let chunks = chunk_text(&extracted, source_id)?;
     let indexed = embed_chunks(&state.embedding_provider, chunks, source_id).await?;
 
     state
@@ -59,7 +59,7 @@ pub async fn ingest_source(
 
     state
         .db
-        .query("UPDATE source SET index_status = 'done', page_count = $page_count WHERE id = $id")
+        .query("UPDATE source SET index_status = 'done', page_count = $page_count WHERE id = type::thing('source', $id)")
         .bind(("id", source_id.to_owned()))
         .bind(("page_count", extracted.page_count as i64))
         .await
@@ -68,15 +68,68 @@ pub async fn ingest_source(
     Ok(())
 }
 
-async fn extract_text(_data: &[u8]) -> Result<ExtractedDoc, IngestionError> {
-    Ok(ExtractedDoc {
-        page_count: 1,
-        text: String::new(),
-        pages: vec![],
-    })
+/// Extract text from raw PDF bytes using `pdf-extract`.
+///
+/// Returns an `ExtractedDoc` with per-page text content and the full merged text.
+/// Falls back gracefully to flat extraction if per-page API fails.
+pub async fn extract_text(data: &[u8]) -> Result<ExtractedDoc, IngestionError> {
+    // Try per-page extraction first for best page tracking
+    match pdf_extract::extract_text_from_mem_by_pages(data) {
+        Ok(page_texts) => {
+            let page_count = page_texts.len();
+            let mut pages = Vec::with_capacity(page_count);
+            let mut full_text = String::new();
+
+            for (i, text) in page_texts.into_iter().enumerate() {
+                let trimmed = text.trim().to_string();
+                pages.push(PageContent {
+                    page_num: i + 1,
+                    text: trimmed.clone(),
+                });
+                if !full_text.is_empty() && !trimmed.is_empty() {
+                    full_text.push('\n');
+                }
+                full_text.push_str(&trimmed);
+            }
+
+            Ok(ExtractedDoc {
+                page_count,
+                text: full_text,
+                pages,
+            })
+        }
+        Err(e) => {
+            // Fallback to single-page extraction, split on form feeds
+            eprintln!("Per-page PDF extraction failed, falling back to flat extraction: {e}");
+            match pdf_extract::extract_text_from_mem(data) {
+                Ok(text) => {
+                    let trimmed = text.trim().to_string();
+                    let page_texts: Vec<&str> = trimmed.split('\x0C').collect();
+                    let page_count = page_texts.len().max(1);
+                    let pages: Vec<PageContent> = page_texts
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, t)| PageContent {
+                            page_num: i + 1,
+                            text: t.trim().to_string(),
+                        })
+                        .collect();
+
+                    Ok(ExtractedDoc {
+                        page_count,
+                        text: trimmed,
+                        pages,
+                    })
+                }
+                Err(e2) => Err(IngestionError::PdfExtraction(format!(
+                    "PDF extraction failed: {e2}"
+                ))),
+            }
+        }
+    }
 }
 
-async fn chunk_text(
+fn chunk_text(
     doc: &ExtractedDoc,
     _source_id: &str,
 ) -> Result<Vec<RawChunk>, IngestionError> {
@@ -142,7 +195,7 @@ where
     C: Connection,
 {
     let mut response = db
-        .query("SELECT filename FROM source WHERE id = $id")
+        .query("SELECT filename FROM source WHERE id = type::thing('source', $id)")
         .bind(("id", source_id.to_owned()))
         .await
         .map_err(|e| IngestionError::Db(

@@ -16,7 +16,7 @@ DEFINE FIELD embed_model ON source TYPE string;
 
 DEFINE TABLE chunk SCHEMAFULL;
 DEFINE FIELD source ON chunk TYPE record<source>;
-DEFINE FIELD campaign ON chunk TYPE record<campaign>;
+DEFINE FIELD campaign ON chunk TYPE record<campaign> | NULL;
 DEFINE FIELD text ON chunk TYPE string;
 DEFINE FIELD page_start ON chunk TYPE int;
 DEFINE FIELD page_end ON chunk TYPE int;
