@@ -39,16 +39,17 @@ pub async fn ingest_source(
             format!("Failed to update index_status: {e}")
         ))?;
 
-    let filename = get_source_filename(&state.db, source_id).await?;
+    // Read the source record to get filename and campaign_id
+    let source_info = get_source_info(&state.db, source_id).await?;
     let pdf_data = state
         .blob_store
-        .retrieve(source_id, &filename)
+        .retrieve(source_id, &source_info.filename)
         .await
         .map_err(|e| IngestionError::Store(e.to_string()))?;
 
     let extracted = extract_text(&pdf_data).await?;
     let chunks = chunk_text(&extracted, source_id)?;
-    let indexed = embed_chunks(&state.embedding_provider, chunks, source_id).await?;
+    let indexed = embed_chunks(&state.embedding_provider, chunks, source_id, &source_info.campaign_id).await?;
 
     state
         .vector_store
@@ -151,11 +152,18 @@ struct RawChunk {
     section_heading: String,
 }
 
-/// Embed chunks using the embedding provider.
+/// Information about a source needed during ingestion.
+struct SourceInfo {
+    filename: String,
+    campaign_id: Option<String>,
+}
+
+/// Embed chunks using the embedding provider, tagging each with the source's campaign.
 async fn embed_chunks(
     provider: &Arc<dyn EmbeddingProvider>,
     chunks: Vec<RawChunk>,
     source_id: &str,
+    campaign_id: &Option<String>,
 ) -> Result<Vec<IndexedChunk>, IngestionError> {
     if chunks.is_empty() {
         return Ok(Vec::new());
@@ -168,13 +176,14 @@ async fn embed_chunks(
         .map_err(|e| IngestionError::Embedding(e.to_string()))?;
 
     let embed_model = provider.model_name().to_string();
+    let campaign = campaign_id.clone();
 
     Ok(chunks
         .into_iter()
         .zip(embeddings)
         .map(|(chunk, embedding)| IndexedChunk {
             chunk_id: format!("{}-{}", source_id, uuid::Uuid::new_v4()),
-            campaign_id: None,
+            campaign_id: campaign.clone(),
             text: chunk.text,
             page_start: chunk.page_start,
             page_end: chunk.page_end,
@@ -186,24 +195,26 @@ async fn embed_chunks(
         .collect())
 }
 
-async fn get_source_filename<C>(
+/// Read source filename and campaign_id from the database.
+async fn get_source_info<C>(
     db: &surrealdb::Surreal<C>,
     source_id: &str,
-) -> Result<String, IngestionError>
+) -> Result<SourceInfo, IngestionError>
 where
     C: Connection,
 {
     let mut response = db
-        .query("SELECT filename FROM source WHERE id = type::thing('source', $id)")
+        .query("SELECT filename, campaign FROM source WHERE id = type::thing('source', $id)")
         .bind(("id", source_id.to_owned()))
         .await
         .map_err(|e| IngestionError::Db(
-            format!("Failed to query source filename: {e}")
+            format!("Failed to query source: {e}")
         ))?;
 
     #[derive(serde::Deserialize)]
     struct Row {
         filename: String,
+        campaign: Option<surrealdb::sql::Thing>,
     }
 
     let rows: Vec<Row> = response
@@ -212,6 +223,9 @@ where
 
     rows.into_iter()
         .next()
-        .map(|r| r.filename)
+        .map(|r| SourceInfo {
+            filename: r.filename,
+            campaign_id: r.campaign.map(|c| c.id.to_string()),
+        })
         .ok_or_else(|| IngestionError::Db(format!("Source '{source_id}' not found")))
 }
