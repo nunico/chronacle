@@ -47,6 +47,9 @@ jobs:
       - name: Test
         run: cargo test
 
+      - name: Deny
+        run: cargo deny check
+
   # ── Frontend checks (PR + merge) ──────────────────────────────────
   frontend-check:
     runs-on: ubuntu-latest
@@ -71,6 +74,9 @@ jobs:
 
       - name: Lint
         run: pnpm lint
+
+      - name: Test
+        run: pnpm test --run
 
   # ── Coverage + Build (merge to main only) ─────────────────────────
   coverage:
