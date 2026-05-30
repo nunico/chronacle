@@ -35,3 +35,10 @@ lcov.info
 .env.local
 .env.*.local
 src-tauri/.fastembed_cache/
+
+/.crew/
+/.crew
+!.crew/artifacts/
+!.crew/graphs/
+!.crew/artifacts/.gitkeep
+!.crew/graphs/.gitkeep
