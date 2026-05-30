@@ -1,0 +1,17 @@
+[
+  {"token": "The ", "done": false},
+  {"token": "fireball ", "done": false},
+  {"token": "spell ", "done": false},
+  {"token": "deals ", "done": false},
+  {"token": "8d6 ", "done": false},
+  {"token": "fire ", "done": false},
+  {"token": "damage ", "done": false},
+  {"token": "in ", "done": false},
+  {"token": "a ", "done": false},
+  {"token": "20-foot ", "done": false},
+  {"token": "radius. ", "done": false},
+  {"token": "[Source: ", "done": false},
+  {"token": "\"Core Rulebook\", ", "done": false},
+  {"token": "p.241]", "done": false},
+  {"token": "", "done": true}
+]

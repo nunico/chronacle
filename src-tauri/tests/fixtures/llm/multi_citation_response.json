@@ -1,0 +1,10 @@
+{
+  "role": "assistant",
+  "content": "The longbow has a normal range of 150 feet and a long range of 600 feet. [Source: \"Core Rulebook\", p.149] Arrows weigh about 0.1 lb each. [Source: \"Equipment Guide\", p.22] A quiver holds up to 20 arrows. [Source: \"Core Rulebook\", p.150] The Sharpshooter feat removes disadvantage on long range shots. [Source: \"Feats Compendium\", p.34]",
+  "citations": [
+    {"source_name": "Core Rulebook", "page": 149},
+    {"source_name": "Equipment Guide", "page": 22},
+    {"source_name": "Core Rulebook", "page": 150},
+    {"source_name": "Feats Compendium", "page": 34}
+  ]
+}

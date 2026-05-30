@@ -1,0 +1,8 @@
+{
+  "role": "assistant",
+  "content": "A shortsword deals 1d6 piercing damage on a hit. [Source: \"Core Rulebook\", p.145] It has the light and finesse properties, making it suitable for two-weapon fighting and Dexterity-based characters. [Source: \"Core Rulebook\", p.146]",
+  "citations": [
+    {"source_name": "Core Rulebook", "page": 145},
+    {"source_name": "Core Rulebook", "page": 146}
+  ]
+}
