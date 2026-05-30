@@ -89,8 +89,9 @@ where
 
             let embedding_field = format!("[{}]", vec_str);
 
-            // Build query: omit campaign for global chunks to avoid schema validation
-            // (DEFINE FIELD campaign ON chunk TYPE record<campaign> without | NULL)
+            // Omit campaign field for global chunks (None branch). The DEFINE FIELD
+            // uses option<record<campaign>> DEFAULT NONE, so omitting the field
+            // produces a valid NONE value without triggering type validation errors.
             let sql = match &chunk.campaign_id {
                 Some(cid) => format!(
                     "CREATE chunk SET
@@ -110,7 +111,6 @@ where
                     "CREATE chunk SET
                         id = $id,
                         source = type::thing('source', $source_id),
-                        campaign = NULL,
                         text = $text,
                         page_start = $page_start,
                         page_end = $page_end,
@@ -153,9 +153,13 @@ where
             .collect::<Vec<_>>()
             .join(",");
 
+        // With option<record<campaign>> DEFAULT NONE, absent campaign fields
+        // hold NONE (not NULL). Check both for backward compat.
         let campaign_filter = match campaign_id {
-            Some(cid) => format!("WHERE campaign = campaign:`{cid}` OR campaign IS NULL",),
-            None => "WHERE campaign IS NULL".to_string(),
+            Some(cid) => {
+                format!("WHERE campaign = campaign:`{cid}` OR campaign IS NONE OR campaign IS NULL")
+            }
+            None => "WHERE campaign IS NONE OR campaign IS NULL".to_string(),
         };
 
         let sql = format!(

@@ -37,6 +37,67 @@ async fn test_schema_migration_creates_tables() {
 }
 
 #[tokio::test]
+async fn test_redefine_chunk_campaign_field() {
+    let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+        .await
+        .unwrap();
+    db.use_ns("test").use_db("test").await.unwrap();
+
+    // Step 1: Create chunk table with the ORIGINAL scaffold schema (record<campaign> WITHOUT | NULL)
+    db.query(
+        "DEFINE TABLE chunk SCHEMAFULL;
+         DEFINE FIELD source ON chunk TYPE record<source>;
+         DEFINE FIELD campaign ON chunk TYPE record<campaign>;
+         DEFINE FIELD text ON chunk TYPE string;
+         DEFINE FIELD embedding ON chunk TYPE array<float>;"
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    // Step 2: Try redefining with | NULL DEFAULT NULL (what 001_initial currently has)
+    let res = db
+        .query("DEFINE FIELD campaign ON chunk TYPE record<campaign> | NULL DEFAULT NULL;")
+        .await
+        .unwrap()
+        .check();
+    eprintln!("Redefine with | NULL: {:?}", res);
+
+    // Step 3: Try redefining with option<record<campaign>>
+    let res2 = db
+        .query("DEFINE FIELD campaign ON chunk TYPE option<record<campaign>> DEFAULT NONE;")
+        .await
+        .unwrap()
+        .check();
+    eprintln!("Redefine with option<>: {:?}", res2);
+
+    // Step 4: Try REMOVE + DEFINE approach
+    db.query(
+        "REMOVE FIELD campaign ON chunk;
+         DEFINE FIELD campaign ON chunk TYPE option<record<campaign>> DEFAULT NONE;"
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+    eprintln!("REMOVE + DEFINE succeeded");
+
+    // Step 5: Verify it works by inserting without campaign
+    let res3 = db
+        .query("CREATE chunk SET id = 'test', source = type::thing('source', 's1'), text = 'hello', embedding = [0.1, 0.2];")
+        .await
+        .unwrap()
+        .check();
+    assert!(
+        res3.is_ok(),
+        "After REMOVE+DEFINE, omitted campaign should work: {:?}",
+        res3
+    );
+    eprintln!("Create with omitted campaign succeeded");
+}
+
+#[tokio::test]
 async fn test_campaign_crud() {
     let db = setup_db().await;
 
