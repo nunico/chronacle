@@ -92,6 +92,15 @@ The app needs relational storage (campaigns, sources, entities, sessions), vecto
 
 Store the model identifier alongside each table in SurrealDB so a mismatch is detectable at startup. The re-index orchestration handles: (1) detecting affected sources, (2) queuing them for re-indexing, (3) purging old chunks, and (4) streaming progress per source so the GM can see where the process stands.
 
+**Asymmetric prefixes.** `nomic-embed-text-v1.5` was trained with task prefixes
+and **requires** them at inference time: `search_document: <text>` for indexed
+chunks and `search_query: <text>` for user queries. `fastembed-rs` (unlike the
+Python `fastembed` library) does not add these automatically. Prefixing is
+enforced inside `FastEmbedProvider::embed_documents()` and
+`FastEmbedProvider::embed_query()`; callers MUST pass un-prefixed text. Missing
+prefixes silently degrade retrieval recall (the failure mode that motivated this
+change — see `docs/superpowers/plans/2026-05-31-rag-quality-improvements.md`).
+
 ---
 
 ## ADR-004: LLM Abstraction — Unified Provider Interface
