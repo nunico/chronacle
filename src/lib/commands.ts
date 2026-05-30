@@ -83,3 +83,78 @@ export async function getLlmProviderStatus(): Promise<LlmProviderStatus> {
 export async function reconfigureLlmProvider(): Promise<string> {
   return invoke<string>('reconfigure_llm_provider');
 }
+
+// ── Custom Provider Types ──────────────────────────────────────────────
+
+export interface CustomProvider {
+  id: string;
+  name: string;
+  provider_type: string;
+  base_url: string;
+  api_key: string;
+}
+
+export interface CustomProviderModel {
+  id: string;
+  provider_id: string;
+  model_id: string;
+  display_name: string;
+}
+
+export async function getCustomProviders(): Promise<CustomProvider[]> {
+  return invoke<CustomProvider[]>('get_custom_providers');
+}
+
+export async function createCustomProvider(
+  name: string,
+  providerType: string,
+  baseUrl: string,
+  apiKey: string,
+): Promise<CustomProvider> {
+  return invoke<CustomProvider>('create_custom_provider', {
+    name,
+    providerType,
+    baseUrl,
+    apiKey,
+  });
+}
+
+export async function updateCustomProvider(
+  id: string,
+  name: string,
+  providerType: string,
+  baseUrl: string,
+  apiKey: string,
+): Promise<CustomProvider> {
+  return invoke<CustomProvider>('update_custom_provider', {
+    id,
+    name,
+    providerType,
+    baseUrl,
+    apiKey,
+  });
+}
+
+export async function deleteCustomProvider(id: string): Promise<void> {
+  return invoke('delete_custom_provider', { id });
+}
+
+export async function getProviderModels(providerId: string): Promise<CustomProviderModel[]> {
+  return invoke<CustomProviderModel[]>('get_provider_models', { providerId });
+}
+
+export async function addProviderModel(
+  providerId: string,
+  modelId: string,
+  displayName: string,
+): Promise<CustomProviderModel> {
+  return invoke<CustomProviderModel>('add_provider_model', {
+    providerId,
+    modelId,
+    displayName,
+  });
+}
+
+export async function removeProviderModel(id: string): Promise<void> {
+  return invoke('remove_provider_model', { id });
+}
