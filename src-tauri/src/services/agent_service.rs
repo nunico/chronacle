@@ -42,8 +42,12 @@ pub async fn stream_response(
     persist_message(&state.db, "user", message).await?;
 
     // 2. Embed the query
-    let query_vector = state
+    let embed_provider = state
         .embedding_provider
+        .read()
+        .map_err(|e| AgentError::Llm(format!("Embedding lock: {e}")))?
+        .clone();
+    let query_vector = embed_provider
         .embed_query(message)
         .await
         .map_err(|e| AgentError::Embedding(e.to_string()))?;
@@ -166,12 +170,10 @@ where
             let name = c.source_name.replace('\'', "''");
             let excerpt = c.text_excerpt.replace('\'', "''");
             match c.page {
-                Some(p) => format!(
-                    "{{ source_name: '{name}', page: {p}, text_excerpt: '{excerpt}' }}"
-                ),
-                None => format!(
-                    "{{ source_name: '{name}', text_excerpt: '{excerpt}' }}"
-                ),
+                Some(p) => {
+                    format!("{{ source_name: '{name}', page: {p}, text_excerpt: '{excerpt}' }}")
+                }
+                None => format!("{{ source_name: '{name}', text_excerpt: '{excerpt}' }}"),
             }
         })
         .collect();
@@ -208,10 +210,8 @@ pub struct Citation {
 fn parse_citations(response: &str) -> Vec<Citation> {
     // Pattern: [Source: "name", p.N] or [Source: "name"]
     // Raw string with r#"...#" delimiters so that inner quotes and backslashes are literal.
-    let re = regex::Regex::new(
-        r#"\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+))?\]"#
-    )
-    .expect("valid citation regex");
+    let re = regex::Regex::new(r#"\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+))?\]"#)
+        .expect("valid citation regex");
 
     re.captures_iter(response)
         .map(|cap| {
@@ -252,19 +252,17 @@ mod tests {
     fn test_build_context_with_results() {
         use crate::providers::vector_store::SearchResult;
 
-        let results = vec![
-            SearchResult {
-                chunk_id: "chunk-1".into(),
-                source_id: "source:abc".into(),
-                source_name: "PHB.pdf".into(),
-                text: "A fighter can use Action Surge once per rest.".into(),
-                page_start: 72,
-                page_end: 72,
-                section_heading: "Fighter Class Features".into(),
-                source_type: "rules".into(),
-                distance: 0.15,
-            },
-        ];
+        let results = vec![SearchResult {
+            chunk_id: "chunk-1".into(),
+            source_id: "source:abc".into(),
+            source_name: "PHB.pdf".into(),
+            text: "A fighter can use Action Surge once per rest.".into(),
+            page_start: 72,
+            page_end: 72,
+            section_heading: "Fighter Class Features".into(),
+            source_type: "rules".into(),
+            distance: 0.15,
+        }];
 
         let ctx = build_context(&results);
         assert!(!ctx.is_empty());
@@ -284,7 +282,8 @@ mod tests {
 
     #[test]
     fn test_system_prompt_with_context() {
-        let ctx = "[0] Source: \"PHB.pdf\", p. 72 — \"Fighter Class Features\"\nAction Surge text.\n\n";
+        let ctx =
+            "[0] Source: \"PHB.pdf\", p. 72 — \"Fighter Class Features\"\nAction Surge text.\n\n";
         let prompt = build_rag_system_prompt(ctx);
         assert!(prompt.contains("REFERENCE MATERIAL"));
         assert!(prompt.contains("PHB.pdf"));

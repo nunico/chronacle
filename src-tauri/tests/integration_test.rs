@@ -62,7 +62,8 @@ async fn test_campaign_crud() {
     assert_eq!(created.len(), 1);
 
     // Verify it exists
-    let mut res = db.query("SELECT * FROM campaign WHERE id = campaign:test1")
+    let mut res = db
+        .query("SELECT * FROM campaign WHERE id = campaign:test1")
         .await
         .unwrap();
 
@@ -108,8 +109,7 @@ async fn test_source_crud() {
     assert_eq!(created.len(), 1);
 
     // Update status
-    db
-        .query("UPDATE source:src1 SET index_status = 'done', campaign = NULL")
+    db.query("UPDATE source:src1 SET index_status = 'done', campaign = NULL")
         .await
         .unwrap();
 }
@@ -142,10 +142,15 @@ fn create_test_pdf() -> Vec<u8> {
     let mut page_dict = Dictionary::new();
     page_dict.set(b"Type", Object::Name(b"Page".to_vec()));
     page_dict.set(b"Parent", Object::Reference(pages_id));
-    page_dict.set(b"MediaBox", Object::Array(vec![
-        Object::Integer(0), Object::Integer(0),
-        Object::Integer(612), Object::Integer(792),
-    ]));
+    page_dict.set(
+        b"MediaBox",
+        Object::Array(vec![
+            Object::Integer(0),
+            Object::Integer(0),
+            Object::Integer(612),
+            Object::Integer(792),
+        ]),
+    );
     page_dict.set(b"Contents", Object::Reference(content_id));
     page_dict.set(b"Resources", Object::Reference(resources_id));
     let page_id = doc.add_object(page_dict);
@@ -210,7 +215,9 @@ async fn test_full_ingest_and_query_cycle() {
         .await
         .expect("Failed to create RocksDB");
     db.use_ns("test").use_db("test").await.unwrap();
-    schema::run_migrations(&db).await.expect("Migration should succeed");
+    schema::run_migrations(&db)
+        .await
+        .expect("Migration should succeed");
 
     let pdfs_dir = temp_dir.path().join("pdfs");
     tokio::fs::create_dir_all(&pdfs_dir)
@@ -224,17 +231,18 @@ async fn test_full_ingest_and_query_cycle() {
     let vector_store: Arc<dyn chronacle_lib::providers::vector_store::VectorStore> =
         Arc::new(SurrealDbVector::new(db.clone()));
 
-    let embedding_provider: Arc<dyn EmbeddingProvider> =
-        Arc::new(MockEmbeddingProvider::new(768));
+    let embedding_provider: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
 
     let llm_provider = Arc::new(NoopProvider);
 
     let state = Arc::new(chronacle_lib::AppState {
         db: db.clone(),
-        llm_provider: RwLock::new(llm_provider as Arc<dyn chronacle_lib::providers::llm_provider::LlmProvider>),
+        llm_provider: RwLock::new(
+            llm_provider as Arc<dyn chronacle_lib::providers::llm_provider::LlmProvider>,
+        ),
         vector_store: vector_store.clone(),
         blob_store: blob_store.clone(),
-        embedding_provider: embedding_provider.clone(),
+        embedding_provider: RwLock::new(embedding_provider.clone()),
     });
 
     // Create source record using the same pattern as the real upload_source command
@@ -285,13 +293,20 @@ async fn test_full_ingest_and_query_cycle() {
     let extracted = chronacle_lib::services::ingestion_service::extract_text(&pdf_data)
         .await
         .expect("extract_text should succeed");
-    eprintln!("Extracted {} pages, text length: {}", extracted.page_count, extracted.text.len());
-    eprintln!("Extracted text: {}", &extracted.text[..std::cmp::min(200, extracted.text.len())]);
+    eprintln!(
+        "Extracted {} pages, text length: {}",
+        extracted.page_count,
+        extracted.text.len()
+    );
+    eprintln!(
+        "Extracted text: {}",
+        &extracted.text[..std::cmp::min(200, extracted.text.len())]
+    );
 
     // Run ingestion — this calls get_source_filename which queries WHERE id = $id
     // with the same source_id string. SurrealDB coerces the string to match the
     // record's Thing id when queried via bind parameters.
-    ingestion_service::ingest_source(&state, source_id)
+    ingestion_service::ingest_source(&state, source_id, std::sync::Arc::new(|_| {}))
         .await
         .expect("ingestion should succeed");
 
@@ -319,7 +334,10 @@ async fn test_full_ingest_and_query_cycle() {
         count: i64,
     }
     let all: Vec<Cc> = debug.take(0).expect("parse");
-    eprintln!("Total chunks in DB: {}", all.first().map(|c| c.count).unwrap_or(-1));
+    eprintln!(
+        "Total chunks in DB: {}",
+        all.first().map(|c| c.count).unwrap_or(-1)
+    );
 
     // Verify source status is 'done'
     let mut res = db
@@ -345,7 +363,9 @@ async fn test_full_ingest_and_query_cycle() {
 
     // Verify chunks exist using type::thing for proper record link
     let mut res = db
-        .query("SELECT count() FROM chunk WHERE source = type::thing('source', $source_id) GROUP ALL")
+        .query(
+            "SELECT count() FROM chunk WHERE source = type::thing('source', $source_id) GROUP ALL",
+        )
         .bind(("source_id", source_id.to_owned()))
         .await
         .expect("query chunks should succeed");
@@ -390,52 +410,78 @@ async fn test_custom_provider_crud() {
 
     // Create a custom provider
     let created = chronacle_lib::services::custom_provider_service::create(
-        &db, "TestProvider", "openai",
-        "https://test.api.com/v1", "sk-test-123",
-    ).await.expect("create should succeed");
+        &db,
+        "TestProvider",
+        "openai",
+        "https://test.api.com/v1",
+        "sk-test-123",
+    )
+    .await
+    .expect("create should succeed");
     assert_eq!(created.name, "TestProvider");
     assert_eq!(created.provider_type, "openai");
 
     // Add models
     let model1 = chronacle_lib::services::custom_provider_service::add_model(
-        &db, &created.id, "gpt-4o", "GPT-4o",
-    ).await.expect("add model should succeed");
+        &db,
+        &created.id,
+        "gpt-4o",
+        "GPT-4o",
+    )
+    .await
+    .expect("add model should succeed");
     assert_eq!(model1.model_id, "gpt-4o");
     assert_eq!(model1.display_name, "GPT-4o");
 
     let _model2 = chronacle_lib::services::custom_provider_service::add_model(
-        &db, &created.id, "claude-3-haiku", "Claude 3 Haiku",
-    ).await.expect("add model should succeed");
+        &db,
+        &created.id,
+        "claude-3-haiku",
+        "Claude 3 Haiku",
+    )
+    .await
+    .expect("add model should succeed");
 
     // Get models
     let models = chronacle_lib::services::custom_provider_service::get_models(&db, &created.id)
-        .await.expect("get models should succeed");
+        .await
+        .expect("get models should succeed");
     assert_eq!(models.len(), 2);
 
     // Get all providers
     let all = chronacle_lib::services::custom_provider_service::get_all(&db)
-        .await.expect("get all should succeed");
+        .await
+        .expect("get all should succeed");
     assert!(!all.is_empty());
     assert!(all.iter().any(|p| p.name == "TestProvider"));
 
     // Delete a model
     chronacle_lib::services::custom_provider_service::remove_model(&db, &model1.id)
-        .await.expect("remove model should succeed");
-    let models_after = chronacle_lib::services::custom_provider_service::get_models(&db, &created.id)
-        .await.expect("get models after delete should succeed");
+        .await
+        .expect("remove model should succeed");
+    let models_after =
+        chronacle_lib::services::custom_provider_service::get_models(&db, &created.id)
+            .await
+            .expect("get models after delete should succeed");
     assert_eq!(models_after.len(), 1);
     assert_eq!(models_after[0].model_id, "claude-3-haiku");
-
     // Delete the provider (should cascade-delete models)
     chronacle_lib::services::custom_provider_service::delete(&db, &created.id)
-        .await.expect("delete should succeed");
+        .await
+        .expect("delete should succeed");
     let after_delete = chronacle_lib::services::custom_provider_service::get_all(&db)
-        .await.expect("get all after delete should succeed");
-    assert!(after_delete.iter().all(|p| p.id != created.id), "provider should be deleted");
+        .await
+        .expect("get all after delete should succeed");
+    assert!(
+        after_delete.iter().all(|p| p.id != created.id),
+        "provider should be deleted"
+    );
 
     // Models should also be gone (cascade delete)
-    let models_final = chronacle_lib::services::custom_provider_service::get_models(&db, &created.id)
-        .await.expect("get models after provider delete should succeed");
+    let models_final =
+        chronacle_lib::services::custom_provider_service::get_models(&db, &created.id)
+            .await
+            .expect("get models after provider delete should succeed");
     assert!(models_final.is_empty(), "models should be cascade-deleted");
 }
 
@@ -444,14 +490,23 @@ async fn test_custom_provider_duplicate_name() {
     let db = setup_db().await;
 
     chronacle_lib::services::custom_provider_service::create(
-        &db, "Duplicate", "openai",
-        "https://api1.com", "key1",
-    ).await.expect("first create should succeed");
+        &db,
+        "Duplicate",
+        "openai",
+        "https://api1.com",
+        "key1",
+    )
+    .await
+    .expect("first create should succeed");
 
     let result = chronacle_lib::services::custom_provider_service::create(
-        &db, "Duplicate", "anthropic",
-        "https://api2.com", "key2",
-    ).await;
+        &db,
+        "Duplicate",
+        "anthropic",
+        "https://api2.com",
+        "key2",
+    )
+    .await;
     assert!(result.is_err(), "duplicate name should fail");
 }
 
@@ -460,14 +515,25 @@ async fn test_custom_provider_update() {
     let db = setup_db().await;
 
     let created = chronacle_lib::services::custom_provider_service::create(
-        &db, "UpdateMe", "openai",
-        "https://old.api.com", "old-key",
-    ).await.expect("create should succeed");
+        &db,
+        "UpdateMe",
+        "openai",
+        "https://old.api.com",
+        "old-key",
+    )
+    .await
+    .expect("create should succeed");
 
     let updated = chronacle_lib::services::custom_provider_service::update(
-        &db, &created.id, "UpdatedName", "anthropic",
-        "https://new.api.com", "new-key",
-    ).await.expect("update should succeed");
+        &db,
+        &created.id,
+        "UpdatedName",
+        "anthropic",
+        "https://new.api.com",
+        "new-key",
+    )
+    .await
+    .expect("update should succeed");
 
     assert_eq!(updated.name, "UpdatedName");
     assert_eq!(updated.provider_type, "anthropic");

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
 use surrealdb::sql::Thing;
+use surrealdb::Surreal;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CampaignRecord {
@@ -31,7 +31,8 @@ impl From<CampaignRecord> for Campaign {
 
 /// Get all campaigns, ordered by name.
 pub async fn get_all(db: &Surreal<Db>) -> Result<Vec<Campaign>, String> {
-    let mut response = db.query("SELECT * FROM campaign ORDER BY name ASC")
+    let mut response = db
+        .query("SELECT * FROM campaign ORDER BY name ASC")
         .await
         .map_err(|e| format!("Failed to query campaigns: {e}"))?;
     let records: Vec<CampaignRecord> = response
@@ -41,20 +42,17 @@ pub async fn get_all(db: &Surreal<Db>) -> Result<Vec<Campaign>, String> {
 }
 
 /// Create a new campaign.
-pub async fn create(
-    db: &Surreal<Db>,
-    name: &str,
-    system: &str,
-) -> Result<Campaign, String> {
+pub async fn create(db: &Surreal<Db>, name: &str, system: &str) -> Result<Campaign, String> {
     let id = uuid::Uuid::new_v4().to_string().replace('-', "");
-    let mut response = db.query(
-        "CREATE campaign SET
+    let mut response = db
+        .query(
+            "CREATE campaign SET
             id = $id,
             name = $name,
             system = $system,
             created_at = time::now(),
-            updated_at = time::now()"
-    )
+            updated_at = time::now()",
+        )
         .bind(("id", id.clone()))
         .bind(("name", name.to_owned()))
         .bind(("system", system.to_owned()))

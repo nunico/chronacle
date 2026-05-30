@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
 use surrealdb::sql::Thing;
+use surrealdb::Surreal;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomProviderRecord {
@@ -64,11 +64,9 @@ impl From<CustomProviderModelRecord> for CustomProviderModel {
 }
 
 /// Get a single custom provider by its record id.
-pub async fn get_by_id(
-    db: &Surreal<Db>,
-    id: &str,
-) -> Result<CustomProvider, String> {
-    let mut response = db.query("SELECT * FROM type::thing('custom_provider', $id)")
+pub async fn get_by_id(db: &Surreal<Db>, id: &str) -> Result<CustomProvider, String> {
+    let mut response = db
+        .query("SELECT * FROM type::thing('custom_provider', $id)")
         .bind(("id", id.to_owned()))
         .await
         .map_err(|e| format!("Failed to query custom provider: {e}"))?;
@@ -82,7 +80,8 @@ pub async fn get_by_id(
 
 /// Get all custom providers, ordered by name.
 pub async fn get_all(db: &Surreal<Db>) -> Result<Vec<CustomProvider>, String> {
-    let mut response = db.query("SELECT * FROM custom_provider ORDER BY name ASC")
+    let mut response = db
+        .query("SELECT * FROM custom_provider ORDER BY name ASC")
         .await
         .map_err(|e| format!("Failed to query custom providers: {e}"))?;
     let records: Vec<CustomProviderRecord> = response
@@ -100,15 +99,16 @@ pub async fn create(
     api_key: &str,
 ) -> Result<CustomProvider, String> {
     let id = uuid::Uuid::new_v4().to_string().replace('-', "");
-    let mut response = db.query(
-        "CREATE custom_provider SET
+    let mut response = db
+        .query(
+            "CREATE custom_provider SET
             id = $id,
             name = $name,
             provider_type = $provider_type,
             base_url = $base_url,
             api_key = $api_key,
-            updated_at = time::now()"
-    )
+            updated_at = time::now()",
+        )
         .bind(("id", id.clone()))
         .bind(("name", name.to_owned()))
         .bind(("provider_type", provider_type.to_owned()))
@@ -167,7 +167,8 @@ pub async fn update(
         q = q.bind((k, v));
     }
 
-    let mut response = q.await
+    let mut response = q
+        .await
         .map_err(|e| format!("Failed to update custom provider: {e}"))?;
     let updated: Vec<CustomProviderRecord> = response
         .take(0)
@@ -183,9 +184,7 @@ pub async fn update(
 /// cascade-delete automatically, so we must delete models first).
 pub async fn delete(db: &Surreal<Db>, id: &str) -> Result<(), String> {
     // Manually cascade-delete associated models first
-    db.query(
-        "DELETE custom_provider_model WHERE provider = type::thing('custom_provider', $id)"
-    )
+    db.query("DELETE custom_provider_model WHERE provider = type::thing('custom_provider', $id)")
         .bind(("id", id.to_owned()))
         .await
         .map_err(|e| format!("Failed to delete provider models: {e}"))?;
@@ -198,13 +197,17 @@ pub async fn delete(db: &Surreal<Db>, id: &str) -> Result<(), String> {
 }
 
 /// Get all models for a custom provider, ordered by display_name.
-pub async fn get_models(db: &Surreal<Db>, provider_id: &str) -> Result<Vec<CustomProviderModel>, String> {
+pub async fn get_models(
+    db: &Surreal<Db>,
+    provider_id: &str,
+) -> Result<Vec<CustomProviderModel>, String> {
     let safe_id = provider_id.replace('`', "``");
-    let mut response = db.query(
-        "SELECT * FROM custom_provider_model
+    let mut response = db
+        .query(
+            "SELECT * FROM custom_provider_model
          WHERE provider = type::thing('custom_provider', $id)
-         ORDER BY display_name ASC"
-    )
+         ORDER BY display_name ASC",
+        )
         .bind(("id", safe_id))
         .await
         .map_err(|e| format!("Failed to query provider models: {e}"))?;
@@ -222,13 +225,14 @@ pub async fn add_model(
     display_name: &str,
 ) -> Result<CustomProviderModel, String> {
     let id = uuid::Uuid::new_v4().to_string().replace('-', "");
-    let mut response = db.query(
-        "CREATE custom_provider_model SET
+    let mut response = db
+        .query(
+            "CREATE custom_provider_model SET
             id = $id,
             provider = type::thing('custom_provider', $provider_id),
             model_id = $model_id,
-            display_name = $display_name"
-    )
+            display_name = $display_name",
+        )
         .bind(("id", id.clone()))
         .bind(("provider_id", provider_id.to_owned()))
         .bind(("model_id", model_id.to_owned()))

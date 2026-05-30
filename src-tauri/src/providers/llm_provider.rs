@@ -91,10 +91,7 @@ async fn openai_parse_sse(
                 while consumed < buf.len() {
                     // Find the next \n\n boundary
                     let remaining = &buf[consumed..];
-                    if let Some(dd) = remaining
-                        .windows(2)
-                        .position(|w| w == b"\n\n")
-                    {
+                    if let Some(dd) = remaining.windows(2).position(|w| w == b"\n\n") {
                         let event_end = consumed + dd + 2;
                         let event_slice = &buf[consumed..event_end];
                         let raw = String::from_utf8_lossy(event_slice);
@@ -173,10 +170,7 @@ async fn anthropic_parse_sse(
                 let mut consumed = 0usize;
                 while consumed < buf.len() {
                     let remaining = &buf[consumed..];
-                    if let Some(dd) = remaining
-                        .windows(2)
-                        .position(|w| w == b"\n\n")
-                    {
+                    if let Some(dd) = remaining.windows(2).position(|w| w == b"\n\n") {
                         let event_end = consumed + dd + 2;
                         let event_slice = &buf[consumed..event_end];
                         let raw = String::from_utf8_lossy(event_slice);
@@ -198,9 +192,8 @@ async fn anthropic_parse_sse(
                         if event_type == Some("content_block_delta") {
                             if let Some(json_str) = data_json {
                                 if let Ok(json) = serde_json::from_str::<Value>(json_str) {
-                                    if let Some(text) = json
-                                        .pointer("/delta/text")
-                                        .and_then(|v| v.as_str())
+                                    if let Some(text) =
+                                        json.pointer("/delta/text").and_then(|v| v.as_str())
                                     {
                                         if !text.is_empty()
                                             && tx.send(Ok(text.to_string())).await.is_err()
@@ -262,9 +255,8 @@ async fn ollama_parse_ndjson(
                             match serde_json::from_str::<Value>(&line) {
                                 Ok(json) => {
                                     // Extract message.content
-                                    if let Some(content) = json
-                                        .pointer("/message/content")
-                                        .and_then(|v| v.as_str())
+                                    if let Some(content) =
+                                        json.pointer("/message/content").and_then(|v| v.as_str())
                                     {
                                         if !content.is_empty()
                                             && tx.send(Ok(content.to_string())).await.is_err()
@@ -354,7 +346,6 @@ impl OpenAIProvider {
             base_url: base,
         }
     }
-
 }
 
 #[async_trait]
@@ -689,7 +680,8 @@ impl LlmProvider for OllamaProvider {
             if !response.status().is_success() {
                 let status = response.status();
                 let text = response.text().await.unwrap_or_default();
-                let err: Result<String, LlmError> = Err(LlmError::Api(format!("HTTP {status}: {text}")));
+                let err: Result<String, LlmError> =
+                    Err(LlmError::Api(format!("HTTP {status}: {text}")));
                 let _ = tx.send(err).await;
                 return;
             }
@@ -781,8 +773,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_ollama_custom_url() {
-        let provider =
-            OllamaProvider::new("http://192.168.1.100:11434".to_string(), "mistral".to_string());
+        let provider = OllamaProvider::new(
+            "http://192.168.1.100:11434".to_string(),
+            "mistral".to_string(),
+        );
         assert!(provider.base_url == "http://192.168.1.100:11434");
         assert!(provider.model == "mistral");
     }

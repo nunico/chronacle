@@ -27,19 +27,16 @@ const CHARS_PER_TOKEN: f64 = 4.0;
 // ── Reusable regex patterns ───────────────────────────────────────────
 
 /// Matches chapter/part headings: "Chapter 1", "Part Three", "Chapter 1: Title", etc.
-static CHAPTER_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^(chapter|part|section|appendix)\s+\S+").unwrap()
-});
+static CHAPTER_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^(chapter|part|section|appendix)\s+\S+").unwrap());
 
 /// Matches numbered section headings: "1. Combat", "3.5 Skills", "10.2.1 Saving Throws"
-static NUMBERED_SECTION_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\d+(?:\.\d+)*[\.\)]?\s+\p{Lu}").unwrap()
-});
+static NUMBERED_SECTION_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\d+(?:\.\d+)*[\.\)]?\s+\p{Lu}").unwrap());
 
 /// Matches ALL-CAPS lines that are short enough to be headings (1–15 words).
-static ALL_CAPS_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[\p{Lu}\s\d'\-\.!?/:;]{2,}$").unwrap()
-});
+static ALL_CAPS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[\p{Lu}\s\d'\-\.!?/:;]{2,}$").unwrap());
 
 // ── Public types ──────────────────────────────────────────────────────
 
@@ -333,8 +330,12 @@ mod tests {
 
     #[test]
     fn test_is_not_heading_regular_sentence() {
-        assert!(!is_heading("The fighter attacks the dragon with a longsword."));
-        assert!(!is_heading("This is a paragraph of regular text that describes how combat works in the game."));
+        assert!(!is_heading(
+            "The fighter attacks the dragon with a longsword."
+        ));
+        assert!(!is_heading(
+            "This is a paragraph of regular text that describes how combat works in the game."
+        ));
     }
 
     #[test]
@@ -393,14 +394,13 @@ mod tests {
 
     #[test]
     fn test_chunk_preserves_page_range() {
-        let p1 = "This is page one of the document. It introduces the basic rules of combat. ".repeat(30);
-        let p2 = "Page two continues with advanced combat techniques and special maneuvers. ".repeat(40);
+        let p1 = "This is page one of the document. It introduces the basic rules of combat. "
+            .repeat(30);
+        let p2 =
+            "Page two continues with advanced combat techniques and special maneuvers. ".repeat(40);
 
         let full_text = format!("{p1}{p2}");
-        let doc = make_doc(
-            &full_text,
-            vec![(&p1, 1), (&p2, 2)],
-        );
+        let doc = make_doc(&full_text, vec![(&p1, 1), (&p2, 2)]);
 
         let chunks = chunk_document(&doc);
         assert!(chunks.len() >= 2, "should split into multiple chunks");
@@ -452,9 +452,7 @@ This section explains the detailed rules for combat encounters. "
         assert!(chunks.len() >= 2, "should produce at least 2 chunks");
 
         // At least some chunks should carry a section heading
-        let has_any_heading = chunks
-            .iter()
-            .any(|c| !c.section_heading.is_empty());
+        let has_any_heading = chunks.iter().any(|c| !c.section_heading.is_empty());
         assert!(has_any_heading, "chunks should have section headings");
     }
 
@@ -464,9 +462,8 @@ This section explains the detailed rules for combat encounters. "
         let intro_text = "Introductory text about the game world and characters. ".repeat(50);
         let combat_text = "Detailed combat rules describing attacks and damage. ".repeat(50);
 
-        let text = format!(
-            "Chapter 1: INTRODUCTION\n{intro_text}\nChapter 2: COMBAT\n{combat_text}"
-        );
+        let text =
+            format!("Chapter 1: INTRODUCTION\n{intro_text}\nChapter 2: COMBAT\n{combat_text}");
 
         let doc = make_doc(&text, vec![(text.as_str(), 1)]);
         let chunks = chunk_document(&doc);
@@ -505,13 +502,18 @@ This section explains the detailed rules for combat encounters. "
         let doc = make_doc(&text, vec![(text.as_str(), 1)]);
 
         let chunks = chunk_document(&doc);
-        assert!(chunks.len() >= 3, "long document should produce multiple chunks");
+        assert!(
+            chunks.len() >= 3,
+            "long document should produce multiple chunks"
+        );
 
         // Verify chunks don't overlap excessively and maintain ordering
         for (i, chunk) in chunks.iter().enumerate().skip(1) {
             let prev_text = &chunks[i - 1].text;
             assert!(
-                chunk.text.contains(prev_text.split_whitespace().last().unwrap_or("")),
+                chunk
+                    .text
+                    .contains(prev_text.split_whitespace().last().unwrap_or("")),
                 "consecutive chunks should have overlap"
             );
         }
@@ -565,12 +567,13 @@ This section explains the detailed rules for combat encounters. "
         let chunks = chunk_document(&doc);
 
         // Verify multiple sections produce multiple chunks
-        assert!(chunks.len() >= 2, "multiple sections should produce multiple chunks");
+        assert!(
+            chunks.len() >= 2,
+            "multiple sections should produce multiple chunks"
+        );
 
         // At least some chunks should carry a section heading
-        let has_any_heading = chunks
-            .iter()
-            .any(|c| !c.section_heading.is_empty());
+        let has_any_heading = chunks.iter().any(|c| !c.section_heading.is_empty());
         assert!(has_any_heading, "chunks should have section headings");
     }
 }

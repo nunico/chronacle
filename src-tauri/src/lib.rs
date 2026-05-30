@@ -11,17 +11,15 @@ use providers::llm_provider::{AnthropicProvider, LlmProvider, OllamaProvider, Op
 
 /// Shared application state managed by Tauri.
 ///
-/// `DbBackend` is `surrealdb::engine::local::Db` (the local SurrealDB
-/// connection type that works with both RocksDB and in-memory engines).
-///
-/// `llm_provider` is behind a `RwLock` so the settings page can swap
-/// providers at runtime without restarting the app.
+/// Both `llm_provider` and `embedding_provider` are behind an `RwLock` so they
+/// can be swapped at runtime — e.g. when the embedding model finishes downloading
+/// or the user changes LLM settings — without restarting the app.
 pub struct AppState {
     pub db: surrealdb::Surreal<surrealdb::engine::local::Db>,
     pub llm_provider: RwLock<Arc<dyn LlmProvider>>,
     pub vector_store: Arc<dyn providers::vector_store::VectorStore>,
     pub blob_store: Arc<dyn providers::blob_store::BlobStore>,
-    pub embedding_provider: Arc<dyn providers::embedding::EmbeddingProvider>,
+    pub embedding_provider: RwLock<Arc<dyn providers::embedding::EmbeddingProvider>>,
 }
 
 /// Determines the application data directory, creating it if needed.
@@ -63,32 +61,32 @@ pub async fn run() {
         .expect("Failed to run schema migrations");
 
     // ── Build service dependencies ──────────────────────────────────
-    let vector_store: Arc<dyn providers::vector_store::VectorStore> = Arc::new(
-        providers::vector_store::SurrealDbVector::new(db.clone()),
-    );
+    let vector_store: Arc<dyn providers::vector_store::VectorStore> =
+        Arc::new(providers::vector_store::SurrealDbVector::new(db.clone()));
 
     let pdfs_dir = data_dir.join("pdfs");
     if !pdfs_dir.exists() {
         std::fs::create_dir_all(&pdfs_dir).expect("Failed to create PDFs directory");
     }
 
-    let blob_store: Arc<dyn providers::blob_store::BlobStore> = Arc::new(
-        providers::blob_store::LocalFileStore::new(pdfs_dir),
-    );
+    let blob_store: Arc<dyn providers::blob_store::BlobStore> =
+        Arc::new(providers::blob_store::LocalFileStore::new(pdfs_dir));
 
-    // Try to initialize fastembed; fall back to a mock if model not cached.
+    // Try to initialize fastembed; fall back to mock if model not cached yet.
     let embedding_provider: Arc<dyn providers::embedding::EmbeddingProvider> =
-        match providers::embedding::FastEmbedProvider::try_new() {
+        match providers::embedding::FastEmbedProvider::try_new(None) {
             Ok(p) => {
-                eprintln!("Embedding model '{}' ready ({} dim)", p.model_name(), p.dimension());
+                eprintln!(
+                    "Embedding model '{}' ready ({} dim)",
+                    p.model_name(),
+                    p.dimension()
+                );
                 Arc::new(p)
             }
             Err(e) => {
                 eprintln!(
-                    "Warning: Embedding model not available — {}. \
-                     Chat and PDF ingestion will fail until the model \
-                     is downloaded on first use.",
-                    e
+                    "Embedding model not cached — starting with mock placeholder ({e}). \
+                     Use the download screen to download the model."
                 );
                 Arc::new(providers::embedding::MockEmbeddingProvider::new(768))
             }
@@ -105,7 +103,7 @@ pub async fn run() {
         llm_provider: RwLock::new(llm_provider),
         vector_store,
         blob_store,
-        embedding_provider,
+        embedding_provider: RwLock::new(embedding_provider),
     });
 
     tauri::Builder::default()
@@ -133,6 +131,8 @@ pub async fn run() {
             commands::delete_campaign,
             commands::get_sources,
             commands::delete_source,
+            commands::check_embedding_model,
+            commands::download_embedding_model,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");
@@ -143,7 +143,10 @@ async fn build_llm_provider_from_db(
     db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
 ) -> Arc<dyn LlmProvider> {
     let settings = match services::settings_service::get_all(db).await {
-        Ok(s) => s.into_iter().map(|s| (s.key, s.value)).collect::<HashMap<_, _>>(),
+        Ok(s) => s
+            .into_iter()
+            .map(|s| (s.key, s.value))
+            .collect::<HashMap<_, _>>(),
         Err(_) => HashMap::new(),
     };
 
@@ -154,7 +157,10 @@ pub(crate) async fn build_llm_provider_from_map(
     settings: &HashMap<String, String>,
     db: Option<&surrealdb::Surreal<surrealdb::engine::local::Db>>,
 ) -> Arc<dyn LlmProvider> {
-    let provider = settings.get("llm_provider").map(|s| s.as_str()).unwrap_or("openai");
+    let provider = settings
+        .get("llm_provider")
+        .map(|s| s.as_str())
+        .unwrap_or("openai");
     let api_key = settings.get("llm_api_key").cloned().unwrap_or_default();
     let model = settings.get("llm_model").cloned().unwrap_or_default();
     let base_url = settings.get("llm_base_url").cloned().unwrap_or_default();
@@ -185,16 +191,21 @@ async fn build_custom_provider(
 ) -> Result<Arc<dyn LlmProvider>, String> {
     let providers = crate::services::custom_provider_service::get_all(db).await?;
 
-    let cp = providers.into_iter()
+    let cp = providers
+        .into_iter()
         .find(|p| p.name == name)
         .ok_or_else(|| format!("Custom provider '{name}' not found"))?;
 
     match cp.provider_type.as_str() {
         "openai" => Ok(Arc::new(OpenAIProvider::with_base_url(
-            cp.api_key, model.to_string(), cp.base_url,
+            cp.api_key,
+            model.to_string(),
+            cp.base_url,
         ))),
         "anthropic" => Ok(Arc::new(AnthropicProvider::with_base_url(
-            cp.api_key, model.to_string(), cp.base_url,
+            cp.api_key,
+            model.to_string(),
+            cp.base_url,
         ))),
         _ => Err(format!("Unknown provider type: {}", cp.provider_type)),
     }

@@ -2,6 +2,10 @@
 ///
 /// Phase 1: extracts text from PDF using `pdf-extract`, chunks via sliding-window
 /// section-aware chunker, embeds via fastembed, and stores in SurrealDB.
+///
+/// Progress reporting: every pipeline stage calls `on_progress` with a fractional
+/// progress (0.0–1.0) and a human-readable step label. The caller is responsible
+/// for forwarding these to the UI (e.g. via Tauri events).
 use std::sync::Arc;
 
 use crate::providers::embedding::EmbeddingProvider;
@@ -9,6 +13,16 @@ use crate::providers::vector_store::IndexedChunk;
 use crate::services::chunker::{chunk_document, ExtractedDoc, PageContent};
 use crate::AppState;
 use surrealdb::Connection;
+
+/// A progress update emitted during ingestion.
+///
+/// `fraction` advances from 0.0 to 1.0 across all stages.
+/// `step` is a human-readable label like "Extracting text from PDF".
+#[derive(Debug, Clone)]
+pub struct IngestionProgress {
+    pub fraction: f32,
+    pub step: String,
+}
 
 /// Errors that can arise during ingestion.
 #[derive(Debug, thiserror::Error)]
@@ -26,37 +40,79 @@ pub enum IngestionError {
 }
 
 /// Ingest a source PDF: extract text, chunk, embed, and store.
+///
+/// `on_progress` is called after each stage with the current progress fraction
+/// (0.0–1.0) and a human-readable step label.
 pub async fn ingest_source(
     state: &Arc<AppState>,
     source_id: &str,
+    on_progress: Arc<dyn Fn(IngestionProgress) + Send + Sync>,
 ) -> Result<(), IngestionError> {
+    on_progress(IngestionProgress {
+        fraction: 0.02,
+        step: "Reading source metadata".into(),
+    });
+
     state
         .db
         .query("UPDATE source SET index_status = 'indexing' WHERE id = type::thing('source', $id)")
         .bind(("id", source_id.to_owned()))
         .await
-        .map_err(|e| IngestionError::Db(
-            format!("Failed to update index_status: {e}")
-        ))?;
+        .map_err(|e| IngestionError::Db(format!("Failed to update index_status: {e}")))?;
 
     // Read the source record to get filename and campaign_id
     let source_info = get_source_info(&state.db, source_id).await?;
+
+    on_progress(IngestionProgress {
+        fraction: 0.05,
+        step: "Loading PDF file from storage".into(),
+    });
     let pdf_data = state
         .blob_store
         .retrieve(source_id, &source_info.filename)
         .await
         .map_err(|e| IngestionError::Store(e.to_string()))?;
 
+    on_progress(IngestionProgress {
+        fraction: 0.20,
+        step: "Extracting text from PDF pages".into(),
+    });
     let extracted = extract_text(&pdf_data).await?;
-    let chunks = chunk_text(&extracted, source_id)?;
-    let indexed = embed_chunks(&state.embedding_provider, chunks, source_id, &source_info.campaign_id).await?;
 
+    on_progress(IngestionProgress {
+        fraction: 0.25,
+        step: "Splitting text into searchable chunks".into(),
+    });
+    let chunks = chunk_text(&extracted, source_id)?;
+
+    on_progress(IngestionProgress {
+        fraction: 0.30,
+        step: "Generating vector embeddings for chunks".into(),
+    });
+    let embed_provider = state
+        .embedding_provider
+        .read()
+        .map_err(|e| IngestionError::Db(format!("Embedding lock: {e}")))?
+        .clone();
+    let indexed =
+        embed_chunks(&embed_provider, chunks, source_id, &source_info.campaign_id).await?;
+
+    drop(embed_provider);
+
+    on_progress(IngestionProgress {
+        fraction: 0.85,
+        step: "Writing chunks to database".into(),
+    });
     state
         .vector_store
         .upsert(source_id, &indexed)
         .await
         .map_err(|e| IngestionError::Db(e.to_string()))?;
 
+    on_progress(IngestionProgress {
+        fraction: 0.98,
+        step: "Finalizing indexing".into(),
+    });
     state
         .db
         .query("UPDATE source SET index_status = 'done', page_count = $page_count WHERE id = type::thing('source', $id)")
@@ -129,10 +185,7 @@ pub async fn extract_text(data: &[u8]) -> Result<ExtractedDoc, IngestionError> {
     }
 }
 
-fn chunk_text(
-    doc: &ExtractedDoc,
-    _source_id: &str,
-) -> Result<Vec<RawChunk>, IngestionError> {
+fn chunk_text(doc: &ExtractedDoc, _source_id: &str) -> Result<Vec<RawChunk>, IngestionError> {
     let chunks = chunk_document(doc);
     Ok(chunks
         .into_iter()
@@ -207,9 +260,7 @@ where
         .query("SELECT filename, campaign FROM source WHERE id = type::thing('source', $id)")
         .bind(("id", source_id.to_owned()))
         .await
-        .map_err(|e| IngestionError::Db(
-            format!("Failed to query source: {e}")
-        ))?;
+        .map_err(|e| IngestionError::Db(format!("Failed to query source: {e}")))?;
 
     #[derive(serde::Deserialize)]
     struct Row {

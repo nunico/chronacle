@@ -22,18 +22,14 @@ pub async fn run_migrations<C>(db: &surrealdb::Surreal<C>) -> Result<(), String>
 where
     C: surrealdb::Connection + Send + Sync,
 {
-    let schema_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("schema");
+    let schema_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("schema");
 
     let mut entries: Vec<_> = std::fs::read_dir(&schema_dir)
         .map_err(|e| format!("Failed to read schema directory: {e}"))?
         .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .and_then(|ext| ext.to_str())
-                == Some("surql")
-        })
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("surql"))
         .collect();
 
     // Sort by filename for deterministic execution order

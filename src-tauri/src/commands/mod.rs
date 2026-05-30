@@ -87,10 +87,7 @@ pub async fn get_chat_history(
                 "SELECT role, content, created_at FROM message WHERE campaign = campaign:`{safe_id}` ORDER BY created_at ASC"
             )
         }
-        None => {
-            "SELECT role, content, created_at FROM message ORDER BY created_at ASC"
-                .to_string()
-        }
+        None => "SELECT role, content, created_at FROM message ORDER BY created_at ASC".to_string(),
     };
 
     let mut response = state
@@ -178,8 +175,7 @@ pub async fn upload_source(
                     embed_model = $embed_model"
             )
         }
-        None => {
-            "CREATE source SET
+        None => "CREATE source SET
                 id = $id,
                 campaign = NULL,
                 filename = $filename,
@@ -189,8 +185,7 @@ pub async fn upload_source(
                 indexed_at = time::now(),
                 index_status = 'pending',
                 embed_model = $embed_model"
-                .to_string()
-        }
+            .to_string(),
     };
     let mut response = state
         .db
@@ -231,28 +226,38 @@ pub async fn upload_source(
         "campaign_id": campaign_id,
     });
 
+    // Build the progress callback — emits Tauri events from each pipeline stage
+    let sid = source_id.clone();
+    let handle = app_handle.clone();
+    let on_progress: std::sync::Arc<
+        dyn Fn(crate::services::ingestion_service::IngestionProgress) + Send + Sync,
+    > = std::sync::Arc::new(
+        move |p: crate::services::ingestion_service::IngestionProgress| {
+            let _ = handle.emit(
+                "ingestion-progress",
+                serde_json::json!({
+                    "source_id": sid,
+                    "status": "indexing",
+                    "progress": p.fraction,
+                    "step": p.step,
+                }),
+            );
+        },
+    );
+
     // Run the ingestion pipeline
     let state_ref = state.inner().clone();
     let sid = source_id.clone();
-    let handle = app_handle.clone();
-    // Run ingestion synchronously in the command so the caller waits for completion
-    let _ = handle.emit(
-        "ingestion-progress",
-        serde_json::json!({
-            "source_id": &sid,
-            "status": "indexing",
-            "progress": 0.0,
-        }),
-    );
 
-    match crate::services::ingestion_service::ingest_source(&state_ref, &sid).await {
+    match crate::services::ingestion_service::ingest_source(&state_ref, &sid, on_progress).await {
         Ok(()) => {
-            let _ = handle.emit(
+            let _ = app_handle.emit(
                 "ingestion-progress",
                 serde_json::json!({
                     "source_id": &sid,
                     "status": "done",
                     "progress": 1.0,
+                    "step": "Complete",
                 }),
             );
             Ok(source_json)
@@ -266,7 +271,7 @@ pub async fn upload_source(
                 .query("UPDATE source SET index_status = 'error' WHERE id = type::thing('source', $id)")
                 .bind(("id", sid.clone()))
                 .await;
-            let _ = handle.emit(
+            let _ = app_handle.emit(
                 "ingestion-error",
                 serde_json::json!({
                     "source_id": &sid,
@@ -343,13 +348,7 @@ pub async fn chat_send(
             match token_result {
                 Ok(token) => {
                     full_response.push_str(&token);
-                    let _ = app.emit(
-                        "chat-token",
-                        ChatToken {
-                            token,
-                            done: false,
-                        },
-                    );
+                    let _ = app.emit("chat-token", ChatToken { token, done: false });
                 }
                 Err(e) => {
                     let _ = app.emit(
@@ -365,11 +364,9 @@ pub async fn chat_send(
         }
 
         // Persist the full assistant response with parsed citations
-        if let Err(e) = crate::services::agent_service::persist_assistant_message(
-            &state_ref.db,
-            &full_response,
-        )
-        .await
+        if let Err(e) =
+            crate::services::agent_service::persist_assistant_message(&state_ref.db, &full_response)
+                .await
         {
             eprintln!("Failed to persist assistant message: {e}");
         }
@@ -401,11 +398,16 @@ pub async fn get_llm_provider_status(
     state: State<'_, Arc<AppState>>,
 ) -> Result<LlmProviderStatus, String> {
     let settings = get_all_settings(&state.db).await?;
-    let map: std::collections::HashMap<String, String> =
-        settings.into_iter().map(|r| (r.id.id.to_string(), r.value)).collect();
+    let map: std::collections::HashMap<String, String> = settings
+        .into_iter()
+        .map(|r| (r.id.id.to_string(), r.value))
+        .collect();
 
     Ok(LlmProviderStatus {
-        provider_type: map.get("llm_provider").cloned().unwrap_or_else(|| "openai".into()),
+        provider_type: map
+            .get("llm_provider")
+            .cloned()
+            .unwrap_or_else(|| "openai".into()),
         model: map.get("llm_model").cloned().unwrap_or_default(),
         api_key_configured: map
             .get("llm_api_key")
@@ -417,13 +419,13 @@ pub async fn get_llm_provider_status(
 /// Re-read settings from the database and reconstruct the LLM provider at
 /// runtime. Returns the active provider type name on success.
 #[tauri::command]
-pub async fn reconfigure_llm_provider(
-    state: State<'_, Arc<AppState>>,
-) -> Result<String, String> {
+pub async fn reconfigure_llm_provider(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     // Read fresh settings from the DB
     let settings = get_all_settings(&state.db).await?;
-    let map: std::collections::HashMap<String, String> =
-        settings.into_iter().map(|r| (r.id.id.to_string(), r.value)).collect();
+    let map: std::collections::HashMap<String, String> = settings
+        .into_iter()
+        .map(|r| (r.id.id.to_string(), r.value))
+        .collect();
 
     let new_provider = crate::build_llm_provider_from_map(&map, Some(&state.db)).await;
     let provider_type = crate::provider_type_name(&new_provider);
@@ -444,13 +446,16 @@ pub async fn get_custom_providers(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<CustomProviderResponse>, String> {
     let providers = crate::services::custom_provider_service::get_all(&state.db).await?;
-    Ok(providers.into_iter().map(|p| CustomProviderResponse {
-        id: p.id,
-        name: p.name,
-        provider_type: p.provider_type,
-        base_url: p.base_url,
-        api_key: p.api_key,
-    }).collect())
+    Ok(providers
+        .into_iter()
+        .map(|p| CustomProviderResponse {
+            id: p.id,
+            name: p.name,
+            provider_type: p.provider_type,
+            base_url: p.base_url,
+            api_key: p.api_key,
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -471,8 +476,13 @@ pub async fn create_custom_provider(
         return Err("Base URL is required".to_string());
     }
     let provider = crate::services::custom_provider_service::create(
-        &state.db, name.trim(), &provider_type, base_url.trim(), &api_key,
-    ).await?;
+        &state.db,
+        name.trim(),
+        &provider_type,
+        base_url.trim(),
+        &api_key,
+    )
+    .await?;
     Ok(CustomProviderResponse {
         id: provider.id,
         name: provider.name,
@@ -492,8 +502,14 @@ pub async fn update_custom_provider(
     api_key: String,
 ) -> Result<CustomProviderResponse, String> {
     let provider = crate::services::custom_provider_service::update(
-        &state.db, &id, &name, &provider_type, &base_url, &api_key,
-    ).await?;
+        &state.db,
+        &id,
+        &name,
+        &provider_type,
+        &base_url,
+        &api_key,
+    )
+    .await?;
     Ok(CustomProviderResponse {
         id: provider.id,
         name: provider.name,
@@ -516,13 +532,17 @@ pub async fn get_provider_models(
     state: State<'_, Arc<AppState>>,
     provider_id: String,
 ) -> Result<Vec<ProviderModelResponse>, String> {
-    let models = crate::services::custom_provider_service::get_models(&state.db, &provider_id).await?;
-    Ok(models.into_iter().map(|m| ProviderModelResponse {
-        id: m.id,
-        provider_id: m.provider_id,
-        model_id: m.model_id,
-        display_name: m.display_name,
-    }).collect())
+    let models =
+        crate::services::custom_provider_service::get_models(&state.db, &provider_id).await?;
+    Ok(models
+        .into_iter()
+        .map(|m| ProviderModelResponse {
+            id: m.id,
+            provider_id: m.provider_id,
+            model_id: m.model_id,
+            display_name: m.display_name,
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -539,8 +559,12 @@ pub async fn add_provider_model(
         return Err("Display name is required".to_string());
     }
     let model = crate::services::custom_provider_service::add_model(
-        &state.db, &provider_id, model_id.trim(), display_name.trim(),
-    ).await?;
+        &state.db,
+        &provider_id,
+        model_id.trim(),
+        display_name.trim(),
+    )
+    .await?;
     Ok(ProviderModelResponse {
         id: model.id,
         provider_id: model.provider_id,
@@ -592,9 +616,7 @@ pub async fn get_sources(
                 "SELECT * FROM source WHERE campaign = campaign:`{safe_id}` ORDER BY display_name ASC"
             )
         }
-        None => {
-            "SELECT * FROM source WHERE campaign IS NULL ORDER BY display_name ASC".to_string()
-        }
+        None => "SELECT * FROM source WHERE campaign IS NULL ORDER BY display_name ASC".to_string(),
     };
     let mut response = state
         .db
@@ -635,10 +657,7 @@ pub async fn get_sources(
 
 /// Delete a source, its blob data, and all associated chunks.
 #[tauri::command]
-pub async fn delete_source(
-    state: State<'_, Arc<AppState>>,
-    id: String,
-) -> Result<(), String> {
+pub async fn delete_source(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     // Check source exists before deleting
     let mut exists = state
         .db
@@ -689,9 +708,14 @@ pub async fn get_campaigns(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<CampaignResponse>, String> {
     let campaigns = crate::services::campaign_service::get_all(&state.db).await?;
-    Ok(campaigns.into_iter().map(|c| CampaignResponse {
-        id: c.id, name: c.name, system: c.system,
-    }).collect())
+    Ok(campaigns
+        .into_iter()
+        .map(|c| CampaignResponse {
+            id: c.id,
+            name: c.name,
+            system: c.system,
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -701,7 +725,9 @@ pub async fn get_campaign(
 ) -> Result<CampaignResponse, String> {
     let campaign = crate::services::campaign_service::get_by_id(&state.db, &id).await?;
     Ok(CampaignResponse {
-        id: campaign.id, name: campaign.name, system: campaign.system,
+        id: campaign.id,
+        name: campaign.name,
+        system: campaign.system,
     })
 }
 
@@ -714,11 +740,12 @@ pub async fn create_campaign(
     if name.trim().is_empty() {
         return Err("Campaign name is required".to_string());
     }
-    let campaign = crate::services::campaign_service::create(
-        &state.db, name.trim(), system.trim(),
-    ).await?;
+    let campaign =
+        crate::services::campaign_service::create(&state.db, name.trim(), system.trim()).await?;
     Ok(CampaignResponse {
-        id: campaign.id, name: campaign.name, system: campaign.system,
+        id: campaign.id,
+        name: campaign.name,
+        system: campaign.system,
     })
 }
 
@@ -729,18 +756,188 @@ pub async fn update_campaign(
     name: String,
     system: String,
 ) -> Result<CampaignResponse, String> {
-    let campaign = crate::services::campaign_service::update(
-        &state.db, &id, &name, &system,
-    ).await?;
+    let campaign =
+        crate::services::campaign_service::update(&state.db, &id, &name, &system).await?;
     Ok(CampaignResponse {
-        id: campaign.id, name: campaign.name, system: campaign.system,
+        id: campaign.id,
+        name: campaign.name,
+        system: campaign.system,
     })
 }
 
 #[tauri::command]
-pub async fn delete_campaign(
-    state: State<'_, Arc<AppState>>,
-    id: String,
-) -> Result<(), String> {
+pub async fn delete_campaign(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     crate::services::campaign_service::delete(&state.db, &id).await
+}
+
+// ── Embedding Model Commands ─────────────────────────────────────────
+
+/// Check whether the nomic-embed-text-v1.5 model is already cached.
+#[tauri::command]
+pub async fn check_embedding_model(_state: State<'_, Arc<AppState>>) -> Result<bool, String> {
+    let data_dir = crate::app_data_dir();
+    let cache_dir = crate::providers::embedding::FastEmbedProvider::cache_dir(&data_dir);
+    Ok(crate::providers::embedding::FastEmbedProvider::is_cached(
+        &cache_dir,
+    ))
+}
+
+/// Download the embedding model with streaming progress.
+///
+/// Progress events are emitted as `model-download-progress` with payload:
+/// `{ status: "downloading"|"done"|"error", file, bytes_downloaded,
+///   total_bytes, progress: 0.0-1.0 }`.
+#[tauri::command]
+pub async fn download_embedding_model(
+    app_handle: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let data_dir = crate::app_data_dir();
+    let cache_dir = data_dir.join("embedding_model");
+
+    // Ensure the cache directory exists
+    tokio::fs::create_dir_all(&cache_dir)
+        .await
+        .map_err(|e| format!("Failed to create cache dir: {e}"))?;
+
+    // Emit initial progress
+    let _ = app_handle.emit(
+        "model-download-progress",
+        serde_json::json!({
+            "status": "downloading",
+            "file": "",
+            "bytes_downloaded": 0,
+            "total_bytes": 0,
+            "progress": 0.0,
+        }),
+    );
+
+    // Download model files using reqwest streaming
+    let client = reqwest::Client::new();
+
+    // Download each model file
+    let model_files = vec![
+        ("tokenizer.json", "tokenizer.json"),
+        ("config.json", "config.json"),
+        ("special_tokens_map.json", "special_tokens_map.json"),
+        ("tokenizer_config.json", "tokenizer_config.json"),
+        ("onnx/model.onnx", "onnx/model.onnx"),
+    ];
+
+    // Ensure onnx subdirectory exists
+    tokio::fs::create_dir_all(cache_dir.join("onnx"))
+        .await
+        .map_err(|e| format!("Failed to create onnx dir: {e}"))?;
+
+    let total_files = model_files.len() as f32;
+    let hf_base = "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main";
+
+    for (i, (url_suffix, local_path)) in model_files.iter().enumerate() {
+        let url = format!("{hf_base}/{url_suffix}");
+        let dest = cache_dir.join(local_path);
+
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to download {local_path}: {e}"))?;
+
+        if !response.status().is_success() {
+            return Err(format!(
+                "Failed to download {local_path}: HTTP {}",
+                response.status()
+            ));
+        }
+
+        let total_size = response.content_length().unwrap_or(0);
+        let mut downloaded: u64 = 0;
+        let mut file = tokio::fs::File::create(&dest)
+            .await
+            .map_err(|e| format!("Failed to create {local_path}: {e}"))?;
+
+        use tokio::io::AsyncWriteExt;
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk) = futures_util::StreamExt::next(&mut stream).await {
+            let chunk = chunk.map_err(|e| format!("Download stream error: {e}"))?;
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| format!("Write error: {e}"))?;
+            downloaded += chunk.len() as u64;
+
+            let file_progress = if total_size > 0 {
+                downloaded as f32 / total_size as f32
+            } else {
+                0.0
+            };
+            let overall = (i as f32 + file_progress) / total_files;
+
+            let _ = app_handle.emit(
+                "model-download-progress",
+                serde_json::json!({
+                    "status": "downloading",
+                    "file": local_path,
+                    "bytes_downloaded": downloaded,
+                    "total_bytes": total_size,
+                    "progress": overall,
+                }),
+            );
+        }
+
+        file.flush()
+            .await
+            .map_err(|e| format!("Flush error: {e}"))?;
+    }
+
+    // Now initialize the real embedding provider from the cached files
+    let model_dir = cache_dir.join("models--nomic-ai--nomic-embed-text-v1.5/snapshots/download");
+    tokio::fs::create_dir_all(&model_dir)
+        .await
+        .map_err(|e| format!("Failed to create model dir: {e}"))?;
+    tokio::fs::create_dir_all(model_dir.join("onnx"))
+        .await
+        .map_err(|e| format!("Failed to create model onnx dir: {e}"))?;
+
+    // Copy downloaded files into hf-hub-compatible cache structure
+    for (_, local_path) in &model_files {
+        let src = cache_dir.join(local_path);
+        let dst = cache_dir
+            .join("models--nomic-ai--nomic-embed-text-v1.5/snapshots/download")
+            .join(local_path);
+        tokio::fs::copy(&src, &dst)
+            .await
+            .map_err(|e| format!("Failed to copy {local_path}: {e}"))?;
+    }
+
+    // Write a sentinel ref so we know the model is cached
+    let refs_dir = cache_dir.join("models--nomic-ai--nomic-embed-text-v1.5/refs");
+    tokio::fs::create_dir_all(&refs_dir)
+        .await
+        .map_err(|e| format!("Failed to create refs dir: {e}"))?;
+    tokio::fs::write(refs_dir.join("main"), b"download")
+        .await
+        .map_err(|e| format!("Failed to write ref: {e}"))?;
+
+    // Initialize the real FastEmbedProvider using the custom cache dir
+    let real_provider = crate::providers::embedding::FastEmbedProvider::try_new(Some(&cache_dir))
+        .map_err(|e| format!("Failed to initialize embedding model: {e}"))?;
+
+    // Swap the provider in AppState
+    *state
+        .embedding_provider
+        .write()
+        .map_err(|e| format!("Failed to acquire write lock: {e}"))? = Arc::new(real_provider);
+
+    let _ = app_handle.emit(
+        "model-download-progress",
+        serde_json::json!({
+            "status": "done",
+            "file": "",
+            "bytes_downloaded": 0,
+            "total_bytes": 0,
+            "progress": 1.0,
+        }),
+    );
+
+    Ok(())
 }

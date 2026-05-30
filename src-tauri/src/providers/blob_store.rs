@@ -18,8 +18,12 @@ pub enum BlobStoreError {
 #[async_trait]
 pub trait BlobStore: Send + Sync {
     /// Persist a blob (e.g. a PDF) to the store.
-    async fn store(&self, source_id: &str, filename: &str, data: &[u8])
-        -> Result<(), BlobStoreError>;
+    async fn store(
+        &self,
+        source_id: &str,
+        filename: &str,
+        data: &[u8],
+    ) -> Result<(), BlobStoreError>;
 
     /// Read a previously stored blob back into memory.
     async fn retrieve(&self, source_id: &str, filename: &str) -> Result<Vec<u8>, BlobStoreError>;
@@ -109,10 +113,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = LocalFileStore::new(dir.path().to_path_buf());
 
-        store
-            .store("src-2", "doc.pdf", b"data")
-            .await
-            .unwrap();
+        store.store("src-2", "doc.pdf", b"data").await.unwrap();
         store.delete("src-2").await.unwrap();
 
         let result = store.retrieve("src-2", "doc.pdf").await;

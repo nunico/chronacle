@@ -222,3 +222,20 @@ export async function getSources(campaignId: string | null): Promise<Source[]> {
 export async function deleteSource(id: string): Promise<void> {
   return invoke('delete_source', { id });
 }
+
+// ── Embedding Model Commands ─────────────────────────────────────────
+
+/**
+ * Check whether the nomic-embed-text-v1.5 model is already cached locally.
+ */
+export async function checkEmbeddingModel(): Promise<boolean> {
+  return invoke<boolean>('check_embedding_model');
+}
+
+/**
+ * Download the embedding model with streaming progress.
+ * Progress is delivered via the `model-download-progress` event.
+ */
+export async function downloadEmbeddingModel(): Promise<void> {
+  return invoke('download_embedding_model');
+}

@@ -76,6 +76,8 @@ mod tests {
         upsert(&db, "test_key", "test_value").await.unwrap();
         let settings = get_all(&db).await.unwrap();
 
-        assert!(settings.iter().any(|s| s.key == "test_key" && s.value == "test_value"));
+        assert!(settings
+            .iter()
+            .any(|s| s.key == "test_key" && s.value == "test_value"));
     }
 }

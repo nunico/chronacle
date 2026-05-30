@@ -122,8 +122,7 @@ where
                 ),
             };
 
-            self
-                .db
+            self.db
                 .query(sql)
                 .bind(("id", chunk.chunk_id.clone()))
                 .bind(("source_id", source_id.to_owned()))
@@ -155,9 +154,7 @@ where
             .join(",");
 
         let campaign_filter = match campaign_id {
-            Some(cid) => format!(
-                "WHERE campaign = campaign:`{cid}` OR campaign IS NULL",
-            ),
+            Some(cid) => format!("WHERE campaign = campaign:`{cid}` OR campaign IS NULL",),
             None => "WHERE campaign IS NULL".to_string(),
         };
 
@@ -265,7 +262,7 @@ mod tests {
 
         db.query(
             "DEFINE TABLE chunk SCHEMAFULL;
-             DEFINE FIELD embedding ON chunk TYPE array<float>;"
+             DEFINE FIELD embedding ON chunk TYPE array<float>;",
         )
         .await
         .unwrap();
