@@ -26,7 +26,7 @@ pub struct CustomProvider {
 impl From<CustomProviderRecord> for CustomProvider {
     fn from(r: CustomProviderRecord) -> Self {
         Self {
-            id: r.id.id.to_string(),
+            id: r.id.id.to_raw(),
             name: r.name,
             provider_type: r.provider_type,
             base_url: r.base_url,
@@ -55,8 +55,8 @@ pub struct CustomProviderModel {
 impl From<CustomProviderModelRecord> for CustomProviderModel {
     fn from(r: CustomProviderModelRecord) -> Self {
         Self {
-            id: r.id.id.to_string(),
-            provider_id: r.provider.id.to_string(),
+            id: r.id.id.to_raw(),
+            provider_id: r.provider.id.to_raw(),
             model_id: r.model_id,
             display_name: r.display_name,
         }

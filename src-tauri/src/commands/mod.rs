@@ -13,7 +13,7 @@ pub async fn get_settings(
     let rows = get_all_settings(&state.db).await?;
     let map = rows
         .into_iter()
-        .map(|r| (r.id.id.to_string(), r.value))
+        .map(|r| (r.id.id.to_raw(), r.value))
         .collect();
     Ok(map)
 }
@@ -400,7 +400,7 @@ pub async fn get_llm_provider_status(
     let settings = get_all_settings(&state.db).await?;
     let map: std::collections::HashMap<String, String> = settings
         .into_iter()
-        .map(|r| (r.id.id.to_string(), r.value))
+        .map(|r| (r.id.id.to_raw(), r.value))
         .collect();
 
     Ok(LlmProviderStatus {
@@ -424,7 +424,7 @@ pub async fn reconfigure_llm_provider(state: State<'_, Arc<AppState>>) -> Result
     let settings = get_all_settings(&state.db).await?;
     let map: std::collections::HashMap<String, String> = settings
         .into_iter()
-        .map(|r| (r.id.id.to_string(), r.value))
+        .map(|r| (r.id.id.to_raw(), r.value))
         .collect();
 
     let new_provider = crate::build_llm_provider_from_map(&map, Some(&state.db)).await;
@@ -643,14 +643,14 @@ pub async fn get_sources(
     Ok(rows
         .into_iter()
         .map(|r| SourceResponse {
-            id: r.id.id.to_string(),
+            id: r.id.id.to_raw(),
             filename: r.filename,
             display_name: r.display_name,
             source_type: r.source_type,
             page_count: r.page_count,
             index_status: r.index_status,
             embed_model: r.embed_model,
-            campaign_id: r.campaign.map(|c| c.id.to_string()),
+            campaign_id: r.campaign.map(|c| c.id.to_raw()),
         })
         .collect())
 }

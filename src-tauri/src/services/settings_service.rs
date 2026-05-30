@@ -36,7 +36,7 @@ where
     Ok(rows
         .into_iter()
         .map(|r| Setting {
-            key: r.id.id.to_string(),
+            key: r.id.id.to_raw(),
             value: r.value,
         })
         .collect())

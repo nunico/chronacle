@@ -22,7 +22,7 @@ pub struct Campaign {
 impl From<CampaignRecord> for Campaign {
     fn from(r: CampaignRecord) -> Self {
         Self {
-            id: r.id.id.to_string(),
+            id: r.id.id.to_raw(),
             name: r.name,
             system: r.system,
         }
