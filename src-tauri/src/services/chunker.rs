@@ -75,7 +75,9 @@ pub struct ExtractedDoc {
 /// Heuristics (in priority order):
 /// 1. Matches `Chapter X` / `Part X` / `Section X` / `Appendix X`
 /// 2. Matches numbered-section pattern like `3. Combat`
-/// 3. Is a short ALL-CAPS line (2–15 words, reasonable heading length)
+/// 3. Is a short ALL-CAPS line (1–15 words)
+/// 4. Is a short Title-Case line (≤10 words, no terminal punctuation,
+///    every non-stopword starts with an uppercase letter)
 pub fn is_heading(line: &str) -> bool {
     let trimmed = line.trim();
 
@@ -111,7 +113,63 @@ pub fn is_heading(line: &str) -> bool {
         return true;
     }
 
+    // Rule 4: Title-Case heading
+    if is_title_case_heading(trimmed) {
+        return true;
+    }
+
     false
+}
+
+/// Short English-language stopwords allowed to be lowercase inside a
+/// Title-Case heading (articles + common short prepositions/conjunctions).
+const TITLE_CASE_STOPWORDS: &[&str] = &[
+    "a", "an", "the", "and", "or", "of", "in", "on", "at", "to", "for", "with", "by", "from",
+    "into", "onto", "as", "but", "nor", "vs",
+];
+
+/// True if `line` looks like a Title-Case section heading:
+/// - 1–10 words
+/// - no terminal `.`, `!`, `?`
+/// - every word that isn't a stopword starts with an uppercase letter
+/// - at least one significant (non-stopword) word, ≥ 3 chars to filter out
+///   single short capital words like "A" or "I"
+fn is_title_case_heading(line: &str) -> bool {
+    if line.ends_with('.') || line.ends_with('!') || line.ends_with('?') {
+        return false;
+    }
+    let words: Vec<&str> = line.split_whitespace().collect();
+    if words.is_empty() || words.len() > 10 {
+        return false;
+    }
+
+    let mut significant_word_count = 0;
+    for w in &words {
+        let lower = w.to_lowercase();
+        if TITLE_CASE_STOPWORDS.contains(&lower.as_str()) {
+            continue;
+        }
+        // Significant word: must start with an uppercase letter.
+        let first = match w.chars().next() {
+            Some(c) => c,
+            None => return false,
+        };
+        if !first.is_uppercase() {
+            return false;
+        }
+        significant_word_count += 1;
+    }
+
+    // Require at least one significant word; for single-word lines require
+    // ≥ 3 chars to avoid splitting "A" / "I" / "Or" as headings.
+    if significant_word_count == 0 {
+        return false;
+    }
+    if words.len() == 1 && words[0].chars().count() < 3 {
+        return false;
+    }
+
+    true
 }
 
 // ── Token approximation ───────────────────────────────────────────────
@@ -372,6 +430,47 @@ mod tests {
         // Short ALL-CAPS with punctuation should still be headings
         assert!(is_heading("WARNING!"));
         assert!(is_heading("STOP!"));
+    }
+
+    // ── Title-Case heading rule ──────────────────────────────────
+
+    #[test]
+    fn title_case_short_lines_are_headings() {
+        assert!(is_heading("Coriolis and Kua"));
+        assert!(is_heading("Combat Rules"));
+        assert!(is_heading("The Brave Companions of Old"));
+        assert!(is_heading("Order of the Pariah"));
+        assert!(is_heading("Magic")); // single word, 5 chars
+    }
+
+    #[test]
+    fn title_case_with_terminal_punctuation_is_not_heading() {
+        assert!(!is_heading("The Brave Companions of Old."));
+        assert!(!is_heading("Combat Rules!"));
+    }
+
+    #[test]
+    fn lowercase_non_stopword_disqualifies() {
+        // "orbits" is not capitalized → not a heading
+        assert!(!is_heading("Coriolis orbits Kua"));
+        // "from" is a stopword (ok lowercase), "stars" is not capitalized
+        assert!(!is_heading("Travelers from distant stars"));
+    }
+
+    #[test]
+    fn single_short_word_is_not_heading() {
+        // Filter out single-letter "headings" like A / I
+        assert!(!is_heading("A"));
+        assert!(!is_heading("I"));
+        assert!(!is_heading("Or"));
+    }
+
+    #[test]
+    fn long_title_case_line_is_not_heading() {
+        // >10 words is body text, not a heading
+        assert!(!is_heading(
+            "The Center of the Third Horizon and the Kua System and the Coriolis Station"
+        ));
     }
 
     // ── Chunking tests ────────────────────────────────────────────
