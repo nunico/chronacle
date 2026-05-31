@@ -59,9 +59,28 @@ pub async fn stream_response(
         .await
         .map_err(|e| AgentError::Retrieval(e.to_string()))?;
 
+    // Diagnostic: dump the retrieved chunks so quality issues are visible in
+    // the dev console. Gate behind CHRONACLE_RAG_DEBUG=1 to keep prod quiet.
+    if std::env::var("CHRONACLE_RAG_DEBUG").is_ok() {
+        log_retrieval_debug(message, &embed_provider, &results);
+    }
+
     // 4. Build context-augmented system prompt
     let context = build_context(&results);
     let system_prompt = build_rag_system_prompt(&context);
+
+    if std::env::var("CHRONACLE_RAG_DEBUG").is_ok() {
+        let llm_type = state
+            .llm_provider
+            .read()
+            .map(|p| p.provider_type().to_string())
+            .unwrap_or_else(|_| "unknown".into());
+        eprintln!("===RAG_DEBUG_PROMPT===");
+        eprintln!("llm_provider: {llm_type}");
+        eprintln!("system_prompt ({} chars):", system_prompt.chars().count());
+        eprintln!("{system_prompt}");
+        eprintln!("===RAG_DEBUG_END===");
+    }
 
     // 5. Call the LLM with the augmented prompt
     let chat_messages = vec![ChatMessage {
@@ -80,6 +99,34 @@ pub async fn stream_response(
     llm.chat_stream(&system_prompt, &chat_messages)
         .await
         .map_err(|e| AgentError::Llm(e.to_string()))
+}
+
+/// Dump retrieval diagnostics to stderr (gated by CHRONACLE_RAG_DEBUG=1).
+///
+/// Prints, between begin/end markers, the user query, embedding model, and
+/// every retrieved chunk's score + source + page range + first ~300 chars of
+/// text. Use this to verify whether the right chunk is being retrieved at all
+/// before debugging the LLM's interpretation of it.
+fn log_retrieval_debug(
+    query: &str,
+    embed_provider: &Arc<dyn crate::providers::embedding::EmbeddingProvider>,
+    results: &[crate::providers::vector_store::SearchResult],
+) {
+    eprintln!("===RAG_DEBUG_BEGIN===");
+    eprintln!("query: {query:?}");
+    eprintln!(
+        "embed_model: {} (dim={})",
+        embed_provider.model_name(),
+        embed_provider.dimension()
+    );
+    eprintln!("retrieved {} chunk(s):", results.len());
+    for (i, r) in results.iter().enumerate() {
+        let excerpt: String = r.text.chars().take(300).collect();
+        eprintln!(
+            "  [{i}] dist={:.4} source={:?} p.{}-{} heading={:?}\n      text: {:?}",
+            r.distance, r.source_name, r.page_start, r.page_end, r.section_heading, excerpt
+        );
+    }
 }
 
 /// Build a context block from search results for the LLM prompt.
