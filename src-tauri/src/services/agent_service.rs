@@ -166,8 +166,8 @@ fn build_rag_system_prompt(context: &str) -> String {
          - The reference passages may use different wording than the user's question \
            (e.g. the question says \"factions\", the passage says \"groups\" or \"organizations\"). \
            Treat synonyms, paraphrases, and partial matches as valid evidence.\n\
-         - When the answer IS present, quote the exact sentence(s) from the reference \
-           material that support your answer, then add a one-line summary.\n\
+         - Answer the question directly in 1–3 sentences. Do NOT quote the passages \
+           verbatim — the UI shows the source excerpt when the user clicks the citation.\n\
          - Every factual claim must cite its source using this exact format: \
            [Source: \"<source name>\", p.<page>].\n\
          - Only say \"the reference material does not contain this information\" if you \
@@ -340,7 +340,10 @@ mod tests {
         assert!(prompt.contains("PHB.pdf"));
         assert!(prompt.contains("[Source: \"<source name>\""));
         // New: prompt must request quoted evidence and tolerate paraphrase
-        assert!(prompt.contains("quote the exact sentence"));
+        // Concise answer: no verbatim quoting; tolerant of paraphrase; no
+        // premature refusal.
+        assert!(prompt.contains("Do NOT quote the passages"));
+        assert!(prompt.contains("1–3 sentences"));
         assert!(prompt.contains("synonyms"));
         assert!(prompt.contains("scanned every passage"));
     }
