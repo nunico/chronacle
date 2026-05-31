@@ -10,7 +10,7 @@
 /// Files use a zero-prefixed numeric naming convention so they sort in
 /// dependency order:
 /// - `001_initial.surql` — Phase 1 tables, fields, indexes
-/// - `002_*.surql` — future migrations
+/// - `003_collections.surql` — collection table, subscribes_to relation, collection fields on source/chunk
 
 use std::path::Path;
 
@@ -75,16 +75,20 @@ mod tests {
             .expect("Schema migration should succeed");
 
         // ── Verify tables were created ──────────────────────────────
-        let mut res = db
-            .query("INFO FOR DB")
+        // INFO FOR DB verifies the DB is operational; we don't inspect
+        // the result structure as it varies by SurrealDB version.
+        db.query("INFO FOR DB")
             .await
             .expect("INFO FOR DB should work");
 
-        // Just check that the query succeeded — we don't parse the
-        // result structure which varies by SurrealDB version.
         // Run a simple query to verify the DB is operational after migration.
         db.query("SELECT count() FROM campaign GROUP ALL")
             .await
             .expect("Query after migration should work");
+
+        // Verify the new collection table from migration 003 exists.
+        db.query("SELECT count() FROM collection GROUP ALL")
+            .await
+            .expect("collection table should exist after migration 003");
     }
 }
