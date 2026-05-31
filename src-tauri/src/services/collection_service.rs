@@ -4,9 +4,8 @@
 /// Campaigns subscribe to collections via the `subscribes_to` relation so that
 /// multiple campaigns can share the same rulebook set without duplication.
 use serde::{Deserialize, Serialize};
-use surrealdb::engine::local::Db;
+use surrealdb::Connection;
 use surrealdb::sql::Thing;
-use surrealdb::Surreal;
 
 /// Raw record returned from SurrealDB for the `collection` table.
 #[derive(Debug, Clone, Deserialize)]
@@ -37,11 +36,14 @@ impl From<CollectionRecord> for Collection {
 }
 
 /// Create a new collection with the given `name` and optional `description`.
-pub async fn create(
-    db: &Surreal<Db>,
+pub async fn create<C>(
+    db: &surrealdb::Surreal<C>,
     name: &str,
     description: Option<&str>,
-) -> Result<Collection, String> {
+) -> Result<Collection, String>
+where
+    C: Connection,
+{
     let id = uuid::Uuid::new_v4().to_string().replace('-', "");
     let mut response = db
         .query(
@@ -68,7 +70,10 @@ pub async fn create(
 }
 
 /// Return all collections ordered by name.
-pub async fn get_all(db: &Surreal<Db>) -> Result<Vec<Collection>, String> {
+pub async fn get_all<C>(db: &surrealdb::Surreal<C>) -> Result<Vec<Collection>, String>
+where
+    C: Connection,
+{
     let mut response = db
         .query("SELECT * FROM collection ORDER BY name ASC")
         .await
@@ -80,7 +85,10 @@ pub async fn get_all(db: &Surreal<Db>) -> Result<Vec<Collection>, String> {
 }
 
 /// Return a single collection by its raw ID string.
-pub async fn get_by_id(db: &Surreal<Db>, id: &str) -> Result<Collection, String> {
+pub async fn get_by_id<C>(db: &surrealdb::Surreal<C>, id: &str) -> Result<Collection, String>
+where
+    C: Connection,
+{
     let mut response = db
         .query("SELECT * FROM type::thing('collection', $id)")
         .bind(("id", id.to_owned()))
@@ -97,12 +105,15 @@ pub async fn get_by_id(db: &Surreal<Db>, id: &str) -> Result<Collection, String>
 }
 
 /// Update the `name` and `description` of an existing collection.
-pub async fn update(
-    db: &Surreal<Db>,
+pub async fn update<C>(
+    db: &surrealdb::Surreal<C>,
     id: &str,
     name: &str,
     description: Option<&str>,
-) -> Result<Collection, String> {
+) -> Result<Collection, String>
+where
+    C: Connection,
+{
     let mut response = db
         .query(
             "UPDATE type::thing('collection', $id) SET
@@ -130,7 +141,10 @@ pub async fn update(
 /// Returns an error (without touching the DB) if:
 /// - any campaign is subscribed to it via `subscribes_to`, or
 /// - any source record still references it via `source.collection`.
-pub async fn delete(db: &Surreal<Db>, id: &str) -> Result<(), String> {
+pub async fn delete<C>(db: &surrealdb::Surreal<C>, id: &str) -> Result<(), String>
+where
+    C: Connection,
+{
     #[derive(Deserialize)]
     struct CountRow {
         count: i64,
@@ -182,11 +196,44 @@ pub async fn delete(db: &Surreal<Db>, id: &str) -> Result<(), String> {
 }
 
 /// Subscribe a campaign to a collection via the `subscribes_to` relation.
-pub async fn add_campaign_collection(
-    db: &Surreal<Db>,
+///
+/// This operation is idempotent: calling it when the relation already exists
+/// returns `Ok(())` without creating a duplicate row.
+pub async fn add_campaign_collection<C>(
+    db: &surrealdb::Surreal<C>,
     campaign_id: &str,
     collection_id: &str,
-) -> Result<(), String> {
+) -> Result<(), String>
+where
+    C: Connection,
+{
+    #[derive(Deserialize)]
+    struct CountRow {
+        count: i64,
+    }
+
+    // Check whether the subscription already exists before inserting.
+    // The unique index on subscribes_to(in, out) prevents duplicates at the
+    // DB level, but we pre-check here so we can return Ok(()) silently
+    // instead of surfacing a constraint error.
+    let mut check = db
+        .query(
+            "SELECT count() FROM subscribes_to \
+             WHERE in = type::thing('campaign', $cid) \
+             AND out = type::thing('collection', $colid) \
+             GROUP ALL",
+        )
+        .bind(("cid", campaign_id.to_owned()))
+        .bind(("colid", collection_id.to_owned()))
+        .await
+        .map_err(|e| format!("Failed to check subscription existence: {e}"))?;
+    let counts: Vec<CountRow> = check
+        .take(0)
+        .map_err(|e| format!("Failed to parse subscription check: {e}"))?;
+    if counts.first().map(|r| r.count).unwrap_or(0) > 0 {
+        return Ok(());
+    }
+
     // SurrealDB 2.x does not allow function calls in the RELATE subject/object
     // positions directly, so we bind the record IDs into variables first.
     db.query(
@@ -202,11 +249,14 @@ pub async fn add_campaign_collection(
 }
 
 /// Remove the `subscribes_to` relation between a campaign and a collection.
-pub async fn remove_campaign_collection(
-    db: &Surreal<Db>,
+pub async fn remove_campaign_collection<C>(
+    db: &surrealdb::Surreal<C>,
     campaign_id: &str,
     collection_id: &str,
-) -> Result<(), String> {
+) -> Result<(), String>
+where
+    C: Connection,
+{
     db.query(
         "DELETE FROM subscribes_to \
          WHERE in = type::thing('campaign', $campaign_id) \
@@ -220,10 +270,13 @@ pub async fn remove_campaign_collection(
 }
 
 /// Return all collections subscribed to by the given campaign.
-pub async fn get_campaign_collections(
-    db: &Surreal<Db>,
+pub async fn get_campaign_collections<C>(
+    db: &surrealdb::Surreal<C>,
     campaign_id: &str,
-) -> Result<Vec<Collection>, String> {
+) -> Result<Vec<Collection>, String>
+where
+    C: Connection,
+{
     let mut response = db
         .query(
             "SELECT * FROM collection WHERE id IN \
@@ -242,6 +295,8 @@ pub async fn get_campaign_collections(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use surrealdb::engine::local::Db;
+    use surrealdb::Surreal;
 
     async fn setup() -> Surreal<Db> {
         let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
@@ -298,12 +353,13 @@ mod tests {
         // Insert a source that references this collection.
         // `campaign` is TYPE record<campaign> | NULL (no DEFAULT), so SCHEMAFULL
         // validation requires it to be set explicitly to NULL rather than omitted.
-        db.query(format!(
-            "CREATE source SET id='s1', campaign=NULL, collection=type::thing('collection', '{}'), \
+        db.query(
+            "CREATE source SET id='s1', campaign=NULL, \
+             collection=type::thing('collection', $cid), \
              filename='a.pdf', display_name='A', source_type='rules', page_count=0, \
              indexed_at=time::now(), index_status='done', embed_model='nomic-embed-text-v1.5'",
-            c.id
-        ))
+        )
+        .bind(("cid", c.id.clone()))
         .await
         .unwrap();
         let result = delete(&db, &c.id).await;
@@ -366,5 +422,40 @@ mod tests {
         let cols = get_campaign_collections(&db, "camp1").await.unwrap();
         assert_eq!(cols.len(), 1);
         assert_eq!(cols[0].name, "D&D 5e Core");
+    }
+
+    #[tokio::test]
+    async fn add_campaign_collection_is_idempotent() {
+        let db = setup().await;
+        let c = create(&db, "D&D 5e Core", None).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='D&D', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        add_campaign_collection(&db, "camp1", &c.id).await.unwrap();
+        add_campaign_collection(&db, "camp1", &c.id).await.unwrap(); // second call must succeed
+        let cols = get_campaign_collections(&db, "camp1").await.unwrap();
+        assert_eq!(cols.len(), 1); // must not return duplicates
+    }
+
+    #[tokio::test]
+    async fn get_by_id_missing_returns_err() {
+        let db = setup().await;
+        let result = get_by_id(&db, "does-not-exist").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn get_all_returns_ordered_by_name() {
+        let db = setup().await;
+        create(&db, "Zzz Collection", None).await.unwrap();
+        create(&db, "Aaa Collection", None).await.unwrap();
+        let all = get_all(&db).await.unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].name, "Aaa Collection");
+        assert_eq!(all[1].name, "Zzz Collection");
     }
 }

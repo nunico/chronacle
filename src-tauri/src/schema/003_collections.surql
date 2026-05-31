@@ -11,6 +11,7 @@ DEFINE FIELD updated_at  ON collection TYPE datetime;
 
 DEFINE TABLE subscribes_to SCHEMAFULL TYPE RELATION FROM campaign TO collection;
 DEFINE FIELD created_at ON subscribes_to TYPE datetime;
+DEFINE INDEX unique_subscription ON TABLE subscribes_to COLUMNS in, out UNIQUE;
 
 -- Add collection field to source (non-nullable — service layer enforces required at insert time).
 -- The old campaign field remains defined but is never set by new code.
