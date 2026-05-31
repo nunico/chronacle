@@ -957,7 +957,12 @@ async fn list_all_source_ids<C: surrealdb::Connection>(
         .await
         .map_err(|e| e.to_string())?;
     let rows: Vec<Row> = resp.take(0).map_err(|e| e.to_string())?;
-    Ok(rows.into_iter().map(|r| r.id.id.to_string()).collect())
+    // Use `.to_raw()` not `.to_string()`. SurrealDB's `Id::to_string()`
+    // wraps string values that need escaping (e.g. UUIDs with hyphens) in
+    // backticks; passing that back through `type::thing('source', $id)`
+    // produces a mangled `source:`\`uuid\`` reference that never matches
+    // the real record. See commit e099a79 for the prior occurrence.
+    Ok(rows.into_iter().map(|r| r.id.id.to_raw()).collect())
 }
 
 /// Re-run ingestion for every source currently in the database.
@@ -1036,5 +1041,56 @@ mod reindex_tests {
         assert_eq!(ids.len(), 2);
         assert!(ids.contains(&"s1".to_string()));
         assert!(ids.contains(&"s2".to_string()));
+    }
+
+    /// Regression test for the backtick-wrapped-ID bug. UUIDs contain hyphens,
+    /// which trigger SurrealDB's `EscapeRidKey` when `Id::to_string()` is used.
+    /// `list_all_source_ids` MUST return raw IDs so they can be passed back
+    /// through `type::thing('source', $id)` without producing a mangled record
+    /// reference. See commit e099a79 for the prior occurrence in delete_source.
+    #[tokio::test]
+    async fn list_all_source_ids_does_not_wrap_uuids_in_backticks() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        let uuid = "d5a80195-3968-44cb-8b46-270830df952f";
+        db.query(format!(
+            "CREATE source SET id='{uuid}', filename='a.pdf', display_name='a', \
+             source_type='rules', page_count=0, indexed_at=time::now(), \
+             index_status='done', embed_model='nomic-embed-text-v1.5'"
+        ))
+        .await
+        .unwrap();
+
+        let ids = list_all_source_ids(&db).await.unwrap();
+        assert_eq!(ids.len(), 1);
+        let id = &ids[0];
+        assert!(
+            !id.contains('`'),
+            "ID must not be wrapped in backticks: got {id:?}"
+        );
+        assert_eq!(id, uuid);
+
+        // Round-trip check: the returned ID must work with type::thing.
+        // If the bug recurs, this query returns no rows.
+        let mut resp = db
+            .query("SELECT id FROM source WHERE id = type::thing('source', $id)")
+            .bind(("id", id.clone()))
+            .await
+            .unwrap();
+        #[derive(Deserialize)]
+        struct Found {
+            #[allow(dead_code)]
+            id: surrealdb::sql::Thing,
+        }
+        let found: Vec<Found> = resp.take(0).unwrap();
+        assert_eq!(
+            found.len(),
+            1,
+            "round-trip lookup with raw ID must find the source"
+        );
     }
 }
