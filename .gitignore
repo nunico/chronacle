@@ -36,6 +36,10 @@ lcov.info
 .env.*.local
 src-tauri/.fastembed_cache/
 
+# ── pdfium binaries (downloaded by build.rs) ─────────────────────────
+src-tauri/resources/pdfium/*
+!src-tauri/resources/pdfium/.gitkeep
+
 /.crew/
 /.crew
 !.crew/artifacts/

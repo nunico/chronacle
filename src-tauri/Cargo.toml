@@ -30,9 +30,13 @@ fastembed = { version = "5", features = ["ort-load-dynamic"] }
 pdf-extract = "0.10"
 futures-util = "0.3"
 unicode-segmentation = "1"
+pdfium-render = { version = "0.8", features = ["thread_safe", "image"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+flate2 = "1"
+tar = "0.4"
 
 [dev-dependencies]
 mockall = "0.13"
