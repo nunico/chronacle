@@ -1,7 +1,8 @@
 /// Ingestion service — orchestrates PDF extraction, chunking, and embedding.
 ///
-/// Phase 1: extracts text from PDF using `pdf-extract`, chunks via sliding-window
-/// section-aware chunker, embeds via fastembed, and stores in SurrealDB.
+/// Phase 1: extracts text via the `PdfExtractor` trait (backed by `pdfium-render`),
+/// normalizes PDF artifacts, chunks into sentence-aware ~250-token chunks, embeds
+/// via fastembed with Nomic task prefixes, and stores in SurrealDB.
 ///
 /// Progress reporting: every pipeline stage calls `on_progress` with a fractional
 /// progress (0.0–1.0) and a human-readable step label. The caller is responsible
@@ -77,7 +78,11 @@ pub async fn ingest_source(
         fraction: 0.20,
         step: "Extracting text from PDF pages".into(),
     });
-    let extracted = extract_text(&pdf_data).await?;
+    let extracted = state
+        .pdf_extractor
+        .extract(&pdf_data)
+        .await
+        .map_err(|e| IngestionError::PdfExtraction(e.to_string()))?;
     let extracted = normalize_extracted(&extracted);
 
     on_progress(IngestionProgress {
@@ -152,66 +157,9 @@ fn normalize_extracted(doc: &ExtractedDoc) -> ExtractedDoc {
     }
 }
 
-/// Extract text from raw PDF bytes using `pdf-extract`.
-///
-/// Returns an `ExtractedDoc` with per-page text content and the full merged text.
-/// Falls back gracefully to flat extraction if per-page API fails.
-pub async fn extract_text(data: &[u8]) -> Result<ExtractedDoc, IngestionError> {
-    // Try per-page extraction first for best page tracking
-    match pdf_extract::extract_text_from_mem_by_pages(data) {
-        Ok(page_texts) => {
-            let page_count = page_texts.len();
-            let mut pages = Vec::with_capacity(page_count);
-            let mut full_text = String::new();
-
-            for (i, text) in page_texts.into_iter().enumerate() {
-                let trimmed = text.trim().to_string();
-                pages.push(PageContent {
-                    page_num: i + 1,
-                    text: trimmed.clone(),
-                });
-                if !full_text.is_empty() && !trimmed.is_empty() {
-                    full_text.push('\n');
-                }
-                full_text.push_str(&trimmed);
-            }
-
-            Ok(ExtractedDoc {
-                page_count,
-                text: full_text,
-                pages,
-            })
-        }
-        Err(e) => {
-            // Fallback to single-page extraction, split on form feeds
-            eprintln!("Per-page PDF extraction failed, falling back to flat extraction: {e}");
-            match pdf_extract::extract_text_from_mem(data) {
-                Ok(text) => {
-                    let trimmed = text.trim().to_string();
-                    let page_texts: Vec<&str> = trimmed.split('\x0C').collect();
-                    let page_count = page_texts.len().max(1);
-                    let pages: Vec<PageContent> = page_texts
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, t)| PageContent {
-                            page_num: i + 1,
-                            text: t.trim().to_string(),
-                        })
-                        .collect();
-
-                    Ok(ExtractedDoc {
-                        page_count,
-                        text: trimmed,
-                        pages,
-                    })
-                }
-                Err(e2) => Err(IngestionError::PdfExtraction(format!(
-                    "PDF extraction failed: {e2}"
-                ))),
-            }
-        }
-    }
-}
+// PDF extraction now goes through the `PdfExtractor` trait on `AppState`
+// (see `src/services/pdf_extractor.rs`). The previous `pdf-extract`-based
+// implementation was replaced with `pdfium-render` for layout-aware extraction.
 
 fn chunk_text(doc: &ExtractedDoc, _source_id: &str) -> Result<Vec<RawChunk>, IngestionError> {
     let chunks = chunk_document(doc);

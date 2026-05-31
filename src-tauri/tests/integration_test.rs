@@ -236,11 +236,18 @@ fn create_test_pdf() -> Vec<u8> {
 
 #[tokio::test]
 async fn test_pdf_extract_text() {
+    use chronacle_lib::services::pdf_extractor::{PdfExtractor, PdfiumExtractor};
+    let lib = pdfium_lib_path();
+    if !lib.exists() {
+        eprintln!("Skipping — pdfium binary not present at {lib:?}");
+        return;
+    }
     let pdf_data = create_test_pdf();
-
-    let extracted = chronacle_lib::services::ingestion_service::extract_text(&pdf_data)
+    let extractor = PdfiumExtractor::new(lib);
+    let extracted = extractor
+        .extract(&pdf_data)
         .await
-        .expect("extract_text should succeed");
+        .expect("extract should succeed");
 
     assert!(extracted.page_count >= 1, "should have at least 1 page");
     assert!(
@@ -258,6 +265,19 @@ async fn test_pdf_extract_text() {
         extracted.pages[0].page_num, 1,
         "first page should be page 1"
     );
+}
+
+/// Path to the pdfium dynamic library bundled into resources/ by build.rs.
+fn pdfium_lib_path() -> std::path::PathBuf {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/pdfium");
+    let name = if cfg!(target_os = "macos") {
+        "libpdfium.dylib"
+    } else if cfg!(target_os = "linux") {
+        "libpdfium.so"
+    } else {
+        "pdfium.dll"
+    };
+    dir.join(name)
 }
 
 #[tokio::test]
@@ -296,6 +316,11 @@ async fn test_full_ingest_and_query_cycle() {
 
     let llm_provider = Arc::new(NoopProvider);
 
+    let pdf_extractor: Arc<dyn chronacle_lib::services::pdf_extractor::PdfExtractor> =
+        Arc::new(chronacle_lib::services::pdf_extractor::PdfiumExtractor::new(
+            pdfium_lib_path(),
+        ));
+
     let state = Arc::new(chronacle_lib::AppState {
         db: db.clone(),
         llm_provider: RwLock::new(
@@ -304,6 +329,7 @@ async fn test_full_ingest_and_query_cycle() {
         vector_store: vector_store.clone(),
         blob_store: blob_store.clone(),
         embedding_provider: RwLock::new(embedding_provider.clone()),
+        pdf_extractor,
     });
 
     // Create source record using the same pattern as the real upload_source command
@@ -350,10 +376,12 @@ async fn test_full_ingest_and_query_cycle() {
         .await
         .expect("blob store should succeed");
 
-    // Debug: test extract_text directly
-    let extracted = chronacle_lib::services::ingestion_service::extract_text(&pdf_data)
+    // Debug: test extract directly via the trait
+    let extracted = state
+        .pdf_extractor
+        .extract(&pdf_data)
         .await
-        .expect("extract_text should succeed");
+        .expect("pdf_extractor.extract should succeed");
     eprintln!(
         "Extracted {} pages, text length: {}",
         extracted.page_count,

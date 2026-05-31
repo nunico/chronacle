@@ -20,6 +20,48 @@ pub struct AppState {
     pub vector_store: Arc<dyn providers::vector_store::VectorStore>,
     pub blob_store: Arc<dyn providers::blob_store::BlobStore>,
     pub embedding_provider: RwLock<Arc<dyn providers::embedding::EmbeddingProvider>>,
+    pub pdf_extractor: Arc<dyn services::pdf_extractor::PdfExtractor>,
+}
+
+/// Locate the bundled pdfium dynamic library.
+///
+/// In `cargo tauri dev` the binary lives under `target/`, so we resolve via
+/// `CARGO_MANIFEST_DIR` (set at compile time). In a bundled app the dylib is
+/// shipped alongside the executable in the platform-specific resource path.
+fn pdfium_library_path() -> std::path::PathBuf {
+    let name = if cfg!(target_os = "macos") {
+        "libpdfium.dylib"
+    } else if cfg!(target_os = "linux") {
+        "libpdfium.so"
+    } else {
+        "pdfium.dll"
+    };
+    // Dev: <manifest>/resources/pdfium/<lib>
+    let dev = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources/pdfium")
+        .join(name);
+    if dev.exists() {
+        return dev;
+    }
+    // Bundled app: try <exe-dir>/../Resources/resources/pdfium/<lib> on mac,
+    // <exe-dir>/resources/pdfium/<lib> elsewhere.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let mac_resources = exe_dir
+                .join("../Resources/resources/pdfium")
+                .join(name);
+            if mac_resources.exists() {
+                return mac_resources;
+            }
+            let other = exe_dir.join("resources/pdfium").join(name);
+            if other.exists() {
+                return other;
+            }
+        }
+    }
+    // Last resort: return the dev path (extraction will fail with a clear
+    // LibLoad error if the file is genuinely missing).
+    dev
 }
 
 /// Determines the application data directory, creating it if needed.
@@ -98,12 +140,17 @@ pub async fn run() {
     let provider_name = provider_type_name(&llm_provider);
     eprintln!("LLM provider '{}' initialised", provider_name);
 
+    let pdf_extractor: Arc<dyn services::pdf_extractor::PdfExtractor> = Arc::new(
+        services::pdf_extractor::PdfiumExtractor::new(pdfium_library_path()),
+    );
+
     let state = Arc::new(AppState {
         db,
         llm_provider: RwLock::new(llm_provider),
         vector_store,
         blob_store,
         embedding_provider: RwLock::new(embedding_provider),
+        pdf_extractor,
     });
 
     tauri::Builder::default()
