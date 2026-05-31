@@ -115,10 +115,16 @@ fn build_rag_system_prompt(context: &str) -> String {
         "You are an expert Game Master assistant.\n\n\
          REFERENCE MATERIAL:\n{context}\n\
          INSTRUCTIONS:\n\
-         - Answer using ONLY information from the reference material above.\n\
+         - Read every passage above carefully BEFORE deciding whether the answer is present.\n\
+         - The reference passages may use different wording than the user's question \
+           (e.g. the question says \"factions\", the passage says \"groups\" or \"organizations\"). \
+           Treat synonyms, paraphrases, and partial matches as valid evidence.\n\
+         - When the answer IS present, quote the exact sentence(s) from the reference \
+           material that support your answer, then add a one-line summary.\n\
          - Every factual claim must cite its source using this exact format: \
            [Source: \"<source name>\", p.<page>].\n\
-         - If the answer is not in the sources, say so explicitly — do not speculate.\n\
+         - Only say \"the reference material does not contain this information\" if you \
+           have scanned every passage and found no relevant content, even by paraphrase.\n\
          - Be concise. The GM is running a table."
     )
 }
@@ -286,6 +292,10 @@ mod tests {
         assert!(prompt.contains("REFERENCE MATERIAL"));
         assert!(prompt.contains("PHB.pdf"));
         assert!(prompt.contains("[Source: \"<source name>\""));
+        // New: prompt must request quoted evidence and tolerate paraphrase
+        assert!(prompt.contains("quote the exact sentence"));
+        assert!(prompt.contains("synonyms"));
+        assert!(prompt.contains("scanned every passage"));
     }
 
     // ── Citation parsing tests ───────────────────────────────────
