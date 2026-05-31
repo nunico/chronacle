@@ -167,9 +167,13 @@ fn build_rag_system_prompt(context: &str) -> String {
            (e.g. the question says \"factions\", the passage says \"groups\" or \"organizations\"). \
            Treat synonyms, paraphrases, and partial matches as valid evidence.\n\
          - Answer the question directly in 1–3 sentences. Do NOT quote the passages \
-           verbatim — the UI shows the source excerpt when the user clicks the citation.\n\
-         - Every factual claim must cite its source using this exact format: \
-           [Source: \"<source name>\", p.<page>].\n\
+           verbatim in your answer — the supporting quote belongs inside the citation.\n\
+         - Every factual claim must cite its source using this exact format, including \
+           a short verbatim quote (1 sentence) from the passage that supports the claim:\n  \
+             [Source: \"<source name>\", p.<page>, quote: \"<verbatim sentence>\"]\n  \
+           Example: [Source: \"PHB\", p.72, quote: \"A fighter can use Action Surge once per rest.\"]\n  \
+           The UI hides the quote from the visible reply and shows it in a popover \
+           when the user clicks the citation badge.\n\
          - Only say \"the reference material does not contain this information\" if you \
            have scanned every passage and found no relevant content, even by paraphrase.\n\
          - Be concise. The GM is running a table."
@@ -258,30 +262,40 @@ pub struct Citation {
 /// Parse citations from an assistant response.
 ///
 /// Accepts:
-///   `[Source: "Name", p.12]`        – single page
-///   `[Source: "Name", p.45-49]`     – page range (only the start is captured)
-///   `[Source: "Name", p. 9-9]`      – with whitespace
-///   `[Source: "Name"]`              – no page
+///   `[Source: "Name", p.12]`                        – page only
+///   `[Source: "Name", p.45-49]`                     – page range (start captured)
+///   `[Source: "Name", p.9, quote: "verbatim text"]` – with inline supporting quote
+///   `[Source: "Name"]`                              – source only
+///
+/// When a quote is present, it's stored as `text_excerpt`. When absent, the
+/// 80 characters following the citation marker are used as a degraded fallback.
 fn parse_citations(response: &str) -> Vec<Citation> {
-    // The page group captures only the first integer; an optional `-N` tail is
-    // consumed but discarded. The page-end isn't needed for citation excerpt
-    // lookup (the chunk for page_start covers page_end too).
-    let re = regex::Regex::new(r#"\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+)(?:-\d+)?)?\]"#)
-        .expect("valid citation regex");
+    // Non-greedy `(.*?)` on the quote group lets it stop at the first `"`
+    // that's followed by `]` (allowing for optional whitespace). The `(?s)`
+    // flag makes `.` match newlines too, in case the LLM wraps long quotes.
+    let re = regex::Regex::new(
+        r#"(?s)\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+)(?:-\d+)?)?(?:,\s*quote:\s*"(.*?)")?\s*\]"#,
+    )
+    .expect("valid citation regex");
 
     re.captures_iter(response)
         .map(|cap| {
             let source_name = cap[1].to_string();
             let page = cap.get(2).and_then(|m| m.as_str().parse::<i64>().ok());
-            // Text excerpt: 80 chars following the citation marker
-            let marker_end = cap.get(0).map_or(0, |m| m.end());
-            let text_excerpt = response
-                .chars()
-                .skip(marker_end)
-                .take(80)
-                .collect::<String>()
-                .trim()
-                .to_string();
+            let text_excerpt = if let Some(q) = cap.get(3) {
+                q.as_str().trim().to_string()
+            } else {
+                // Fallback: 80 chars after the marker. Useful when older
+                // assistant messages predate the inline-quote prompt.
+                let marker_end = cap.get(0).map_or(0, |m| m.end());
+                response
+                    .chars()
+                    .skip(marker_end)
+                    .take(80)
+                    .collect::<String>()
+                    .trim()
+                    .to_string()
+            };
 
             Citation {
                 source_name,
@@ -345,12 +359,14 @@ mod tests {
         assert!(prompt.contains("PHB.pdf"));
         assert!(prompt.contains("[Source: \"<source name>\""));
         // New: prompt must request quoted evidence and tolerate paraphrase
-        // Concise answer: no verbatim quoting; tolerant of paraphrase; no
-        // premature refusal.
+        // Concise answer: no verbatim quoting in the visible reply;
+        // tolerant of paraphrase; no premature refusal; supporting quote
+        // travels inside the citation marker.
         assert!(prompt.contains("Do NOT quote the passages"));
         assert!(prompt.contains("1–3 sentences"));
         assert!(prompt.contains("synonyms"));
         assert!(prompt.contains("scanned every passage"));
+        assert!(prompt.contains("quote: \""));
     }
 
     // ── Citation parsing tests ───────────────────────────────────
@@ -387,6 +403,28 @@ mod tests {
         assert_eq!(citations.len(), 1);
         assert_eq!(citations[0].source_name, "SRD");
         assert_eq!(citations[0].page, None);
+    }
+
+    #[test]
+    fn test_parse_citations_with_inline_quote() {
+        let text = "Coriolis orbits Kua. [Source: \"Quickstart.pdf\", p.9, quote: \"The space station Coriolis orbits the green jungles of the planet Kua.\"]";
+        let citations = parse_citations(text);
+        assert_eq!(citations.len(), 1);
+        assert_eq!(citations[0].source_name, "Quickstart.pdf");
+        assert_eq!(citations[0].page, Some(9));
+        assert_eq!(
+            citations[0].text_excerpt,
+            "The space station Coriolis orbits the green jungles of the planet Kua."
+        );
+    }
+
+    #[test]
+    fn test_parse_citations_inline_quote_with_page_range() {
+        let text = "[Source: \"PHB\", p.45-49, quote: \"Combat proceeds in rounds.\"]";
+        let citations = parse_citations(text);
+        assert_eq!(citations.len(), 1);
+        assert_eq!(citations[0].page, Some(45));
+        assert_eq!(citations[0].text_excerpt, "Combat proceeds in rounds.");
     }
 
     #[test]

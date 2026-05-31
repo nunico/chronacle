@@ -24,12 +24,15 @@
   let isLoading = $state(false);
   let currentResponse = $state('');
 
-  // Citation popover state: when the user clicks a citation badge we look
-  // up the chunk that backed it and float a popover next to the badge.
+  // Citation popover state: a click on a citation badge floats a popover
+  // next to it showing the supporting quote. The quote travels inline in
+  // the citation marker (data-quote); the backend chunk lookup is only a
+  // fallback for messages whose citations omit the quote.
   let citationPopover = $state<
     | {
         source: string;
         page: number | null;
+        quote: string | null;
         chunk: CitationChunk | null;
         loading: boolean;
         x: number;
@@ -79,16 +82,22 @@
 
   /** Render message content with clickable citation badges.
    *
-   * Matches both `p.N` and `p.N-M` (range). `page` captures the start; the
-   * optional `-M` tail is consumed but discarded — the chunk for page_start
-   * also covers page_end. */
+   * Citation forms accepted (mirrors the Rust parser):
+   *   [Source: "Name", p.9]
+   *   [Source: "Name", p.45-49]
+   *   [Source: "Name", p.9, quote: "verbatim sentence"]   ← preferred
+   *
+   * The verbatim quote, when present, is stashed in `data-quote` on the
+   * badge so the popover can show it directly without a backend lookup.
+   * The visible label stays compact: `Name p.N` (no quote shown). */
   function renderContent(text: string): string {
     return text.replace(
-      /\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+)(?:-\d+)?)?\]/g,
-      (_, name: string, page: string | undefined) => {
+      /\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+)(?:-\d+)?)?(?:,\s*quote:\s*"([\s\S]*?)")?\s*\]/g,
+      (_, name: string, page: string | undefined, quote: string | undefined) => {
         const dataPage = page ? ` data-page="${escapeAttr(page)}"` : '';
+        const dataQuote = quote ? ` data-quote="${escapeAttr(quote)}"` : '';
         const label = `${escapeAttr(name)}${page ? ` p.${escapeAttr(page)}` : ''}`;
-        return `<button type="button" class="citation-badge" data-source="${escapeAttr(name)}"${dataPage} title="Show source passage">${label}</button>`;
+        return `<button type="button" class="citation-badge" data-source="${escapeAttr(name)}"${dataPage}${dataQuote} title="Show source passage">${label}</button>`;
       },
     );
   }
@@ -101,11 +110,29 @@
     const source = target.dataset.source ?? '';
     const pageStr = target.dataset.page;
     const page = pageStr ? parseInt(pageStr, 10) : null;
+    const inlineQuote = target.dataset.quote ?? null;
     const rect = target.getBoundingClientRect();
 
+    // Inline quote is the happy path — display immediately, no backend call.
+    if (inlineQuote) {
+      citationPopover = {
+        source,
+        page,
+        quote: inlineQuote,
+        chunk: null,
+        loading: false,
+        x: rect.left,
+        y: rect.bottom + 6,
+      };
+      return;
+    }
+
+    // Fallback: legacy/quote-less citation. Fetch the chunk so the user still
+    // gets *something* to read.
     citationPopover = {
       source,
       page,
+      quote: null,
       chunk: null,
       loading: true,
       x: rect.left,
@@ -114,7 +141,6 @@
 
     try {
       const chunk = await getChunkForCitation(source, page);
-      // Only commit if the user hasn't clicked another / dismissed in the meantime
       if (citationPopover && citationPopover.source === source && citationPopover.page === page) {
         citationPopover = { ...citationPopover, chunk, loading: false };
       }
@@ -207,14 +233,7 @@
   >
     <div class="popover-header">
       <strong>{citationPopover.source}</strong>
-      {#if citationPopover.chunk}
-        <span class="muted">
-          p.{citationPopover.chunk.page_start}{citationPopover.chunk.page_end !==
-          citationPopover.chunk.page_start
-            ? `-${citationPopover.chunk.page_end}`
-            : ''}
-        </span>
-      {:else if citationPopover.page !== null}
+      {#if citationPopover.page !== null}
         <span class="muted">p.{citationPopover.page}</span>
       {/if}
       <button
@@ -223,7 +242,9 @@
         aria-label="Close"
         onclick={() => (citationPopover = null)}>×</button>
     </div>
-    {#if citationPopover.loading}
+    {#if citationPopover.quote}
+      <div class="popover-body popover-quote">“{citationPopover.quote}”</div>
+    {:else if citationPopover.loading}
       <div class="popover-body muted">Loading…</div>
     {:else if citationPopover.chunk}
       {#if citationPopover.chunk.section_heading}
@@ -231,7 +252,7 @@
       {/if}
       <div class="popover-body">{citationPopover.chunk.text}</div>
     {:else}
-      <div class="popover-body muted">No matching passage found.</div>
+      <div class="popover-body muted">No supporting quote available.</div>
     {/if}
   </div>
 {/if}
@@ -478,5 +499,10 @@
   .popover-body.muted {
     color: var(--text-muted, #9999b3);
     font-style: italic;
+  }
+
+  .popover-quote {
+    font-style: italic;
+    color: var(--text, #e7e7ef);
   }
 </style>
