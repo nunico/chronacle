@@ -224,7 +224,7 @@ async fn embed_chunks(
 
     let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
     let embeddings = provider
-        .embed(texts)
+        .embed_documents(texts)
         .await
         .map_err(|e| IngestionError::Embedding(e.to_string()))?;
 

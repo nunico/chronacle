@@ -45,20 +45,21 @@ pub enum EmbeddingError {
 // ── Trait ────────────────────────────────────────────────────────────
 
 /// Trait abstracting embedding generation.
+///
+/// Document-side and query-side embedding go through distinct methods because
+/// some models (notably `nomic-embed-text-v1.5`) are asymmetric and require
+/// different task prefixes (`search_document: ` vs `search_query: `).
+/// Callers MUST pass un-prefixed text — prefixes are applied internally by
+/// each implementation. See ADR-003.
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
-    /// Embed multiple texts as a batch. Returns one vector per input.
-    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbeddingError>;
+    /// Embed multiple documents (chunks) for indexing.
+    /// Implementations MUST apply any model-specific document prefix.
+    async fn embed_documents(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbeddingError>;
 
-    /// Embed a single query string.
-    async fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
-        Ok(self
-            .embed(vec![text.to_string()])
-            .await?
-            .into_iter()
-            .next()
-            .unwrap_or_default())
-    }
+    /// Embed a single query for search.
+    /// Implementations MUST apply any model-specific query prefix.
+    async fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbeddingError>;
 
     /// The dimension of vectors produced by this provider.
     fn dimension(&self) -> usize;
@@ -66,6 +67,10 @@ pub trait EmbeddingProvider: Send + Sync {
     /// A human-readable model identifier (e.g. `"nomic-embed-text-v1.5"`).
     fn model_name(&self) -> &str;
 }
+
+// Nomic asymmetric prefixes — applied internally by FastEmbedProvider.
+const NOMIC_DOC_PREFIX: &str = "search_document: ";
+const NOMIC_QUERY_PREFIX: &str = "search_query: ";
 
 // ── FastEmbed implementation ─────────────────────────────────────────
 
@@ -152,17 +157,45 @@ impl FastEmbedProvider {
             _ => 768,
         }
     }
+
+    /// True for Nomic embed models, which require asymmetric task prefixes.
+    fn uses_nomic_prefixes(&self) -> bool {
+        self.name.starts_with("nomic-embed-text")
+    }
 }
 
 #[async_trait]
 impl EmbeddingProvider for FastEmbedProvider {
-    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-        let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+    async fn embed_documents(
+        &self,
+        texts: Vec<String>,
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        let prefixed: Vec<String> = if self.uses_nomic_prefixes() {
+            texts
+                .into_iter()
+                .map(|t| format!("{NOMIC_DOC_PREFIX}{t}"))
+                .collect()
+        } else {
+            texts
+        };
+        let refs: Vec<&str> = prefixed.iter().map(|s| s.as_str()).collect();
         let mut model = self.inner.lock().await;
-        let embeddings = model
+        model
             .embed(refs, None)
+            .map_err(|e| EmbeddingError::Embed(e.to_string()))
+    }
+
+    async fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
+        let prefixed = if self.uses_nomic_prefixes() {
+            format!("{NOMIC_QUERY_PREFIX}{text}")
+        } else {
+            text.to_string()
+        };
+        let mut model = self.inner.lock().await;
+        let mut out = model
+            .embed(vec![prefixed.as_str()], None)
             .map_err(|e| EmbeddingError::Embed(e.to_string()))?;
-        Ok(embeddings)
+        Ok(out.pop().unwrap_or_default())
     }
 
     fn dimension(&self) -> usize {
@@ -193,8 +226,15 @@ impl MockEmbeddingProvider {
 
 #[async_trait]
 impl EmbeddingProvider for MockEmbeddingProvider {
-    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+    async fn embed_documents(
+        &self,
+        texts: Vec<String>,
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         Ok(texts.into_iter().map(|_| vec![0.0; self.dim]).collect())
+    }
+
+    async fn embed_query(&self, _text: &str) -> Result<Vec<f32>, EmbeddingError> {
+        Ok(vec![0.0; self.dim])
     }
 
     fn dimension(&self) -> usize {
@@ -223,12 +263,47 @@ mod tests {
     async fn test_mock_embed_batch() {
         let provider = MockEmbeddingProvider::new(384);
         let result = provider
-            .embed(vec!["hello".into(), "world".into()])
+            .embed_documents(vec!["hello".into(), "world".into()])
             .await
             .unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].len(), 384);
         assert_eq!(result[1].len(), 384);
+    }
+
+    #[tokio::test]
+    async fn test_mock_provider_implements_split_trait() {
+        let provider = MockEmbeddingProvider::new(384);
+        let docs = provider
+            .embed_documents(vec!["hello".into(), "world".into()])
+            .await
+            .unwrap();
+        assert_eq!(docs.len(), 2);
+        let q = provider.embed_query("hello").await.unwrap();
+        assert_eq!(q.len(), 384);
+    }
+
+    #[tokio::test]
+    async fn test_fastembed_document_and_query_paths_compile() {
+        // Confirms the trait surface is wired correctly. Returns same-dimension
+        // vectors for both methods. all-MiniLM-L6-v2 doesn't use prefixes, but
+        // the Nomic-prefix logic is gated on the model name (see
+        // uses_nomic_prefixes), so both paths exercise the trait shape.
+        let Ok(provider) = FastEmbedProvider::try_new_small() else {
+            eprintln!("Skipping — small model not cached");
+            return;
+        };
+        let raw = "Coriolis orbits the planet Kua";
+        let as_doc = provider
+            .embed_documents(vec![raw.to_string()])
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let as_query = provider.embed_query(raw).await.unwrap();
+        assert_eq!(as_doc.len(), as_query.len());
+        assert!(as_doc.iter().any(|&v| v != 0.0));
     }
 
     #[tokio::test]
