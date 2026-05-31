@@ -1011,6 +1011,218 @@ pub async fn reindex_all_sources(
     Ok(total)
 }
 
+// ── Citation chunk lookup ─────────────────────────────────────────────
+
+/// The chunk text + locator returned for a citation popover.
+#[derive(Serialize)]
+pub struct CitationChunk {
+    pub text: String,
+    pub page_start: i64,
+    pub page_end: i64,
+    pub section_heading: String,
+}
+
+/// Look up the chunk that backs a citation, so the UI can show the source
+/// passage when the user clicks the citation badge.
+///
+/// `source_name` matches `source.filename`. `page` is the cited page (the
+/// first number when the citation says `p.45-49`). If multiple chunks span
+/// the page, the earliest one is returned. None if no chunk matches.
+#[tauri::command]
+pub async fn get_chunk_for_citation(
+    state: State<'_, Arc<AppState>>,
+    source_name: String,
+    page: Option<i64>,
+) -> Result<Option<CitationChunk>, String> {
+    // Resolve the source.id first via filename so the chunk query can use
+    // it directly. Doing this in two steps avoids relying on SurrealDB's
+    // record-link filtering inside WHERE, which the MTREE optimizer has
+    // surprised us with before.
+    let mut src_resp = state
+        .db
+        .query("SELECT id FROM source WHERE filename = $name LIMIT 1")
+        .bind(("name", source_name))
+        .await
+        .map_err(|e| format!("source lookup: {e}"))?;
+    #[derive(Deserialize)]
+    struct SourceIdRow {
+        id: surrealdb::sql::Thing,
+    }
+    let src_rows: Vec<SourceIdRow> = src_resp
+        .take(0)
+        .map_err(|e| format!("source decode: {e}"))?;
+    let Some(src_id) = src_rows.into_iter().next() else {
+        return Ok(None);
+    };
+
+    // Build the chunk query — gate on page only when one was provided.
+    let sql = if page.is_some() {
+        "SELECT text, page_start, page_end, section_heading FROM chunk \
+         WHERE source = $src AND page_start <= $page AND page_end >= $page \
+         ORDER BY page_start ASC LIMIT 1"
+    } else {
+        "SELECT text, page_start, page_end, section_heading FROM chunk \
+         WHERE source = $src ORDER BY page_start ASC LIMIT 1"
+    };
+
+    let mut chunk_resp = state
+        .db
+        .query(sql)
+        .bind(("src", src_id.id))
+        .bind(("page", page))
+        .await
+        .map_err(|e| format!("chunk lookup: {e}"))?;
+    #[derive(Deserialize)]
+    struct ChunkRow {
+        text: String,
+        page_start: i64,
+        page_end: i64,
+        section_heading: String,
+    }
+    let chunk_rows: Vec<ChunkRow> = chunk_resp
+        .take(0)
+        .map_err(|e| format!("chunk decode: {e}"))?;
+    Ok(chunk_rows.into_iter().next().map(|r| CitationChunk {
+        text: r.text,
+        page_start: r.page_start,
+        page_end: r.page_end,
+        section_heading: r.section_heading,
+    }))
+}
+
+#[cfg(test)]
+mod citation_tests {
+    use super::*;
+
+    async fn seed_db() -> surrealdb::Surreal<surrealdb::engine::local::Db> {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("t").use_db("t").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE source SET id='quickstart', filename='Quickstart.pdf', \
+             display_name='Quickstart', source_type='rules', page_count=10, \
+             indexed_at=time::now(), index_status='done', embed_model='nomic-embed-text-v1.5'",
+        )
+        .await
+        .unwrap();
+        // Two chunks: one on p.9, one on p.20-22. The embedding must have
+        // dimension 768 to satisfy the MTREE index; the actual values don't
+        // matter for citation-lookup tests.
+        let zeros: String = std::iter::repeat("0.0")
+            .take(768)
+            .collect::<Vec<_>>()
+            .join(",");
+        db.query(format!(
+            "CREATE chunk SET id='c1', source=type::thing('source','quickstart'), \
+             text='Coriolis orbits Kua', page_start=9, page_end=9, \
+             section_heading='Intro', source_type='rules', embedding=[{zeros}], \
+             embed_model='nomic-embed-text-v1.5'"
+        ))
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+        db.query(format!(
+            "CREATE chunk SET id='c2', source=type::thing('source','quickstart'), \
+             text='Council factions list', page_start=20, page_end=22, \
+             section_heading='Factions', source_type='rules', embedding=[{zeros}], \
+             embed_model='nomic-embed-text-v1.5'"
+        ))
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+        db
+    }
+
+    /// Mirrors get_chunk_for_citation without needing a Tauri State.
+    async fn lookup<C: surrealdb::Connection>(
+        db: &surrealdb::Surreal<C>,
+        source_name: &str,
+        page: Option<i64>,
+    ) -> Option<CitationChunk> {
+        let mut src_resp = db
+            .query("SELECT id FROM source WHERE filename = $name LIMIT 1")
+            .bind(("name", source_name.to_owned()))
+            .await
+            .ok()?;
+        #[derive(Deserialize)]
+        struct SourceIdRow {
+            id: surrealdb::sql::Thing,
+        }
+        let src: Vec<SourceIdRow> = src_resp.take(0).ok()?;
+        let src_id = src.into_iter().next()?.id;
+        let sql = if page.is_some() {
+            "SELECT text, page_start, page_end, section_heading FROM chunk \
+             WHERE source = $src AND page_start <= $page AND page_end >= $page \
+             ORDER BY page_start ASC LIMIT 1"
+        } else {
+            "SELECT text, page_start, page_end, section_heading FROM chunk \
+             WHERE source = $src ORDER BY page_start ASC LIMIT 1"
+        };
+        let mut resp = db
+            .query(sql)
+            .bind(("src", src_id))
+            .bind(("page", page))
+            .await
+            .ok()?;
+        #[derive(Deserialize)]
+        struct R {
+            text: String,
+            page_start: i64,
+            page_end: i64,
+            section_heading: String,
+        }
+        let rows: Vec<R> = resp.take(0).ok()?;
+        rows.into_iter().next().map(|r| CitationChunk {
+            text: r.text,
+            page_start: r.page_start,
+            page_end: r.page_end,
+            section_heading: r.section_heading,
+        })
+    }
+
+    #[tokio::test]
+    async fn returns_chunk_for_exact_page_hit() {
+        let db = seed_db().await;
+        let got = lookup(&db, "Quickstart.pdf", Some(9)).await.unwrap();
+        assert_eq!(got.text, "Coriolis orbits Kua");
+        assert_eq!(got.page_start, 9);
+        assert_eq!(got.section_heading, "Intro");
+    }
+
+    #[tokio::test]
+    async fn returns_chunk_when_page_in_range() {
+        let db = seed_db().await;
+        let got = lookup(&db, "Quickstart.pdf", Some(21)).await.unwrap();
+        assert_eq!(got.text, "Council factions list");
+        assert_eq!(got.page_start, 20);
+        assert_eq!(got.page_end, 22);
+    }
+
+    #[tokio::test]
+    async fn returns_none_for_unknown_source() {
+        let db = seed_db().await;
+        assert!(lookup(&db, "Nonexistent.pdf", Some(1)).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn returns_none_for_page_with_no_chunk() {
+        let db = seed_db().await;
+        assert!(lookup(&db, "Quickstart.pdf", Some(99)).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn returns_first_chunk_when_page_omitted() {
+        let db = seed_db().await;
+        let got = lookup(&db, "Quickstart.pdf", None).await.unwrap();
+        // page_start=9 is earlier than page_start=20
+        assert_eq!(got.page_start, 9);
+    }
+}
+
 #[cfg(test)]
 mod reindex_tests {
     use super::*;

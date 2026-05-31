@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { chatSend, getChatHistory, type Campaign } from './lib/commands';
+  import {
+    chatSend,
+    getChatHistory,
+    getChunkForCitation,
+    type Campaign,
+    type CitationChunk,
+  } from './lib/commands';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
   let {
@@ -17,6 +23,20 @@
   let input = $state('');
   let isLoading = $state(false);
   let currentResponse = $state('');
+
+  // Citation popover state: when the user clicks a citation badge we look
+  // up the chunk that backed it and float a popover next to the badge.
+  let citationPopover = $state<
+    | {
+        source: string;
+        page: number | null;
+        chunk: CitationChunk | null;
+        loading: boolean;
+        x: number;
+        y: number;
+      }
+    | null
+  >(null);
 
   let unlistenListener: UnlistenFn | null = null;
 
@@ -48,14 +68,69 @@
     if (unlistenListener) unlistenListener();
   });
 
-  /** Render message content with citation badges */
+  /** HTML-attribute-escape a string. */
+  function escapeAttr(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  /** Render message content with clickable citation badges. */
   function renderContent(text: string): string {
     return text.replace(
       /\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+))?\]/g,
       (_, name: string, page: string | undefined) => {
-        return `<span class="citation-badge" title="Source: ${name}${page ? `, p.${page}` : ''}">${name}${page ? ` p.${page}` : ''}</span>`;
+        const dataPage = page ? ` data-page="${escapeAttr(page)}"` : '';
+        const label = `${escapeAttr(name)}${page ? ` p.${escapeAttr(page)}` : ''}`;
+        return `<button type="button" class="citation-badge" data-source="${escapeAttr(name)}"${dataPage} title="Show source passage">${label}</button>`;
       },
     );
+  }
+
+  async function handleMessagesClick(event: MouseEvent) {
+    const target = (event.target as HTMLElement | null)?.closest('.citation-badge');
+    if (!(target instanceof HTMLElement)) return;
+    event.stopPropagation();
+
+    const source = target.dataset.source ?? '';
+    const pageStr = target.dataset.page;
+    const page = pageStr ? parseInt(pageStr, 10) : null;
+    const rect = target.getBoundingClientRect();
+
+    citationPopover = {
+      source,
+      page,
+      chunk: null,
+      loading: true,
+      x: rect.left,
+      y: rect.bottom + 6,
+    };
+
+    try {
+      const chunk = await getChunkForCitation(source, page);
+      // Only commit if the user hasn't clicked another / dismissed in the meantime
+      if (citationPopover && citationPopover.source === source && citationPopover.page === page) {
+        citationPopover = { ...citationPopover, chunk, loading: false };
+      }
+    } catch (e) {
+      console.error('Failed to load citation chunk:', e);
+      if (citationPopover && citationPopover.source === source && citationPopover.page === page) {
+        citationPopover = { ...citationPopover, chunk: null, loading: false };
+      }
+    }
+  }
+
+  function handleWindowClick(event: MouseEvent) {
+    if (!citationPopover) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('.citation-popover') || target?.closest('.citation-badge')) return;
+    citationPopover = null;
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') citationPopover = null;
   }
 
   async function sendMessage() {
@@ -102,7 +177,7 @@
     </div>
   {/if}
 
-  <div class="messages">
+  <div class="messages" onclick={handleMessagesClick} role="presentation">
     {#each messages as msg (msg.role + msg.content)}
       <div class="message {msg.role}">
         <div class="role-label">{msg.role === 'user' ? 'You' : 'Chronacle'}</div>
@@ -118,6 +193,46 @@
     {/if}
   </div>
 </div>
+
+{#if citationPopover}
+  <div
+    class="citation-popover"
+    style="left: {citationPopover.x}px; top: {citationPopover.y}px"
+    role="dialog"
+    aria-label="Source passage"
+  >
+    <div class="popover-header">
+      <strong>{citationPopover.source}</strong>
+      {#if citationPopover.chunk}
+        <span class="muted">
+          p.{citationPopover.chunk.page_start}{citationPopover.chunk.page_end !==
+          citationPopover.chunk.page_start
+            ? `-${citationPopover.chunk.page_end}`
+            : ''}
+        </span>
+      {:else if citationPopover.page !== null}
+        <span class="muted">p.{citationPopover.page}</span>
+      {/if}
+      <button
+        type="button"
+        class="popover-close"
+        aria-label="Close"
+        onclick={() => (citationPopover = null)}>×</button>
+    </div>
+    {#if citationPopover.loading}
+      <div class="popover-body muted">Loading…</div>
+    {:else if citationPopover.chunk}
+      {#if citationPopover.chunk.section_heading}
+        <div class="popover-heading">{citationPopover.chunk.section_heading}</div>
+      {/if}
+      <div class="popover-body">{citationPopover.chunk.text}</div>
+    {:else}
+      <div class="popover-body muted">No matching passage found.</div>
+    {/if}
+  </div>
+{/if}
+
+<svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} />
 
 <div class="input-area">
   <div class="input-header">
@@ -291,9 +406,73 @@
     margin: 0 0.15rem;
     line-height: 1.4;
     user-select: none;
+    border: none;
+    font-family: inherit;
   }
 
   .citation-badge:hover {
     filter: brightness(1.15);
+  }
+
+  .citation-popover {
+    position: fixed;
+    z-index: 100;
+    max-width: min(440px, 90vw);
+    background: var(--bg, #1f2030);
+    color: var(--text, #e7e7ef);
+    border: 1px solid var(--border, #3a3b50);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+  }
+
+  .popover-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border, #3a3b50);
+    background: var(--surface, #2a2b40);
+  }
+
+  .popover-header .muted {
+    color: var(--text-muted, #9999b3);
+    font-size: 0.8rem;
+  }
+
+  .popover-close {
+    margin-left: auto;
+    background: transparent;
+    color: inherit;
+    border: none;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 0.25rem;
+  }
+
+  .popover-close:hover {
+    color: var(--accent);
+  }
+
+  .popover-heading {
+    padding: 0.4rem 0.75rem 0;
+    font-size: 0.8rem;
+    color: var(--text-muted, #9999b3);
+    font-style: italic;
+  }
+
+  .popover-body {
+    padding: 0.6rem 0.75rem 0.75rem;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    max-height: 320px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
+
+  .popover-body.muted {
+    color: var(--text-muted, #9999b3);
+    font-style: italic;
   }
 </style>

@@ -260,3 +260,29 @@ export interface ReindexProgress {
 export async function reindexAllSources(): Promise<number> {
   return invoke<number>('reindex_all_sources');
 }
+
+// ── Citation chunk lookup ────────────────────────────────────────────
+
+export interface CitationChunk {
+  text: string;
+  page_start: number;
+  page_end: number;
+  section_heading: string;
+}
+
+/**
+ * Look up the chunk that backs a citation, so the chat UI can show the
+ * supporting passage when the user clicks a citation badge.
+ *
+ * `page` is the cited page number (the first integer from `p.45-49`).
+ * Returns null if the source or matching chunk isn't found.
+ */
+export async function getChunkForCitation(
+  sourceName: string,
+  page: number | null,
+): Promise<CitationChunk | null> {
+  return await invoke<CitationChunk | null>('get_chunk_for_citation', {
+    sourceName,
+    page,
+  });
+}
