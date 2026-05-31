@@ -112,7 +112,10 @@ mod tests {
         let out = normalize(input);
         assert!(out.contains("First paragraph."));
         assert!(out.contains("Second paragraph."));
-        assert!(out.contains("\n\n"), "paragraph break must survive: {out:?}");
+        assert!(
+            out.contains("\n\n"),
+            "paragraph break must survive: {out:?}"
+        );
     }
 
     #[test]

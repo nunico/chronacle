@@ -47,9 +47,7 @@ fn pdfium_library_path() -> std::path::PathBuf {
     // <exe-dir>/resources/pdfium/<lib> elsewhere.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
-            let mac_resources = exe_dir
-                .join("../Resources/resources/pdfium")
-                .join(name);
+            let mac_resources = exe_dir.join("../Resources/resources/pdfium").join(name);
             if mac_resources.exists() {
                 return mac_resources;
             }

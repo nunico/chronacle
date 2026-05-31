@@ -49,7 +49,7 @@ async fn test_redefine_chunk_campaign_field() {
          DEFINE FIELD source ON chunk TYPE record<source>;
          DEFINE FIELD campaign ON chunk TYPE record<campaign>;
          DEFINE FIELD text ON chunk TYPE string;
-         DEFINE FIELD embedding ON chunk TYPE array<float>;"
+         DEFINE FIELD embedding ON chunk TYPE array<float>;",
     )
     .await
     .unwrap()
@@ -75,7 +75,7 @@ async fn test_redefine_chunk_campaign_field() {
     // Step 4: Try REMOVE + DEFINE approach
     db.query(
         "REMOVE FIELD campaign ON chunk;
-         DEFINE FIELD campaign ON chunk TYPE option<record<campaign>> DEFAULT NONE;"
+         DEFINE FIELD campaign ON chunk TYPE option<record<campaign>> DEFAULT NONE;",
     )
     .await
     .unwrap()
@@ -235,7 +235,7 @@ fn create_test_pdf() -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn test_pdf_extract_text() {
+async fn test_pdfium_extract_text() {
     use chronacle_lib::services::pdf_extractor::{PdfExtractor, PdfiumExtractor};
     let lib = pdfium_lib_path();
     if !lib.exists() {
@@ -317,9 +317,7 @@ async fn test_full_ingest_and_query_cycle() {
     let llm_provider = Arc::new(NoopProvider);
 
     let pdf_extractor: Arc<dyn chronacle_lib::services::pdf_extractor::PdfExtractor> =
-        Arc::new(chronacle_lib::services::pdf_extractor::PdfiumExtractor::new(
-            pdfium_lib_path(),
-        ));
+        Arc::new(chronacle_lib::services::pdf_extractor::PdfiumExtractor::new(pdfium_lib_path()));
 
     let state = Arc::new(chronacle_lib::AppState {
         db: db.clone(),

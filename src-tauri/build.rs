@@ -45,9 +45,8 @@ fn main() {
 
     fs::create_dir_all(&resources_dir).expect("create resources/pdfium dir");
 
-    let url = format!(
-        "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/{asset}"
-    );
+    let url =
+        format!("https://github.com/bblanchon/pdfium-binaries/releases/latest/download/{asset}");
     println!("cargo:warning=Downloading pdfium binary from {url}");
 
     let client = reqwest::blocking::Client::builder()

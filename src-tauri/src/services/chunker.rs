@@ -157,9 +157,7 @@ pub fn chunk_document(doc: &ExtractedDoc) -> Vec<Chunk> {
 
         while j < sentences.len() {
             let next_len = sentences[j].1.chars().count();
-            if !chunk_text.is_empty()
-                && chunk_text.chars().count() + next_len + 1 > target_chars
-            {
+            if !chunk_text.is_empty() && chunk_text.chars().count() + next_len + 1 > target_chars {
                 break;
             }
             if !chunk_text.is_empty() {

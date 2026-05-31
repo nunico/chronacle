@@ -166,10 +166,7 @@ impl FastEmbedProvider {
 
 #[async_trait]
 impl EmbeddingProvider for FastEmbedProvider {
-    async fn embed_documents(
-        &self,
-        texts: Vec<String>,
-    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+    async fn embed_documents(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         let prefixed: Vec<String> = if self.uses_nomic_prefixes() {
             texts
                 .into_iter()
@@ -226,10 +223,7 @@ impl MockEmbeddingProvider {
 
 #[async_trait]
 impl EmbeddingProvider for MockEmbeddingProvider {
-    async fn embed_documents(
-        &self,
-        texts: Vec<String>,
-    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+    async fn embed_documents(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         Ok(texts.into_iter().map(|_| vec![0.0; self.dim]).collect())
     }
 
