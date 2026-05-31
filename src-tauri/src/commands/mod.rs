@@ -941,3 +941,100 @@ pub async fn download_embedding_model(
 
     Ok(())
 }
+
+// ── Re-index all sources ──────────────────────────────────────────────
+
+/// Enumerate all source IDs in the database.
+async fn list_all_source_ids<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+) -> Result<Vec<String>, String> {
+    #[derive(Deserialize)]
+    struct Row {
+        id: surrealdb::sql::Thing,
+    }
+    let mut resp = db
+        .query("SELECT id FROM source")
+        .await
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<Row> = resp.take(0).map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().map(|r| r.id.id.to_string()).collect())
+}
+
+/// Re-run ingestion for every source currently in the database.
+///
+/// For each source: delete existing chunks, then call `ingest_source` again.
+/// Emits a `reindex-progress` event per pipeline tick so the UI can show
+/// progress across sources.
+#[tauri::command]
+pub async fn reindex_all_sources(
+    app_handle: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<usize, String> {
+    let ids = list_all_source_ids(&state.db).await?;
+    let total = ids.len();
+
+    for (idx, sid) in ids.iter().enumerate() {
+        let sid_for_progress = sid.clone();
+        let handle = app_handle.clone();
+        let on_progress: std::sync::Arc<
+            dyn Fn(crate::services::ingestion_service::IngestionProgress) + Send + Sync,
+        > = std::sync::Arc::new(move |p| {
+            let _ = handle.emit(
+                "reindex-progress",
+                serde_json::json!({
+                    "source_id": &sid_for_progress,
+                    "current": idx + 1,
+                    "total": total,
+                    "progress": p.fraction,
+                    "step": p.step,
+                }),
+            );
+        });
+
+        state
+            .vector_store
+            .delete_by_source(sid)
+            .await
+            .map_err(|e| format!("delete chunks for {sid}: {e}"))?;
+
+        let state_ref = state.inner().clone();
+        crate::services::ingestion_service::ingest_source(&state_ref, sid, on_progress)
+            .await
+            .map_err(|e| format!("re-ingest {sid}: {e}"))?;
+    }
+
+    Ok(total)
+}
+
+#[cfg(test)]
+mod reindex_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn list_all_source_ids_returns_all_ids() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE source SET id='s1', filename='a.pdf', display_name='a', \
+             source_type='rules', page_count=0, indexed_at=time::now(), \
+             index_status='done', embed_model='nomic-embed-text-v1.5'",
+        )
+        .await
+        .unwrap();
+        db.query(
+            "CREATE source SET id='s2', filename='b.pdf', display_name='b', \
+             source_type='rules', page_count=0, indexed_at=time::now(), \
+             index_status='done', embed_model='nomic-embed-text-v1.5'",
+        )
+        .await
+        .unwrap();
+
+        let ids = list_all_source_ids(&db).await.unwrap();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"s1".to_string()));
+        assert!(ids.contains(&"s2".to_string()));
+    }
+}

@@ -239,3 +239,24 @@ export async function checkEmbeddingModel(): Promise<boolean> {
 export async function downloadEmbeddingModel(): Promise<void> {
   return invoke('download_embedding_model');
 }
+
+// ── Re-index all sources ─────────────────────────────────────────────
+
+export interface ReindexProgress {
+  source_id: string;
+  current: number;
+  total: number;
+  progress: number;
+  step: string;
+}
+
+/**
+ * Re-run ingestion for every source currently in the database.
+ *
+ * Resolves with the number of sources re-indexed. While the command is
+ * running, the `reindex-progress` Tauri event fires for each pipeline tick.
+ * Listen with `app.listen<ReindexProgress>('reindex-progress', ...)`.
+ */
+export async function reindexAllSources(): Promise<number> {
+  return invoke<number>('reindex_all_sources');
+}
