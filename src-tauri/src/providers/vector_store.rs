@@ -153,13 +153,32 @@ where
             .collect::<Vec<_>>()
             .join(",");
 
-        // With option<record<campaign>> DEFAULT NONE, absent campaign fields
-        // hold NONE (not NULL). Check both for backward compat.
-        let campaign_filter = match campaign_id {
-            Some(cid) => {
-                format!("WHERE campaign = campaign:`{cid}` OR campaign IS NONE OR campaign IS NULL")
-            }
-            None => "WHERE campaign IS NONE OR campaign IS NULL".to_string(),
+        // Canonical SurrealDB KNN pattern:
+        //   - `embedding <|K|> $vec` in WHERE uses the MTREE index to filter
+        //     to the K nearest neighbours (metric inherited from the index —
+        //     ours is DIST COSINE).
+        //   - `vector::distance::knn()` in SELECT retrieves the distance the
+        //     KNN scan computed for the current row.
+        //
+        // The previous form (`embedding <|1|> [vec] AS distance` in SELECT)
+        // returned a boolean, which deserialize_distance silently coerced to
+        // f64::MAX — every row tied, ORDER BY did nothing, results came back
+        // in storage order. Retrieval was effectively random.
+        //
+        // We over-fetch (K = limit * 5, min 50) so the campaign filter has
+        // candidates to narrow from without leaving us short of `limit`.
+        let knn_k = std::cmp::max(limit * 5, 50);
+
+        // Don't combine an `OR` predicate with the KNN operator — the MTREE
+        // optimizer can't push it down and returns zero rows. Since the
+        // schema (post 002_fix_chunk_campaign_type) defines `campaign` as
+        // `option<record<campaign>> DEFAULT NONE`, IS NULL is impossible, so
+        // we only need IS NONE.
+        let campaign_clause = match campaign_id {
+            Some(cid) => format!(
+                " AND (campaign = campaign:`{cid}` OR campaign IS NONE)"
+            ),
+            None => " AND campaign IS NONE".to_string(),
         };
 
         let sql = format!(
@@ -172,12 +191,11 @@ where
                 page_end,
                 section_heading,
                 source_type,
-                embedding <|1|> [{}] AS distance
+                vector::distance::knn() AS distance
             FROM chunk
-            {}
+            WHERE embedding <|{knn_k}|> [{vec_str}]{campaign_clause}
             ORDER BY distance ASC
-            LIMIT {}",
-            vec_str, campaign_filter, limit
+            LIMIT {limit}"
         );
 
         let mut response = self
@@ -204,19 +222,24 @@ where
         where
             D: serde::Deserializer<'de>,
         {
+            // Accept numbers (the happy path) and numeric strings (some
+            // SurrealDB versions return distance as a string). REJECT bool —
+            // a boolean here means the KNN expression was used incorrectly
+            // (`embedding <|K|> $vec` in SELECT returns membership, not
+            // distance); silently coercing it to f64::MAX hides the bug and
+            // makes retrieval return random rows. See the inline comment on
+            // the search query above.
             #[derive(serde::Deserialize)]
             #[serde(untagged)]
             enum Num {
                 F64(f64),
                 I64(i64),
-                Bool(#[allow(dead_code)] bool),
                 String(String),
             }
             match serde::Deserialize::deserialize(deserializer)? {
                 Num::F64(v) => Ok(v),
                 Num::I64(v) => Ok(v as f64),
-                Num::Bool(_) => Ok(f64::MAX),
-                Num::String(s) => Ok(s.parse::<f64>().unwrap_or(f64::MAX)),
+                Num::String(s) => s.parse::<f64>().map_err(serde::de::Error::custom),
             }
         }
 

@@ -141,3 +141,106 @@ async fn council_factions_question_retrieves_correct_chunk() {
         top.text
     );
 }
+
+/// Regression test for the SurrealDB KNN search bug: with `<|1|>` used in the
+/// SELECT expression, every chunk got `distance = f64::MAX` and retrieval
+/// returned chunks in storage order. With many chunks and one specific target,
+/// random order would almost never put the target at #1 — this test would
+/// catch that.
+#[tokio::test]
+async fn retrieval_ranks_target_chunk_above_distractors() {
+    let Ok(provider) = FastEmbedProvider::try_new(None) else {
+        eprintln!("Skipping — nomic model not cached");
+        return;
+    };
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(provider);
+
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("test.db");
+    let db = Surreal::new::<surrealdb::engine::local::RocksDb>(db_path)
+        .await
+        .unwrap();
+    db.use_ns("test").use_db("test").await.unwrap();
+    chronacle_lib::schema::run_migrations(&db).await.unwrap();
+    db.query(
+        "CREATE source SET id='s1', filename='quickstart.pdf', display_name='Quickstart', \
+         source_type='rules', page_count=1, indexed_at=time::now(), index_status='done', \
+         embed_model='nomic-embed-text-v1.5'",
+    )
+    .await
+    .unwrap();
+
+    // 20 distractor chunks about unrelated TTRPG topics + 1 target chunk
+    // mentioning Coriolis orbiting Kua.
+    let mut texts: Vec<String> = (0..20)
+        .map(|i| {
+            format!(
+                "Distractor passage {i}: combat rules, dice mechanics, weapon ranges. \
+                 Light weapons fit in half a row; heavy weapons need two rows. \
+                 Rolling six sixes is a critical success."
+            )
+        })
+        .collect();
+    let target =
+        "The space station Coriolis orbits the green jungles of the planet Kua in the Kua system.";
+    texts.push(target.to_string());
+
+    let vectors = embed.embed_documents(texts.clone()).await.unwrap();
+    let store = SurrealDbVector::new(db);
+    let indexed: Vec<IndexedChunk> = texts
+        .iter()
+        .zip(vectors)
+        .enumerate()
+        .map(|(i, (t, v))| IndexedChunk {
+            chunk_id: format!("s1-{i}"),
+            campaign_id: None,
+            text: t.clone(),
+            page_start: 1,
+            page_end: 1,
+            section_heading: String::new(),
+            source_type: "rules".into(),
+            embedding: v,
+            embed_model: "nomic-embed-text-v1.5".into(),
+        })
+        .collect();
+    store.upsert("s1", &indexed).await.unwrap();
+
+    let qv = embed
+        .embed_query("What planet does Coriolis orbit?")
+        .await
+        .unwrap();
+    let results = store.search(&qv, None, 5).await.unwrap();
+
+    assert!(!results.is_empty(), "search returned no results");
+
+    // 1. Distance must be a real number (cosine distance ∈ [0, 2]), not the
+    //    f64::MAX fallback that signalled the broken-query bug.
+    for r in &results {
+        assert!(
+            r.distance.is_finite() && r.distance < 10.0,
+            "distance must be a real cosine value, got {} (was the search query returning bool again?)",
+            r.distance
+        );
+    }
+
+    // 2. Distances must be DIFFERENT (the bug made them all tie at MAX).
+    let distinct_distances: std::collections::HashSet<u64> = results
+        .iter()
+        .map(|r| r.distance.to_bits())
+        .collect();
+    assert!(
+        distinct_distances.len() > 1,
+        "all distances equal — search not actually ranking. distances={:?}",
+        results.iter().map(|r| r.distance).collect::<Vec<_>>()
+    );
+
+    // 3. The target chunk must be #1 — distractors are about unrelated topics
+    //    and shouldn't beat a chunk that literally answers the question.
+    let top = &results[0];
+    assert!(
+        top.text.contains("Coriolis") && top.text.contains("Kua"),
+        "target chunk should rank #1; got top: {:?}",
+        top.text
+    );
+}
+
