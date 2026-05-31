@@ -16,7 +16,8 @@ DEFINE FIELD embed_model ON source TYPE string;
 
 DEFINE TABLE chunk SCHEMAFULL;
 DEFINE FIELD source ON chunk TYPE record<source>;
-DEFINE FIELD campaign ON chunk TYPE record<campaign>;
+-- campaign on chunk is nullable: collection-based code omits it; legacy code sets it.
+DEFINE FIELD campaign ON chunk TYPE record<campaign> | NULL DEFAULT NULL;
 DEFINE FIELD text ON chunk TYPE string;
 DEFINE FIELD page_start ON chunk TYPE int;
 DEFINE FIELD page_end ON chunk TYPE int;

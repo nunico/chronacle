@@ -40,7 +40,10 @@ pub trait LlmProvider: Send + Sync {
 /// Provider that uses the OpenAI chat-completion API.
 pub struct OpenAIProvider {
     api_key: String,
+    // Phase 1 stub — fields are stored and will be used in the Phase 2 implementation.
+    #[allow(dead_code)]
     model: String,
+    #[allow(dead_code)]
     base_url: String,
 }
 
@@ -96,6 +99,8 @@ impl LlmProvider for OpenAIProvider {
 /// Provider that uses the Anthropic Messages API.
 pub struct AnthropicProvider {
     api_key: String,
+    // Phase 1 stub — will be read in the Phase 2 implementation.
+    #[allow(dead_code)]
     model: String,
 }
 
@@ -133,7 +138,9 @@ impl LlmProvider for AnthropicProvider {
 
         tokio::spawn(async move {
             let _ = tx
-                .send(Ok("[Anthropic response not yet implemented — Phase 1 stub.]".to_string()))
+                .send(Ok(
+                    "[Anthropic response not yet implemented — Phase 1 stub.]".to_string(),
+                ))
                 .await;
         });
 
@@ -146,7 +153,10 @@ impl LlmProvider for AnthropicProvider {
 /// Ollama *does not* expose an OpenAI-compatible endpoint; requests must use
 /// the raw Ollama API (`POST /api/chat` with NDJSON streaming).
 pub struct OllamaProvider {
+    // Phase 1 stub — fields are stored and will be used in the Phase 2 implementation.
+    #[allow(dead_code)]
     base_url: String,
+    #[allow(dead_code)]
     model: String,
 }
 
@@ -183,7 +193,9 @@ impl LlmProvider for OllamaProvider {
 
         tokio::spawn(async move {
             let _ = tx
-                .send(Ok("[Ollama response not yet implemented — Phase 1 stub.]".to_string()))
+                .send(Ok(
+                    "[Ollama response not yet implemented — Phase 1 stub.]".to_string()
+                ))
                 .await;
         });
 
@@ -198,9 +210,7 @@ mod tests {
     #[tokio::test]
     async fn test_openai_provider_returns_config_error_without_key() {
         let provider = OpenAIProvider::new(String::new(), "gpt-4o-mini".to_string());
-        let result = provider
-            .chat_stream("test", &[])
-            .await;
+        let result = provider.chat_stream("test", &[]).await;
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), LlmError::Config(_)));

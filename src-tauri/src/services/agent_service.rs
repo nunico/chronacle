@@ -6,7 +6,6 @@
 /// 4. Builds a context-augmented prompt.
 /// 5. Streams the LLM response.
 /// 6. Persists the conversation to the `message` table.
-
 use std::sync::Arc;
 
 use crate::AppState;
@@ -29,10 +28,13 @@ pub enum AgentError {
 ///
 /// Returns a string with the LLM's response (including citations). In Phase 2
 /// this will return a full `ChatResponse` with structured citation data.
+///
+/// `collection_ids` scopes retrieval to the caller's subscribed collections.
+/// Pass an empty slice to skip retrieval entirely (e.g. during Phase 1 stub).
 pub async fn process_message(
     state: &Arc<AppState>,
     message: &str,
-    _campaign_id: Option<&str>,
+    collection_ids: &[String],
 ) -> Result<String, AgentError> {
     // ── 1. Embed the query ─────────────────────────────────────
     let query_vector = embed_query(message).await?;
@@ -40,7 +42,7 @@ pub async fn process_message(
     // ── 2. Retrieve relevant chunks ────────────────────────────
     let _results = state
         .vector_store
-        .search(&query_vector, None, 10)
+        .search(&query_vector, collection_ids, 10)
         .await
         .map_err(|e| AgentError::Retrieval(e.to_string()))?;
 

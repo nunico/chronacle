@@ -124,6 +124,9 @@ pub async fn upload_source(
 #[derive(Debug, Deserialize)]
 pub struct ChatRequest {
     pub message: String,
+    // Deserialized from IPC; will be used in Phase 2 when agent routing is
+    // collection-scoped. Rust's dead-code lint does not see serde reads.
+    #[allow(dead_code)]
     pub campaign_id: Option<String>,
 }
 
@@ -165,13 +168,7 @@ pub async fn chat_send(
                 while let Some(token_result) = rx.recv().await {
                     match token_result {
                         Ok(token) => {
-                            let _ = app.emit(
-                                "chat-token",
-                                ChatToken {
-                                    token,
-                                    done: false,
-                                },
-                            );
+                            let _ = app.emit("chat-token", ChatToken { token, done: false });
                         }
                         Err(e) => {
                             let _ = app.emit(
