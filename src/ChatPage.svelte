@@ -129,7 +129,7 @@
     citationPopover = null;
   }
 
-  function handleKeydown(event: KeyboardEvent) {
+  function handleWindowKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') citationPopover = null;
   }
 
@@ -232,7 +232,7 @@
   </div>
 {/if}
 
-<svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} />
+<svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} />
 
 <div class="input-area">
   <div class="input-header">
