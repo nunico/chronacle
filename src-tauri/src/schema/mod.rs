@@ -10,6 +10,7 @@
 /// Files use a zero-prefixed numeric naming convention so they sort in
 /// dependency order:
 /// - `001_initial.surql` — Phase 1 tables, fields, indexes
+/// - `002_embedding_index.surql` — (reserved; not yet created)
 /// - `003_collections.surql` — collection table, subscribes_to relation, collection fields on source/chunk
 
 use std::path::Path;

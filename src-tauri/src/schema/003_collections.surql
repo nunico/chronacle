@@ -5,16 +5,16 @@
 
 DEFINE TABLE collection SCHEMAFULL;
 DEFINE FIELD name        ON collection TYPE string;
-DEFINE FIELD description ON collection TYPE string | NULL;
+DEFINE FIELD description ON collection TYPE string | NULL DEFAULT NULL;
 DEFINE FIELD created_at  ON collection TYPE datetime;
 DEFINE FIELD updated_at  ON collection TYPE datetime;
 
 DEFINE TABLE subscribes_to SCHEMAFULL TYPE RELATION FROM campaign TO collection;
 DEFINE FIELD created_at ON subscribes_to TYPE datetime;
 
--- Add collection field to source (nullable — service layer enforces required).
+-- Add collection field to source (non-nullable — service layer enforces required at insert time).
 -- The old campaign field remains defined but is never set by new code.
-DEFINE FIELD collection ON source TYPE record<collection> | NULL DEFAULT NULL;
+DEFINE FIELD collection ON source TYPE record<collection>;
 
 -- Add collection field to chunk (inherited from source at index time).
-DEFINE FIELD collection ON chunk TYPE record<collection> | NULL DEFAULT NULL;
+DEFINE FIELD collection ON chunk TYPE record<collection>;
