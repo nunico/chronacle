@@ -77,10 +77,14 @@
       .replace(/>/g, '&gt;');
   }
 
-  /** Render message content with clickable citation badges. */
+  /** Render message content with clickable citation badges.
+   *
+   * Matches both `p.N` and `p.N-M` (range). `page` captures the start; the
+   * optional `-M` tail is consumed but discarded — the chunk for page_start
+   * also covers page_end. */
   function renderContent(text: string): string {
     return text.replace(
-      /\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+))?\]/g,
+      /\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+)(?:-\d+)?)?\]/g,
       (_, name: string, page: string | undefined) => {
         const dataPage = page ? ` data-page="${escapeAttr(page)}"` : '';
         const label = `${escapeAttr(name)}${page ? ` p.${escapeAttr(page)}` : ''}`;

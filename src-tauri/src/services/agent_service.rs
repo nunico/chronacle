@@ -257,11 +257,16 @@ pub struct Citation {
 
 /// Parse citations from an assistant response.
 ///
-/// Looks for patterns like: `[Source: "Name", p.12]` or `[Source: "Name"]`.
+/// Accepts:
+///   `[Source: "Name", p.12]`        – single page
+///   `[Source: "Name", p.45-49]`     – page range (only the start is captured)
+///   `[Source: "Name", p. 9-9]`      – with whitespace
+///   `[Source: "Name"]`              – no page
 fn parse_citations(response: &str) -> Vec<Citation> {
-    // Pattern: [Source: "name", p.N] or [Source: "name"]
-    // Raw string with r#"...#" delimiters so that inner quotes and backslashes are literal.
-    let re = regex::Regex::new(r#"\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+))?\]"#)
+    // The page group captures only the first integer; an optional `-N` tail is
+    // consumed but discarded. The page-end isn't needed for citation excerpt
+    // lookup (the chunk for page_start covers page_end too).
+    let re = regex::Regex::new(r#"\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+)(?:-\d+)?)?\]"#)
         .expect("valid citation regex");
 
     re.captures_iter(response)
@@ -382,6 +387,24 @@ mod tests {
         assert_eq!(citations.len(), 1);
         assert_eq!(citations[0].source_name, "SRD");
         assert_eq!(citations[0].page, None);
+    }
+
+    #[test]
+    fn test_parse_citations_page_range() {
+        // The LLM mimics the `p.N-M` format from the context block. Parser
+        // must capture the first page; without this, the badge in the UI
+        // wouldn't render at all (the whole citation falls through as text).
+        let cases = [
+            ("[Source: \"Quickstart.pdf\", p.9-9]", "Quickstart.pdf", Some(9)),
+            ("[Source: \"Quickstart.pdf\", p.45-49]", "Quickstart.pdf", Some(45)),
+            ("[Source: \"PHB\", p. 72-72]", "PHB", Some(72)),
+        ];
+        for (input, expected_name, expected_page) in cases {
+            let citations = parse_citations(input);
+            assert_eq!(citations.len(), 1, "no match for {input:?}");
+            assert_eq!(citations[0].source_name, expected_name);
+            assert_eq!(citations[0].page, expected_page);
+        }
     }
 
     // ── Message persistence tests ───────────────────────────────
