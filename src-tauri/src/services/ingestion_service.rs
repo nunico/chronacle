@@ -78,6 +78,7 @@ pub async fn ingest_source(
         step: "Extracting text from PDF pages".into(),
     });
     let extracted = extract_text(&pdf_data).await?;
+    let extracted = normalize_extracted(&extracted);
 
     on_progress(IngestionProgress {
         fraction: 0.25,
@@ -122,6 +123,33 @@ pub async fn ingest_source(
         .map_err(|e| IngestionError::Db(e.to_string()))?;
 
     Ok(())
+}
+
+/// Apply [`text_normalizer::normalize`] to every page and rebuild the merged
+/// full text. This repairs PDF extraction artifacts (soft hyphens, intra-paragraph
+/// newlines) before chunking so that embeddings see clean prose.
+fn normalize_extracted(doc: &ExtractedDoc) -> ExtractedDoc {
+    use crate::services::text_normalizer::normalize;
+    let pages: Vec<PageContent> = doc
+        .pages
+        .iter()
+        .map(|p| PageContent {
+            page_num: p.page_num,
+            text: normalize(&p.text),
+        })
+        .collect();
+    let mut full = String::new();
+    for (i, p) in pages.iter().enumerate() {
+        if i > 0 && !p.text.is_empty() && !full.is_empty() {
+            full.push('\n');
+        }
+        full.push_str(&p.text);
+    }
+    ExtractedDoc {
+        page_count: pages.len(),
+        text: full,
+        pages,
+    }
 }
 
 /// Extract text from raw PDF bytes using `pdf-extract`.
@@ -279,4 +307,57 @@ where
             campaign_id: r.campaign.map(|c| c.id.to_string()),
         })
         .ok_or_else(|| IngestionError::Db(format!("Source '{source_id}' not found")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_extracted_removes_soft_hyphen_artifacts() {
+        let raw = ExtractedDoc {
+            page_count: 1,
+            text: "power-\nful descen-\ndents of\nthe captain family".to_string(),
+            pages: vec![PageContent {
+                page_num: 1,
+                text: "power-\nful descen-\ndents of\nthe captain family".to_string(),
+            }],
+        };
+        let normalized = normalize_extracted(&raw);
+        assert!(
+            !normalized.text.contains("-\n"),
+            "soft hyphens not removed: {:?}",
+            normalized.text
+        );
+        assert!(normalized.text.contains("powerful"));
+        assert!(normalized.text.contains("descendents"));
+        assert_eq!(normalized.pages[0].text, normalized.text);
+        assert_eq!(normalized.page_count, 1);
+    }
+
+    #[test]
+    fn normalize_extracted_preserves_page_boundaries() {
+        let p1 = "First page paragraph.";
+        let p2 = "Second page paragraph.";
+        let raw = ExtractedDoc {
+            page_count: 2,
+            text: format!("{p1}\n{p2}"),
+            pages: vec![
+                PageContent {
+                    page_num: 1,
+                    text: p1.to_string(),
+                },
+                PageContent {
+                    page_num: 2,
+                    text: p2.to_string(),
+                },
+            ],
+        };
+        let normalized = normalize_extracted(&raw);
+        assert_eq!(normalized.pages.len(), 2);
+        assert_eq!(normalized.pages[0].page_num, 1);
+        assert_eq!(normalized.pages[1].page_num, 2);
+        assert!(normalized.text.contains(p1));
+        assert!(normalized.text.contains(p2));
+    }
 }
