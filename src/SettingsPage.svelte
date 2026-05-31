@@ -8,9 +8,12 @@
     getProviderModels,
     addProviderModel,
     removeProviderModel,
+    reindexAllSources,
     type CustomProvider,
     type CustomProviderModel,
+    type ReindexProgress,
   } from './lib/commands';
+  import { listen } from '@tauri-apps/api/event';
 
   let providerType = $state('openai');
   let apiKey = $state('');
@@ -37,6 +40,32 @@
   let editingProviderModels = $state<string | null>(null);
   let newModelId = $state('');
   let newModelDisplayName = $state('');
+
+  // Re-index state
+  let reindexing = $state(false);
+  let reindexProgress = $state<ReindexProgress | null>(null);
+  let reindexError = $state<string | null>(null);
+  let reindexedCount = $state<number | null>(null);
+
+  async function onReindexAll() {
+    reindexing = true;
+    reindexError = null;
+    reindexedCount = null;
+    reindexProgress = null;
+    const unlisten = await listen<ReindexProgress>('reindex-progress', (e) => {
+      reindexProgress = e.payload;
+    });
+    try {
+      const count = await reindexAllSources();
+      reindexedCount = count;
+    } catch (e) {
+      reindexError = String(e);
+    } finally {
+      reindexing = false;
+      reindexProgress = null;
+      unlisten();
+    }
+  }
 
   onMount(async () => {
     await loadSettings();
@@ -423,6 +452,30 @@
       <button class="small-btn primary" onclick={() => { showAddProvider = true; }}>+ Add Custom Provider</button>
     {/if}
   </section>
+
+  <section class="config-section">
+    <h3>Embedding model</h3>
+    <p class="muted">
+      Re-index every PDF source to apply recent improvements to text extraction,
+      chunking, and embedding quality. Existing sources stay searchable during
+      re-indexing; only their chunks get replaced.
+    </p>
+    <button class="small-btn primary" disabled={reindexing} onclick={onReindexAll}>
+      {reindexing ? 'Re-indexing…' : 'Re-index all sources'}
+    </button>
+    {#if reindexing && reindexProgress}
+      <div class="reindex-progress">
+        Source {reindexProgress.current}/{reindexProgress.total}: {reindexProgress.step}
+        ({Math.round(reindexProgress.progress * 100)}%)
+      </div>
+    {/if}
+    {#if reindexError}
+      <div class="reindex-error">Re-index failed: {reindexError}</div>
+    {/if}
+    {#if reindexedCount !== null && !reindexing}
+      <div class="reindex-success">Re-indexed {reindexedCount} source(s).</div>
+    {/if}
+  </section>
 </div>
 
 <style>
@@ -717,5 +770,35 @@
     border: none;
     border-top: 1px solid var(--border);
     margin: 1.5rem 0;
+  }
+
+  .muted {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin: 0 0 0.75rem;
+  }
+
+  .reindex-progress {
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .reindex-error {
+    margin-top: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    background: #5a1e1e;
+    color: #fca5a5;
+    font-size: 0.85rem;
+  }
+
+  .reindex-success {
+    margin-top: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    background: #14532d;
+    color: #86efac;
+    font-size: 0.85rem;
   }
 </style>
