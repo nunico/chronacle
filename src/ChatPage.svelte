@@ -80,6 +80,39 @@
       .replace(/>/g, '&gt;');
   }
 
+  /** Split a leading ALL-CAPS section heading off the quote, if any.
+   *
+   * pdfium concatenates section headings onto the same line as body text
+   * ("CORIOLIS AND KUA The center of the Third Horizon..."), and when the
+   * LLM picks a verbatim sentence it grabs the heading too. We split at
+   * the first word containing a lowercase letter.
+   *
+   * Conservative: requires 2+ leading ALL-CAPS words AND non-empty body
+   * to avoid misreading "A 6 means success." or stray emphasis as a
+   * heading. */
+  function splitHeading(quote: string): { heading: string | null; body: string } {
+    const tokens = quote.split(/(\s+)/);
+    let headingTokenEnd = 0;
+    let headingWordCount = 0;
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      if (/^\s+$/.test(t)) continue;
+      if (/^[A-Z][A-Z0-9'&:\-/]*$/.test(t)) {
+        headingTokenEnd = i + 1;
+        headingWordCount++;
+      } else {
+        break;
+      }
+    }
+    if (headingWordCount < 2 || headingTokenEnd >= tokens.length) {
+      return { heading: null, body: quote };
+    }
+    const heading = tokens.slice(0, headingTokenEnd).join('').trim();
+    const body = tokens.slice(headingTokenEnd).join('').trim();
+    if (!body) return { heading: null, body: quote };
+    return { heading, body };
+  }
+
   /** Render message content with clickable citation badges.
    *
    * Citation forms accepted (mirrors the Rust parser):
@@ -243,7 +276,11 @@
         onclick={() => (citationPopover = null)}>×</button>
     </div>
     {#if citationPopover.quote}
-      <div class="popover-body popover-quote">“{citationPopover.quote}”</div>
+      {@const split = splitHeading(citationPopover.quote)}
+      {#if split.heading}
+        <div class="popover-heading">{split.heading}</div>
+      {/if}
+      <div class="popover-body popover-quote">“{split.body}”</div>
     {:else if citationPopover.loading}
       <div class="popover-body muted">Loading…</div>
     {:else if citationPopover.chunk}
