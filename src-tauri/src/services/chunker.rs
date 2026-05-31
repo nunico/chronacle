@@ -16,10 +16,14 @@ use regex::Regex;
 // ── Configuration constants ───────────────────────────────────────────
 
 /// Target chunk size in approximate tokens.
-const TARGET_TOKENS: usize = 400;
+///
+/// Smaller chunks (vs. the prior 400) improve retrieval precision for factoid
+/// queries: each chunk is more focused on a single topic, so its embedding is
+/// less diluted and cosine similarity ranks the right chunk higher.
+const TARGET_TOKENS: usize = 250;
 
-/// Overlap between consecutive chunks in approximate tokens.
-const OVERLAP_TOKENS: usize = 80;
+/// Overlap between consecutive chunks in approximate tokens (~20% of target).
+const OVERLAP_TOKENS: usize = 50;
 
 /// Characters per token approximation.
 const CHARS_PER_TOKEN: f64 = 4.0;
@@ -128,52 +132,93 @@ pub fn approx_token_count(text: &str) -> usize {
 ///
 /// Strategy:
 /// 1. Run section detection across the full text to find heading positions.
-/// 2. Walk through the full text with a sliding window of ~TARGET_TOKENS.
-/// 3. In the overlap region, prefer splitting at section boundaries.
+/// 2. Split the text into sentences and group sentences greedily up to
+///    ~TARGET_TOKENS per chunk.
+/// 3. Overlap consecutive chunks by ~OVERLAP_TOKENS worth of trailing sentences.
 /// 4. Tag each chunk with its source page range and section heading.
 pub fn chunk_document(doc: &ExtractedDoc) -> Vec<Chunk> {
     let target_chars = (TARGET_TOKENS as f64 * CHARS_PER_TOKEN) as usize;
     let overlap_chars = (OVERLAP_TOKENS as f64 * CHARS_PER_TOKEN) as usize;
-    let step = target_chars.saturating_sub(overlap_chars);
 
-    // ── Detect section headings ──────────────────────────────────
     let headings = detect_headings(&doc.text);
-
-    // ── Build page-offset index for page_start/page_end ──────────
     let page_offsets = build_page_offsets(&doc.pages);
+    let sentences = sentence_offsets(&doc.text);
 
-    // ── Sliding window ───────────────────────────────────────────
-    let text = &doc.text;
-    let text_len = text.chars().count();
+    if sentences.is_empty() {
+        return Vec::new();
+    }
+
     let mut chunks: Vec<Chunk> = Vec::new();
-    let mut cursor = 0;
+    let mut i = 0;
+    while i < sentences.len() {
+        let chunk_start_char = sentences[i].0;
+        let mut chunk_text = String::new();
+        let mut j = i;
 
-    while cursor < text_len {
-        let end = std::cmp::min(cursor + target_chars, text_len);
+        while j < sentences.len() {
+            let next_len = sentences[j].1.chars().count();
+            if !chunk_text.is_empty()
+                && chunk_text.chars().count() + next_len + 1 > target_chars
+            {
+                break;
+            }
+            if !chunk_text.is_empty() {
+                chunk_text.push(' ');
+            }
+            chunk_text.push_str(sentences[j].1);
+            j += 1;
+        }
 
-        let raw_text: String = text.chars().skip(cursor).take(end - cursor).collect();
-        let trimmed = raw_text.trim().to_string();
-
-        if !trimmed.is_empty() {
-            // Determine the most relevant section heading for this chunk
-            let heading = find_active_heading(cursor, &headings);
-
-            // Compute page range for this chunk
-            let (ps, pe) = page_range_for_byte_range(cursor, end, &page_offsets);
+        if !chunk_text.trim().is_empty() {
+            let chunk_end_char = chunk_start_char + chunk_text.chars().count();
+            let heading = find_active_heading(chunk_start_char, &headings);
+            let (ps, pe) =
+                page_range_for_byte_range(chunk_start_char, chunk_end_char, &page_offsets);
 
             chunks.push(Chunk {
-                text: trimmed,
+                text: chunk_text.trim().to_string(),
                 page_start: ps,
                 page_end: pe,
                 section_heading: heading,
             });
         }
 
-        // Advance cursor — prefer section boundaries in the overlap zone
-        cursor = advance_cursor(cursor, step, end, text_len, &headings);
+        if j >= sentences.len() {
+            break;
+        }
+
+        // Advance i so the next chunk overlaps by ~OVERLAP_TOKENS worth of
+        // trailing sentences. Always make progress (at least one sentence).
+        let mut overlap_size = 0usize;
+        let mut new_i = j;
+        while new_i > i + 1 && overlap_size < overlap_chars {
+            new_i -= 1;
+            overlap_size += sentences[new_i].1.chars().count();
+        }
+        i = std::cmp::max(new_i, i + 1);
     }
 
     chunks
+}
+
+/// Split text into sentences and return each sentence's starting char offset.
+///
+/// Uses Unicode sentence boundaries from `unicode-segmentation`. Empty / pure
+/// whitespace sentences are skipped.
+fn sentence_offsets(text: &str) -> Vec<(usize, &str)> {
+    use unicode_segmentation::UnicodeSegmentation;
+    let mut out = Vec::new();
+    let mut offset = 0usize;
+    for sentence in text.split_sentence_bounds() {
+        let trimmed = sentence.trim();
+        if !trimmed.is_empty() {
+            // Find the offset of the trimmed sentence within the original chunk
+            let lead = sentence.chars().take_while(|c| c.is_whitespace()).count();
+            out.push((offset + lead, trimmed));
+        }
+        offset += sentence.chars().count();
+    }
+    out
 }
 
 /// Detect all heading positions in the full text.
@@ -243,32 +288,6 @@ fn page_range_for_byte_range(
     }
 
     (page_start, page_end)
-}
-
-/// Advance the window cursor, preferring section boundaries when available.
-fn advance_cursor(
-    cursor: usize,
-    step: usize,
-    end: usize,
-    _text_len: usize,
-    headings: &[(usize, String)],
-) -> usize {
-    // Default: move forward by `step`
-    let default_next = std::cmp::max(cursor + 1, end);
-
-    // Look for a section heading in the overlap zone (between `step` chars
-    // from the start and the original end position)
-    let overlap_start = cursor + step;
-
-    // Find the first heading that falls within the overlap zone
-    for (hpos, _) in headings {
-        if *hpos > cursor && *hpos >= overlap_start && *hpos < end {
-            return *hpos;
-        }
-    }
-
-    // If no heading in the overlap zone, use the overlap target
-    default_next
 }
 
 #[cfg(test)]
@@ -575,5 +594,47 @@ This section explains the detailed rules for combat encounters. "
         // At least some chunks should carry a section heading
         let has_any_heading = chunks.iter().any(|c| !c.section_heading.is_empty());
         assert!(has_any_heading, "chunks should have section headings");
+    }
+
+    // ── Sentence-aware chunking tests ─────────────────────────────
+
+    #[test]
+    fn target_chunk_size_is_about_250_tokens() {
+        assert_eq!(TARGET_TOKENS, 250);
+        assert_eq!(OVERLAP_TOKENS, 50);
+    }
+
+    #[test]
+    fn chunks_dont_end_mid_sentence() {
+        let text = "First sentence ends here. Second sentence is longer and continues. \
+                    Third sentence wraps up. "
+            .repeat(60);
+        let doc = make_doc(&text, vec![(text.as_str(), 1)]);
+        let chunks = chunk_document(&doc);
+        assert!(chunks.len() >= 2);
+        for c in &chunks {
+            let last_char = c.text.trim_end().chars().last().unwrap_or('.');
+            assert!(
+                ['.', '!', '?', '"', ')'].contains(&last_char),
+                "chunk ends mid-sentence: {:?}",
+                c.text.chars().rev().take(40).collect::<String>()
+            );
+        }
+    }
+
+    #[test]
+    fn chunks_dont_start_mid_word() {
+        let text = "Some sample text about combat. ".repeat(80);
+        let doc = make_doc(&text, vec![(text.as_str(), 1)]);
+        let chunks = chunk_document(&doc);
+        for c in &chunks {
+            let first_word = c.text.split_whitespace().next().unwrap_or("");
+            if let Some(first) = first_word.chars().next() {
+                assert!(
+                    first.is_alphabetic() || first.is_numeric() || first == '"' || first == '(',
+                    "chunk starts mid-word: {first_word:?}"
+                );
+            }
+        }
     }
 }

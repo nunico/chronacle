@@ -29,6 +29,7 @@ regex = "1"
 fastembed = { version = "5", features = ["ort-load-dynamic"] }
 pdf-extract = "0.10"
 futures-util = "0.3"
+unicode-segmentation = "1"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
