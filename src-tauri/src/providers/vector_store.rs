@@ -34,10 +34,22 @@ pub trait VectorStore: Send + Sync {
         chunks: &[IndexedChunk],
     ) -> Result<(), VectorStoreError>;
 
+    /// Search for the `limit` nearest neighbours to `query_vector`.
+    ///
+    /// Only chunks whose `collection` record link is in `collection_ids` are
+    /// returned. Passing an empty slice returns `Ok(Vec::new())` immediately —
+    /// callers must subscribe to at least one collection to receive results.
+    ///
+    /// # Note on MTREE and OR clauses
+    ///
+    /// SurrealDB's MTREE vector index cannot be combined with OR at the top
+    /// level of a WHERE clause. The collection filter uses `IN [...]` which
+    /// the query planner handles as a single AND clause, keeping the index
+    /// path intact.
     async fn search(
         &self,
         query_vector: &[f32],
-        campaign_id: Option<&str>,
+        collection_ids: &[String],
         limit: u64,
     ) -> Result<Vec<SearchResult>, VectorStoreError>;
 
@@ -48,7 +60,9 @@ pub trait VectorStore: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct IndexedChunk {
     pub chunk_id: String,
-    pub campaign_id: Option<String>,
+    /// Every chunk must belong to a collection — the schema defines
+    /// `chunk.collection TYPE record<collection>` as non-nullable.
+    pub collection_id: String,
     pub text: String,
     pub page_start: i64,
     pub page_end: i64,
@@ -56,6 +70,23 @@ pub struct IndexedChunk {
     pub source_type: String,
     pub embedding: Vec<f32>,
     pub embed_model: String,
+}
+
+/// Validate a collection ID before embedding it in a SurrealQL identifier.
+///
+/// Collection IDs originate from our own UUID generator (hex + hyphens), but
+/// we validate defensively to prevent backtick-injection attacks in cases
+/// where an unexpected value could reach the SQL builder.
+///
+/// Allowed characters: ASCII alphanumeric, `-`, `_`.
+fn sanitize_collection_id(id: &str) -> Result<&str, VectorStoreError> {
+    if id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        Ok(id)
+    } else {
+        Err(VectorStoreError::Db(format!(
+            "Invalid collection ID (unexpected characters): {id}"
+        )))
+    }
 }
 
 /// SurrealDB-backed implementation of [`VectorStore`].
@@ -89,38 +120,25 @@ where
 
             let embedding_field = format!("[{}]", vec_str);
 
-            // Omit campaign field for global chunks (None branch). The DEFINE FIELD
-            // uses option<record<campaign>> DEFAULT NONE, so omitting the field
-            // produces a valid NONE value without triggering type validation errors.
-            let sql = match &chunk.campaign_id {
-                Some(cid) => format!(
-                    "CREATE chunk SET
-                        id = $id,
-                        source = type::thing('source', $source_id),
-                        campaign = campaign:`{cid}`,
-                        text = $text,
-                        page_start = $page_start,
-                        page_end = $page_end,
-                        section_heading = $section_heading,
-                        source_type = $source_type,
-                        embedding = {},
-                        embed_model = $embed_model",
-                    embedding_field,
-                ),
-                None => format!(
-                    "CREATE chunk SET
-                        id = $id,
-                        source = type::thing('source', $source_id),
-                        text = $text,
-                        page_start = $page_start,
-                        page_end = $page_end,
-                        section_heading = $section_heading,
-                        source_type = $source_type,
-                        embedding = {},
-                        embed_model = $embed_model",
-                    embedding_field,
-                ),
-            };
+            // Build the collection clause as a typed record link.
+            // sanitize_collection_id rejects any ID that contains characters
+            // outside [A-Za-z0-9\-_], guarding against backtick injection.
+            let cid = sanitize_collection_id(&chunk.collection_id)?;
+            let collection_clause = format!("collection = collection:`{cid}`");
+
+            let sql = format!(
+                "CREATE chunk SET
+                    id = $id,
+                    source = type::thing('source', $source_id),
+                    {collection_clause},
+                    text = $text,
+                    page_start = $page_start,
+                    page_end = $page_end,
+                    section_heading = $section_heading,
+                    source_type = $source_type,
+                    embedding = {embedding_field},
+                    embed_model = $embed_model"
+            );
 
             self.db
                 .query(sql)
@@ -144,43 +162,38 @@ where
     async fn search(
         &self,
         query_vector: &[f32],
-        campaign_id: Option<&str>,
+        collection_ids: &[String],
         limit: u64,
     ) -> Result<Vec<SearchResult>, VectorStoreError> {
+        // Empty subscription list → nothing to search; return immediately
+        // so we never hit the DB with a vacuous query.
+        if collection_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let vec_str = query_vector
             .iter()
             .map(|v| v.to_string())
             .collect::<Vec<_>>()
             .join(",");
 
-        // Canonical SurrealDB KNN pattern:
-        //   - `embedding <|K|> $vec` in WHERE uses the MTREE index to filter
-        //     to the K nearest neighbours (metric inherited from the index —
-        //     ours is DIST COSINE).
-        //   - `vector::distance::knn()` in SELECT retrieves the distance the
-        //     KNN scan computed for the current row.
-        //
-        // The previous form (`embedding <|1|> [vec] AS distance` in SELECT)
-        // returned a boolean, which deserialize_distance silently coerced to
-        // f64::MAX — every row tied, ORDER BY did nothing, results came back
-        // in storage order. Retrieval was effectively random.
-        //
-        // We over-fetch (K = limit * 5, min 50) so the campaign filter has
-        // candidates to narrow from without leaving us short of `limit`.
-        let knn_k = std::cmp::max(limit * 5, 50);
+        // Build `collection IN [collection:`id1`, collection:`id2`, ...]`.
+        // Using IN with a typed record-link list as a secondary WHERE condition
+        // keeps the MTREE index path intact — OR at the top level would bypass
+        // the vector index.
+        // sanitize_collection_id validates each ID against backtick injection.
+        let col_list = collection_ids
+            .iter()
+            .map(|id| sanitize_collection_id(id).map(|safe| format!("collection:`{safe}`")))
+            .collect::<Result<Vec<_>, _>>()?
+            .join(", ");
 
-        // Don't combine an `OR` predicate with the KNN operator — the MTREE
-        // optimizer can't push it down and returns zero rows. Since the
-        // schema (post 002_fix_chunk_campaign_type) defines `campaign` as
-        // `option<record<campaign>> DEFAULT NONE`, IS NULL is impossible, so
-        // we only need IS NONE.
-        let campaign_clause = match campaign_id {
-            Some(cid) => format!(
-                " AND (campaign = campaign:`{cid}` OR campaign IS NONE)"
-            ),
-            None => " AND campaign IS NONE".to_string(),
-        };
-
+        // SurrealDB KNN pattern:
+        //   WHERE embedding <|K|> $vec  — activates MTREE index / brute-force ANN
+        //   SELECT vector::distance::knn() AS distance — retrieves the computed distance
+        // The collection filter is ANDed into the same WHERE clause.
+        // The vector literal must appear directly in the WHERE expression (not SELECT)
+        // for the MTREE index to activate.
         let sql = format!(
             "SELECT
                 id,
@@ -193,7 +206,8 @@ where
                 source_type,
                 vector::distance::knn() AS distance
             FROM chunk
-            WHERE embedding <|{knn_k}|> [{vec_str}]{campaign_clause}
+            WHERE embedding <|{limit}|> [{vec_str}]
+            AND collection IN [{col_list}]
             ORDER BY distance ASC
             LIMIT {limit}"
         );
@@ -280,6 +294,28 @@ where
 mod tests {
     use super::*;
 
+    #[test]
+    fn sanitize_collection_id_accepts_valid_ids() {
+        assert!(sanitize_collection_id("abc123").is_ok());
+        assert!(sanitize_collection_id("01234567-89ab-cdef-0123-456789abcdef").is_ok());
+        assert!(sanitize_collection_id("col_1").is_ok());
+    }
+
+    #[test]
+    fn sanitize_collection_id_rejects_backtick() {
+        let result = sanitize_collection_id("col`DROP TABLE chunk");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Invalid collection ID"));
+    }
+
+    #[test]
+    fn sanitize_collection_id_rejects_other_special_chars() {
+        assert!(sanitize_collection_id("col id").is_err()); // space
+        assert!(sanitize_collection_id("col/id").is_err()); // slash
+        assert!(sanitize_collection_id("col;DROP").is_err()); // semicolon
+    }
+
     #[tokio::test]
     async fn test_search_empty_store() {
         let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
@@ -295,9 +331,83 @@ mod tests {
         .unwrap();
 
         let store = SurrealDbVector::new(db);
-        let results = store.search(&[0.0; 768], None, 10).await;
+        // Empty collection_ids → immediate Ok(vec![]) without touching the DB
+        let results = store.search(&[0.0; 768], &[], 10).await;
 
         assert!(results.is_ok());
         assert!(results.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_only_returns_chunks_from_subscribed_collections() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        // Create two collections
+        db.query(
+            "CREATE collection SET id='col1', name='C1', created_at=time::now(), updated_at=time::now(); \
+             CREATE collection SET id='col2', name='C2', created_at=time::now(), updated_at=time::now()"
+        ).await.unwrap();
+
+        // Create a source for each (source.collection is NON-NULLABLE)
+        db.query(
+            "CREATE source SET id='s1', collection=type::thing('collection','col1'), \
+             filename='a.pdf', display_name='A', source_type='rules', page_count=1, \
+             indexed_at=time::now(), index_status='done', embed_model='nomic-embed-text-v1.5'; \
+             CREATE source SET id='s2', collection=type::thing('collection','col2'), \
+             filename='b.pdf', display_name='B', source_type='rules', page_count=1, \
+             indexed_at=time::now(), index_status='done', embed_model='nomic-embed-text-v1.5'",
+        )
+        .await
+        .unwrap();
+
+        // Use [1.0, 0.0, ..., 0.0] instead of all-zeros: cosine similarity is
+        // undefined for zero vectors, causing SurrealDB to return `false` (no match).
+        let ones_first = {
+            let mut v = std::iter::repeat("0.0").take(768).collect::<Vec<_>>();
+            v[0] = "1.0";
+            v.join(",")
+        };
+        // SAFETY: {ones_first} is constructed from string literals — not user input —
+        // so format! here is acceptable for test fixture data.
+        db.query(format!(
+            "CREATE chunk SET id='c1', source=type::thing('source','s1'), \
+             collection=type::thing('collection','col1'), text='Alpha text', \
+             page_start=1, page_end=1, section_heading='', source_type='rules', \
+             embedding=[{ones_first}], embed_model='nomic-embed-text-v1.5'; \
+             CREATE chunk SET id='c2', source=type::thing('source','s2'), \
+             collection=type::thing('collection','col2'), text='Beta text', \
+             page_start=1, page_end=1, section_heading='', source_type='rules', \
+             embedding=[{ones_first}], embed_model='nomic-embed-text-v1.5'"
+        ))
+        .await
+        .unwrap();
+
+        let store = SurrealDbVector::new(db);
+        // Match the stored embedding: [1.0, 0.0, ..., 0.0] for valid cosine similarity.
+        let mut query = vec![0.0f32; 768];
+        query[0] = 1.0;
+
+        // Only subscribed to col1 — should only get Alpha
+        let results = store
+            .search(&query, &["col1".to_string()], 10)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].text, "Alpha text");
+
+        // Subscribed to both — gets both
+        let results = store
+            .search(&query, &["col1".to_string(), "col2".to_string()], 10)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 2);
+
+        // No subscriptions — empty result
+        let results = store.search(&query, &[], 10).await.unwrap();
+        assert!(results.is_empty());
     }
 }

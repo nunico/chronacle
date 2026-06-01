@@ -123,8 +123,26 @@ pub async fn update_setting(
     Ok(())
 }
 
+// ── Source Commands ───────────────────────────────────────────────────────────
+
+/// Response shape for a source record returned over IPC.
+#[derive(Debug, Clone, Serialize)]
+pub struct SourceResponse {
+    pub id: String,
+    pub filename: String,
+    pub display_name: String,
+    pub source_type: String,
+    pub page_count: i64,
+    pub index_status: String,
+    pub embed_model: String,
+    pub collection_id: Option<String>,
+}
+
 /// Uploads a source PDF file, storing it in the blob store and triggering
 /// ingestion (extraction → chunking → embedding).
+///
+/// After the DB INSERT succeeds the ingestion pipeline runs synchronously and
+/// emits `ingestion-progress` / `ingestion-error` Tauri events.
 #[tauri::command]
 pub async fn upload_source(
     app_handle: tauri::AppHandle,
@@ -132,8 +150,12 @@ pub async fn upload_source(
     file_path: String,
     display_name: Option<String>,
     source_type: Option<String>,
-    campaign_id: Option<String>,
+    collection_id: String,
 ) -> Result<serde_json::Value, String> {
+    if collection_id.trim().is_empty() {
+        return Err("collection_id is required".to_string());
+    }
+
     let path = std::path::PathBuf::from(&file_path);
     let filename = path
         .file_name()
@@ -157,25 +179,17 @@ pub async fn upload_source(
         .await
         .map_err(|e| format!("Failed to store blob: {e}"))?;
 
-    // Insert source record with optional campaign
-    // Build the query based on whether a campaign_id was provided
-    let source_sql = match &campaign_id {
-        Some(cid) => {
-            let safe_id = cid.replace('`', "``");
-            format!(
-                "CREATE source SET
-                    id = $id,
-                    campaign = campaign:`{safe_id}`,
-                    filename = $filename,
-                    display_name = $display_name,
-                    source_type = $source_type,
-                    page_count = 0,
-                    indexed_at = time::now(),
-                    index_status = 'pending',
-                    embed_model = $embed_model"
-            )
-        }
-        None => "CREATE source SET
+    // Insert source record — collection is bound via parameter, never interpolated.
+    #[derive(Deserialize)]
+    struct CreatedSource {
+        #[expect(dead_code)]
+        id: surrealdb::sql::Thing,
+    }
+
+    let created: Vec<CreatedSource> = state
+        .db
+        .query(
+            "CREATE source SET
                 id = $id,
                 campaign = NULL,
                 filename = $filename,
@@ -184,38 +198,26 @@ pub async fn upload_source(
                 page_count = 0,
                 indexed_at = time::now(),
                 index_status = 'pending',
-                embed_model = $embed_model"
-            .to_string(),
-    };
-    let mut response = state
-        .db
-        .query(source_sql)
+                embed_model = $embed_model,
+                collection = type::thing('collection', $collection_id)",
+        )
         .bind(("id", source_id.to_owned()))
         .bind(("filename", filename.to_owned()))
         .bind(("display_name", display_name.to_owned()))
         .bind(("source_type", source_type.to_owned()))
         .bind(("embed_model", embed_model.to_owned()))
+        .bind(("collection_id", collection_id.clone()))
         .await
-        .map_err(|e| format!("Failed to create source record: {e}"))?;
-
-    // Confirm the CREATE query succeeded. Use a struct that only extracts
-    // the id to avoid SurrealDB's record-link (Thing) serialization issues
-    // with serde_json::Value.
-    #[derive(Deserialize)]
-    struct CreatedSource {
-        #[expect(dead_code)]
-        id: surrealdb::sql::Thing,
-    }
-
-    let created: Vec<CreatedSource> = response
+        .map_err(|e| format!("Failed to create source record: {e}"))?
+        .check()
+        .map_err(|e| format!("Source INSERT violated a schema constraint: {e}"))?
         .take(0)
         .map_err(|e| format!("Failed to parse created source: {e}"))?;
 
     if created.is_empty() {
-        return Err("No source record was created".to_string());
+        return Err("Source creation failed: no record returned".to_string());
     }
 
-    // Build a JSON-safe response that avoids SurrealDB's internal types
     let source_json = serde_json::json!({
         "id": source_id,
         "filename": filename,
@@ -223,7 +225,7 @@ pub async fn upload_source(
         "source_type": source_type,
         "index_status": "pending",
         "embed_model": embed_model,
-        "campaign_id": campaign_id,
+        "collection_id": collection_id,
     });
 
     // Build the progress callback — emits Tauri events from each pipeline stage
@@ -245,7 +247,6 @@ pub async fn upload_source(
         },
     );
 
-    // Run the ingestion pipeline
     let state_ref = state.inner().clone();
     let sid = source_id.clone();
 
@@ -263,12 +264,14 @@ pub async fn upload_source(
             Ok(source_json)
         }
         Err(e) => {
-            // Mark source as errored
             let err_msg = e.to_string();
             eprintln!("Ingestion failed for source {sid}: {err_msg}");
             let _ = state_ref
                 .db
-                .query("UPDATE source SET index_status = 'error' WHERE id = type::thing('source', $id)")
+                .query(
+                    "UPDATE source SET index_status = 'error' \
+                     WHERE id = type::thing('source', $id)",
+                )
                 .bind(("id", sid.clone()))
                 .await;
             let _ = app_handle.emit(
@@ -278,17 +281,195 @@ pub async fn upload_source(
                     "error": &err_msg,
                 }),
             );
-            // Return the source record so the user can see it even on partial failure
-            // but surface the error
             Err(format!("PDF ingestion failed: {err_msg}"))
         }
     }
 }
 
+/// Returns all sources, optionally filtered to a specific collection.
+///
+/// When `collection_id` is provided the query uses a parameterised binding
+/// (never string interpolation) to avoid SQL-injection risks.
+#[tauri::command]
+pub async fn get_sources(
+    state: State<'_, Arc<AppState>>,
+    collection_id: Option<String>,
+) -> Result<Vec<SourceResponse>, String> {
+    /// Raw row shape as SurrealDB returns it.
+    #[derive(Deserialize)]
+    struct SourceRow {
+        id: surrealdb::sql::Thing,
+        filename: String,
+        display_name: String,
+        source_type: String,
+        page_count: i64,
+        index_status: String,
+        embed_model: String,
+        collection: Option<surrealdb::sql::Thing>,
+    }
+
+    let mut response = if let Some(ref cid) = collection_id {
+        state
+            .db
+            .query(
+                "SELECT * FROM source \
+                 WHERE collection = type::thing('collection', $cid) \
+                 ORDER BY display_name ASC",
+            )
+            .bind(("cid", cid.clone()))
+            .await
+            .map_err(|e| format!("Failed to query sources: {e}"))?
+    } else {
+        state
+            .db
+            .query("SELECT * FROM source ORDER BY display_name ASC")
+            .await
+            .map_err(|e| format!("Failed to query sources: {e}"))?
+    };
+
+    let rows: Vec<SourceRow> = response
+        .take(0)
+        .map_err(|e| format!("Failed to parse sources: {e}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| SourceResponse {
+            id: r.id.id.to_raw(),
+            filename: r.filename,
+            display_name: r.display_name,
+            source_type: r.source_type,
+            page_count: r.page_count,
+            index_status: r.index_status,
+            embed_model: r.embed_model,
+            collection_id: r.collection.map(|t| t.id.to_raw()),
+        })
+        .collect())
+}
+
+// ── Collection Commands ───────────────────────────────────────────────────────
+
+/// IPC response shape for a `collection` record.
+#[derive(Debug, Clone, Serialize)]
+pub struct CollectionResponse {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+}
+
+impl From<crate::services::collection_service::Collection> for CollectionResponse {
+    fn from(c: crate::services::collection_service::Collection) -> Self {
+        Self {
+            id: c.id,
+            name: c.name,
+            description: c.description,
+        }
+    }
+}
+
+/// Returns all collections ordered by name.
+#[tauri::command]
+pub async fn get_collections(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<CollectionResponse>, String> {
+    let collections = crate::services::collection_service::get_all(&state.db).await?;
+    Ok(collections.into_iter().map(Into::into).collect())
+}
+
+/// Creates a new collection.  `name` must be non-empty.
+#[tauri::command]
+pub async fn create_collection(
+    state: State<'_, Arc<AppState>>,
+    name: String,
+    description: Option<String>,
+) -> Result<CollectionResponse, String> {
+    if name.trim().is_empty() {
+        return Err("Collection name is required".to_string());
+    }
+    let c =
+        crate::services::collection_service::create(&state.db, name.trim(), description.as_deref())
+            .await?;
+    Ok(c.into())
+}
+
+/// Updates the name and description of an existing collection.
+#[tauri::command]
+pub async fn update_collection(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    name: String,
+    description: Option<String>,
+) -> Result<CollectionResponse, String> {
+    if name.trim().is_empty() {
+        return Err("Collection name is required".to_string());
+    }
+    let c = crate::services::collection_service::update(
+        &state.db,
+        &id,
+        name.trim(),
+        description.as_deref(),
+    )
+    .await?;
+    Ok(c.into())
+}
+
+/// Deletes a collection.  Fails if any campaigns are subscribed or any sources
+/// still reference it.
+#[tauri::command]
+pub async fn delete_collection(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
+    crate::services::collection_service::delete(&state.db, &id).await
+}
+
+/// Subscribes a campaign to a collection.  Idempotent.
+#[tauri::command]
+pub async fn add_campaign_collection(
+    state: State<'_, Arc<AppState>>,
+    campaign_id: String,
+    collection_id: String,
+) -> Result<(), String> {
+    crate::services::collection_service::add_campaign_collection(
+        &state.db,
+        &campaign_id,
+        &collection_id,
+    )
+    .await
+}
+
+/// Removes a campaign's subscription to a collection.
+#[tauri::command]
+pub async fn remove_campaign_collection(
+    state: State<'_, Arc<AppState>>,
+    campaign_id: String,
+    collection_id: String,
+) -> Result<(), String> {
+    crate::services::collection_service::remove_campaign_collection(
+        &state.db,
+        &campaign_id,
+        &collection_id,
+    )
+    .await
+}
+
+/// Returns all collections to which a campaign is subscribed.
+#[tauri::command]
+pub async fn get_campaign_collections(
+    state: State<'_, Arc<AppState>>,
+    campaign_id: String,
+) -> Result<Vec<CollectionResponse>, String> {
+    let cols =
+        crate::services::collection_service::get_campaign_collections(&state.db, &campaign_id)
+            .await?;
+    Ok(cols.into_iter().map(Into::into).collect())
+}
+
+// ── Chat Commands ─────────────────────────────────────────────────────────────
+
 /// Chat message request payload.
 #[derive(Debug, Deserialize)]
 pub struct ChatRequest {
     pub message: String,
+    // Deserialized from IPC; will be used in Phase 2 when agent routing is
+    // collection-scoped. Rust's dead-code lint does not see serde reads.
+    #[allow(dead_code)] // field is populated via serde; Rust lint cannot see that
     pub campaign_id: Option<String>,
 }
 
@@ -579,80 +760,6 @@ pub async fn remove_provider_model(
     id: String,
 ) -> Result<(), String> {
     crate::services::custom_provider_service::remove_model(&state.db, &id).await
-}
-
-// ── Source Commands ──────────────────────────────────────────────────
-
-/// Response payload for a source record.
-#[derive(Debug, Clone, Serialize)]
-pub struct SourceResponse {
-    pub id: String,
-    pub filename: String,
-    pub display_name: String,
-    pub source_type: String,
-    pub page_count: i64,
-    pub index_status: String,
-    pub embed_model: String,
-    pub campaign_id: Option<String>,
-}
-
-/// Returns sources, optionally filtered by campaign.
-///
-/// When `campaign_id` is `None`, returns all global (non-campaign) sources.
-/// Pass an empty string to get all sources regardless of campaign.
-#[tauri::command]
-pub async fn get_sources(
-    state: State<'_, Arc<AppState>>,
-    campaign_id: Option<String>,
-) -> Result<Vec<SourceResponse>, String> {
-    let sql = match &campaign_id {
-        // Empty string = all sources
-        Some(cid) if cid.is_empty() || cid == "*" => {
-            "SELECT * FROM source ORDER BY display_name ASC".to_string()
-        }
-        Some(cid) => {
-            let safe_id = cid.replace('`', "``");
-            format!(
-                "SELECT * FROM source WHERE campaign = campaign:`{safe_id}` ORDER BY display_name ASC"
-            )
-        }
-        None => "SELECT * FROM source WHERE campaign IS NULL ORDER BY display_name ASC".to_string(),
-    };
-    let mut response = state
-        .db
-        .query(sql)
-        .await
-        .map_err(|e| format!("Failed to query sources: {e}"))?;
-
-    #[derive(Deserialize)]
-    struct SourceRow {
-        id: surrealdb::sql::Thing,
-        filename: String,
-        display_name: String,
-        source_type: String,
-        page_count: i64,
-        index_status: String,
-        embed_model: String,
-        campaign: Option<surrealdb::sql::Thing>,
-    }
-
-    let rows: Vec<SourceRow> = response
-        .take(0)
-        .map_err(|e| format!("Failed to parse sources: {e}"))?;
-
-    Ok(rows
-        .into_iter()
-        .map(|r| SourceResponse {
-            id: r.id.id.to_raw(),
-            filename: r.filename,
-            display_name: r.display_name,
-            source_type: r.source_type,
-            page_count: r.page_count,
-            index_status: r.index_status,
-            embed_model: r.embed_model,
-            campaign_id: r.campaign.map(|c| c.id.to_raw()),
-        })
-        .collect())
 }
 
 /// Delete a source, its blob data, and all associated chunks.
@@ -1101,9 +1208,16 @@ mod citation_tests {
         db.use_ns("t").use_db("t").await.unwrap();
         crate::schema::run_migrations(&db).await.unwrap();
         db.query(
+            "CREATE collection SET id='col1', name='Test', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        db.query(
             "CREATE source SET id='quickstart', filename='Quickstart.pdf', \
              display_name='Quickstart', source_type='rules', page_count=10, \
-             indexed_at=time::now(), index_status='done', embed_model='nomic-embed-text-v1.5'",
+             indexed_at=time::now(), index_status='done', embed_model='nomic-embed-text-v1.5', \
+             collection=type::thing('collection','col1')",
         )
         .await
         .unwrap();
@@ -1116,6 +1230,7 @@ mod citation_tests {
             .join(",");
         db.query(format!(
             "CREATE chunk SET id='c1', source=type::thing('source','quickstart'), \
+             collection=type::thing('collection','col1'), \
              text='Coriolis orbits Kua', page_start=9, page_end=9, \
              section_heading='Intro', source_type='rules', embedding=[{zeros}], \
              embed_model='nomic-embed-text-v1.5'"
@@ -1126,6 +1241,7 @@ mod citation_tests {
         .unwrap();
         db.query(format!(
             "CREATE chunk SET id='c2', source=type::thing('source','quickstart'), \
+             collection=type::thing('collection','col1'), \
              text='Council factions list', page_start=20, page_end=22, \
              section_heading='Factions', source_type='rules', embedding=[{zeros}], \
              embed_model='nomic-embed-text-v1.5'"
@@ -1235,16 +1351,24 @@ mod reindex_tests {
         db.use_ns("test").use_db("test").await.unwrap();
         crate::schema::run_migrations(&db).await.unwrap();
         db.query(
+            "CREATE collection SET id='col1', name='Test', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        db.query(
             "CREATE source SET id='s1', filename='a.pdf', display_name='a', \
              source_type='rules', page_count=0, indexed_at=time::now(), \
-             index_status='done', embed_model='nomic-embed-text-v1.5'",
+             index_status='done', embed_model='nomic-embed-text-v1.5', \
+             collection=type::thing('collection','col1')",
         )
         .await
         .unwrap();
         db.query(
             "CREATE source SET id='s2', filename='b.pdf', display_name='b', \
              source_type='rules', page_count=0, indexed_at=time::now(), \
-             index_status='done', embed_model='nomic-embed-text-v1.5'",
+             index_status='done', embed_model='nomic-embed-text-v1.5', \
+             collection=type::thing('collection','col1')",
         )
         .await
         .unwrap();
@@ -1269,10 +1393,17 @@ mod reindex_tests {
         crate::schema::run_migrations(&db).await.unwrap();
 
         let uuid = "d5a80195-3968-44cb-8b46-270830df952f";
+        db.query(
+            "CREATE collection SET id='col1', name='Test', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
         db.query(format!(
             "CREATE source SET id='{uuid}', filename='a.pdf', display_name='a', \
              source_type='rules', page_count=0, indexed_at=time::now(), \
-             index_status='done', embed_model='nomic-embed-text-v1.5'"
+             index_status='done', embed_model='nomic-embed-text-v1.5', \
+             collection=type::thing('collection','col1')"
         ))
         .await
         .unwrap();
@@ -1304,5 +1435,120 @@ mod reindex_tests {
             1,
             "round-trip lookup with raw ID must find the source"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use surrealdb::engine::local::Db;
+    use surrealdb::Surreal;
+
+    async fn setup_db() -> Surreal<Db> {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db
+    }
+
+    // ── CollectionResponse conversion ────────────────────────────────────────
+
+    #[test]
+    fn collection_response_from_collection() {
+        let c = crate::services::collection_service::Collection {
+            id: "abc123".to_string(),
+            name: "D&D 5e Core".to_string(),
+            description: Some("Core rulebooks".to_string()),
+        };
+        let resp = CollectionResponse::from(c);
+        assert_eq!(resp.id, "abc123");
+        assert_eq!(resp.name, "D&D 5e Core");
+        assert_eq!(resp.description.as_deref(), Some("Core rulebooks"));
+    }
+
+    #[test]
+    fn collection_response_from_collection_no_desc() {
+        let c = crate::services::collection_service::Collection {
+            id: "xyz".to_string(),
+            name: "Pathfinder".to_string(),
+            description: None,
+        };
+        let resp = CollectionResponse::from(c);
+        assert!(resp.description.is_none());
+    }
+
+    // ── get_sources — collection_id filter ───────────────────────────────────
+
+    #[tokio::test]
+    async fn get_sources_filters_by_collection() {
+        let db = setup_db().await;
+
+        let col_a = crate::services::collection_service::create(&db, "Col A", None)
+            .await
+            .unwrap();
+        let col_b = crate::services::collection_service::create(&db, "Col B", None)
+            .await
+            .unwrap();
+
+        db.query(
+            "CREATE source SET
+                 id = 'src_a',
+                 filename = 'a.pdf',
+                 display_name = 'Source A',
+                 source_type = 'rules',
+                 page_count = 0,
+                 indexed_at = time::now(),
+                 index_status = 'pending',
+                 embed_model = 'nomic-embed-text-v1.5',
+                 campaign = NULL,
+                 collection = type::thing('collection', $cid)",
+        )
+        .bind(("cid", col_a.id.clone()))
+        .await
+        .unwrap();
+
+        db.query(
+            "CREATE source SET
+                 id = 'src_b',
+                 filename = 'b.pdf',
+                 display_name = 'Source B',
+                 source_type = 'rules',
+                 page_count = 0,
+                 indexed_at = time::now(),
+                 index_status = 'pending',
+                 embed_model = 'nomic-embed-text-v1.5',
+                 campaign = NULL,
+                 collection = type::thing('collection', $cid)",
+        )
+        .bind(("cid", col_b.id.clone()))
+        .await
+        .unwrap();
+
+        let mut resp_a = db
+            .query(
+                "SELECT * FROM source \
+                 WHERE collection = type::thing('collection', $cid) \
+                 ORDER BY display_name ASC",
+            )
+            .bind(("cid", col_a.id.clone()))
+            .await
+            .unwrap();
+
+        #[derive(Deserialize)]
+        struct Row {
+            id: surrealdb::sql::Thing,
+        }
+        let rows_a: Vec<Row> = resp_a.take(0).unwrap();
+        assert_eq!(rows_a.len(), 1);
+        assert_eq!(rows_a[0].id.id.to_raw(), "src_a");
+
+        let mut resp_all = db
+            .query("SELECT * FROM source ORDER BY display_name ASC")
+            .await
+            .unwrap();
+        let rows_all: Vec<Row> = resp_all.take(0).unwrap();
+        assert_eq!(rows_all.len(), 2);
     }
 }

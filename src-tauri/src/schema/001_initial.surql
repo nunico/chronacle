@@ -5,6 +5,8 @@ DEFINE FIELD created_at ON campaign TYPE datetime;
 DEFINE FIELD updated_at ON campaign TYPE datetime;
 
 DEFINE TABLE source SCHEMAFULL;
+-- DEFAULT NULL ensures INSERT without this field satisfies SCHEMAFULL constraint,
+-- mirroring the same pattern used on chunk.campaign.
 DEFINE FIELD campaign ON source TYPE record<campaign> | NULL DEFAULT NULL;
 DEFINE FIELD filename ON source TYPE string;
 DEFINE FIELD display_name ON source TYPE string;
@@ -16,6 +18,7 @@ DEFINE FIELD embed_model ON source TYPE string;
 
 DEFINE TABLE chunk SCHEMAFULL;
 DEFINE FIELD source ON chunk TYPE record<source>;
+-- campaign on chunk is nullable: collection-based code omits it; legacy code sets it.
 DEFINE FIELD campaign ON chunk TYPE record<campaign> | NULL DEFAULT NULL;
 DEFINE FIELD text ON chunk TYPE string;
 DEFINE FIELD page_start ON chunk TYPE int;
@@ -46,7 +49,8 @@ DEFINE FIELD notes ON session TYPE string;
 DEFINE FIELD created_at ON session TYPE datetime;
 
 DEFINE TABLE message SCHEMAFULL;
-DEFINE FIELD campaign ON message TYPE record<campaign> DEFAULT NULL;
+-- DEFAULT NULL lets inserts omit campaign (e.g. global / no-campaign context).
+DEFINE FIELD campaign ON message TYPE record<campaign> | NULL DEFAULT NULL;
 DEFINE FIELD role ON message TYPE string ASSERT $value IN ['user', 'assistant', 'system'];
 DEFINE FIELD content ON message TYPE string;
 DEFINE FIELD citations ON message TYPE array<object>;

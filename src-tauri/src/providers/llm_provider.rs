@@ -300,7 +300,10 @@ async fn ollama_parse_ndjson(
 /// Provider that uses the OpenAI chat-completion API.
 pub struct OpenAIProvider {
     api_key: String,
+    // Phase 1 stub — fields are stored and will be used in the Phase 2 implementation.
+    #[allow(dead_code)]
     model: String,
+    #[allow(dead_code)]
     base_url: String,
 }
 
@@ -439,6 +442,8 @@ impl LlmProvider for OpenAIProvider {
 /// Provider that uses the Anthropic Messages API.
 pub struct AnthropicProvider {
     api_key: String,
+    // Phase 1 stub — will be read in the Phase 2 implementation.
+    #[allow(dead_code)]
     model: String,
     base_url: String,
 }
@@ -585,7 +590,10 @@ impl LlmProvider for AnthropicProvider {
 /// Ollama *does not* expose an OpenAI-compatible endpoint; requests must use
 /// the raw Ollama API (`POST /api/chat` with NDJSON streaming).
 pub struct OllamaProvider {
+    // Phase 1 stub — fields are stored and will be used in the Phase 2 implementation.
+    #[allow(dead_code)]
     base_url: String,
+    #[allow(dead_code)]
     model: String,
 }
 

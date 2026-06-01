@@ -42,9 +42,15 @@ async fn seed_index(
     db.use_ns("test").use_db("test").await.unwrap();
     chronacle_lib::schema::run_migrations(db).await.unwrap();
     db.query(
+        "CREATE collection SET id='col1', name='Test', \
+         created_at=time::now(), updated_at=time::now()",
+    )
+    .await
+    .unwrap();
+    db.query(
         "CREATE source SET id='s1', filename='quickstart.pdf', display_name='Quickstart', \
          source_type='rules', page_count=1, indexed_at=time::now(), index_status='done', \
-         embed_model='nomic-embed-text-v1.5'",
+         embed_model='nomic-embed-text-v1.5', collection=type::thing('collection','col1')",
     )
     .await
     .unwrap();
@@ -61,7 +67,7 @@ async fn seed_index(
         .enumerate()
         .map(|(i, (c, v))| IndexedChunk {
             chunk_id: format!("s1-{i}"),
-            campaign_id: None,
+            collection_id: "col1".to_string(),
             text: c.text.clone(),
             page_start: c.page_start,
             page_end: c.page_end,
@@ -95,7 +101,7 @@ async fn coriolis_orbit_question_retrieves_correct_chunk() {
         .embed_query("What planet is Coriolis orbiting?")
         .await
         .unwrap();
-    let results = store.search(&qv, None, 3).await.unwrap();
+    let results = store.search(&qv, &["col1".to_string()], 3).await.unwrap();
     assert!(!results.is_empty(), "search returned no results");
     let top = &results[0];
     let lower = top.text.to_lowercase();
@@ -125,7 +131,7 @@ async fn council_factions_question_retrieves_correct_chunk() {
         .embed_query("Which are the council factions?")
         .await
         .unwrap();
-    let results = store.search(&qv, None, 3).await.unwrap();
+    let results = store.search(&qv, &["col1".to_string()], 3).await.unwrap();
     assert!(!results.is_empty(), "search returned no results");
     let top = &results[0];
     let lower = top.text.to_lowercase();
@@ -163,9 +169,15 @@ async fn retrieval_ranks_target_chunk_above_distractors() {
     db.use_ns("test").use_db("test").await.unwrap();
     chronacle_lib::schema::run_migrations(&db).await.unwrap();
     db.query(
+        "CREATE collection SET id='col1', name='Test', \
+         created_at=time::now(), updated_at=time::now()",
+    )
+    .await
+    .unwrap();
+    db.query(
         "CREATE source SET id='s1', filename='quickstart.pdf', display_name='Quickstart', \
          source_type='rules', page_count=1, indexed_at=time::now(), index_status='done', \
-         embed_model='nomic-embed-text-v1.5'",
+         embed_model='nomic-embed-text-v1.5', collection=type::thing('collection','col1')",
     )
     .await
     .unwrap();
@@ -193,7 +205,7 @@ async fn retrieval_ranks_target_chunk_above_distractors() {
         .enumerate()
         .map(|(i, (t, v))| IndexedChunk {
             chunk_id: format!("s1-{i}"),
-            campaign_id: None,
+            collection_id: "col1".to_string(),
             text: t.clone(),
             page_start: 1,
             page_end: 1,
@@ -209,7 +221,7 @@ async fn retrieval_ranks_target_chunk_above_distractors() {
         .embed_query("What planet does Coriolis orbit?")
         .await
         .unwrap();
-    let results = store.search(&qv, None, 5).await.unwrap();
+    let results = store.search(&qv, &["col1".to_string()], 5).await.unwrap();
 
     assert!(!results.is_empty(), "search returned no results");
 

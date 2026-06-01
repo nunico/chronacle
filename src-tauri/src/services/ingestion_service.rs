@@ -61,7 +61,6 @@ pub async fn ingest_source(
         .await
         .map_err(|e| IngestionError::Db(format!("Failed to update index_status: {e}")))?;
 
-    // Read the source record to get filename and campaign_id
     let source_info = get_source_info(&state.db, source_id).await?;
 
     on_progress(IngestionProgress {
@@ -101,7 +100,7 @@ pub async fn ingest_source(
         .map_err(|e| IngestionError::Db(format!("Embedding lock: {e}")))?
         .clone();
     let indexed =
-        embed_chunks(&embed_provider, chunks, source_id, &source_info.campaign_id).await?;
+        embed_chunks(&embed_provider, chunks, source_id, &source_info.collection_id).await?;
 
     drop(embed_provider);
 
@@ -182,17 +181,19 @@ struct RawChunk {
 }
 
 /// Information about a source needed during ingestion.
-struct SourceInfo {
-    filename: String,
-    campaign_id: Option<String>,
+#[derive(Debug)]
+pub(crate) struct SourceInfo {
+    pub(crate) filename: String,
+    /// Every source must belong to a collection — non-nullable per schema.
+    pub(crate) collection_id: String,
 }
 
-/// Embed chunks using the embedding provider, tagging each with the source's campaign.
+/// Embed chunks using the embedding provider, tagging each with the source's collection.
 async fn embed_chunks(
     provider: &Arc<dyn EmbeddingProvider>,
     chunks: Vec<RawChunk>,
     source_id: &str,
-    campaign_id: &Option<String>,
+    collection_id: &str,
 ) -> Result<Vec<IndexedChunk>, IngestionError> {
     if chunks.is_empty() {
         return Ok(Vec::new());
@@ -205,14 +206,14 @@ async fn embed_chunks(
         .map_err(|e| IngestionError::Embedding(e.to_string()))?;
 
     let embed_model = provider.model_name().to_string();
-    let campaign = campaign_id.clone();
+    let cid = collection_id.to_owned();
 
     Ok(chunks
         .into_iter()
         .zip(embeddings)
         .map(|(chunk, embedding)| IndexedChunk {
             chunk_id: format!("{}-{}", source_id, uuid::Uuid::new_v4()),
-            campaign_id: campaign.clone(),
+            collection_id: cid.clone(),
             text: chunk.text,
             page_start: chunk.page_start,
             page_end: chunk.page_end,
@@ -224,8 +225,11 @@ async fn embed_chunks(
         .collect())
 }
 
-/// Read source filename and campaign_id from the database.
-async fn get_source_info<C>(
+/// Fetch the filename and collection ID for a source record.
+///
+/// Exposed as `pub(crate)` so the `#[cfg(test)]` block below can call it
+/// directly without going through the full `ingest_source` pipeline.
+pub(crate) async fn get_source_info<C>(
     db: &surrealdb::Surreal<C>,
     source_id: &str,
 ) -> Result<SourceInfo, IngestionError>
@@ -233,7 +237,7 @@ where
     C: Connection,
 {
     let mut response = db
-        .query("SELECT filename, campaign FROM source WHERE id = type::thing('source', $id)")
+        .query("SELECT filename, collection FROM source WHERE id = type::thing('source', $id)")
         .bind(("id", source_id.to_owned()))
         .await
         .map_err(|e| IngestionError::Db(format!("Failed to query source: {e}")))?;
@@ -241,7 +245,8 @@ where
     #[derive(serde::Deserialize)]
     struct Row {
         filename: String,
-        campaign: Option<surrealdb::sql::Thing>,
+        /// Non-optional: matches `source.collection TYPE record<collection>` schema.
+        collection: surrealdb::sql::Thing,
     }
 
     let rows: Vec<Row> = response
@@ -252,7 +257,7 @@ where
         .next()
         .map(|r| SourceInfo {
             filename: r.filename,
-            campaign_id: r.campaign.map(|c| c.id.to_string()),
+            collection_id: r.collection.id.to_raw(),
         })
         .ok_or_else(|| IngestionError::Db(format!("Source '{source_id}' not found")))
 }
@@ -307,5 +312,43 @@ mod tests {
         assert_eq!(normalized.pages[1].page_num, 2);
         assert!(normalized.text.contains(p1));
         assert!(normalized.text.contains(p2));
+    }
+
+    #[tokio::test]
+    async fn get_source_info_reads_collection_id() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE collection SET id='col1', name='Test', created_at=time::now(), updated_at=time::now()"
+        ).await.unwrap();
+        db.query(
+            "CREATE source SET id='src1', collection=type::thing('collection','col1'), \
+             filename='test.pdf', display_name='Test', source_type='rules', page_count=0, \
+             indexed_at=time::now(), index_status='pending', embed_model='nomic-embed-text-v1.5'",
+        )
+        .await
+        .unwrap();
+
+        let info = get_source_info(&db, "src1").await.unwrap();
+        assert_eq!(info.filename, "test.pdf");
+        assert_eq!(info.collection_id.as_str(), "col1");
+    }
+
+    #[tokio::test]
+    async fn get_source_info_not_found_returns_err() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        let result = get_source_info(&db, "does-not-exist").await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("not found") || msg.contains("does-not-exist"), "Got: {msg}");
     }
 }

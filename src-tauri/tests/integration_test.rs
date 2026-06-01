@@ -145,10 +145,16 @@ async fn test_campaign_crud() {
 async fn test_source_crud() {
     let db = setup_db().await;
 
+    db.query(
+        "CREATE collection SET id='col1', name='Test', \
+         created_at=time::now(), updated_at=time::now()",
+    )
+    .await
+    .unwrap();
     let mut res = db
         .query(
             "CREATE source:src1 SET
-                campaign = NULL,
+                collection = type::thing('collection', 'col1'),
                 filename = 'test.pdf',
                 display_name = 'Test PDF',
                 source_type = 'rules',
@@ -330,6 +336,14 @@ async fn test_full_ingest_and_query_cycle() {
         pdf_extractor,
     });
 
+    // Create a collection so the source record can reference it
+    db.query(
+        "CREATE collection SET id='col1', name='Test', \
+         created_at=time::now(), updated_at=time::now()",
+    )
+    .await
+    .unwrap();
+
     // Create source record using the same pattern as the real upload_source command
     let source_id = "ingest-test-source";
     let filename = "test.pdf";
@@ -340,7 +354,7 @@ async fn test_full_ingest_and_query_cycle() {
         .query(
             "CREATE source SET
                 id = $id,
-                campaign = NULL,
+                collection = type::thing('collection', 'col1'),
                 filename = $filename,
                 display_name = $display_name,
                 source_type = 'rules',
@@ -475,8 +489,9 @@ async fn test_full_ingest_and_query_cycle() {
         .await
         .expect("embed query should succeed");
 
+    let collection_ids = vec!["col1".to_string()];
     let results = vector_store
-        .search(&query_vec, None, 5)
+        .search(&query_vec, &collection_ids, 5)
         .await
         .expect("vector search should succeed");
 

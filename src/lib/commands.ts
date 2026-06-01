@@ -14,25 +14,34 @@ export async function updateSetting(key: string, value: string): Promise<void> {
   return invoke('update_setting', { key, value });
 }
 
+// ── Source Types & Commands ────────────────────────────────────────────
+
+export interface Source {
+  id: string;
+  filename: string;
+  display_name: string;
+  source_type: string;
+  page_count: number;
+  index_status: string;
+  embed_model: string;
+  collection_id: string | null;
+}
+
 /**
- * Upload a source PDF file for indexing.
- *
- * @param filePath  Absolute path to the PDF on the local filesystem.
- * @param displayName  Optional human-readable label.
- * @param sourceType  One of "rules", "lore", "supplement".
- * @returns The created source record.
+ * Upload a source PDF and index it into the given collection.
+ * collectionId is required — every source must belong to a collection.
  */
 export async function uploadSource(
   filePath: string,
-  displayName?: string,
-  sourceType?: string,
-  campaignId?: string,
+  displayName: string | undefined,
+  sourceType: string | undefined,
+  collectionId: string,
 ): Promise<Record<string, unknown>> {
   return invoke('upload_source', {
     filePath,
     displayName: displayName ?? null,
     sourceType: sourceType ?? null,
-    campaignId: campaignId ?? null,
+    collectionId,
   });
 }
 
@@ -47,6 +56,21 @@ export async function getChatHistory(
   return invoke<Array<{ role: string; content: string }>>('get_chat_history', {
     campaignId,
   });
+}
+
+/**
+ * Get sources, optionally filtered by collection.
+ * Pass null to get all sources across all collections.
+ */
+export async function getSources(collectionId: string | null): Promise<Source[]> {
+  return invoke<Source[]>('get_sources', { collectionId });
+}
+
+/**
+ * Delete a source, its blob data, and all associated chunks.
+ */
+export async function deleteSource(id: string): Promise<void> {
+  return invoke('delete_source', { id });
 }
 
 /**
@@ -161,12 +185,68 @@ export async function removeProviderModel(id: string): Promise<void> {
   return invoke('remove_provider_model', { id });
 }
 
+// ── Collection Types & Commands ────────────────────────────────────────
+
+export interface Collection {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
+export async function getCollections(): Promise<Collection[]> {
+  return invoke<Collection[]>('get_collections');
+}
+
+export async function createCollection(
+  name: string,
+  description?: string,
+): Promise<Collection> {
+  return invoke<Collection>('create_collection', {
+    name,
+    description: description ?? null,
+  });
+}
+
+export async function updateCollection(
+  id: string,
+  name: string,
+  description?: string,
+): Promise<Collection> {
+  return invoke<Collection>('update_collection', {
+    id,
+    name,
+    description: description ?? null,
+  });
+}
+
+export async function deleteCollection(id: string): Promise<void> {
+  return invoke('delete_collection', { id });
+}
+
+export async function addCampaignCollection(
+  campaignId: string,
+  collectionId: string,
+): Promise<void> {
+  return invoke('add_campaign_collection', { campaignId, collectionId });
+}
+
+export async function removeCampaignCollection(
+  campaignId: string,
+  collectionId: string,
+): Promise<void> {
+  return invoke('remove_campaign_collection', { campaignId, collectionId });
+}
+
+export async function getCampaignCollections(campaignId: string): Promise<Collection[]> {
+  return invoke<Collection[]>('get_campaign_collections', { campaignId });
+}
+
 // ── Campaign Types & Commands ──────────────────────────────────────────
 
 export interface Campaign {
   id: string;
   name: string;
-  system: string;
+  system: string | null;
 }
 
 export async function getCampaigns(): Promise<Campaign[]> {
@@ -186,41 +266,25 @@ export async function updateCampaign(
 }
 
 export async function createCampaign(name: string, system: string): Promise<Campaign> {
-  return invoke<Campaign>('create_campaign', { name, system });
+  return invoke<Campaign>('create_campaign', {
+    name,
+    system: system || null,
+  });
 }
 
 export async function deleteCampaign(id: string): Promise<void> {
   return invoke('delete_campaign', { id });
 }
 
-// ── Source (PDF) Types & Commands ─────────────────────────────────────
+// MRU collection tracking (persisted in localStorage)
+const MRU_KEY = 'chronacle_mru_collection_id';
 
-export interface Source {
-  id: string;
-  filename: string;
-  display_name: string;
-  source_type: string;
-  page_count: number;
-  index_status: string;
-  embed_model: string;
-  campaign_id: string | null;
+export function getMruCollectionId(): string | null {
+  return localStorage.getItem(MRU_KEY);
 }
 
-/**
- * Get sources, optionally filtered by campaign.
- * - Pass `"*"` or `""` for all sources
- * - Pass `null` for global (non-campaign) sources
- * - Pass a campaign ID for campaign-specific sources
- */
-export async function getSources(campaignId: string | null): Promise<Source[]> {
-  return invoke<Source[]>('get_sources', { campaignId });
-}
-
-/**
- * Delete a source, its blob data, and all associated chunks.
- */
-export async function deleteSource(id: string): Promise<void> {
-  return invoke('delete_source', { id });
+export function setMruCollectionId(id: string): void {
+  localStorage.setItem(MRU_KEY, id);
 }
 
 // ── Embedding Model Commands ─────────────────────────────────────────

@@ -29,6 +29,36 @@ pub enum AgentError {
     Db(String),
 }
 
+/// Resolve the collection IDs that a campaign is subscribed to.
+///
+/// Queries the `subscribes_to` relation for the given `campaign_id` and
+/// returns the bare IDs (no `table:` prefix) of all subscribed collections.
+/// Returns an empty `Vec` when the campaign has no subscriptions.
+pub async fn resolve_collection_ids<C>(
+    db: &surrealdb::Surreal<C>,
+    campaign_id: &str,
+) -> Result<Vec<String>, AgentError>
+where
+    C: Connection,
+{
+    let mut response = db
+        .query("SELECT out FROM subscribes_to WHERE in = type::thing('campaign', $id)")
+        .bind(("id", campaign_id.to_owned()))
+        .await
+        .map_err(|e| AgentError::Db(e.to_string()))?;
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        out: surrealdb::sql::Thing,
+    }
+
+    let rows: Vec<Row> = response
+        .take(0)
+        .map_err(|e| AgentError::Db(e.to_string()))?;
+
+    Ok(rows.into_iter().map(|r| r.out.id.to_raw()).collect())
+}
+
 /// Run the full streaming RAG pipeline.
 ///
 /// Returns a channel of streaming tokens. Once the channel is exhausted,
@@ -52,10 +82,18 @@ pub async fn stream_response(
         .await
         .map_err(|e| AgentError::Embedding(e.to_string()))?;
 
-    // 3. Retrieve relevant chunks from the vector store
+    // 3. Resolve collection IDs for the active campaign
+    let collection_ids = match campaign_id {
+        Some(cid) => resolve_collection_ids(&state.db, cid)
+            .await
+            .map_err(|e| AgentError::Retrieval(e.to_string()))?,
+        None => Vec::new(),
+    };
+
+    // 4. Retrieve relevant chunks from the vector store
     let results = state
         .vector_store
-        .search(&query_vector, campaign_id, 10)
+        .search(&query_vector, &collection_ids, 10)
         .await
         .map_err(|e| AgentError::Retrieval(e.to_string()))?;
 
@@ -65,7 +103,7 @@ pub async fn stream_response(
         log_retrieval_debug(message, &embed_provider, &results);
     }
 
-    // 4. Build context-augmented system prompt
+    // 5. Build context-augmented system prompt
     let context = build_context(&results);
     let system_prompt = build_rag_system_prompt(&context);
 
@@ -82,7 +120,7 @@ pub async fn stream_response(
         eprintln!("===RAG_DEBUG_END===");
     }
 
-    // 5. Call the LLM with the augmented prompt
+    // 6. Call the LLM with the augmented prompt
     let chat_messages = vec![ChatMessage {
         role: "user".to_string(),
         content: message.to_string(),
@@ -270,9 +308,6 @@ pub struct Citation {
 /// When a quote is present, it's stored as `text_excerpt`. When absent, the
 /// 80 characters following the citation marker are used as a degraded fallback.
 fn parse_citations(response: &str) -> Vec<Citation> {
-    // Non-greedy `(.*?)` on the quote group lets it stop at the first `"`
-    // that's followed by `]` (allowing for optional whitespace). The `(?s)`
-    // flag makes `.` match newlines too, in case the LLM wraps long quotes.
     let re = regex::Regex::new(
         r#"(?s)\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+)(?:-\d+)?)?(?:,\s*quote:\s*"(.*?)")?\s*\]"#,
     )
@@ -285,8 +320,6 @@ fn parse_citations(response: &str) -> Vec<Citation> {
             let text_excerpt = if let Some(q) = cap.get(3) {
                 q.as_str().trim().to_string()
             } else {
-                // Fallback: 80 chars after the marker. Useful when older
-                // assistant messages predate the inline-quote prompt.
                 let marker_end = cap.get(0).map_or(0, |m| m.end());
                 response
                     .chars()
@@ -358,10 +391,6 @@ mod tests {
         assert!(prompt.contains("REFERENCE MATERIAL"));
         assert!(prompt.contains("PHB.pdf"));
         assert!(prompt.contains("[Source: \"<source name>\""));
-        // New: prompt must request quoted evidence and tolerate paraphrase
-        // Concise answer: no verbatim quoting in the visible reply;
-        // tolerant of paraphrase; no premature refusal; supporting quote
-        // travels inside the citation marker.
         assert!(prompt.contains("Do NOT quote the passages"));
         assert!(prompt.contains("1–3 sentences"));
         assert!(prompt.contains("synonyms"));
@@ -429,9 +458,6 @@ mod tests {
 
     #[test]
     fn test_parse_citations_page_range() {
-        // The LLM mimics the `p.N-M` format from the context block. Parser
-        // must capture the first page; without this, the badge in the UI
-        // wouldn't render at all (the whole citation falls through as text).
         let cases = [
             ("[Source: \"Quickstart.pdf\", p.9-9]", "Quickstart.pdf", Some(9)),
             ("[Source: \"Quickstart.pdf\", p.45-49]", "Quickstart.pdf", Some(45)),
@@ -469,7 +495,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify both messages exist
         let mut response = db
             .query("SELECT count() FROM message GROUP ALL")
             .await
@@ -481,15 +506,11 @@ mod tests {
         let counts: Vec<Count> = response.take(0).unwrap();
         assert_eq!(counts[0].count, 2);
 
-        // Query assistant message directly with a simple query
-        // SurrealDB in-memory may handle object literals differently;
-        // test the persist + citation parse logic at the Rust level instead
         let citations = parse_citations("response with [Source: \"PHB\", p.72].");
         assert_eq!(citations.len(), 1);
         assert_eq!(citations[0].source_name, "PHB");
         assert_eq!(citations[0].page, Some(72));
 
-        // Verify the answer message content was stored
         let mut response = db
             .query("SELECT role, content FROM message WHERE role = $role")
             .bind(("role", "assistant"))
@@ -537,5 +558,56 @@ mod tests {
 
         let rows: Vec<Row> = response.take(0).unwrap();
         assert!(rows.is_empty());
+    }
+
+    // ── Collection resolution tests ──────────────────────────────
+
+    #[tokio::test]
+    async fn resolve_collection_ids_returns_subscribed_ids() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE collection SET id='col1', name='C1', created_at=time::now(), updated_at=time::now(); \
+             CREATE collection SET id='col2', name='C2', created_at=time::now(), updated_at=time::now(); \
+             CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+             created_at=time::now(), updated_at=time::now()"
+        ).await.unwrap();
+        db.query(
+            "LET $in = type::thing('campaign','camp1');
+             LET $out1 = type::thing('collection','col1');
+             LET $out2 = type::thing('collection','col2');
+             RELATE $in->subscribes_to->$out1 SET created_at=time::now();
+             RELATE $in->subscribes_to->$out2 SET created_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let ids = resolve_collection_ids(&db, "camp1").await.unwrap();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"col1".to_string()));
+        assert!(ids.contains(&"col2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn resolve_collection_ids_empty_for_no_subscriptions() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let ids = resolve_collection_ids(&db, "camp1").await.unwrap();
+        assert!(ids.is_empty());
     }
 }
