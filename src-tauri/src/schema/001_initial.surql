@@ -5,7 +5,9 @@ DEFINE FIELD created_at ON campaign TYPE datetime;
 DEFINE FIELD updated_at ON campaign TYPE datetime;
 
 DEFINE TABLE source SCHEMAFULL;
-DEFINE FIELD campaign ON source TYPE record<campaign> | NULL;
+-- DEFAULT NULL ensures INSERT without this field satisfies SCHEMAFULL constraint,
+-- mirroring the same pattern used on chunk.campaign.
+DEFINE FIELD campaign ON source TYPE record<campaign> | NULL DEFAULT NULL;
 DEFINE FIELD filename ON source TYPE string;
 DEFINE FIELD display_name ON source TYPE string;
 DEFINE FIELD source_type ON source TYPE string ASSERT $value IN ['rules', 'lore', 'supplement'];

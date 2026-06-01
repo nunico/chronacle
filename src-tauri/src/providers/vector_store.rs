@@ -64,7 +64,9 @@ pub trait VectorStore: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct IndexedChunk {
     pub chunk_id: String,
-    pub collection_id: Option<String>,
+    /// Every chunk must belong to a collection — the schema defines
+    /// `chunk.collection TYPE record<collection>` as non-nullable.
+    pub collection_id: String,
     pub text: String,
     pub page_start: i64,
     pub page_end: i64,
@@ -72,6 +74,23 @@ pub struct IndexedChunk {
     pub source_type: String,
     pub embedding: Vec<f32>,
     pub embed_model: String,
+}
+
+/// Validate a collection ID before embedding it in a SurrealQL identifier.
+///
+/// Collection IDs originate from our own UUID generator (hex + hyphens), but
+/// we validate defensively to prevent backtick-injection attacks in cases
+/// where an unexpected value could reach the SQL builder.
+///
+/// Allowed characters: ASCII alphanumeric, `-`, `_`.
+fn sanitize_collection_id(id: &str) -> Result<&str, VectorStoreError> {
+    if id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        Ok(id)
+    } else {
+        Err(VectorStoreError::Db(format!(
+            "Invalid collection ID (unexpected characters): {id}"
+        )))
+    }
 }
 
 /// SurrealDB-backed implementation of [`VectorStore`].
@@ -110,11 +129,11 @@ where
 
             let embedding_field = format!("[{}]", vec_str);
 
-            // Build the collection clause: either a typed record link or NONE.
-            let collection_clause = match &chunk.collection_id {
-                Some(cid) => format!("collection = collection:`{cid}`"),
-                None => "collection = NONE".to_string(),
-            };
+            // Build the collection clause as a typed record link.
+            // sanitize_collection_id rejects any ID that contains characters
+            // outside [A-Za-z0-9\-_], guarding against backtick injection.
+            let cid = sanitize_collection_id(&chunk.collection_id)?;
+            let collection_clause = format!("collection = collection:`{cid}`");
 
             let sql = format!(
                 "CREATE chunk SET
@@ -130,8 +149,7 @@ where
                     embed_model = $embed_model"
             );
 
-            let _ = self
-                .db
+            self.db
                 .query(sql)
                 .bind(("id", chunk.chunk_id.clone()))
                 .bind(("source_id", source_id.to_owned()))
@@ -142,6 +160,8 @@ where
                 .bind(("source_type", chunk.source_type.clone()))
                 .bind(("embed_model", chunk.embed_model.clone()))
                 .await
+                .map_err(|e| VectorStoreError::Db(e.to_string()))?
+                .check()
                 .map_err(|e| VectorStoreError::Db(e.to_string()))?;
         }
 
@@ -170,10 +190,11 @@ where
         // Using IN with a typed record-link list as a secondary WHERE condition
         // keeps the MTREE index path intact — OR at the top level would bypass
         // the vector index.
+        // sanitize_collection_id validates each ID against backtick injection.
         let col_list = collection_ids
             .iter()
-            .map(|id| format!("collection:`{id}`"))
-            .collect::<Vec<_>>()
+            .map(|id| sanitize_collection_id(id).map(|safe| format!("collection:`{safe}`")))
+            .collect::<Result<Vec<_>, _>>()?
             .join(", ");
 
         // SurrealDB KNN pattern:
@@ -250,6 +271,28 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_collection_id_accepts_valid_ids() {
+        assert!(sanitize_collection_id("abc123").is_ok());
+        assert!(sanitize_collection_id("01234567-89ab-cdef-0123-456789abcdef").is_ok());
+        assert!(sanitize_collection_id("col_1").is_ok());
+    }
+
+    #[test]
+    fn sanitize_collection_id_rejects_backtick() {
+        let result = sanitize_collection_id("col`DROP TABLE chunk");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Invalid collection ID"));
+    }
+
+    #[test]
+    fn sanitize_collection_id_rejects_other_special_chars() {
+        assert!(sanitize_collection_id("col id").is_err()); // space
+        assert!(sanitize_collection_id("col/id").is_err()); // slash
+        assert!(sanitize_collection_id("col;DROP").is_err()); // semicolon
+    }
 
     #[tokio::test]
     async fn test_search_empty_store() {
