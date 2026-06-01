@@ -170,7 +170,7 @@ chronacle/
 
 ## License
 
-Copyright © 2025-present Nunico.
+Copyright © 2026-present Nico Nußbaum.
 
 **Code:** Licensed under the **GNU Affero General Public License v3.0** — see [`LICENSE`](./LICENSE).
 

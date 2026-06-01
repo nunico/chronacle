@@ -2,7 +2,7 @@
 
 ## Chronacle
 
-Copyright (C) 2025-present Nunico
+Copyright © 2026-present Nico Nußbaum.
 
 ## Terms
 
