@@ -1,6 +1,7 @@
 [workspace]
 members = ["src-tauri"]
 resolver = "2"
+license = "AGPL-3.0 WITH branding-exception"
 
 [profile.test]
 opt-level = 0
@@ -8,3 +9,5 @@ debug = 2
 
 [workspace.metadata.chronacle]
 coverage = "cargo llvm-cov --html"
+license = "AGPL-3.0 WITH branding-exception"
+license-file = "LICENSE"

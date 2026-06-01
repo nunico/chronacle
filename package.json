@@ -1,6 +1,8 @@
 {
   "name": "chronacle",
   "private": true,
+  "license": "AGPL-3.0 WITH branding-exception",
+  "license-file": "LICENSE",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -30,6 +30,18 @@ pnpm playwright test tests/e2e/ui/      # requires built Tauri app
 cargo tauri dev && cargo tauri build
 ```
 
+## License
+
+This project is licensed under **AGPL-3.0 with a Branding Exception**.
+
+- **Code**: Licensed under the GNU Affero General Public License v3.0.
+  See [`LICENSE`](LICENSE).
+- **Brand Assets**: The project name "Chronacle", its logos, icons, and trade
+  dress are **not** covered by the AGPL. They may not be used in modified
+  or redistributed versions without explicit permission.
+  See [`LICENSE-EXCEPTION.md`](LICENSE-EXCEPTION.md).
+- Forks must remove or replace all Brand Assets.
+
 ## Hard constraints
 
 - **Tauri IPC only.** Frontend talks to the Rust backend via `invoke()` commands and `app.listen()` events. No HTTP server, no WebSocket (ADR-005).
