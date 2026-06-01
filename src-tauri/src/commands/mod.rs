@@ -71,10 +71,11 @@ pub struct SourceResponse {
 /// Uploads a source PDF file, storing it in the blob store and triggering
 /// ingestion (extraction → chunking → embedding).
 ///
-/// For Phase 1 the ingestion pipeline is a stub that marks the source as
-/// `pending`; full processing will be wired in a later iteration.
+/// After the DB INSERT succeeds the ingestion pipeline runs synchronously and
+/// emits `ingestion-progress` / `ingestion-error` Tauri events.
 #[tauri::command]
 pub async fn upload_source(
+    app_handle: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
     file_path: String,
     display_name: Option<String>,
@@ -109,7 +110,13 @@ pub async fn upload_source(
         .map_err(|e| format!("Failed to store blob: {e}"))?;
 
     // Insert source record — collection is bound via parameter, never interpolated.
-    let mut response = state
+    #[derive(Deserialize)]
+    struct CreatedSource {
+        #[expect(dead_code)]
+        id: surrealdb::sql::Thing,
+    }
+
+    let created: Vec<CreatedSource> = state
         .db
         .query(
             "CREATE source SET
@@ -130,16 +137,64 @@ pub async fn upload_source(
         .bind(("embed_model", embed_model.to_owned()))
         .bind(("collection_id", collection_id.clone()))
         .await
-        .map_err(|e| format!("Failed to create source record: {e}"))?;
-
-    let created: Vec<serde_json::Value> = response
+        .map_err(|e| format!("Failed to create source record: {e}"))?
+        .check()
+        .map_err(|e| format!("Source INSERT violated a schema constraint: {e}"))?
         .take(0)
         .map_err(|e| format!("Failed to parse created source: {e}"))?;
 
-    Ok(created
-        .into_iter()
-        .next()
-        .unwrap_or(serde_json::json!({"id": source_id, "collection_id": collection_id})))
+    if created.is_empty() {
+        return Err("Source creation failed: no record returned".to_string());
+    }
+
+    let source_json = serde_json::json!({
+        "id": source_id,
+        "filename": filename,
+        "display_name": display_name,
+        "source_type": source_type,
+        "index_status": "pending",
+        "embed_model": embed_model,
+        "collection_id": collection_id,
+    });
+
+    let state_ref = state.inner().clone();
+    let sid = source_id.clone();
+
+    match crate::services::ingestion_service::ingest_source(&state_ref, &sid).await {
+        Ok(()) => {
+            let _ = app_handle.emit(
+                "ingestion-progress",
+                serde_json::json!({
+                    "source_id": &sid,
+                    "status": "done",
+                    "progress": 1.0,
+                    "step": "Complete",
+                }),
+            );
+            Ok(source_json)
+        }
+        Err(e) => {
+            let err_msg = e.to_string();
+            eprintln!("Ingestion failed for source {sid}: {err_msg}");
+            // Best-effort: mark source as errored in the DB.
+            let _ = state_ref
+                .db
+                .query(
+                    "UPDATE source SET index_status = 'error' \
+                     WHERE id = type::thing('source', $id)",
+                )
+                .bind(("id", sid.clone()))
+                .await;
+            let _ = app_handle.emit(
+                "ingestion-error",
+                serde_json::json!({
+                    "source_id": &sid,
+                    "error": &err_msg,
+                }),
+            );
+            Err(format!("PDF ingestion failed: {err_msg}"))
+        }
+    }
 }
 
 /// Returns all sources, optionally filtered to a specific collection.
@@ -445,48 +500,6 @@ mod tests {
         assert!(resp.description.is_none());
     }
 
-    // ── create_collection validation ─────────────────────────────────────────
-
-    #[tokio::test]
-    async fn create_collection_rejects_empty_name() {
-        let db = setup_db().await;
-        let state_inner = Arc::new(AppState {
-            db,
-            llm_provider: Arc::new(crate::providers::llm_provider::OpenAIProvider::new(
-                String::new(),
-                String::new(),
-            )),
-            vector_store: Arc::new(crate::providers::vector_store::SurrealDbVector::new(
-                surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
-                    .await
-                    .unwrap(),
-            )),
-            blob_store: Arc::new(crate::providers::blob_store::LocalFileStore::new(
-                std::path::PathBuf::from("/tmp"),
-            )),
-        });
-        // Call the service directly (State<> wrapping is a Tauri concern)
-        let result = crate::services::collection_service::create(&state_inner.db, "  ", None).await;
-        // The service itself does not validate; validation is in the command.
-        // Test the command-level guard via direct logic replication.
-        let name = "  ".to_string();
-        assert!(
-            name.trim().is_empty(),
-            "empty-name guard must trigger for whitespace-only input"
-        );
-        // The service call with whitespace name should succeed (it's a DB-level
-        // decision), but the command wraps it with the guard. Ensure guard fires.
-        drop(result);
-    }
-
-    // ── update_collection validation ─────────────────────────────────────────
-
-    #[test]
-    fn update_collection_empty_name_guard() {
-        let name = String::new();
-        assert!(name.trim().is_empty());
-    }
-
     // ── get_sources — collection_id filter ───────────────────────────────────
 
     #[tokio::test]
@@ -562,16 +575,5 @@ mod tests {
             .unwrap();
         let rows_all: Vec<Row> = resp_all.take(0).unwrap();
         assert_eq!(rows_all.len(), 2);
-    }
-
-    // ── upload_source — collection_id guard ──────────────────────────────────
-
-    #[test]
-    fn upload_source_empty_collection_id_guard() {
-        let collection_id = "   ".to_string();
-        assert!(
-            collection_id.trim().is_empty(),
-            "whitespace collection_id must be rejected"
-        );
     }
 }
