@@ -24,32 +24,69 @@ pub enum AgentError {
     Db(String),
 }
 
+/// Resolve the collection IDs that a campaign is subscribed to.
+///
+/// Queries the `subscribes_to` relation for the given `campaign_id` and
+/// returns the bare IDs (no `table:` prefix) of all subscribed collections.
+/// Returns an empty `Vec` when the campaign has no subscriptions.
+pub async fn resolve_collection_ids<C>(
+    db: &surrealdb::Surreal<C>,
+    campaign_id: &str,
+) -> Result<Vec<String>, AgentError>
+where
+    C: Connection,
+{
+    let mut response = db
+        .query("SELECT out FROM subscribes_to WHERE in = type::thing('campaign', $id)")
+        .bind(("id", campaign_id.to_owned()))
+        .await
+        .map_err(|e| AgentError::Db(e.to_string()))?;
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        out: surrealdb::sql::Thing,
+    }
+
+    let rows: Vec<Row> = response
+        .take(0)
+        .map_err(|e| AgentError::Db(e.to_string()))?;
+
+    Ok(rows.into_iter().map(|r| r.out.id.to_raw()).collect())
+}
+
 /// Run the full RAG pipeline for a user message.
 ///
 /// Returns a string with the LLM's response (including citations). In Phase 2
 /// this will return a full `ChatResponse` with structured citation data.
 ///
-/// `collection_ids` scopes retrieval to the caller's subscribed collections.
-/// Pass an empty slice to skip retrieval entirely (e.g. during Phase 1 stub).
+/// `campaign_id` scopes retrieval to the collections the campaign subscribes to.
+/// Pass `None` to skip retrieval entirely (e.g. during Phase 1 stub or when no
+/// campaign is active).
 pub async fn process_message(
     state: &Arc<AppState>,
     message: &str,
-    collection_ids: &[String],
+    campaign_id: Option<&str>,
 ) -> Result<String, AgentError> {
     // ── 1. Embed the query ─────────────────────────────────────
     let query_vector = embed_query(message).await?;
 
-    // ── 2. Retrieve relevant chunks ────────────────────────────
+    // ── 2. Resolve collection IDs for the active campaign ──────
+    let collection_ids = match campaign_id {
+        Some(cid) => resolve_collection_ids(&state.db, cid).await?,
+        None => Vec::new(),
+    };
+
+    // ── 3. Retrieve relevant chunks ────────────────────────────
     let _results = state
         .vector_store
-        .search(&query_vector, collection_ids, 10)
+        .search(&query_vector, &collection_ids, 10)
         .await
         .map_err(|e| AgentError::Retrieval(e.to_string()))?;
 
-    // ── 3. Build context ───────────────────────────────────────
+    // ── 4. Build context ───────────────────────────────────────
     let _context = build_context(&_results);
 
-    // ── 4. Call LLM ────────────────────────────────────────────
+    // ── 5. Call LLM ────────────────────────────────────────────
     // TODO: Phase 2 — build system prompt with context, call LLM,
     //       stream response back to caller.
     let response = format!(
@@ -57,7 +94,7 @@ pub async fn process_message(
          Your question was: \"{message}\"]"
     );
 
-    // ── 5. Persist message ─────────────────────────────────────
+    // ── 6. Persist message ─────────────────────────────────────
     persist_message(&state.db, "user", message).await?;
     persist_message(&state.db, "assistant", &response).await?;
 
@@ -124,5 +161,54 @@ mod tests {
     async fn test_build_context_empty() {
         let ctx = build_context(&[]);
         assert!(ctx.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolve_collection_ids_returns_subscribed_ids() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE collection SET id='col1', name='C1', created_at=time::now(), updated_at=time::now(); \
+             CREATE collection SET id='col2', name='C2', created_at=time::now(), updated_at=time::now(); \
+             CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+             created_at=time::now(), updated_at=time::now()"
+        ).await.unwrap();
+        db.query(
+            "LET $in = type::thing('campaign','camp1');
+             LET $out1 = type::thing('collection','col1');
+             LET $out2 = type::thing('collection','col2');
+             RELATE $in->subscribes_to->$out1 SET created_at=time::now();
+             RELATE $in->subscribes_to->$out2 SET created_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let ids = resolve_collection_ids(&db, "camp1").await.unwrap();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"col1".to_string()));
+        assert!(ids.contains(&"col2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn resolve_collection_ids_empty_for_no_subscriptions() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let ids = resolve_collection_ids(&db, "camp1").await.unwrap();
+        assert!(ids.is_empty());
     }
 }
