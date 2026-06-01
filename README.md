@@ -50,12 +50,31 @@ All external dependencies are behind Rust traits (`Arc<dyn LlmProvider>`, `Arc<d
 
 ## Prerequisites
 
-| Tool    | Version  | Note                                            |
-|---------|----------|-------------------------------------------------|
-| Rust    | ≥ 1.81   | Install via [rustup](https://rustup.rs)          |
-| Node.js | ≥ 20     | Use [nvm](https://github.com/nvm-sh/nvm) or fnm  |
-| pnpm    | ≥ 9      | `npm install -g pnpm`                            |
-| Tauri   | —        | CLI bundled via pnpm; system deps listed below   |
+| Tool    | Version  | Note                                                 |
+|---------|----------|------------------------------------------------------|
+| Rust    | ≥ 1.95   | Managed by [mise](https://mise.jdx.dev)               |
+| Node.js | ≥ 24     | Managed by [mise](https://mise.jdx.dev); pinned to LTS in [`mise.toml`](mise.toml) |
+| pnpm    | ≥ 9.15   | Managed by [mise](https://mise.jdx.dev)               |
+| Tauri   | ≥ 2.11   | CLI bundled via pnpm; system deps listed below         |
+
+### Install with mise
+
+This project uses **[mise](https://mise.jdx.dev)** to manage tool versions (defined in [`mise.toml`](mise.toml)).
+
+```bash
+# Install mise (macOS / Linux)
+curl https://mise.run | sh
+# Or via Homebrew: brew install mise
+
+# Activate mise in your shell (add to ~/.zshrc / ~/.bashrc)
+eval "$(mise activate)"
+
+# Install all project tools (Rust, Node.js, pnpm)
+cd chronacle
+mise install
+```
+
+> **Note:** Node.js, pnpm, and Rust are pinned per-project by `mise.toml` and installed with a single `mise install` command. No need for rustup, nvm, or npm `-g` installs.
 
 ### System Dependencies (Tauri 2)
 
