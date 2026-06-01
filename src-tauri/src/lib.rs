@@ -56,24 +56,19 @@ pub async fn run() {
 
     // ── Build service dependencies ──────────────────────────────────
     let llm_provider: Arc<dyn providers::llm_provider::LlmProvider> = Arc::new(
-        providers::llm_provider::OpenAIProvider::new(
-            String::new(),
-            String::new(),
-        ),
+        providers::llm_provider::OpenAIProvider::new(String::new(), String::new()),
     );
 
-    let vector_store: Arc<dyn providers::vector_store::VectorStore> = Arc::new(
-        providers::vector_store::SurrealDbVector::new(db.clone()),
-    );
+    let vector_store: Arc<dyn providers::vector_store::VectorStore> =
+        Arc::new(providers::vector_store::SurrealDbVector::new(db.clone()));
 
     let pdfs_dir = data_dir.join("pdfs");
     if !pdfs_dir.exists() {
         std::fs::create_dir_all(&pdfs_dir).expect("Failed to create PDFs directory");
     }
 
-    let blob_store: Arc<dyn providers::blob_store::BlobStore> = Arc::new(
-        providers::blob_store::LocalFileStore::new(pdfs_dir),
-    );
+    let blob_store: Arc<dyn providers::blob_store::BlobStore> =
+        Arc::new(providers::blob_store::LocalFileStore::new(pdfs_dir));
 
     let state = Arc::new(AppState {
         db,
@@ -89,7 +84,15 @@ pub async fn run() {
             commands::get_settings,
             commands::update_setting,
             commands::upload_source,
+            commands::get_sources,
             commands::chat_send,
+            commands::get_collections,
+            commands::create_collection,
+            commands::update_collection,
+            commands::delete_collection,
+            commands::add_campaign_collection,
+            commands::remove_campaign_collection,
+            commands::get_campaign_collections,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");
