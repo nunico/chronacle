@@ -95,8 +95,8 @@ pub async fn process_message(
     );
 
     // ── 6. Persist message ─────────────────────────────────────
-    persist_message(&state.db, "user", message).await?;
-    persist_message(&state.db, "assistant", &response).await?;
+    persist_message(&state.db, "user", message, campaign_id).await?;
+    persist_message(&state.db, "assistant", &response, campaign_id).await?;
 
     Ok(response)
 }
@@ -124,24 +124,37 @@ fn build_context(results: &[crate::providers::vector_store::SearchResult]) -> St
 }
 
 /// Insert a message record into the `message` table.
+///
+/// `campaign_id` is `Some` when a campaign is active; `None` produces
+/// `campaign = NULL` which is valid because the schema declares
+/// `DEFAULT NULL` on that field.
 async fn persist_message<C>(
     db: &surrealdb::Surreal<C>,
     role: &str,
     content: &str,
+    campaign_id: Option<&str>,
 ) -> Result<(), AgentError>
 where
     C: Connection,
 {
-    db.query(
+    let campaign_expr = match campaign_id {
+        Some(cid) => format!("type::thing('campaign', '{cid}')"),
+        None => "NULL".to_owned(),
+    };
+
+    db.query(format!(
         "CREATE message SET
+            campaign = {campaign_expr},
             role = $role,
             content = $content,
             citations = [],
-            created_at = time::now()",
-    )
+            created_at = time::now()"
+    ))
     .bind(("role", role.to_owned()))
     .bind(("content", content.to_owned()))
     .await
+    .map_err(|e| AgentError::Db(e.to_string()))?
+    .check()
     .map_err(|e| AgentError::Db(e.to_string()))?;
 
     Ok(())

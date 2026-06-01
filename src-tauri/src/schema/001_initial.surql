@@ -49,7 +49,8 @@ DEFINE FIELD notes ON session TYPE string;
 DEFINE FIELD created_at ON session TYPE datetime;
 
 DEFINE TABLE message SCHEMAFULL;
-DEFINE FIELD campaign ON message TYPE record<campaign>;
+-- DEFAULT NULL lets inserts omit campaign (e.g. global / no-campaign context).
+DEFINE FIELD campaign ON message TYPE record<campaign> | NULL DEFAULT NULL;
 DEFINE FIELD role ON message TYPE string ASSERT $value IN ['user', 'assistant', 'system'];
 DEFINE FIELD content ON message TYPE string;
 DEFINE FIELD citations ON message TYPE array<object>;
