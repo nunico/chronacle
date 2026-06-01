@@ -2,7 +2,6 @@
 ///
 /// Phase 1 provides the full pipeline skeleton; the actual PDF-extraction and
 /// embedding calls are stubbed and will be wired in a later iteration.
-
 use std::sync::Arc;
 
 use crate::AppState;
@@ -23,6 +22,13 @@ pub enum IngestionError {
     Store(String),
 }
 
+/// Metadata fetched from the source record before ingestion begins.
+pub(crate) struct SourceInfo {
+    pub(crate) filename: String,
+    /// Every source must belong to a collection — non-nullable per schema.
+    pub(crate) collection_id: String,
+}
+
 /// Ingest a source PDF: extract text, chunk, embed, and store.
 ///
 /// 1. Reads the raw PDF bytes from the blob store.
@@ -30,25 +36,20 @@ pub enum IngestionError {
 /// 3. Splits into chunks (stubbed — returns empty set).
 /// 4. Embeds each chunk with `fastembed` (stubbed — returns empty set).
 /// 5. Stores chunks in the vector store and marks `index_status = 'done'`.
-pub async fn ingest_source(
-    state: &Arc<AppState>,
-    source_id: &str,
-) -> Result<(), IngestionError> {
+pub async fn ingest_source(state: &Arc<AppState>, source_id: &str) -> Result<(), IngestionError> {
     // ── 1. Update status to 'indexing' ──────────────────────────────
     state
         .db
         .query("UPDATE source SET index_status = 'indexing' WHERE id = $id")
         .bind(("id", source_id.to_owned()))
         .await
-        .map_err(|e| IngestionError::Db(
-            format!("Failed to update index_status: {e}")
-        ))?;
+        .map_err(|e| IngestionError::Db(format!("Failed to update index_status: {e}")))?;
 
-    // ── 2. Read from blob store ────────────────────────────────────
-    let filename = get_source_filename(&state.db, source_id).await?;
+    // ── 2. Read source metadata and blob ──────────────────────────────
+    let source_info = get_source_info(&state.db, source_id).await?;
     let pdf_data = state
         .blob_store
-        .retrieve(source_id, &filename)
+        .retrieve(source_id, &source_info.filename)
         .await
         .map_err(|e| IngestionError::Store(e.to_string()))?;
 
@@ -59,7 +60,7 @@ pub async fn ingest_source(
     let chunks = chunk_text(&extracted, source_id).await?;
 
     // ── 5. Embed ───────────────────────────────────────────────────
-    let indexed = embed_chunks(chunks).await?;
+    let indexed = embed_chunks(chunks, &source_info.collection_id).await?;
 
     // ── 6. Store in vector store ───────────────────────────────────
     state
@@ -118,33 +119,45 @@ struct RawChunk {
     _section_heading: String,
 }
 
-/// Embed each chunk using `fastembed`.
+/// Embed each chunk using `fastembed`, tagging each with `collection_id`.
+///
+/// `collection_id` is non-optional: every source must belong to a collection
+/// per the schema (`source.collection TYPE record<collection>`), and this
+/// value is inherited by every chunk produced from that source.
 async fn embed_chunks(
     _chunks: Vec<RawChunk>,
+    collection_id: &str,
 ) -> Result<Vec<crate::providers::vector_store::IndexedChunk>, IngestionError> {
     // TODO: Phase 2 — implement with fastembed (nomic-embed-text-v1.5)
+    //
+    // Each IndexedChunk will carry `collection_id: collection_id.to_owned()`
+    // so the vector store can enforce the collection filter at search time.
+    let _ = collection_id; // used in Phase 2 implementation
     Ok(Vec::new())
 }
 
-/// Helper: fetch the filename for a source record.
-async fn get_source_filename<C>(
+/// Fetch the filename and collection ID for a source record.
+///
+/// Exposed as `pub(crate)` so the `#[cfg(test)]` block below can call it
+/// directly without going through the full `ingest_source` pipeline.
+pub(crate) async fn get_source_info<C>(
     db: &surrealdb::Surreal<C>,
     source_id: &str,
-) -> Result<String, IngestionError>
+) -> Result<SourceInfo, IngestionError>
 where
     C: Connection,
 {
     let mut response = db
-        .query("SELECT filename FROM source WHERE id = $id")
+        .query("SELECT filename, collection FROM source WHERE id = type::thing('source', $id)")
         .bind(("id", source_id.to_owned()))
         .await
-        .map_err(|e| IngestionError::Db(
-            format!("Failed to query source filename: {e}")
-        ))?;
+        .map_err(|e| IngestionError::Db(format!("Failed to query source: {e}")))?;
 
     #[derive(serde::Deserialize)]
     struct Row {
         filename: String,
+        /// Non-optional: matches `source.collection TYPE record<collection>` schema.
+        collection: surrealdb::sql::Thing,
     }
 
     let rows: Vec<Row> = response
@@ -153,6 +166,38 @@ where
 
     rows.into_iter()
         .next()
-        .map(|r| r.filename)
+        .map(|r| SourceInfo {
+            filename: r.filename,
+            collection_id: r.collection.id.to_raw(),
+        })
         .ok_or_else(|| IngestionError::Db(format!("Source '{source_id}' not found")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn get_source_info_reads_collection_id() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE collection SET id='col1', name='Test', created_at=time::now(), updated_at=time::now()"
+        ).await.unwrap();
+        db.query(
+            "CREATE source SET id='src1', collection=type::thing('collection','col1'), \
+             filename='test.pdf', display_name='Test', source_type='rules', page_count=0, \
+             indexed_at=time::now(), index_status='pending', embed_model='nomic-embed-text-v1.5'",
+        )
+        .await
+        .unwrap();
+
+        let info = get_source_info(&db, "src1").await.unwrap();
+        assert_eq!(info.filename, "test.pdf");
+        assert_eq!(info.collection_id.as_str(), "col1");
+    }
 }
