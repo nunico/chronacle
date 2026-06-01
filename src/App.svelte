@@ -2,11 +2,35 @@
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import { open } from '@tauri-apps/plugin-dialog';
+  import {
+    getCollections,
+    createCollection,
+    getMruCollectionId,
+    setMruCollectionId,
+    uploadSource,
+    type Collection,
+  } from './lib/commands';
 
   let messages = $state<Array<{ role: string; content: string }>>([]);
   let input = $state('');
   let isLoading = $state(false);
   let currentResponse = $state('');
+
+  // Upload state
+  let isUploading = $state(false);
+  let uploadStatus = $state('');
+  let uploadedSourceName = $state('');
+
+  // Collection picker state
+  let collections = $state<Collection[]>([]);
+  let pendingUploadPath = $state<string | null>(null);
+  let pendingUploadName = $state<string | null>(null);
+  let showCollectionPicker = $state(false);
+  let pickerCollectionId = $state('');
+  let pickerNewName = $state('');
+  let showNewCollectionInput = $state(false);
+  let pickerError = $state('');
 
   onMount(async () => {
     // Load chat history from backend on page load
@@ -64,6 +88,101 @@
       sendMessage();
     }
   }
+
+  async function openFilePicker() {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (!selected) return;
+
+    const path = typeof selected === 'string' ? selected : selected[0];
+    const name = path.split('/').pop()?.split('\\').pop() ?? 'document.pdf';
+
+    // Load collections and show picker
+    try {
+      collections = await getCollections();
+    } catch (e) {
+      console.error('Failed to load collections:', e);
+      collections = [];
+    }
+
+    // Pre-select MRU collection if it still exists
+    const mru = getMruCollectionId();
+    pickerCollectionId =
+      mru && collections.some((c) => c.id === mru) ? mru : (collections[0]?.id ?? '');
+    pendingUploadPath = path;
+    pendingUploadName = name;
+    showCollectionPicker = true;
+    pickerError = '';
+    showNewCollectionInput = false;
+    pickerNewName = '';
+  }
+
+  async function handlePickerCreateNew() {
+    if (!pickerNewName.trim()) return;
+    pickerError = '';
+    try {
+      const newCol = await createCollection(pickerNewName.trim());
+      collections = [...collections, newCol];
+      pickerCollectionId = newCol.id;
+      pickerNewName = '';
+      showNewCollectionInput = false;
+    } catch (e) {
+      pickerError = String(e);
+    }
+  }
+
+  async function confirmUpload() {
+    if (!pickerCollectionId || !pendingUploadPath || !pendingUploadName) return;
+    pickerError = '';
+
+    const path = pendingUploadPath;
+    const name = pendingUploadName;
+    const collectionId = pickerCollectionId;
+
+    // Close picker immediately
+    showCollectionPicker = false;
+    pendingUploadPath = null;
+    pendingUploadName = null;
+
+    setMruCollectionId(collectionId);
+
+    isUploading = true;
+    uploadStatus = 'Uploading…';
+    uploadedSourceName = name;
+
+    let unlistenProgress: UnlistenFn | null = null;
+    let unlistenError: UnlistenFn | null = null;
+
+    try {
+      unlistenProgress = await listen<{ source_id: string; status: string; step: string }>(
+        'ingestion-progress',
+        (event) => {
+          uploadStatus = event.payload.step ?? 'Processing…';
+          if (event.payload.status === 'done') {
+            isUploading = false;
+          }
+        },
+      );
+
+      unlistenError = await listen<{ source_id: string; error: string }>(
+        'ingestion-error',
+        (event) => {
+          uploadStatus = `Error: ${event.payload.error}`;
+          isUploading = false;
+        },
+      );
+
+      await uploadSource(path, name, 'rules', collectionId);
+    } catch (e) {
+      uploadStatus = `Upload failed: ${String(e)}`;
+      isUploading = false;
+    } finally {
+      if (unlistenProgress) unlistenProgress();
+      if (unlistenError) unlistenError();
+    }
+  }
 </script>
 
 <div class="app-container">
@@ -77,7 +196,7 @@
       {#if messages.length === 0 && !isLoading}
         <div class="welcome">
           <p>Welcome to Chronacle, your TTRPG Game Master's assistant.</p>
-          <p class="hint">Upload rulebook PDFs on the Settings page, then ask questions here.</p>
+          <p class="hint">Upload rulebook PDFs using the button below, then ask questions here.</p>
         </div>
       {/if}
 
@@ -110,9 +229,69 @@
         {isLoading ? 'Thinking…' : 'Send'}
       </button>
     </div>
+
+    {#if isUploading || uploadStatus}
+      <div class="upload-status" class:uploading={isUploading}>
+        <span class="upload-name">{uploadedSourceName}</span>
+        <span class="upload-msg">{uploadStatus}</span>
+      </div>
+    {/if}
+
+    <!-- Collection picker overlay -->
+    {#if showCollectionPicker}
+      <div class="picker-overlay">
+        <div class="picker-dialog">
+          <h3>Add "{pendingUploadName}" to collection</h3>
+          {#if pickerError}
+            <div class="picker-error">{pickerError}</div>
+          {/if}
+
+          {#if collections.length > 0}
+            <select bind:value={pickerCollectionId} class="picker-select">
+              {#each collections as col}
+                <option value={col.id}>{col.name}</option>
+              {/each}
+            </select>
+          {:else}
+            <p class="picker-hint">No collections yet.</p>
+          {/if}
+
+          {#if showNewCollectionInput}
+            <div class="picker-new">
+              <input
+                bind:value={pickerNewName}
+                placeholder="New collection name"
+                onkeydown={(e) => e.key === 'Enter' && handlePickerCreateNew()}
+              />
+              <button class="picker-create-btn" onclick={handlePickerCreateNew}>Create</button>
+              <button class="picker-cancel-btn" onclick={() => (showNewCollectionInput = false)}>Cancel</button>
+            </div>
+          {:else}
+            <button class="picker-new-btn" onclick={() => (showNewCollectionInput = true)}>
+              + Create new collection
+            </button>
+          {/if}
+
+          <div class="picker-actions">
+            <button
+              class="picker-cancel-btn"
+              onclick={() => { showCollectionPicker = false; pendingUploadPath = null; pendingUploadName = null; }}
+            >Cancel</button>
+            <button
+              class="picker-confirm-btn"
+              disabled={!pickerCollectionId}
+              onclick={confirmUpload}
+            >Upload</button>
+          </div>
+        </div>
+      </div>
+    {/if}
   </main>
 
   <footer>
+    <button onclick={openFilePicker} disabled={isUploading}>
+      {isUploading ? 'Uploading…' : 'Upload PDF'}
+    </button>
     <button onclick={() => alert('Settings page — coming in Phase 1')}>
       Settings
     </button>
@@ -262,10 +441,40 @@
     cursor: not-allowed;
   }
 
+  .upload-status {
+    margin-top: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    padding: 0.3rem 0.5rem;
+    border-radius: 4px;
+    background: var(--bg-assistant);
+  }
+
+  .upload-status.uploading {
+    color: var(--accent);
+  }
+
+  .upload-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 200px;
+  }
+
+  .upload-msg {
+    flex: 1;
+  }
+
   footer {
     padding: 0.75rem 0;
     border-top: 1px solid var(--border);
-    text-align: center;
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
   }
 
   footer button {
@@ -278,7 +487,119 @@
     font-size: 0.85rem;
   }
 
-  footer button:hover {
+  footer button:hover:not(:disabled) {
     background: var(--bg-assistant);
   }
+
+  footer button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* ── Collection picker ──────────────────────────────────────────── */
+
+  .picker-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+
+  .picker-dialog {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    width: 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .picker-dialog h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .picker-error {
+    color: #e74c3c;
+    font-size: 0.8rem;
+    padding: 0.3rem 0.5rem;
+    background: rgba(231, 76, 60, 0.1);
+    border-radius: 4px;
+  }
+
+  .picker-select {
+    width: 100%;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-input);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85rem;
+  }
+
+  .picker-hint { font-size: 0.85rem; color: var(--text-muted); margin: 0; }
+
+  .picker-new {
+    display: flex;
+    gap: 0.35rem;
+  }
+
+  .picker-new input {
+    flex: 1;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-input);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85rem;
+  }
+
+  .picker-new-btn {
+    background: none;
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    color: var(--text-muted);
+  }
+
+  .picker-new-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .picker-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+
+  .picker-cancel-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+    color: var(--text);
+  }
+
+  .picker-create-btn, .picker-confirm-btn {
+    border: none;
+    border-radius: 4px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .picker-confirm-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
