@@ -122,6 +122,29 @@ export async function getCampaignCollections(campaignId: string): Promise<Collec
   return invoke<Collection[]>('get_campaign_collections', { campaignId });
 }
 
+// ── Campaign Types & Commands ──────────────────────────────────────────
+
+export interface Campaign {
+  id: string;
+  name: string;
+  system: string | null;
+}
+
+export async function getCampaigns(): Promise<Campaign[]> {
+  return invoke<Campaign[]>('get_campaigns');
+}
+
+export async function createCampaign(name: string, system: string): Promise<Campaign> {
+  return invoke<Campaign>('create_campaign', {
+    name,
+    system: system || null,
+  });
+}
+
+export async function deleteCampaign(id: string): Promise<void> {
+  return invoke('delete_campaign', { id });
+}
+
 // MRU collection tracking (persisted in localStorage)
 const MRU_KEY = 'chronacle_mru_collection_id';
 
