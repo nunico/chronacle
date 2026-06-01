@@ -54,6 +54,13 @@ export async function getSources(collectionId: string | null): Promise<Source[]>
 }
 
 /**
+ * Delete a source, its blob data, and all associated chunks.
+ */
+export async function deleteSource(id: string): Promise<void> {
+  return invoke('delete_source', { id });
+}
+
+/**
  * Send a chat message to the AI agent (streaming response is delivered
  * via the `chat-token` event).
  */
