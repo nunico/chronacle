@@ -23,6 +23,7 @@ pub enum IngestionError {
 }
 
 /// Metadata fetched from the source record before ingestion begins.
+#[derive(Debug)]
 pub(crate) struct SourceInfo {
     pub(crate) filename: String,
     /// Every source must belong to a collection — non-nullable per schema.
@@ -40,10 +41,12 @@ pub async fn ingest_source(state: &Arc<AppState>, source_id: &str) -> Result<(),
     // ── 1. Update status to 'indexing' ──────────────────────────────
     state
         .db
-        .query("UPDATE source SET index_status = 'indexing' WHERE id = $id")
+        .query("UPDATE source SET index_status = 'indexing' WHERE id = type::thing('source', $id)")
         .bind(("id", source_id.to_owned()))
         .await
-        .map_err(|e| IngestionError::Db(format!("Failed to update index_status: {e}")))?;
+        .map_err(|e| IngestionError::Db(format!("Failed to update index_status: {e}")))?
+        .check()
+        .map_err(|e| IngestionError::Db(e.to_string()))?;
 
     // ── 2. Read source metadata and blob ──────────────────────────────
     let source_info = get_source_info(&state.db, source_id).await?;
@@ -72,10 +75,12 @@ pub async fn ingest_source(state: &Arc<AppState>, source_id: &str) -> Result<(),
     // ── 7. Mark done ───────────────────────────────────────────────
     state
         .db
-        .query("UPDATE source SET index_status = 'done', page_count = $page_count WHERE id = $id")
+        .query("UPDATE source SET index_status = 'done', page_count = $page_count WHERE id = type::thing('source', $id)")
         .bind(("id", source_id.to_owned()))
         .bind(("page_count", extracted.page_count as i64))
         .await
+        .map_err(|e| IngestionError::Db(e.to_string()))?
+        .check()
         .map_err(|e| IngestionError::Db(e.to_string()))?;
 
     Ok(())
@@ -126,13 +131,12 @@ struct RawChunk {
 /// value is inherited by every chunk produced from that source.
 async fn embed_chunks(
     _chunks: Vec<RawChunk>,
-    collection_id: &str,
+    _collection_id: &str,
 ) -> Result<Vec<crate::providers::vector_store::IndexedChunk>, IngestionError> {
     // TODO: Phase 2 — implement with fastembed (nomic-embed-text-v1.5)
     //
-    // Each IndexedChunk will carry `collection_id: collection_id.to_owned()`
+    // Each IndexedChunk will carry `collection_id: _collection_id.to_owned()`
     // so the vector store can enforce the collection filter at search time.
-    let _ = collection_id; // used in Phase 2 implementation
     Ok(Vec::new())
 }
 
@@ -199,5 +203,19 @@ mod tests {
         let info = get_source_info(&db, "src1").await.unwrap();
         assert_eq!(info.filename, "test.pdf");
         assert_eq!(info.collection_id.as_str(), "col1");
+    }
+
+    #[tokio::test]
+    async fn get_source_info_not_found_returns_err() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        let result = get_source_info(&db, "does-not-exist").await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("not found") || msg.contains("does-not-exist"), "Got: {msg}");
     }
 }
