@@ -135,21 +135,20 @@ async fn persist_message<C>(
     campaign_id: Option<&str>,
 ) -> Result<(), AgentError>
 where
-    C: Connection,
+    C: surrealdb::Connection,
 {
-    let campaign_expr = match campaign_id {
-        Some(cid) => format!("type::thing('campaign', '{cid}')"),
-        None => "NULL".to_owned(),
-    };
+    let campaign: Option<surrealdb::sql::Thing> = campaign_id
+        .map(|cid| surrealdb::sql::Thing::from(("campaign", cid)));
 
-    db.query(format!(
+    db.query(
         "CREATE message SET
-            campaign = {campaign_expr},
-            role = $role,
-            content = $content,
-            citations = [],
-            created_at = time::now()"
-    ))
+            campaign   = $campaign,
+            role       = $role,
+            content    = $content,
+            citations  = [],
+            created_at = time::now()",
+    )
+    .bind(("campaign", campaign))
     .bind(("role", role.to_owned()))
     .bind(("content", content.to_owned()))
     .await
