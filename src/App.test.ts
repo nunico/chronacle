@@ -121,8 +121,8 @@ describe('collection picker — cancel', () => {
 
     await waitFor(() => screen.getByText(/to collection/i));
 
-    // The dialog actions area has a Cancel button
-    const cancelBtn = screen.getAllByRole('button', { name: /Cancel/i })[0];
+    // Use testid to unambiguously target the dialog's Cancel button
+    const cancelBtn = screen.getByTestId('picker-cancel');
     await fireEvent.click(cancelBtn);
 
     await waitFor(() => {

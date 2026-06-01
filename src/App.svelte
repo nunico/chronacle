@@ -162,6 +162,9 @@
           uploadStatus = event.payload.step ?? 'Processing…';
           if (event.payload.status === 'done') {
             isUploading = false;
+            setTimeout(() => {
+              uploadStatus = '';
+            }, 2000);
           }
         },
       );
@@ -240,8 +243,8 @@
     <!-- Collection picker overlay -->
     {#if showCollectionPicker}
       <div class="picker-overlay">
-        <div class="picker-dialog">
-          <h3>Add "{pendingUploadName}" to collection</h3>
+        <div class="picker-dialog" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+          <h3 id="picker-title">Add "{pendingUploadName}" to collection</h3>
           {#if pickerError}
             <div class="picker-error">{pickerError}</div>
           {/if}
@@ -275,6 +278,7 @@
           <div class="picker-actions">
             <button
               class="picker-cancel-btn"
+              data-testid="picker-cancel"
               onclick={() => { showCollectionPicker = false; pendingUploadPath = null; pendingUploadName = null; }}
             >Cancel</button>
             <button
