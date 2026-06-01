@@ -73,11 +73,18 @@
     loadingSources = true;
     error = '';
     try {
-      sources = await getSources(id);
+      const result = await getSources(id);
+      if (selected?.kind === 'collection' && selected.id === id) {
+        sources = result;
+      }
     } catch (e) {
-      error = String(e);
+      if (selected?.kind === 'collection' && selected.id === id) {
+        error = String(e);
+      }
     } finally {
-      loadingSources = false;
+      if (selected?.kind === 'collection' && selected.id === id) {
+        loadingSources = false;
+      }
     }
   }
 
@@ -86,11 +93,18 @@
     loadingCampaignCols = true;
     error = '';
     try {
-      campaignCollections = await getCampaignCollections(id);
+      const result = await getCampaignCollections(id);
+      if (selected?.kind === 'campaign' && selected.id === id) {
+        campaignCollections = result;
+      }
     } catch (e) {
-      error = String(e);
+      if (selected?.kind === 'campaign' && selected.id === id) {
+        error = String(e);
+      }
     } finally {
-      loadingCampaignCols = false;
+      if (selected?.kind === 'campaign' && selected.id === id) {
+        loadingCampaignCols = false;
+      }
     }
   }
 
@@ -121,7 +135,7 @@
     }
   }
 
-  async function startRename(id: string, currentName: string) {
+  function startRename(id: string, currentName: string) {
     renamingId = id;
     renameValue = currentName;
   }
@@ -141,6 +155,7 @@
       }
     } catch (e) {
       error = String(e);
+      renamingId = null;
     }
   }
 
@@ -231,10 +246,9 @@
     return campaigns.find((c) => c.id === selected!.id);
   }
 
-  function availableToAdd(): Collection[] {
-    const subscribed = new Set(campaignCollections.map((c) => c.id));
-    return collections.filter((c) => !subscribed.has(c.id));
-  }
+  const unsubscribedCollections = $derived(
+    collections.filter((c) => !new Set(campaignCollections.map((c) => c.id)).has(c.id)),
+  );
 </script>
 
 <div class="page">
@@ -429,10 +443,10 @@
             {/each}
           </div>
 
-          {#if availableToAdd().length > 0}
+          {#if unsubscribedCollections.length > 0}
             <div class="add-collection-row">
               <span class="muted">Add collection:</span>
-              {#each availableToAdd() as col}
+              {#each unsubscribedCollections as col}
                 <button
                   class="add-chip-btn"
                   disabled={addingCollectionId === col.id}
@@ -442,7 +456,7 @@
             </div>
           {/if}
 
-          {#if campaignCollections.length === 0 && availableToAdd().length === 0}
+          {#if campaignCollections.length === 0 && unsubscribedCollections.length === 0}
             <p class="hint">No collections exist yet. Create a collection first, then subscribe this campaign to it.</p>
           {/if}
         {/if}
