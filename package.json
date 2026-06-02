@@ -35,9 +35,6 @@
     "vite": "^6.0.0",
     "vitest": "^2.0.0"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "msw"]
-  },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.7.1"

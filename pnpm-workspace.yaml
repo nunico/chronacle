@@ -1,0 +1,5 @@
+settings:
+  onlyBuiltDependencies:
+    - esbuild
+    - msw
+  minimumReleaseAge: 0
