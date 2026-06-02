@@ -34,6 +34,12 @@ vi.mock('./lib/commands', () => ({
   deleteSource: vi.fn(),
   getMruCollectionId: vi.fn().mockReturnValue(null),
   setMruCollectionId: vi.fn(),
+  checkEmbeddingModel: vi.fn().mockResolvedValue(true),
+  downloadEmbeddingModel: vi.fn().mockResolvedValue(undefined),
+  getCampaigns: vi.fn().mockResolvedValue([]),
+  getChatHistory: vi.fn().mockResolvedValue([]),
+  chatSend: vi.fn().mockResolvedValue(undefined),
+  getChunkForCitation: vi.fn().mockResolvedValue(null),
 }));
 
 import * as dialog from '@tauri-apps/plugin-dialog';
@@ -71,7 +77,7 @@ describe('collection picker — visibility', () => {
 
     render(App);
 
-    const uploadBtn = screen.getByRole('button', { name: /Upload PDF/i });
+    const uploadBtn = await screen.findByRole('button', { name: /Upload PDF/i });
     await fireEvent.click(uploadBtn);
 
     await waitFor(() => {
@@ -84,7 +90,7 @@ describe('collection picker — visibility', () => {
 
     render(App);
 
-    const uploadBtn = screen.getByRole('button', { name: /Upload PDF/i });
+    const uploadBtn = await screen.findByRole('button', { name: /Upload PDF/i });
     await fireEvent.click(uploadBtn);
 
     await waitFor(() => {
@@ -101,7 +107,7 @@ describe('collection picker — filename display', () => {
     mockedCommands.getCollections.mockResolvedValue([makeCollection('col-1', 'Rulebook')]);
 
     render(App);
-    await fireEvent.click(screen.getByRole('button', { name: /Upload PDF/i }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Upload PDF/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/my-rulebook\.pdf/)).toBeTruthy();
@@ -117,7 +123,7 @@ describe('collection picker — cancel', () => {
     mockedCommands.getCollections.mockResolvedValue([makeCollection('col-1', 'Rulebook')]);
 
     render(App);
-    await fireEvent.click(screen.getByRole('button', { name: /Upload PDF/i }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Upload PDF/i }));
 
     await waitFor(() => screen.getByText(/to collection/i));
 
@@ -142,7 +148,7 @@ describe('collection picker — MRU pre-selection', () => {
     mockedDialog.open.mockResolvedValue('/path/rules.pdf');
 
     render(App);
-    await fireEvent.click(screen.getByRole('button', { name: /Upload PDF/i }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Upload PDF/i }));
 
     await waitFor(() => screen.getByText(/to collection/i));
 
@@ -157,7 +163,7 @@ describe('collection picker — MRU pre-selection', () => {
     mockedDialog.open.mockResolvedValue('/path/rules.pdf');
 
     render(App);
-    await fireEvent.click(screen.getByRole('button', { name: /Upload PDF/i }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Upload PDF/i }));
 
     await waitFor(() => screen.getByText(/to collection/i));
 
@@ -174,7 +180,7 @@ describe('collection picker — create new collection', () => {
     mockedCommands.getCollections.mockResolvedValue([]);
 
     render(App);
-    await fireEvent.click(screen.getByRole('button', { name: /Upload PDF/i }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Upload PDF/i }));
     await waitFor(() => screen.getByText(/to collection/i));
 
     const newBtn = screen.getByRole('button', { name: /Create new collection/i });
@@ -190,7 +196,7 @@ describe('collection picker — create new collection', () => {
     mockedCommands.getCollections.mockResolvedValue([]);
 
     render(App);
-    await fireEvent.click(screen.getByRole('button', { name: /Upload PDF/i }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Upload PDF/i }));
     await waitFor(() => screen.getByText(/to collection/i));
 
     await fireEvent.click(screen.getByRole('button', { name: /Create new collection/i }));
@@ -214,7 +220,7 @@ describe('collection picker — create new collection', () => {
     mockedCommands.getCollections.mockResolvedValue([]);
 
     render(App);
-    await fireEvent.click(screen.getByRole('button', { name: /Upload PDF/i }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Upload PDF/i }));
     await waitFor(() => screen.getByText(/to collection/i));
 
     await fireEvent.click(screen.getByRole('button', { name: /Create new collection/i }));
@@ -237,7 +243,7 @@ describe('confirmUpload', () => {
     mockedDialog.open.mockResolvedValue('/home/gm/rules.pdf');
 
     render(App);
-    await fireEvent.click(screen.getByRole('button', { name: /Upload PDF/i }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Upload PDF/i }));
     await waitFor(() => screen.getByText(/to collection/i));
 
     const confirmBtn = screen.getByRole('button', { name: /^Upload$/ });
@@ -263,7 +269,7 @@ describe('confirmUpload', () => {
     mockedDialog.open.mockResolvedValue('/path/bestiary.pdf');
 
     render(App);
-    await fireEvent.click(screen.getByRole('button', { name: /Upload PDF/i }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Upload PDF/i }));
     await waitFor(() => screen.getByText(/to collection/i));
 
     await fireEvent.click(screen.getByRole('button', { name: /^Upload$/ }));
@@ -283,7 +289,7 @@ describe('confirmUpload', () => {
     );
 
     render(App);
-    await fireEvent.click(screen.getByRole('button', { name: /Upload PDF/i }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Upload PDF/i }));
     await waitFor(() => screen.getByText(/to collection/i));
 
     await fireEvent.click(screen.getByRole('button', { name: /^Upload$/ }));
@@ -299,7 +305,7 @@ describe('confirmUpload', () => {
     mockedCommands.getCollections.mockResolvedValue([]);
 
     render(App);
-    await fireEvent.click(screen.getByRole('button', { name: /Upload PDF/i }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Upload PDF/i }));
     await waitFor(() => screen.getByText(/to collection/i));
 
     const confirmBtn = screen.getByRole('button', { name: /^Upload$/ });
