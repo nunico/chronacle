@@ -4,8 +4,8 @@
 /// Campaigns subscribe to collections via the `subscribes_to` relation so that
 /// multiple campaigns can share the same rulebook set without duplication.
 use serde::{Deserialize, Serialize};
-use surrealdb::Connection;
 use surrealdb::sql::Thing;
+use surrealdb::Connection;
 
 /// Raw record returned from SurrealDB for the `collection` table.
 #[derive(Debug, Clone, Deserialize)]

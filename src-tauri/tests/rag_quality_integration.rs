@@ -236,10 +236,8 @@ async fn retrieval_ranks_target_chunk_above_distractors() {
     }
 
     // 2. Distances must be DIFFERENT (the bug made them all tie at MAX).
-    let distinct_distances: std::collections::HashSet<u64> = results
-        .iter()
-        .map(|r| r.distance.to_bits())
-        .collect();
+    let distinct_distances: std::collections::HashSet<u64> =
+        results.iter().map(|r| r.distance.to_bits()).collect();
     assert!(
         distinct_distances.len() > 1,
         "all distances equal — search not actually ranking. distances={:?}",
@@ -255,4 +253,3 @@ async fn retrieval_ranks_target_chunk_above_distractors() {
         top.text
     );
 }
-

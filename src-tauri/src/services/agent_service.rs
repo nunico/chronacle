@@ -459,8 +459,16 @@ mod tests {
     #[test]
     fn test_parse_citations_page_range() {
         let cases = [
-            ("[Source: \"Quickstart.pdf\", p.9-9]", "Quickstart.pdf", Some(9)),
-            ("[Source: \"Quickstart.pdf\", p.45-49]", "Quickstart.pdf", Some(45)),
+            (
+                "[Source: \"Quickstart.pdf\", p.9-9]",
+                "Quickstart.pdf",
+                Some(9),
+            ),
+            (
+                "[Source: \"Quickstart.pdf\", p.45-49]",
+                "Quickstart.pdf",
+                Some(45),
+            ),
             ("[Source: \"PHB\", p. 72-72]", "PHB", Some(72)),
         ];
         for (input, expected_name, expected_page) in cases {

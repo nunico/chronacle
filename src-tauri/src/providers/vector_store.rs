@@ -80,7 +80,10 @@ pub struct IndexedChunk {
 ///
 /// Allowed characters: ASCII alphanumeric, `-`, `_`.
 fn sanitize_collection_id(id: &str) -> Result<&str, VectorStoreError> {
-    if id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         Ok(id)
     } else {
         Err(VectorStoreError::Db(format!(

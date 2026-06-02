@@ -99,8 +99,13 @@ pub async fn ingest_source(
         .read()
         .map_err(|e| IngestionError::Db(format!("Embedding lock: {e}")))?
         .clone();
-    let indexed =
-        embed_chunks(&embed_provider, chunks, source_id, &source_info.collection_id).await?;
+    let indexed = embed_chunks(
+        &embed_provider,
+        chunks,
+        source_id,
+        &source_info.collection_id,
+    )
+    .await?;
 
     drop(embed_provider);
 
@@ -349,6 +354,9 @@ mod tests {
         let result = get_source_info(&db, "does-not-exist").await;
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("not found") || msg.contains("does-not-exist"), "Got: {msg}");
+        assert!(
+            msg.contains("not found") || msg.contains("does-not-exist"),
+            "Got: {msg}"
+        );
     }
 }
