@@ -1,5 +1,5 @@
+allowBuilds:
+  esbuild: true
+  msw: true
 settings:
-  onlyBuiltDependencies:
-    - esbuild
-    - msw
   minimumReleaseAge: 0

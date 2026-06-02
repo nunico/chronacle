@@ -23,17 +23,17 @@ No cloud dependency, no subscription — the LLM backend is configurable at setu
 ## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│  Tauri Shell (Desktop UI)           │
-│  ┌──────────────┐  ┌──────────────┐ │
-│  │ Svelte 5     │◄─┤ Tauri IPC    │ │
-│  │ Frontend     │  │ (commands +   │ │
-│  │              │  │  events)      │ │
-│  └──────────────┘  └──────┬───────┘ │
-├────────────────────────────┼────────┤
-│  Rust Backend              │        │
-│  ┌─────────────────────────▼──────┐ │
-│  │ Service Layer                  │ │
+┌────────────────────────────────────┐
+│  Tauri Shell (Desktop UI)          │
+│  ┌──────────────┐  ┌─────────────┐ │
+│  │ Svelte 5     │◄─┤ Tauri IPC   │ │
+│  │ Frontend     │  │ (commands + │ │
+│  │              │  │  events)    │ │
+│  └──────────────┘  └───────┬─────┘ │
+├────────────────────────────┼───────┤
+│  Rust Backend              │       │
+│  ┌─────────────────────────▼─────┐ │
+│  │ Service Layer                 │ │
 │  │  LlmProvider · VectorStore ·  │ │
 │  │  BlobStore (all via traits)   │ │
 │  └─────────────────┬─────────────┘ │
@@ -41,7 +41,7 @@ No cloud dependency, no subscription — the LLM backend is configurable at setu
 │  │ SurrealDB (relational +       │ │
 │  │  vector + graph, embedded)    │ │
 │  └───────────────────────────────┘ │
-└─────────────────────────────────────┘
+└────────────────────────────────────┘
 ```
 
 All external dependencies are behind Rust traits (`Arc<dyn LlmProvider>`, `Arc<dyn VectorStore>`, `Arc<dyn BlobStore>`), making the service layer testable and portable to a server deployment later.
@@ -50,12 +50,12 @@ All external dependencies are behind Rust traits (`Arc<dyn LlmProvider>`, `Arc<d
 
 ## Prerequisites
 
-| Tool    | Version  | Note                                                 |
-|---------|----------|------------------------------------------------------|
-| Rust    | ≥ 1.95   | Managed by [mise](https://mise.jdx.dev)               |
-| Node.js | ≥ 24     | Managed by [mise](https://mise.jdx.dev); pinned to LTS in [`mise.toml`](mise.toml) |
-| pnpm    | ≥ 9.15   | Managed by [mise](https://mise.jdx.dev)               |
-| Tauri   | ≥ 2.11   | CLI bundled via pnpm; system deps listed below         |
+| Tool    | Version | Note                                                                               |
+| ------- | ------- | ---------------------------------------------------------------------------------- |
+| Rust    | ≥ 1.95  | Managed by [mise](https://mise.jdx.dev)                                            |
+| Node.js | ≥ 24    | Managed by [mise](https://mise.jdx.dev); pinned to LTS in [`mise.toml`](mise.toml) |
+| pnpm    | ≥ 11    | Managed by [mise](https://mise.jdx.dev)                                            |
+| Tauri   | ≥ 2.11  | CLI bundled via pnpm; system deps listed below                                     |
 
 ### Install with mise
 
@@ -175,15 +175,15 @@ chronacle/
 
 ## Tech Stack
 
-| Layer        | Technology                                     |
-|-------------|------------------------------------------------|
-| Shell       | [Tauri 2](https://v2.tauri.app) (Rust + WebView) |
-| Frontend    | [Svelte 5](https://svelte.dev) + TypeScript + Vite |
-| Backend     | Rust                                           |
-| Storage     | [SurrealDB](https://surrealdb.com) (embedded, RocksDB) |
-| Embeddings  | [fastembed-rs](https://github.com/Anush008/fastembed-rs) (local) |
-| LLM         | OpenAI / Anthropic / Ollama (configurable via traits) |
-| PDF         | pdfium-render                                  |
+| Layer      | Technology                                                       |
+| ---------- | ---------------------------------------------------------------- |
+| Shell      | [Tauri 2](https://v2.tauri.app) (Rust + WebView)                 |
+| Frontend   | [Svelte 5](https://svelte.dev) + TypeScript + Vite               |
+| Backend    | Rust                                                             |
+| Storage    | [SurrealDB](https://surrealdb.com) (embedded, RocksDB)           |
+| Embeddings | [fastembed-rs](https://github.com/Anush008/fastembed-rs) (local) |
+| LLM        | OpenAI / Anthropic / Ollama (configurable via traits)            |
+| PDF        | pdfium-render                                                    |
 
 ---
 

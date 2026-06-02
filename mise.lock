@@ -33,12 +33,8 @@ checksum = "sha256:ca2742695be8de44027d71b3f53a4bdb36009b95575fe1ae6f7f0b5ce091c
 url = "https://nodejs.org/dist/v24.13.0/node-v24.13.0-win-x64.zip"
 
 [[tools.pnpm]]
-version = "9.15.9"
+version = "11"
 backend = "asdf:pnpm"
-
-[tools.pnpm."platforms.macos-arm64"]
-checksum = "blake3:2d1ea0f424d82d42db9265a8d3eb9b9347ed8587478d51decc9f539c3eaa4022"
-url = "https://github.com/pnpm/pnpm/releases/download/v9.15.9/pnpm-macos-arm64"
 
 [[tools.rust]]
 version = "1.95.0"
