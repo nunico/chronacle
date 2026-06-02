@@ -278,7 +278,7 @@
     {/if}
 
     <div class="item-list">
-      {#each collections as col}
+      {#each collections as col (col.id)}
         <div class="item-row">
           {#if renamingId === col.id}
             <input
@@ -340,7 +340,7 @@
     {/if}
 
     <div class="item-list">
-      {#each campaigns as campaign}
+      {#each campaigns as campaign (campaign.id)}
         <div class="item-row">
           <button
             class="item-btn"
@@ -386,7 +386,7 @@
           </div>
         {:else}
           <div class="source-list">
-            {#each sources as source}
+            {#each sources as source (source.id)}
               <div class="source-card">
                 <div class="source-info">
                   <span class="source-name">{source.display_name}</span>
@@ -431,7 +431,7 @@
           <p class="muted">Loading…</p>
         {:else}
           <div class="chips">
-            {#each campaignCollections as col}
+            {#each campaignCollections as col (col.id)}
               <span class="chip">
                 {col.name}
                 <button
@@ -446,7 +446,7 @@
           {#if unsubscribedCollections.length > 0}
             <div class="add-collection-row">
               <span class="muted">Add collection:</span>
-              {#each unsubscribedCollections as col}
+              {#each unsubscribedCollections as col (col.id)}
                 <button
                   class="add-chip-btn"
                   disabled={addingCollectionId === col.id}

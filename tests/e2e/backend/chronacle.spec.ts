@@ -8,9 +8,9 @@ test.describe('Chronacle Backend IPC', () => {
     // addInitScript runs in the browser context where the module
     // isn't available.
     await page.addInitScript(() => {
-      // @ts-ignore
+      // @ts-expect-error -- __TAURI_INTERNALS__ is injected by Tauri at runtime
       window.__TAURI_INTERNALS__ = {
-        invoke: (cmd: string, args?: Record<string, unknown>) => {
+        invoke: (cmd: string, _args?: Record<string, unknown>) => {
           switch (cmd) {
             case 'get_settings':
               return {

@@ -14,6 +14,7 @@
     type ReindexProgress,
   } from './lib/commands';
   import { listen } from '@tauri-apps/api/event';
+  import { SvelteMap } from 'svelte/reactivity';
 
   let providerType = $state('openai');
   let apiKey = $state('');
@@ -93,7 +94,7 @@
       currentProviderType = status.provider_type;
       currentModel = status.model || '(default)';
       apiKeyConfigured = status.api_key_configured;
-    } catch (e) {
+    } catch {
       // Status is unavailable on first load; that's fine
     }
   }
@@ -210,7 +211,7 @@
     try {
       const providers = await getCustomProviders();
       customProviders = providers;
-      const modelsMap = new Map<string, CustomProviderModel[]>();
+      const modelsMap = new SvelteMap<string, CustomProviderModel[]>();
       for (const p of providers) {
         const models = await getProviderModels(p.id);
         modelsMap.set(p.id, models);
@@ -258,7 +259,7 @@
       newModelDisplayName = '';
       const models = await getProviderModels(providerId);
       providerModelsMap.set(providerId, models);
-      providerModelsMap = new Map(providerModelsMap);
+      providerModelsMap = new SvelteMap(providerModelsMap);
     } catch (e) {
       showError(`Failed to add model: ${e}`);
     }
@@ -269,7 +270,7 @@
       await removeProviderModel(id);
       const models = await getProviderModels(providerId);
       providerModelsMap.set(providerId, models);
-      providerModelsMap = new Map(providerModelsMap);
+      providerModelsMap = new SvelteMap(providerModelsMap);
     } catch (e) {
       showError(`Failed to remove model: ${e}`);
     }

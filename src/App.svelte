@@ -207,7 +207,7 @@
 
           {#if collections.length > 0}
             <select bind:value={pickerCollectionId} class="picker-select">
-              {#each collections as col}
+              {#each collections as col (col.id)}
                 <option value={col.id}>{col.name}</option>
               {/each}
             </select>

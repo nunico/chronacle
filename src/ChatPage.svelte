@@ -244,6 +244,7 @@
     {#each messages as msg (msg.role + msg.content)}
       <div class="message {msg.role}">
         <div class="role-label">{msg.role === 'user' ? 'You' : 'Chronacle'}</div>
+        <!-- eslint-disable-next-line svelte/no-at-html-tags -->
         <div class="content">{@html renderContent(msg.content)}</div>
       </div>
     {/each}
@@ -251,6 +252,7 @@
     {#if isLoading && currentResponse}
       <div class="message assistant">
         <div class="role-label">Chronacle</div>
+        <!-- eslint-disable-next-line svelte/no-at-html-tags -->
         <div class="content streaming">{@html renderContent(currentResponse)}</div>
       </div>
     {/if}
@@ -306,7 +308,7 @@
           onchange={(e) => handleCampaignChange((e.target as HTMLSelectElement).value || null)}
         >
           <option value={null}>Global</option>
-          {#each campaigns as c}
+          {#each campaigns as c (c.id)}
             <option value={c.id}>{c.name}</option>
           {/each}
         </select>
