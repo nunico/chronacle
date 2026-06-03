@@ -8,12 +8,27 @@ importers:
 
   .:
     dependencies:
+      '@fontsource-variable/cinzel':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource-variable/hanken-grotesk':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource-variable/jetbrains-mono':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource/spectral':
+        specifier: ^5.2.8
+        version: 5.2.8
       '@tauri-apps/api':
         specifier: ^2.0.0
         version: 2.11.0
       '@tauri-apps/plugin-dialog':
         specifier: ^2.7.1
         version: 2.7.1
+      lucide:
+        specifier: ^1.17.0
+        version: 1.17.0
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -221,6 +236,18 @@ packages:
     peerDependenciesMeta:
       '@noble/hashes':
         optional: true
+
+  '@fontsource-variable/cinzel@5.2.8':
+    resolution: {integrity: sha512-62ddfR79tYNWxIZJPlyFGBusbnONbPL6d163mT/jZOGV4vV8so6Z3buRM5epqtiA6qcVVeF8OZijJJGeLABGJg==}
+
+  '@fontsource-variable/hanken-grotesk@5.2.8':
+    resolution: {integrity: sha512-K7hu09ZKReBc7EifRLeM4K94NZBrxFEg0nGcISmVwlFQOJo4EmYkLXTWEwr5JcNW4z2hr5zy8vLS2sxC8JDmrQ==}
+
+  '@fontsource-variable/jetbrains-mono@5.2.8':
+    resolution: {integrity: sha512-WBA9elru6Jdp5df2mES55wuOO0WIrn3kpXnI4+W2ek5u3ZgLS9XS4gmIlcQhiZOWEKl95meYdvK7xI+ETLCq/Q==}
+
+  '@fontsource/spectral@5.2.8':
+    resolution: {integrity: sha512-0CqZ8/z8A38BdeSz5t2NSd5tCO1R9P1k7SF2VpRLMbZTMSSR6+2Dk0ZBMfEQK/IrBLQS1HgHLMqpdTwRpnKpGQ==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -1166,6 +1193,9 @@ packages:
     resolution: {integrity: sha512-RPimw/7aMdv2oqRrxKwvZXcPfwBrn/JZ2xYcY9Hus/6LaS3VOAKVWKWgNLCFSiOm1ESXinjsDlidVU7JlnCN2A==}
     engines: {node: 20 || >=22}
 
+  lucide@1.17.0:
+    resolution: {integrity: sha512-icbHK+hG15rWoacjNi3aw+UXHRmZ9Ee1fJ6ZSu7lbC4GOig7evVEXYCfK77FvjQHusPgi0D/QN7zTO+5wZ8PwQ==}
+
   lz-string@1.5.0:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
     hasBin: true
@@ -1783,6 +1813,14 @@ snapshots:
       levn: 0.4.1
 
   '@exodus/bytes@1.15.1': {}
+
+  '@fontsource-variable/cinzel@5.2.8': {}
+
+  '@fontsource-variable/hanken-grotesk@5.2.8': {}
+
+  '@fontsource-variable/jetbrains-mono@5.2.8': {}
+
+  '@fontsource/spectral@5.2.8': {}
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -2642,6 +2680,8 @@ snapshots:
       p-locate: 5.0.0
 
   lru-cache@11.5.1: {}
+
+  lucide@1.17.0: {}
 
   lz-string@1.5.0: {}
 

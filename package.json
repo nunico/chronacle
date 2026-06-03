@@ -39,8 +39,13 @@
     "vitest": "^4.1.8"
   },
   "dependencies": {
+    "@fontsource-variable/cinzel": "^5.2.8",
+    "@fontsource-variable/hanken-grotesk": "^5.2.8",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@fontsource/spectral": "^5.2.8",
     "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-dialog": "^2.7.1"
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "lucide": "^1.17.0"
   },
   "packageManager": "pnpm@11.5.1+sha512.93f7b57422ea7068257235b4c16eb60762eb68e1dc23723199cc739043ea9be2c4143274a399d8c6defa2b1176226d9ca1c4b63482d6200c1a8fbaa78c1d1485"
 }
