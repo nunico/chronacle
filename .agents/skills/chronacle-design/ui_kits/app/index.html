@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chronacle — Oracle</title>
+  <link rel="stylesheet" href="app.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "svelte": "https://esm.sh/svelte@5",
+      "svelte/": "https://esm.sh/svelte@5/",
+      "svelte/internal/client": "https://esm.sh/svelte@5/internal/client",
+      "svelte/internal/disclose-version": "https://esm.sh/svelte@5/internal/disclose-version"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Lucide line-icons (UMD global) -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Svelte 5: components compile in the browser; no build step -->
+  <script type="module">
+    import { boot } from "./_loader.js";
+    boot("./App.svelte");
+  </script>
+</body>
+</html>
