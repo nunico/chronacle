@@ -6,7 +6,7 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['.agents/*', '.claude/*'],
+    ignores: ['.agents/*', '.claude/*', 'dist/*'],
   },
   js.configs.recommended,
   ...sveltePlugin.configs['flat/recommended'],

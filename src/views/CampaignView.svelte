@@ -16,7 +16,7 @@
     type Source,
   } from '../lib/commands';
   import { collectionIcon } from './collection-icons';
-  import { SvelteMap } from 'svelte/reactivity';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   let {
     activeCampaignId,
@@ -34,8 +34,8 @@
 
   let collections = $state<Collection[]>([]);
   let subscribed = $state<Collection[]>([]);
-  let sourcesByCol = $state<Map<string, Source[]>>(new SvelteMap());
-  let expanded = $state<Set<string>>(new Set());
+  let sourcesByCol = new SvelteMap<string, Source[]>();
+  let expanded = new SvelteSet<string>();
   let error = $state('');
 
   let manageOpen = $state(false);
@@ -57,7 +57,7 @@
   });
 
   $effect(() => {
-    activeCampaignId;
+    void activeCampaignId;
     refreshSubscribed();
   });
 
@@ -93,22 +93,19 @@
   }
 
   async function toggleExpand(c: Collection) {
-    const next = new Set(expanded);
-    if (next.has(c.id)) {
-      next.delete(c.id);
+    if (expanded.has(c.id)) {
+      expanded.delete(c.id);
     } else {
-      next.add(c.id);
+      expanded.add(c.id);
       if (!sourcesByCol.has(c.id)) {
         try {
           const list = await getSources(c.id);
           sourcesByCol.set(c.id, list);
-          sourcesByCol = new SvelteMap(sourcesByCol);
         } catch (e) {
           error = String(e);
         }
       }
     }
-    expanded = next;
   }
 
   async function removeSource(s: Source, colId: string) {
@@ -117,7 +114,6 @@
       await deleteSource(s.id);
       const list = await getSources(colId);
       sourcesByCol.set(colId, list);
-      sourcesByCol = new SvelteMap(sourcesByCol);
     } catch (e) {
       error = String(e);
     }

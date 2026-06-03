@@ -63,9 +63,9 @@
 
   // Auto-scroll thread on new messages or while streaming.
   $effect(() => {
-    messages;
-    currentResponse;
-    isLoading;
+    void messages;
+    void currentResponse;
+    void isLoading;
     if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
   });
 

@@ -28,12 +28,14 @@
   $effect(() => {
     if (!el) return;
     const node = (icons as Record<string, IconNode>)[toPascal(name)];
+    // eslint-disable-next-line svelte/no-dom-manipulating
     el.innerHTML = '';
     if (!node) return;
     const svg = createElement(node);
     svg.setAttribute('width', String(size));
     svg.setAttribute('height', String(size));
     svg.setAttribute('stroke-width', String(strokeWidth));
+    // eslint-disable-next-line svelte/no-dom-manipulating
     el.appendChild(svg);
   });
 </script>
