@@ -71,14 +71,18 @@
 
   onMount(async () => {
     unlistenListener = await listen<{ token: string; done: boolean }>('chat-token', (event) => {
+      // The backend emits the terminal error as `{ token: "[Error: ...]", done: true }`
+      // in a single event. Append the token BEFORE flushing so the error reaches
+      // the thread instead of being silently swallowed when no prior tokens streamed.
+      if (event.payload.token) {
+        currentResponse += event.payload.token;
+      }
       if (event.payload.done) {
         if (currentResponse) {
           messages = [...messages, { role: 'assistant', content: currentResponse }];
         }
         currentResponse = '';
         isLoading = false;
-      } else {
-        currentResponse += event.payload.token;
       }
     });
   });

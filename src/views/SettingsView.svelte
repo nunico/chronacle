@@ -481,10 +481,16 @@
 
 <style>
 .settings-page {
-  max-width: 720px;
-  margin: 0 auto;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 28px 26px 40px;
   font-family: var(--font-sans);
+}
+.settings-page > * {
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
 }
 h2 {
   font-family: var(--font-display);

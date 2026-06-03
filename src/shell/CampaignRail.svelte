@@ -44,8 +44,8 @@
   >
     <span class="gem"></span>
     <span class="campaign-text">
-      <span class="nm">{activeCampaign?.name ?? 'Global'}</span>
-      <span class="mt">{activeCampaign?.system ?? 'no campaign'}</span>
+      <span class="nm">{activeCampaign?.name ?? 'No campaign'}</span>
+      <span class="mt">{activeCampaign?.system ?? 'create one to start'}</span>
     </span>
     <Icon name="chevrons-up-down" size={15} className="chev" />
   </button>

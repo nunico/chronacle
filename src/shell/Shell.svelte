@@ -52,8 +52,11 @@
     const stored = localStorage.getItem(ACTIVE_KEY);
     if (stored && campaigns.some((c) => c.id === stored)) {
       activeCampaignId = stored;
+    } else if (campaigns.length > 0) {
+      setActiveCampaignId(campaigns[0].id);
     } else {
       activeCampaignId = null;
+      view = 'campaign';
     }
   });
 
@@ -66,7 +69,16 @@
   async function refreshCampaigns() {
     campaigns = await getCampaigns();
     if (activeCampaignId && !campaigns.some((c) => c.id === activeCampaignId)) {
-      setActiveCampaignId(null);
+      // Active campaign was deleted — fall back to the first remaining one
+      // (or null if there are none, which forces the user to the campaign view).
+      if (campaigns.length > 0) {
+        setActiveCampaignId(campaigns[0].id);
+      } else {
+        setActiveCampaignId(null);
+        view = 'campaign';
+      }
+    } else if (!activeCampaignId && campaigns.length > 0) {
+      setActiveCampaignId(campaigns[0].id);
     }
   }
 

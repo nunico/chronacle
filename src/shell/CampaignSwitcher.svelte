@@ -11,15 +11,15 @@
   }: {
     campaigns: Campaign[];
     activeCampaignId: string | null;
-    onSelect: (id: string | null) => void;
+    onSelect: (id: string) => void;
     onManage: () => void;
     onClose: () => void;
   } = $props();
 
-  let firstBtn = $state<HTMLButtonElement | undefined>(undefined);
+  let popoverEl = $state<HTMLDivElement | undefined>(undefined);
 
   $effect(() => {
-    firstBtn?.focus();
+    popoverEl?.querySelector<HTMLButtonElement>('.row')?.focus();
   });
 
   function onKeydown(e: KeyboardEvent) {
@@ -41,23 +41,10 @@
   onkeydown={() => {}}
 ></div>
 
-<div class="popover" role="dialog" aria-label="Switch campaign">
-  <button
-    bind:this={firstBtn}
-    class="row"
-    class:active={activeCampaignId === null}
-    onclick={() => {
-      onSelect(null);
-      onClose();
-    }}
-  >
-    <span class="gem-dot"></span>
-    <span class="nm">Global</span>
-    <span class="mt">no campaign</span>
-    {#if activeCampaignId === null}
-      <Icon name="check" size={14} />
-    {/if}
-  </button>
+<div class="popover" role="dialog" aria-label="Switch campaign" bind:this={popoverEl}>
+  {#if campaigns.length === 0}
+    <div class="empty">No campaigns yet — create one to get started.</div>
+  {/if}
   {#each campaigns as c (c.id)}
     <button
       class="row"
@@ -157,5 +144,12 @@
   }
   .manage {
     color: var(--arcane-300);
+  }
+  .empty {
+    padding: 12px 10px;
+    font-size: 12.5px;
+    color: var(--fg-3);
+    font-family: var(--font-sans);
+    text-align: center;
   }
 </style>

@@ -180,10 +180,10 @@
       <div class="gem"></div>
       <div class="hero-text">
         <div class="eyebrow">Campaign</div>
-        <h1>{active?.name ?? 'Global — no campaign selected'}</h1>
+        <h1>{active?.name ?? 'No campaign yet'}</h1>
         <p class="meta">
           {active?.system ?? '—'}
-          {#if !active}<span class="hint"> · select or create a campaign below</span>{/if}
+          {#if !active}<span class="hint"> · create one below to get started</span>{/if}
         </p>
       </div>
       {#if active}

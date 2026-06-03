@@ -59,7 +59,7 @@ describe('CampaignView', () => {
     });
   });
 
-  it('shows a Global hero when no campaign is active', async () => {
+  it('shows an empty-state hero when no campaign exists', async () => {
     render(CampaignView, {
       props: {
         activeCampaignId: null,
@@ -70,7 +70,7 @@ describe('CampaignView', () => {
       },
     });
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /Global/i })).toBeTruthy();
+      expect(screen.getByRole('heading', { name: /no campaign yet/i })).toBeTruthy();
     });
   });
 

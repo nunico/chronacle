@@ -464,12 +464,16 @@ pub async fn get_campaign_collections(
 // ── Chat Commands ─────────────────────────────────────────────────────────────
 
 /// Chat message request payload.
+///
+/// Tauri's IPC bridge auto-camelCases top-level command arguments but NOT
+/// struct fields — without `rename_all = "camelCase"` the `campaignId` the
+/// frontend sends silently deserializes as `None`, which collapses every
+/// chat into the unscoped path (no campaign-filtered history, empty
+/// collection list, RAG returns no context).
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatRequest {
     pub message: String,
-    // Deserialized from IPC; will be used in Phase 2 when agent routing is
-    // collection-scoped. Rust's dead-code lint does not see serde reads.
-    #[allow(dead_code)] // field is populated via serde; Rust lint cannot see that
     pub campaign_id: Option<String>,
 }
 
@@ -545,9 +549,12 @@ pub async fn chat_send(
         }
 
         // Persist the full assistant response with parsed citations
-        if let Err(e) =
-            crate::services::agent_service::persist_assistant_message(&state_ref.db, &full_response)
-                .await
+        if let Err(e) = crate::services::agent_service::persist_assistant_message(
+            &state_ref.db,
+            &full_response,
+            campaign_id.as_deref(),
+        )
+        .await
         {
             eprintln!("Failed to persist assistant message: {e}");
         }
@@ -1451,6 +1458,31 @@ mod tests {
         db.use_ns("test").use_db("test").await.unwrap();
         crate::schema::run_migrations(&db).await.unwrap();
         db
+    }
+
+    // ── ChatRequest IPC deserialization ─────────────────────────────────────
+
+    /// Regression for bugs #5 and #6: the frontend sends `campaignId` (camelCase)
+    /// over the Tauri IPC bridge. Without `#[serde(rename_all = "camelCase")]`
+    /// the struct's snake_case field never binds, every chat falls back to
+    /// `None`, history is unscoped, and RAG retrieval skips the DB.
+    #[test]
+    fn chat_request_deserializes_camel_case_campaign_id() {
+        let json =
+            r#"{"message":"what does cover do?","campaignId":"d5a8019596844cb8b46270830df952f"}"#;
+        let req: ChatRequest = serde_json::from_str(json).expect("camelCase IPC payload");
+        assert_eq!(req.message, "what does cover do?");
+        assert_eq!(
+            req.campaign_id.as_deref(),
+            Some("d5a8019596844cb8b46270830df952f"),
+        );
+    }
+
+    #[test]
+    fn chat_request_deserializes_missing_campaign_id_as_none() {
+        let json = r#"{"message":"hi"}"#;
+        let req: ChatRequest = serde_json::from_str(json).expect("no campaign id is valid");
+        assert!(req.campaign_id.is_none());
     }
 
     // ── CollectionResponse conversion ────────────────────────────────────────
