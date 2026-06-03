@@ -31,8 +31,9 @@
   .upload-status {
     margin-top: 0.5rem;
     font-size: 0.8rem;
-    color: var(--text-muted);
+    color: var(--fg-3);
     text-align: center;
+    font-family: var(--font-sans);
   }
 
   .upload-filename {
@@ -41,7 +42,7 @@
   }
 
   .upload-progress-text {
-    color: var(--accent);
+    color: var(--arcane-500);
   }
 
   .progress-bar-container {
@@ -55,20 +56,20 @@
   .progress-bar {
     width: 200px;
     height: 4px;
-    background: var(--border);
+    background: var(--line);
     border-radius: 2px;
     overflow: hidden;
   }
 
   .progress-fill {
     height: 100%;
-    background: var(--accent);
+    background: var(--arcane-500);
     transition: width 0.3s ease;
   }
 
   .progress-pct {
     font-size: 0.75rem;
-    color: var(--text-muted);
+    color: var(--fg-3);
     min-width: 2.5rem;
     text-align: right;
   }

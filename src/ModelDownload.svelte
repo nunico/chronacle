@@ -154,7 +154,7 @@
     width: 100%;
     text-align: center;
     background: var(--bg-assistant);
-    border: 1px solid var(--border);
+    border: 1px solid var(--line);
     border-radius: 12px;
     padding: 2.5rem 2rem;
   }
@@ -168,19 +168,21 @@
     font-size: 1.4rem;
     font-weight: 700;
     margin: 0 0 0.75rem;
+    font-family: var(--font-display);
   }
 
   .desc {
     font-size: 0.9rem;
-    color: var(--text-muted);
+    color: var(--fg-3);
     line-height: 1.6;
     margin: 0 0 1rem;
+    font-family: var(--font-sans);
   }
 
   .model-name {
     font-size: 0.8rem;
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    color: var(--arcane-500);
+    background: color-mix(in srgb, var(--arcane-500) 10%, transparent);
     display: inline-block;
     padding: 0.25rem 0.75rem;
     border-radius: 4px;
@@ -193,15 +195,15 @@
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    color: var(--text-muted);
+    color: var(--fg-3);
     font-size: 0.9rem;
   }
 
   .spinner {
     width: 16px;
     height: 16px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
+    border: 2px solid var(--line);
+    border-top-color: var(--arcane-500);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
   }
@@ -212,7 +214,7 @@
 
   .download-btn {
     padding: 0.75rem 2rem;
-    background: var(--accent);
+    background: var(--arcane-500);
     color: #fff;
     border: none;
     border-radius: 8px;
@@ -223,7 +225,7 @@
   }
 
   .download-btn:hover {
-    background: var(--accent-hover);
+    background: var(--arcane-400);
   }
 
   .progress-section {
@@ -232,14 +234,14 @@
 
   .status-text {
     font-size: 0.85rem;
-    color: var(--accent);
+    color: var(--arcane-500);
     font-weight: 600;
     margin-bottom: 0.3rem;
   }
 
   .file-info {
     font-size: 0.75rem;
-    color: var(--text-muted);
+    color: var(--fg-3);
     margin-bottom: 0.5rem;
     font-family: monospace;
     word-break: break-all;
@@ -256,21 +258,21 @@
     flex: 1;
     max-width: 280px;
     height: 8px;
-    background: var(--border);
+    background: var(--line);
     border-radius: 4px;
     overflow: hidden;
   }
 
   .progress-fill {
     height: 100%;
-    background: var(--accent);
+    background: var(--arcane-500);
     transition: width 0.3s ease;
     border-radius: 4px;
   }
 
   .progress-pct {
     font-size: 0.85rem;
-    color: var(--text-muted);
+    color: var(--fg-3);
     min-width: 2.5rem;
     text-align: right;
   }
@@ -291,7 +293,7 @@
 
   .error-detail {
     font-size: 0.8rem;
-    color: var(--text-muted);
+    color: var(--fg-3);
     margin: 0 0 0.5rem;
     word-break: break-word;
   }
