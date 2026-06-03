@@ -1,14 +1,10 @@
+@import './lib/tokens.css';
+
 :root {
-  --bg: #1a1a2e;
-  --bg-surface: #16213e;
-  --bg-input: #0f3460;
-  --bg-user: #1a3a5c;
-  --bg-assistant: #1e2a3a;
-  --text: #e4e4e7;
-  --text-muted: #9ca3af;
-  --border: #2d3748;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
+  --tex-starfield: url('./lib/assets/tex-starfield.png');
+  --tex-circuit: url('./lib/assets/tex-circuit.png');
+  --tex-aura: url('./lib/assets/tex-aura.png');
+  --brand-mark: url('./lib/assets/chronacle-icon.png');
 }
 
 *,
@@ -22,13 +18,12 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: var(--bg);
-  color: var(--text);
-  font-family: 'Georgia', 'Times New Roman', serif;
-  font-size: 16px;
-  line-height: 1.6;
+  background: var(--bg-void);
+  color: var(--fg-1);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
 }
 
 #app {
@@ -44,7 +39,8 @@ textarea {
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -52,10 +48,29 @@ textarea {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
+  background: rgba(124, 148, 255, 0.16);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: rgba(124, 148, 255, 0.28);
+  background-clip: padding-box;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--glow-focus);
+  border-radius: var(--r-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
