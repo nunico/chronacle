@@ -1,0 +1,257 @@
+/* ============================================================
+   CHRONACLE — Colors & Type
+   Arcane technology: an AI oracle bound in a spellbook.
+   Deep cosmic grounds · electric arcane blue/violet · gem-white glow
+   ============================================================ */
+
+
+:root {
+  /* ---------- BRAND ANCHORS (sampled from the app mark) ---------- */
+  --arcane-300: #8aa0ff;
+  --arcane-400: #5b78ff;
+  --arcane-500: #3d5bff; /* primary — the circuit traces */
+  --arcane-600: #2a3fe0;
+  --arcane-700: #1e2bb0;
+
+  --violet-300: #b8a6ff;
+  --violet-400: #9b86ff;
+  --violet-500: #7b5cff; /* the violet page-glow */
+  --violet-600: #5f3fe0;
+
+  --gem: #c8d6ff; /* gem-glow highlight (near white-blue) */
+  --gem-bright: #eaf0ff;
+  --rune-gold: #e8b86a; /* warm accent — runes / treasure / highlights */
+
+  /* ---------- COSMIC GROUNDS (dark-first) ---------- */
+  --bg-void: #05060f; /* deepest — full-bleed cosmic backdrop */
+  --bg-abyss: #0a0c1a; /* primary app surface */
+  --bg-panel: #10132a; /* raised panels / cards */
+  --bg-panel-2: #171c3a; /* higher elevation / popovers */
+  --bg-inset: #070912; /* wells / inset fields */
+  --bg-scrim: rgba(5, 6, 15, 0.66);
+
+  /* ---------- HAIRLINES / BORDERS ---------- */
+  --line-faint: rgba(124, 148, 255, 0.1);
+  --line: rgba(124, 148, 255, 0.18);
+  --line-strong: rgba(124, 148, 255, 0.34);
+  --line-glow: rgba(91, 120, 255, 0.55);
+
+  /* ---------- FOREGROUND ---------- */
+  --fg-1: #eaedff; /* primary text — soft moon-white */
+  --fg-2: #aab3dc; /* secondary */
+  --fg-3: #6e769e; /* tertiary / muted */
+  --fg-4: #444a6b; /* faint / disabled */
+  --fg-on-accent: #f4f6ff;
+
+  /* ---------- SEMANTIC ---------- */
+  --success: #4fd1a0;
+  --success-bg: rgba(79, 209, 160, 0.12);
+  --warning: #e8b86a;
+  --warning-bg: rgba(232, 184, 106, 0.12);
+  --danger: #f2674b;
+  --danger-bg: rgba(242, 103, 75, 0.13);
+  --info: var(--arcane-400);
+  --info-bg: rgba(91, 120, 255, 0.12);
+
+  /* ---------- BRAND GRADIENTS / GLOWS ---------- */
+  --grad-arcane: linear-gradient(135deg, var(--arcane-500) 0%, var(--violet-500) 100%);
+  --grad-gem: radial-gradient(
+    circle at 50% 40%,
+    var(--gem-bright) 0%,
+    var(--violet-400) 45%,
+    var(--arcane-600) 100%
+  );
+  --grad-veil: linear-gradient(180deg, rgba(10, 12, 26, 0) 0%, var(--bg-void) 88%);
+  --aura: radial-gradient(
+    60% 60% at 50% 38%,
+    rgba(123, 92, 255, 0.3),
+    rgba(61, 91, 255, 0.1) 45%,
+    transparent 72%
+  );
+
+  --glow-arcane: 0 0 24px rgba(61, 91, 255, 0.45);
+  --glow-violet: 0 0 26px rgba(123, 92, 255, 0.4);
+  --glow-gem: 0 0 18px rgba(200, 214, 255, 0.55);
+  --glow-focus: 0 0 0 3px rgba(61, 91, 255, 0.32);
+
+  /* ---------- ELEVATION (dark UI: depth + glow) ---------- */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 10px 30px -10px rgba(0, 0, 0, 0.65), 0 1px 0 0 var(--line-faint) inset;
+  --shadow-3: 0 28px 70px -18px rgba(0, 0, 0, 0.78), 0 1px 0 0 var(--line-faint) inset;
+  --shadow-card: 0 12px 36px -16px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--line) inset;
+
+  /* ---------- RADII (squircle-leaning, per the app mark) ---------- */
+  --r-xs: 5px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 26px;
+  --r-2xl: 36px;
+  --r-full: 999px;
+
+  /* ---------- SPACING (4pt) ---------- */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
+  --s-20: 80px;
+
+  /* ---------- MOTION ---------- */
+  --ease-arcane: cubic-bezier(0.22, 1, 0.36, 1); /* smooth settle */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 420ms;
+
+  /* ---------- TYPE FAMILIES ---------- */
+  --font-display: 'Cinzel', 'Times New Roman', serif; /* engraved arcane caps */
+  --font-serif: 'Spectral', Georgia, 'Times New Roman', serif; /* lore / reading */
+  --font-sans: 'Hanken Grotesk', system-ui, sans-serif; /* UI chrome */
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace; /* rules · dice · stat blocks */
+}
+
+/* ============================================================
+   SEMANTIC TYPE ROLES
+   Display (Cinzel) for titles & wordmark · Serif (Spectral) for
+   lore/body reading · Sans (Hanken) for UI · Mono for game data.
+   ============================================================ */
+
+.display-xl {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 72px;
+  line-height: 1.02;
+  letter-spacing: 0.01em;
+  color: var(--fg-1);
+}
+.display-lg {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 52px;
+  line-height: 1.06;
+  letter-spacing: 0.012em;
+  color: var(--fg-1);
+}
+.display-md {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 36px;
+  line-height: 1.12;
+  letter-spacing: 0.014em;
+  color: var(--fg-1);
+}
+
+.h1 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 28px;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  color: var(--fg-1);
+}
+.h2 {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--fg-1);
+}
+.h3 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 17px;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+  color: var(--fg-1);
+}
+
+/* Reading / lore — Spectral serif */
+.lede {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 20px;
+  line-height: 1.55;
+  color: var(--fg-2);
+}
+.prose {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 1.68;
+  color: var(--fg-2);
+}
+.prose-quote {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 18px;
+  line-height: 1.55;
+  color: var(--fg-2);
+}
+
+/* UI text — Hanken */
+.body {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--fg-2);
+}
+.body-sm {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--fg-3);
+}
+.label {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.2;
+  color: var(--fg-2);
+}
+
+/* Eyebrow / overline — arcane spaced caps */
+.eyebrow {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--arcane-300);
+}
+
+/* Game data — Mono (dice notation, rule citations, stat blocks) */
+.mono {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--arcane-300);
+  letter-spacing: -0.01em;
+}
+.dice {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--gem);
+  letter-spacing: 0.02em;
+}
+
+/* Gradient ink for hero words */
+.ink-gradient {
+  background: var(--grad-arcane);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
