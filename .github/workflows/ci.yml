@@ -45,7 +45,7 @@ jobs:
         run: cargo install tauri-cli --version "^2.0.0"
 
       - name: Generate Icons
-        run: cargo tauri icon
+        run: cd src-tauri/ && cargo tauri icon
 
       - name: Format check
         run: cargo fmt --check
