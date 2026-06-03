@@ -134,7 +134,7 @@ Add these lines to the very top of `src/main.ts`, above the existing imports:
 
 ```ts
 import '@fontsource-variable/cinzel';
-import '@fontsource-variable/spectral';
+import '@fontsource/spectral';
 import '@fontsource-variable/hanken-grotesk';
 import '@fontsource-variable/jetbrains-mono';
 import './lib/tokens.css';

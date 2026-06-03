@@ -292,7 +292,7 @@ No new Tauri commands. No new events.
 - `src/main.ts` adds:
   ```ts
   import '@fontsource-variable/cinzel';
-  import '@fontsource-variable/spectral';
+  import '@fontsource/spectral';
   import '@fontsource-variable/hanken-grotesk';
   import '@fontsource-variable/jetbrains-mono';
   ```
@@ -356,7 +356,7 @@ After each implementation phase: `pnpm dev`, screenshot Oracle empty-state, an a
 
 ## 11. Migration steps (for the implementation plan)
 
-1. Install: `lucide`, `@fontsource-variable/cinzel`, `@fontsource-variable/spectral`, `@fontsource-variable/hanken-grotesk`, `@fontsource-variable/jetbrains-mono`.
+1. Install: `lucide`, `@fontsource-variable/cinzel`, `@fontsource/spectral` (no variable build available), `@fontsource-variable/hanken-grotesk`, `@fontsource-variable/jetbrains-mono`.
 2. Copy 4 brand assets to `src/lib/assets/`. Add `src/lib/tokens.css` (verbatim from design system, minus Google Fonts `@import`). Rewrite `src/app.css` (imports tokens, applies kit shell rules globally, removes legacy palette).
 3. Add font imports to `main.ts`. Add `src/components/Icon.svelte` (Lucide ESM wrapper), `EyeMark.svelte`, `RulingCard.svelte`.
 4. Build `src/shell/` — `Shell.svelte`, `CampaignRail.svelte`, `CampaignSwitcher.svelte`, `Topbar.svelte`. Wire campaign list, `activeCampaignId` localStorage, collection picker dialog, `UploadProgress` (lifted from current `App.svelte`).
