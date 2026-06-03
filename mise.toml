@@ -1,9 +1,36 @@
 [env]
-_.path = './node_modules/.bin'
+_.path = ['{{config_root}}/node_modules/.bin']
 
-[hooks]
-postinstall = 'corepack enable pnpm && corepack use pnpm@latest-11'
+NODE_ENV = "{{ env.NODE_ENV | default(value='development') }}"
 
 [tools]
-node = 'lts'
-rust = 'latest'
+node = '26'
+rust = '1.95'
+
+[hooks]
+postinstall = 'npm install -g pnpm@latest-11'
+
+[tasks.pnpm-install]
+description = 'Installs dependencies with pnpm'
+run = 'pnpm install'
+sources = ['package.json', 'pnpm-lock.yaml', 'mise.toml']
+outputs = ['node_modules/.pnpm/lock.yaml']
+
+[tasks.prebuild]
+description = 'Generate icons'
+dir = '{{config_root}}/src-tauri'
+run = 'tauri icon'
+depends = ['pnpm-install']
+
+[tasks.dev]
+description = 'Run application in DEV mode'
+run = 'tauri dev'
+depends = ['pnpm-install']
+
+[tasks.build]
+description = 'Build application package'
+run = 'node --run build'
+depends = ['pnpm-install']
+
+[settings]
+experimental = true
