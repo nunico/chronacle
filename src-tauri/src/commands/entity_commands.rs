@@ -74,8 +74,16 @@ pub async fn relate_entities(
     rel_type: String,
     notes: Option<String>,
 ) -> Result<(), EntityError> {
+    let from_k = parse_kind(&from_kind)?;
+    let to_k = parse_kind(&to_kind)?;
     entity_service::relate(
-        &state.db, &from_id, &from_kind, &to_id, &to_kind, &rel_type, notes,
+        &state.db,
+        &from_id,
+        from_k.table_name(),
+        &to_id,
+        to_k.table_name(),
+        &rel_type,
+        notes,
     )
     .await
 }
@@ -85,17 +93,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_kind_valid() {
-        assert!(matches!(parse_kind("npc"), Ok(EntityKind::Npc)));
-        assert!(matches!(
-            parse_kind("player_character"),
-            Ok(EntityKind::PlayerCharacter)
-        ));
+    fn parse_kind_all_valid_variants() {
+        let cases = [
+            ("npc", EntityKind::Npc),
+            ("location", EntityKind::Location),
+            ("faction", EntityKind::Faction),
+            ("creature", EntityKind::Creature),
+            ("item", EntityKind::Item),
+            ("event", EntityKind::Event),
+            ("player_character", EntityKind::PlayerCharacter),
+            ("misc", EntityKind::Misc),
+        ];
+        for (s, expected) in &cases {
+            assert_eq!(parse_kind(s).unwrap(), *expected, "failed for {s}");
+        }
     }
 
     #[test]
-    fn parse_kind_invalid_returns_error() {
+    fn parse_kind_invalid_returns_invalid_kind_error() {
         let err = parse_kind("dragon").unwrap_err();
         assert!(matches!(err, EntityError::InvalidKind { kind } if kind == "dragon"));
+    }
+
+    #[test]
+    fn relate_entities_rejects_invalid_from_kind() {
+        let err = parse_kind("goblin").unwrap_err();
+        assert!(matches!(err, EntityError::InvalidKind { .. }));
     }
 }
