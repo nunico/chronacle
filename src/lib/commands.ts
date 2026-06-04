@@ -394,13 +394,13 @@ export interface GraphNode {
   date_start: string | null;
   date_end: string | null;
   is_ongoing: boolean | null;
-  sequence_index: number | null;
+  sequence_index: number | null; // Rust i64; safe as JS number for realistic ordering values
   era: string | null;
   duration_label: string | null;
   // player_character fields
   player_name: string | null;
   character_class: string | null;
-  character_level: number | null;
+  character_level: number | null; // Rust i64; safe as JS number for level 1-20
   status: 'active' | 'retired' | 'deceased' | 'missing' | 'on_hiatus' | null;
 }
 
