@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
-use surrealdb::engine::local::Db;
 use surrealdb::sql::Thing;
-use surrealdb::Surreal;
 use thiserror::Error;
 
 // ── Error type ──────────────────────────────────────────────────────────────
@@ -168,8 +166,8 @@ pub struct EntityInput {
 // ── Service functions ────────────────────────────────────────────────────────
 
 /// Create a new graph node of the given kind scoped to an optional campaign.
-pub async fn create(
-    db: &Surreal<Db>,
+pub async fn create<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
     campaign_id: Option<&str>,
     kind: EntityKind,
     input: EntityInput,
@@ -185,7 +183,7 @@ pub async fn create(
     let mut response = db
         .query(
             "CREATE type::thing($table, $id) SET
-                campaign        = IF $campaign_id != NONE THEN type::thing('campaign', $campaign_id) ELSE NULL END,
+                campaign        = IF $campaign_id IS NOT NONE THEN type::thing('campaign', $campaign_id) ELSE NULL END,
                 name            = $name,
                 summary         = $summary,
                 notes           = $notes,
@@ -235,8 +233,8 @@ pub async fn create(
 }
 
 /// Fetch a single node by its raw ID and kind.
-pub async fn get_by_id(
-    db: &Surreal<Db>,
+pub async fn get_by_id<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
     id: &str,
     kind: EntityKind,
 ) -> Result<GraphNode, EntityError> {
@@ -260,8 +258,8 @@ pub async fn get_by_id(
 }
 
 /// List all nodes of a kind for a campaign, ordered by name.
-pub async fn get_by_campaign(
-    db: &Surreal<Db>,
+pub async fn get_by_campaign<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
     campaign_id: &str,
     kind: EntityKind,
 ) -> Result<Vec<GraphNode>, EntityError> {

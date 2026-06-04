@@ -161,3 +161,69 @@ async fn get_by_campaign_returns_only_matching_entities() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].id, n1.id);
 }
+
+#[tokio::test]
+async fn create_with_empty_name_returns_validation_error() {
+    use chronacle_lib::services::entity_service::EntityError;
+    let db = setup_db().await;
+    let input = EntityInput {
+        name: "   ".to_string(),
+        summary: None,
+        notes: None,
+        date_start: None,
+        date_end: None,
+        is_ongoing: None,
+        sequence_index: None,
+        era: None,
+        duration_label: None,
+        player_name: None,
+        character_class: None,
+        character_level: None,
+        status: None,
+    };
+    let err = create(&db, None, EntityKind::Npc, input).await.unwrap_err();
+    assert!(matches!(err, EntityError::Validation { ref field, .. } if field == "name"));
+}
+
+#[tokio::test]
+async fn get_by_campaign_excludes_other_campaign_entities() {
+    let db = setup_db().await;
+    let c1 = chronacle_lib::services::campaign_service::create(&db, "Campaign One", "D&D 5e")
+        .await
+        .unwrap();
+    let c2 = chronacle_lib::services::campaign_service::create(&db, "Campaign Two", "PF2e")
+        .await
+        .unwrap();
+    create(
+        &db,
+        Some(&c1.id),
+        EntityKind::Npc,
+        npc_input("Belongs to C1"),
+    )
+    .await
+    .unwrap();
+    create(
+        &db,
+        Some(&c2.id),
+        EntityKind::Npc,
+        npc_input("Belongs to C2"),
+    )
+    .await
+    .unwrap();
+    let results = get_by_campaign(&db, &c1.id, EntityKind::Npc).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].name, "Belongs to C1");
+}
+
+#[tokio::test]
+async fn get_by_id_with_wrong_kind_returns_not_found() {
+    use chronacle_lib::services::entity_service::EntityError;
+    let db = setup_db().await;
+    let node = create(&db, None, EntityKind::Npc, npc_input("Torvin"))
+        .await
+        .unwrap();
+    let err = get_by_id(&db, &node.id, EntityKind::Location)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, EntityError::NotFound { .. }));
+}
