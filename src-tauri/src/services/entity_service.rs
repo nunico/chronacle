@@ -326,10 +326,12 @@ pub async fn update<C: surrealdb::Connection>(
         .bind(("character_level", input.character_level))
         .bind(("status", input.status))
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
-    let records: Vec<GraphNodeRecord> = response
-        .take(0)
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
     records
         .into_iter()
         .next()
@@ -348,7 +350,9 @@ pub async fn delete<C: surrealdb::Connection>(
         .bind(("table", table))
         .bind(("id", id.to_owned()))
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
     Ok(())
 }
 
