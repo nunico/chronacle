@@ -5,7 +5,7 @@ use thiserror::Error;
 // ── Error type ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Error, Serialize)]
-#[serde(tag = "code", content = "message", rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE", tag = "code")]
 pub enum EntityError {
     #[error("Entity '{id}' not found")]
     NotFound { id: String },
@@ -15,8 +15,8 @@ pub enum EntityError {
     InvalidKind { kind: String },
     #[error("Validation error on field '{field}': {message}")]
     Validation { field: String, message: String },
-    #[error("Database error: {0}")]
-    Database(String),
+    #[error("Database error: {message}")]
+    Database { message: String },
 }
 
 // ── Entity kind ──────────────────────────────────────────────────────────────
@@ -58,7 +58,9 @@ impl EntityKind {
             "event" => Ok(Self::Event),
             "player_character" => Ok(Self::PlayerCharacter),
             "misc" => Ok(Self::Misc),
-            other => Err(EntityError::InvalidKind { kind: other.to_string() }),
+            other => Err(EntityError::InvalidKind {
+                kind: other.to_string(),
+            }),
         }
     }
 }
@@ -178,13 +180,24 @@ mod tests {
     }
 
     #[test]
-    fn entity_kind_from_table_roundtrips() {
-        for (table, kind) in &[
-            ("npc", EntityKind::Npc),
-            ("location", EntityKind::Location),
-            ("player_character", EntityKind::PlayerCharacter),
-        ] {
-            assert_eq!(EntityKind::from_table(table).unwrap(), *kind);
+    fn entity_kind_from_table_roundtrips_all_variants() {
+        let variants = [
+            EntityKind::Npc,
+            EntityKind::Location,
+            EntityKind::Faction,
+            EntityKind::Creature,
+            EntityKind::Item,
+            EntityKind::Event,
+            EntityKind::PlayerCharacter,
+            EntityKind::Misc,
+        ];
+        for kind in &variants {
+            assert_eq!(
+                EntityKind::from_table(kind.table_name()).unwrap(),
+                *kind,
+                "roundtrip failed for {:?}",
+                kind
+            );
         }
     }
 
