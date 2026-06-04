@@ -368,3 +368,101 @@ export async function getChunkForCitation(
     page,
   });
 }
+
+// ── Entity Manager ───────────────────────────────────────────────────────────
+
+export type EntityKind =
+  | 'npc'
+  | 'location'
+  | 'faction'
+  | 'creature'
+  | 'item'
+  | 'event'
+  | 'player_character'
+  | 'misc';
+
+export interface GraphNode {
+  id: string;
+  kind: string;
+  campaign_id: string | null;
+  name: string;
+  summary: string | null;
+  notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  // event fields
+  date_start: string | null;
+  date_end: string | null;
+  is_ongoing: boolean | null;
+  sequence_index: number | null;
+  era: string | null;
+  duration_label: string | null;
+  // player_character fields
+  player_name: string | null;
+  character_class: string | null;
+  character_level: number | null;
+  status: 'active' | 'retired' | 'deceased' | 'missing' | 'on_hiatus' | null;
+}
+
+export interface EntityInput {
+  name: string;
+  summary?: string | null;
+  notes?: string | null;
+  // event
+  dateStart?: string | null;
+  dateEnd?: string | null;
+  isOngoing?: boolean | null;
+  sequenceIndex?: number | null;
+  era?: string | null;
+  durationLabel?: string | null;
+  // player_character
+  playerName?: string | null;
+  characterClass?: string | null;
+  characterLevel?: number | null;
+  status?: string | null;
+}
+
+export interface EntityError {
+  code: 'NOT_FOUND' | 'CAMPAIGN_MISMATCH' | 'INVALID_KIND' | 'VALIDATION' | 'DATABASE';
+  message: string;
+  field?: string; // present on VALIDATION errors
+}
+
+export async function getEntities(campaignId: string, kind: EntityKind): Promise<GraphNode[]> {
+  return invoke<GraphNode[]>('get_entities', { campaignId, kind });
+}
+
+export async function getEntity(id: string, kind: EntityKind): Promise<GraphNode> {
+  return invoke<GraphNode>('get_entity', { id, kind });
+}
+
+export async function createEntity(
+  campaignId: string,
+  kind: EntityKind,
+  input: EntityInput,
+): Promise<GraphNode> {
+  return invoke<GraphNode>('create_entity', { campaignId, kind, input });
+}
+
+export async function updateEntity(
+  id: string,
+  kind: EntityKind,
+  input: EntityInput,
+): Promise<GraphNode> {
+  return invoke<GraphNode>('update_entity', { id, kind, input });
+}
+
+export async function deleteEntity(id: string, kind: EntityKind): Promise<void> {
+  return invoke<void>('delete_entity', { id, kind });
+}
+
+export async function relateEntities(
+  fromId: string,
+  fromKind: EntityKind,
+  toId: string,
+  toKind: EntityKind,
+  relType: string,
+  notes?: string | null,
+): Promise<void> {
+  return invoke<void>('relate_entities', { fromId, fromKind, toId, toKind, relType, notes });
+}
