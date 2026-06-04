@@ -58,6 +58,19 @@ describe('EntityForm', () => {
     await fireEvent.submit(screen.getByRole('form'));
     expect(onSave).toHaveBeenCalledOnce();
     expect(onSave.mock.calls[0][0].detail.name).toBe('New NPC');
+    expect(onSave.mock.calls[0][0].detail.summary).toBeNull();
+    expect(onSave.mock.calls[0][0].detail.playerName).toBeNull();
+  });
+
+  it('shows prop-supplied field error for the name field', () => {
+    render(EntityForm, {
+      props: {
+        kind: 'npc' as EntityKind,
+        node: null,
+        error: { code: 'VALIDATION', message: 'Too long', field: 'name' },
+      },
+    });
+    expect(screen.getByText(/too long/i)).toBeTruthy();
   });
 
   it('shows inline validation error when name is empty on submit', async () => {
