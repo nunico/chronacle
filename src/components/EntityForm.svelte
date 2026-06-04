@@ -5,7 +5,7 @@
     kind: EntityKind;
     node?: GraphNode | null;
     error?: { code: string; message: string; field?: string } | null;
-    onsave?: (event: CustomEvent<EntityInput>) => void;
+    onsave?: (input: EntityInput) => void;
     oncancel?: () => void;
   }
 
@@ -50,7 +50,7 @@
       characterLevel: characterLevel ? parseInt(characterLevel, 10) : null,
       status: status || null,
     };
-    onsave?.(new CustomEvent('save', { detail: input }));
+    onsave?.(input);
   }
 </script>
 

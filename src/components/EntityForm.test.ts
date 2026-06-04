@@ -57,9 +57,9 @@ describe('EntityForm', () => {
     await fireEvent.input(screen.getByLabelText(/name/i), { target: { value: 'New NPC' } });
     await fireEvent.submit(screen.getByRole('form'));
     expect(onSave).toHaveBeenCalledOnce();
-    expect(onSave.mock.calls[0][0].detail.name).toBe('New NPC');
-    expect(onSave.mock.calls[0][0].detail.summary).toBeNull();
-    expect(onSave.mock.calls[0][0].detail.playerName).toBeNull();
+    expect(onSave.mock.calls[0][0].name).toBe('New NPC');
+    expect(onSave.mock.calls[0][0].summary).toBeNull();
+    expect(onSave.mock.calls[0][0].playerName).toBeNull();
   });
 
   it('shows prop-supplied field error for the name field', () => {
