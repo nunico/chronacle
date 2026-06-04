@@ -16,6 +16,7 @@
     type Source,
   } from '../lib/commands';
   import { collectionIcon } from './collection-icons';
+  import EntityManager from '../components/EntityManager.svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   let {
@@ -46,6 +47,7 @@
   let editSystem = $state('');
 
   let active = $derived(campaigns.find((c) => c.id === activeCampaignId) ?? null);
+  let activeTab = $state<'library' | 'entities'>('library');
 
   onMount(async () => {
     try {
@@ -194,6 +196,28 @@
       {/if}
     </section>
 
+    <div class="view-tabs" role="tablist">
+      <button
+        role="tab"
+        aria-selected={activeTab === 'library'}
+        class="view-tab"
+        class:active={activeTab === 'library'}
+        onclick={() => { activeTab = 'library'; }}
+      >
+        Library
+      </button>
+      <button
+        role="tab"
+        aria-selected={activeTab === 'entities'}
+        class="view-tab"
+        class:active={activeTab === 'entities'}
+        onclick={() => { activeTab = 'entities'; }}
+      >
+        Entities
+      </button>
+    </div>
+
+    {#if activeTab === 'library'}
     <div class="stats">
       <div class="stat"><span class="n">{subCount}</span><span class="l">collections</span></div>
       <div class="stat"><span class="n">{bookCount}</span><span class="l">books loaded</span></div>
@@ -326,6 +350,11 @@
         </div>
       {/each}
     </section>
+    {:else if activeTab === 'entities' && active}
+      <EntityManager campaignId={active.id} />
+    {:else if activeTab === 'entities'}
+      <p class="muted">Select a campaign to manage entities.</p>
+    {/if}
   </div>
 </div>
 
@@ -684,5 +713,28 @@
   .muted {
     color: var(--fg-3);
     font-size: 13px;
+  }
+  .view-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 0 0 2px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 20px;
+  }
+  .view-tab {
+    background: none;
+    border: none;
+    color: var(--fg-3);
+    padding: 10px 16px;
+    cursor: pointer;
+    font-family: var(--font-sans);
+    font-size: 13.5px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .view-tab.active {
+    color: var(--fg-1);
+    border-bottom-color: var(--arcane-400, #cba6f7);
   }
 </style>
