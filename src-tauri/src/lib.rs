@@ -230,6 +230,12 @@ pub async fn run() {
             commands::download_embedding_model,
             commands::reindex_all_sources,
             commands::get_chunk_for_citation,
+            commands::get_entities,
+            commands::get_entity,
+            commands::create_entity,
+            commands::update_entity,
+            commands::delete_entity,
+            commands::relate_entities,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");

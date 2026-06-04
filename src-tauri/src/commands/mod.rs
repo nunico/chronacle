@@ -1,3 +1,6 @@
+pub mod entity_commands;
+pub use entity_commands::*;
+
 use std::sync::Arc;
 
 use crate::AppState;
