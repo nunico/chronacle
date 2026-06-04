@@ -227,3 +227,58 @@ async fn get_by_id_with_wrong_kind_returns_not_found() {
         .unwrap_err();
     assert!(matches!(err, EntityError::NotFound { .. }));
 }
+
+#[tokio::test]
+async fn update_changes_name_and_notes() {
+    use chronacle_lib::services::entity_service::update;
+    let db = setup_db().await;
+    let created = create(&db, None, EntityKind::Npc, npc_input("Old Name")).await.unwrap();
+
+    let updated_input = EntityInput {
+        name: "New Name".to_string(),
+        summary: Some("Updated summary".to_string()),
+        notes: Some("Some notes".to_string()),
+        date_start: None, date_end: None, is_ongoing: None,
+        sequence_index: None, era: None, duration_label: None,
+        player_name: None, character_class: None,
+        character_level: None, status: None,
+    };
+    let updated = update(&db, &created.id, EntityKind::Npc, updated_input).await.unwrap();
+    assert_eq!(updated.id, created.id);
+    assert_eq!(updated.name, "New Name");
+    assert_eq!(updated.notes.as_deref(), Some("Some notes"));
+}
+
+#[tokio::test]
+async fn update_not_found_returns_error() {
+    use chronacle_lib::services::entity_service::{update, EntityError};
+    let db = setup_db().await;
+    let err = update(&db, "missing", EntityKind::Location, EntityInput {
+        name: "Ghost".to_string(),
+        summary: None, notes: None,
+        date_start: None, date_end: None, is_ongoing: None,
+        sequence_index: None, era: None, duration_label: None,
+        player_name: None, character_class: None,
+        character_level: None, status: None,
+    }).await.unwrap_err();
+    assert!(matches!(err, EntityError::NotFound { .. }));
+}
+
+#[tokio::test]
+async fn delete_removes_node() {
+    use chronacle_lib::services::entity_service::{delete, EntityError};
+    let db = setup_db().await;
+    let created = create(&db, None, EntityKind::Faction, EntityInput {
+        name: "The Crimson Hand".to_string(),
+        summary: None, notes: None,
+        date_start: None, date_end: None, is_ongoing: None,
+        sequence_index: None, era: None, duration_label: None,
+        player_name: None, character_class: None,
+        character_level: None, status: None,
+    }).await.unwrap();
+
+    delete(&db, &created.id, EntityKind::Faction).await.unwrap();
+
+    let err = get_by_id(&db, &created.id, EntityKind::Faction).await.unwrap_err();
+    assert!(matches!(err, EntityError::NotFound { .. }));
+}

@@ -278,6 +278,80 @@ pub async fn get_by_campaign<C: surrealdb::Connection>(
     Ok(records.into_iter().map(Into::into).collect())
 }
 
+/// Update an existing graph node. Returns NotFound if the record doesn't exist.
+pub async fn update<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    id: &str,
+    kind: EntityKind,
+    input: EntityInput,
+) -> Result<GraphNode, EntityError> {
+    if input.name.trim().is_empty() {
+        return Err(EntityError::Validation {
+            field: "name".to_string(),
+            message: "Name is required".to_string(),
+        });
+    }
+    let table = kind.table_name();
+    let mut response = db
+        .query(
+            "UPDATE type::thing($table, $id) SET
+                name         = $name,
+                summary      = $summary,
+                notes        = $notes,
+                date_start   = $date_start,
+                date_end     = $date_end,
+                is_ongoing   = $is_ongoing,
+                sequence_index = $sequence_index,
+                era          = $era,
+                duration_label = $duration_label,
+                player_name  = $player_name,
+                character_class = $character_class,
+                character_level = $character_level,
+                status       = $status,
+                updated_at   = time::now()",
+        )
+        .bind(("table", table))
+        .bind(("id", id.to_owned()))
+        .bind(("name", input.name.trim().to_owned()))
+        .bind(("summary", input.summary))
+        .bind(("notes", input.notes))
+        .bind(("date_start", input.date_start))
+        .bind(("date_end", input.date_end))
+        .bind(("is_ongoing", input.is_ongoing))
+        .bind(("sequence_index", input.sequence_index))
+        .bind(("era", input.era))
+        .bind(("duration_label", input.duration_label))
+        .bind(("player_name", input.player_name))
+        .bind(("character_class", input.character_class))
+        .bind(("character_level", input.character_level))
+        .bind(("status", input.status))
+        .await
+        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+    let records: Vec<GraphNodeRecord> = response
+        .take(0)
+        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+    records
+        .into_iter()
+        .next()
+        .map(Into::into)
+        .ok_or_else(|| EntityError::NotFound { id: id.to_string() })
+}
+
+/// Hard-delete a graph node by id.
+pub async fn delete<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    id: &str,
+    kind: EntityKind,
+) -> Result<(), EntityError> {
+    let table = kind.table_name();
+    db.query("DELETE type::thing($table, $id)")
+        .bind(("table", table))
+        .bind(("id", id.to_owned()))
+        .await
+        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
