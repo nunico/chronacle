@@ -12,6 +12,7 @@
 /// - `001_initial.surql` — Phase 1 tables, fields, indexes
 /// - `002_embedding_index.surql` — (reserved; not yet created)
 /// - `003_collections.surql` — collection table, subscribes_to relation, collection fields on source/chunk
+/// - `004_graph_entities.surql` — 8 typed graph node tables (npc, location, faction, creature, item, event, player_character, misc); relates_to updated to FROM ANY TO ANY
 use std::path::Path;
 
 /// Run all pending schema migrations against the given database.
@@ -96,37 +97,29 @@ mod tests {
         db.use_ns("test").use_db("test").await.unwrap();
         run_migrations(&db).await.expect("migrations");
 
+        #[derive(serde::Deserialize)]
+        struct DbInfo {
+            tables: std::collections::HashMap<String, serde_json::Value>,
+        }
+        let mut resp = db.query("INFO FOR DB").await.expect("INFO FOR DB");
+        let info: DbInfo = resp
+            .take::<Option<DbInfo>>(0)
+            .expect("parse INFO FOR DB")
+            .expect("INFO FOR DB returned None");
+
         for table in &[
-            "npc",
-            "location",
-            "faction",
-            "creature",
-            "item",
-            "event",
-            "player_character",
-            "misc",
+            "npc", "location", "faction", "creature", "item",
+            "event", "player_character", "misc", "relates_to",
         ] {
-            db.query(&format!("SELECT count() FROM {table} GROUP ALL"))
-                .await
-                .unwrap_or_else(|e| panic!("table {table} should exist: {e}"));
+            assert!(
+                info.tables.contains_key(*table),
+                "expected table '{table}' to exist after migration 004"
+            );
         }
 
-        // relates_to accepts cross-type edges
-        db.query("SELECT count() FROM relates_to GROUP ALL")
-            .await
-            .expect("relates_to should exist");
-
-        // entity table should be gone — verify via INFO FOR DB rather than querying it,
-        // because SurrealDB in-memory returns Ok (empty) for queries against removed tables.
-        let mut info_result = db.query("INFO FOR DB").await.expect("INFO FOR DB");
-        let info: Option<serde_json::Value> = info_result.take(0).expect("INFO FOR DB result");
-        let info = info.expect("INFO FOR DB returned None");
-        let tables = info
-            .get("tables")
-            .expect("INFO FOR DB should have tables key");
         assert!(
-            tables.get("entity").is_none(),
-            "entity table should have been removed by migration 004, but INFO FOR DB still lists it"
+            !info.tables.contains_key("entity"),
+            "entity table should have been removed by migration 004"
         );
     }
 }

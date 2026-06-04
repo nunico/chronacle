@@ -13,7 +13,7 @@ DEFINE FIELD rel_type   ON relates_to TYPE string;
 DEFINE FIELD notes      ON relates_to TYPE string | NULL DEFAULT NULL;
 DEFINE FIELD created_at ON relates_to TYPE datetime DEFAULT time::now();
 
--- Shared fields macro (applied to every node table below)
+-- Shared fields (manually repeated for each node table below):
 -- Each table gets: campaign, name, summary, notes, created_at, updated_at
 
 DEFINE TABLE npc SCHEMAFULL;
