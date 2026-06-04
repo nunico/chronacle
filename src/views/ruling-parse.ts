@@ -64,6 +64,33 @@ export function renderContent(text: string): string {
   });
 }
 
+/** Find the index of the first sentence-end character (`.!?\n`) that lies
+ * OUTSIDE any `[Source: ... ]` citation marker.
+ *
+ * Naively calling `text.search(/[.!?\n]/)` matches the period inside a
+ * filename like `"Rulebook.pdf"`, cutting a citation in half so it no longer
+ * matches `SOURCE_RE`. Skip past every `[Source: ...]` marker before testing
+ * the candidate characters.
+ *
+ * An unterminated `[Source:` (no closing `]`) is treated as "consumes the
+ * rest of the text" so we don't pick a sentence-end inside garbage markup.
+ */
+export function findVerdictBoundary(text: string): number {
+  let i = 0;
+  while (i < text.length) {
+    if (text.startsWith('[Source:', i)) {
+      const end = text.indexOf(']', i);
+      if (end === -1) return -1;
+      i = end + 1;
+      continue;
+    }
+    const c = text[i];
+    if (c === '.' || c === '!' || c === '?' || c === '\n') return i;
+    i++;
+  }
+  return -1;
+}
+
 /** Parse an assistant message into a ruling structure for RulingCard. */
 export function parseRuling(text: string): RulingData {
   const cites: Cite[] = [];
@@ -79,8 +106,10 @@ export function parseRuling(text: string): RulingData {
     cites.push({ label, src, quote });
   }
 
-  // Split verdict from why on the first sentence boundary (before stripping citations).
-  const sentenceEnd = text.search(/[.!?\n]/);
+  // Split verdict from why on the first sentence boundary OUTSIDE any
+  // citation marker (filenames like `Rulebook.pdf` contain a `.` that must
+  // not be treated as a sentence boundary).
+  const sentenceEnd = findVerdictBoundary(text);
   let verdict: string;
   let whyText: string;
   if (sentenceEnd === -1) {

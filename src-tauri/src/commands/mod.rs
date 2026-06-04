@@ -886,6 +886,33 @@ pub async fn delete_campaign(state: State<'_, Arc<AppState>>, id: String) -> Res
 
 // ── Embedding Model Commands ─────────────────────────────────────────
 
+/// Report which sources were embedded with a different model than the active one.
+///
+/// Returns an empty `stale` list when every indexed source matches the active
+/// embedding provider's model ID. The mock provider (used as a placeholder
+/// before the real model is downloaded) is treated as "no active model" and
+/// always returns clean — it's not a real mismatch, just the pre-download state.
+#[tauri::command]
+pub async fn get_embedding_model_mismatch(
+    state: State<'_, Arc<AppState>>,
+) -> Result<crate::providers::embedding::EmbeddingModelMismatch, String> {
+    let active = state
+        .embedding_provider
+        .read()
+        .map_err(|e| format!("embedding lock: {e}"))?
+        .model_name()
+        .to_string();
+    if active == "mock" {
+        return Ok(crate::providers::embedding::EmbeddingModelMismatch {
+            active_model: active,
+            stale: Vec::new(),
+        });
+    }
+    crate::providers::embedding::check_embedding_model_consistency(&state.db, &active)
+        .await
+        .map_err(|e| format!("mismatch check failed: {e}"))
+}
+
 /// Check whether the nomic-embed-text-v1.5 model is already cached.
 #[tauri::command]
 pub async fn check_embedding_model(_state: State<'_, Arc<AppState>>) -> Result<bool, String> {
@@ -1231,14 +1258,13 @@ mod citation_tests {
         // Two chunks: one on p.9, one on p.20-22. The embedding must have
         // dimension 768 to satisfy the MTREE index; the actual values don't
         // matter for citation-lookup tests.
-        let zeros: String = std::iter::repeat("0.0")
-            .take(768)
+        let zeros: String = std::iter::repeat_n("0.0", 768)
             .collect::<Vec<_>>()
             .join(",");
         db.query(format!(
             "CREATE chunk SET id='c1', source=type::thing('source','quickstart'), \
              collection=type::thing('collection','col1'), \
-             text='Coriolis orbits Kua', page_start=9, page_end=9, \
+             text='Lantern orbits Mirovia', page_start=9, page_end=9, \
              section_heading='Intro', source_type='rules', embedding=[{zeros}], \
              embed_model='nomic-embed-text-v1.5'"
         ))
@@ -1311,7 +1337,7 @@ mod citation_tests {
     async fn returns_chunk_for_exact_page_hit() {
         let db = seed_db().await;
         let got = lookup(&db, "Quickstart.pdf", Some(9)).await.unwrap();
-        assert_eq!(got.text, "Coriolis orbits Kua");
+        assert_eq!(got.text, "Lantern orbits Mirovia");
         assert_eq!(got.page_start, 9);
         assert_eq!(got.section_heading, "Intro");
     }

@@ -9,9 +9,13 @@
     uploadSource,
     getMruCollectionId,
     setMruCollectionId,
+    getEmbeddingModelMismatch,
+    reindexAllSources,
     type Campaign,
     type Collection,
+    type EmbeddingModelMismatch,
   } from '../lib/commands';
+  import { onEmbeddingModelMismatch } from '../lib/events';
   import CampaignRail, { type View } from './CampaignRail.svelte';
   import CampaignSwitcher from './CampaignSwitcher.svelte';
   import Topbar from './Topbar.svelte';
@@ -43,13 +47,26 @@
   let showNewCollectionInput = $state(false);
   let pickerError = $state('');
 
+  // Embedding model mismatch (ADR-003): banner shown when indexed sources
+  // were embedded with a different model than the active provider.
+  let mismatch = $state<EmbeddingModelMismatch | null>(null);
+  let reindexing = $state(false);
+  let mismatchDismissed = $state(false);
+
   onMount(async () => {
     try {
       campaigns = await getCampaigns();
     } catch (e) {
       console.error('Failed to load campaigns:', e);
     }
-    const stored = localStorage.getItem(ACTIVE_KEY);
+    // Defensive: `localStorage` can be undefined during async teardown in
+    // some test environments. Treat any throw as "no stored selection".
+    let stored: string | null = null;
+    try {
+      stored = localStorage.getItem(ACTIVE_KEY);
+    } catch {
+      stored = null;
+    }
     if (stored && campaigns.some((c) => c.id === stored)) {
       activeCampaignId = stored;
     } else if (campaigns.length > 0) {
@@ -58,7 +75,52 @@
       activeCampaignId = null;
       view = 'campaign';
     }
+    // Initial mismatch check covers reloads after the startup event already
+    // fired. The $effect listener below catches the live event from `setup`.
+    try {
+      const report = await getEmbeddingModelMismatch();
+      if (report.stale.length > 0) mismatch = report;
+    } catch (e) {
+      console.error('mismatch check failed:', e);
+    }
   });
+
+  // Listen for the startup mismatch event. $effect handles unsubscribe on
+  // teardown even with async listener setup.
+  $effect(() => {
+    let unlisten: (() => void) | null = null;
+    onEmbeddingModelMismatch((payload) => {
+      if (payload.stale.length > 0) mismatch = payload;
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  });
+
+  async function handleReindex() {
+    if (reindexing) return;
+    reindexing = true;
+    try {
+      await reindexAllSources();
+      const report = await getEmbeddingModelMismatch();
+      if (report.stale.length === 0) {
+        mismatch = null;
+        mismatchDismissed = false;
+      } else {
+        mismatch = report;
+      }
+    } catch (e) {
+      console.error('reindex failed:', e);
+    } finally {
+      reindexing = false;
+    }
+  }
+
+  let totalStaleSources = $derived(
+    mismatch ? mismatch.stale.reduce((acc, s) => acc + s.source_count, 0) : 0,
+  );
 
   function setActiveCampaignId(id: string | null) {
     activeCampaignId = id;
@@ -220,6 +282,33 @@
 
   <main class="main">
     <Topbar title={head.title} sub={head.sub} />
+    {#if mismatch && !mismatchDismissed}
+      <div class="mismatch-banner" role="status" data-testid="mismatch-banner">
+        <div class="mismatch-text">
+          <strong>Embedding model changed.</strong>
+          {totalStaleSources}
+          source{totalStaleSources === 1 ? '' : 's'} indexed with a different model
+          ({mismatch.stale.map((s) => s.embed_model).join(', ')}). Retrieval quality will suffer
+          until they are re-indexed with the active model ({mismatch.active_model}).
+        </div>
+        <div class="mismatch-actions">
+          <button
+            class="mismatch-reindex-btn"
+            onclick={handleReindex}
+            disabled={reindexing}
+            data-testid="mismatch-reindex">
+            {reindexing ? 'Re-indexing…' : 'Re-index now'}
+          </button>
+          <button
+            class="mismatch-dismiss-btn"
+            onclick={() => (mismatchDismissed = true)}
+            disabled={reindexing}
+            data-testid="mismatch-dismiss">
+            Dismiss
+          </button>
+        </div>
+      </div>
+    {/if}
     {#if view === 'oracle'}
       <OracleView {activeCampaignId} onOpenUpload={() => openFilePicker()} />
     {:else if view === 'campaign'}
@@ -410,5 +499,62 @@
   .picker-confirm-btn:disabled {
     opacity: 0.5;
     box-shadow: none;
+  }
+  .mismatch-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin: 10px 16px 0;
+    padding: 10px 14px;
+    border: 1px solid var(--line-strong);
+    border-left: 3px solid var(--danger, #d97757);
+    border-radius: var(--r-md);
+    background: var(--danger-bg, rgba(217, 119, 87, 0.08));
+    color: var(--fg-1);
+    font-family: var(--font-sans);
+    font-size: 13px;
+  }
+  .mismatch-text {
+    flex: 1;
+    line-height: 1.45;
+  }
+  .mismatch-text strong {
+    color: var(--fg-1);
+  }
+  .mismatch-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .mismatch-reindex-btn {
+    border: 0;
+    border-radius: var(--r-md);
+    padding: 7px 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    background: var(--grad-arcane);
+    color: var(--fg-on-accent);
+    box-shadow: var(--glow-arcane);
+    font-family: var(--font-sans);
+    cursor: pointer;
+  }
+  .mismatch-reindex-btn:disabled {
+    opacity: 0.6;
+    cursor: progress;
+  }
+  .mismatch-dismiss-btn {
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 7px 12px;
+    font-size: 12.5px;
+    color: var(--fg-2);
+    font-family: var(--font-sans);
+    cursor: pointer;
+  }
+  .mismatch-dismiss-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>

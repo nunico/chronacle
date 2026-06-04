@@ -642,3 +642,183 @@ async fn test_custom_provider_update() {
     assert_eq!(updated.base_url, "https://new.api.com");
     assert_eq!(updated.api_key, "new-key");
 }
+
+// ── Ingestion error recovery ─────────────────────────────────────────
+
+/// An embedding provider that always fails — used to drive `ingest_source`
+/// down its error path so the test can verify `mark_failed_and_cleanup`.
+struct FailingEmbeddingProvider;
+
+#[async_trait::async_trait]
+impl chronacle_lib::providers::embedding::EmbeddingProvider for FailingEmbeddingProvider {
+    async fn embed_documents(
+        &self,
+        _texts: Vec<String>,
+    ) -> Result<Vec<Vec<f32>>, chronacle_lib::providers::embedding::EmbeddingError> {
+        Err(chronacle_lib::providers::embedding::EmbeddingError::Embed(
+            "simulated embedding failure".into(),
+        ))
+    }
+
+    async fn embed_query(
+        &self,
+        _text: &str,
+    ) -> Result<Vec<f32>, chronacle_lib::providers::embedding::EmbeddingError> {
+        Err(chronacle_lib::providers::embedding::EmbeddingError::Embed(
+            "simulated embedding failure".into(),
+        ))
+    }
+
+    fn dimension(&self) -> usize {
+        768
+    }
+
+    fn model_name(&self) -> &str {
+        "failing-mock"
+    }
+}
+
+/// When ingestion fails mid-pipeline:
+///   1. `source.index_status` must become `'failed'` (not stuck in `'indexing'`).
+///   2. Any chunks already written for the source must be deleted so a retry
+///      starts from a clean slate.
+///
+/// Regression for `docs/architecture.md` Phase 1: "cleanup partial chunks on
+/// failure" — without this, a failed ingest leaves the source row stuck in
+/// `'indexing'` and orphan chunks accumulate across retries.
+#[tokio::test]
+async fn ingestion_failure_marks_source_failed_and_cleans_chunks() {
+    use chronacle_lib::providers::blob_store::BlobStore;
+    use chronacle_lib::providers::embedding::EmbeddingProvider;
+    use chronacle_lib::providers::llm_provider::NoopProvider;
+    use chronacle_lib::providers::vector_store::SurrealDbVector;
+    use chronacle_lib::services::ingestion_service;
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+
+    let db_path = temp_dir.path().join("test.db");
+    let db = surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(db_path)
+        .await
+        .expect("RocksDB");
+    db.use_ns("test").use_db("test").await.unwrap();
+    schema::run_migrations(&db).await.expect("migrations");
+
+    let pdfs_dir = temp_dir.path().join("pdfs");
+    tokio::fs::create_dir_all(&pdfs_dir)
+        .await
+        .expect("pdfs dir");
+    let blob_store: Arc<dyn BlobStore> = Arc::new(
+        chronacle_lib::providers::blob_store::LocalFileStore::new(pdfs_dir),
+    );
+    let vector_store: Arc<dyn chronacle_lib::providers::vector_store::VectorStore> =
+        Arc::new(SurrealDbVector::new(db.clone()));
+    let embedding_provider: Arc<dyn EmbeddingProvider> = Arc::new(FailingEmbeddingProvider);
+    let llm_provider = Arc::new(NoopProvider);
+    let pdf_extractor: Arc<dyn chronacle_lib::services::pdf_extractor::PdfExtractor> =
+        Arc::new(chronacle_lib::services::pdf_extractor::PdfiumExtractor::new(pdfium_lib_path()));
+
+    let state = Arc::new(chronacle_lib::AppState {
+        db: db.clone(),
+        llm_provider: RwLock::new(
+            llm_provider as Arc<dyn chronacle_lib::providers::llm_provider::LlmProvider>,
+        ),
+        vector_store,
+        blob_store: blob_store.clone(),
+        embedding_provider: RwLock::new(embedding_provider),
+        pdf_extractor,
+    });
+
+    // Set up source + collection
+    db.query(
+        "CREATE collection SET id='col1', name='Test', \
+         created_at=time::now(), updated_at=time::now()",
+    )
+    .await
+    .expect("collection");
+
+    let source_id = "fail-test-source";
+    let filename = "test.pdf";
+    db.query(
+        "CREATE source SET id = $id, collection = type::thing('collection','col1'), \
+         filename = $filename, display_name='Test', source_type='rules', \
+         page_count=0, indexed_at=time::now(), index_status='pending', \
+         embed_model='nomic-embed-text-v1.5'",
+    )
+    .bind(("id", source_id.to_owned()))
+    .bind(("filename", filename.to_owned()))
+    .await
+    .expect("source");
+
+    // Pre-seed two orphan chunks so we can prove cleanup actually deletes them.
+    // (In production, these would arrive mid-pipeline from a previous failed run
+    // or a crash during upsert. We seed them here to make the assertion
+    // unambiguous.)
+    let zeros: String = std::iter::repeat_n("0.0", 768)
+        .collect::<Vec<_>>()
+        .join(",");
+    db.query(format!(
+        "CREATE chunk SET id='leftover1', source=type::thing('source','{source_id}'), \
+         collection=type::thing('collection','col1'), text='leftover chunk 1', \
+         page_start=1, page_end=1, section_heading='', source_type='rules', \
+         embedding=[{zeros}], embed_model='nomic-embed-text-v1.5'; \
+         CREATE chunk SET id='leftover2', source=type::thing('source','{source_id}'), \
+         collection=type::thing('collection','col1'), text='leftover chunk 2', \
+         page_start=2, page_end=2, section_heading='', source_type='rules', \
+         embedding=[{zeros}], embed_model='nomic-embed-text-v1.5'"
+    ))
+    .await
+    .expect("pre-seed chunks")
+    .check()
+    .expect("pre-seed ok");
+
+    // Store the PDF blob so the extraction stage succeeds and we reach the
+    // failing embedding step.
+    let pdf_data = create_test_pdf();
+    blob_store
+        .store(source_id, filename, &pdf_data)
+        .await
+        .expect("blob store");
+
+    // Run ingestion — should fail at the embedding stage.
+    let result =
+        ingestion_service::ingest_source(&state, source_id, std::sync::Arc::new(|_| {})).await;
+    assert!(
+        result.is_err(),
+        "ingest should fail with FailingEmbeddingProvider; got: {:?}",
+        result
+    );
+
+    // 1. Source must be marked `failed`, not stuck in `indexing`.
+    let mut res = db
+        .query("SELECT index_status FROM source WHERE id = type::thing('source', $id)")
+        .bind(("id", source_id.to_owned()))
+        .await
+        .expect("query source");
+    #[derive(serde::Deserialize)]
+    struct StatusRow {
+        index_status: String,
+    }
+    let rows: Vec<StatusRow> = res.take(0).expect("parse status");
+    assert_eq!(rows.len(), 1, "source should still exist");
+    assert_eq!(
+        rows[0].index_status, "error",
+        "source must be marked 'error', not stuck in 'indexing'"
+    );
+
+    // 2. All chunks (including pre-seeded orphans) for this source must be gone.
+    let mut res = db
+        .query("SELECT count() FROM chunk WHERE source = type::thing('source', $id) GROUP ALL")
+        .bind(("id", source_id.to_owned()))
+        .await
+        .expect("count chunks");
+    #[derive(serde::Deserialize)]
+    struct CountRow {
+        count: i64,
+    }
+    let counts: Vec<CountRow> = res.take(0).expect("parse count");
+    let remaining = counts.first().map(|c| c.count).unwrap_or(0);
+    assert_eq!(
+        remaining, 0,
+        "all chunks for failed source must be deleted; {remaining} remained"
+    );
+}

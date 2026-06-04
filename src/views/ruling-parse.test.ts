@@ -83,4 +83,38 @@ describe('parseRuling', () => {
     expect(r.cites[0].label).toBe('Lore');
     expect(r.cites[0].src).toBe('Lore');
   });
+
+  // Regression: when the LLM's first sentence ends with a citation and the
+  // filename contains a period (e.g. "Rulebook.pdf"), parseRuling used to split
+  // verdict/body at the period INSIDE the filename, cutting the [Source: ...]
+  // marker in half so neither verdict nor body could match SOURCE_RE — the
+  // raw citation markup leaked into the rendered output. Mirrors the actual
+  // shape observed in the field (a single citation-laden sentence ending in `.`).
+  it('does not split a sentence inside a citation marker (filename contains a period)', () => {
+    const text =
+      'The lands of Vethara include Drystone [Source: "Rulebook.pdf", p.298, quote: "Drystone is a rising power."], Marrowen [Source: "Rulebook.pdf", p.36, quote: "Marrowen lies to the east."].';
+    const r = parseRuling(text);
+    // No raw citation markup must leak into either rendered half.
+    expect(r.verdict).not.toContain('[Source:');
+    expect(r.why).not.toContain('[Source:');
+    // Verdict carries the citation-stripped sentence so the title makes sense.
+    expect(r.verdict).toContain('Drystone');
+    expect(r.verdict).toContain('Marrowen');
+    expect(r.verdict).not.toContain('Rulebook.pdf');
+    // Both citations are captured (chip footer + popover).
+    expect(r.cites).toHaveLength(2);
+    expect(r.cites[0].label).toBe('Rulebook.pdf p.298');
+    expect(r.cites[1].label).toBe('Rulebook.pdf p.36');
+  });
+
+  // Defensive: same problem could trigger on a literal newline inside a
+  // citation (if the LLM emitted one), since the verdict/body split regex
+  // also matched \n.
+  it('does not split inside a citation marker that spans a newline', () => {
+    const text = 'Hello Drystone [Source: "Rulebook.pdf",\np.298, quote: "Drystone."] and more.';
+    const r = parseRuling(text);
+    expect(r.verdict).not.toContain('[Source:');
+    expect(r.cites).toHaveLength(1);
+    expect(r.cites[0].label).toBe('Rulebook.pdf p.298');
+  });
 });

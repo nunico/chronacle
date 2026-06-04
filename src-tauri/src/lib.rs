@@ -153,7 +153,49 @@ pub async fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(state)
+        .manage(state.clone())
+        .setup(move |app| {
+            // ADR-003: warn if any indexed sources were embedded with a different
+            // model than the active embedding provider. Mock provider is treated
+            // as "no active model" (pre-download placeholder, not a real
+            // mismatch) and skipped here.
+            let app_handle = app.handle().clone();
+            let state_for_check = state.clone();
+            tokio::spawn(async move {
+                let active = match state_for_check.embedding_provider.read() {
+                    Ok(p) => p.model_name().to_string(),
+                    Err(_) => return,
+                };
+                if active == "mock" {
+                    return;
+                }
+                match providers::embedding::check_embedding_model_consistency(
+                    &state_for_check.db,
+                    &active,
+                )
+                .await
+                {
+                    Ok(report) if !report.is_clean() => {
+                        eprintln!(
+                            "Embedding model mismatch detected: active={}, {} stale source(s) across {} model(s)",
+                            report.active_model,
+                            report.total_stale_sources(),
+                            report.stale.len()
+                        );
+                        let _ = tauri::Emitter::emit(
+                            &app_handle,
+                            "embedding-model-mismatch",
+                            &report,
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("Embedding model mismatch check failed: {e}");
+                    }
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::update_setting,
@@ -184,6 +226,7 @@ pub async fn run() {
             commands::update_campaign,
             commands::delete_campaign,
             commands::check_embedding_model,
+            commands::get_embedding_model_mismatch,
             commands::download_embedding_model,
             commands::reindex_all_sources,
             commands::get_chunk_for_citation,

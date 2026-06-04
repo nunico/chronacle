@@ -370,7 +370,7 @@ mod tests {
         // Use [1.0, 0.0, ..., 0.0] instead of all-zeros: cosine similarity is
         // undefined for zero vectors, causing SurrealDB to return `false` (no match).
         let ones_first = {
-            let mut v = std::iter::repeat("0.0").take(768).collect::<Vec<_>>();
+            let mut v = std::iter::repeat_n("0.0", 768).collect::<Vec<_>>();
             v[0] = "1.0";
             v.join(",")
         };

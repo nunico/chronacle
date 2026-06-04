@@ -44,7 +44,30 @@ pub enum IngestionError {
 ///
 /// `on_progress` is called after each stage with the current progress fraction
 /// (0.0–1.0) and a human-readable step label.
+///
+/// On any failure, this function marks `source.index_status = 'failed'` and
+/// deletes orphan chunks written before the error so a retry starts from a
+/// clean slate (architecture.md Phase 1: "cleanup partial chunks on failure").
+/// True resume from the last successful page batch is intentionally deferred —
+/// "cleanup + retry" is the simplest correct behavior for Phase 1.
 pub async fn ingest_source(
+    state: &Arc<AppState>,
+    source_id: &str,
+    on_progress: Arc<dyn Fn(IngestionProgress) + Send + Sync>,
+) -> Result<(), IngestionError> {
+    let result = ingest_source_inner(state, source_id, on_progress).await;
+    if let Err(e) = &result {
+        eprintln!("Ingestion failed for source {source_id}: {e}");
+        if let Err(cleanup_err) = mark_failed_and_cleanup(&state.db, source_id).await {
+            eprintln!(
+                "Ingestion cleanup also failed for {source_id}: {cleanup_err} (original error: {e})"
+            );
+        }
+    }
+    result
+}
+
+async fn ingest_source_inner(
     state: &Arc<AppState>,
     source_id: &str,
     on_progress: Arc<dyn Fn(IngestionProgress) + Send + Sync>,
@@ -265,6 +288,30 @@ where
             collection_id: r.collection.id.to_raw(),
         })
         .ok_or_else(|| IngestionError::Db(format!("Source '{source_id}' not found")))
+}
+
+/// Mark a source as `failed` and delete any chunks already written for it.
+///
+/// Called from the error path of `ingest_source` so a retry starts from a
+/// clean slate. If the source row was already deleted by the caller (e.g.
+/// `delete_source` racing with a failed ingest), the UPDATE is a no-op.
+async fn mark_failed_and_cleanup<C>(
+    db: &surrealdb::Surreal<C>,
+    source_id: &str,
+) -> Result<(), IngestionError>
+where
+    C: Connection,
+{
+    db.query(
+        "UPDATE source SET index_status = 'error' WHERE id = type::thing('source', $id); \
+         DELETE chunk WHERE source = type::thing('source', $id)",
+    )
+    .bind(("id", source_id.to_owned()))
+    .await
+    .map_err(|e| IngestionError::Db(format!("cleanup query failed: {e}")))?
+    .check()
+    .map_err(|e| IngestionError::Db(format!("cleanup statement failed: {e}")))?;
+    Ok(())
 }
 
 #[cfg(test)]

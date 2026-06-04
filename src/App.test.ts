@@ -22,6 +22,8 @@ const getChatHistory = vi.fn();
 const getSettings = vi.fn();
 const getLlmProviderStatus = vi.fn();
 const getCustomProviders = vi.fn();
+const getEmbeddingModelMismatch = vi.fn();
+const reindexAllSources = vi.fn();
 
 vi.mock('./lib/commands', () => ({
   checkEmbeddingModel: (...a: unknown[]) => checkEmbeddingModel(...a),
@@ -32,8 +34,15 @@ vi.mock('./lib/commands', () => ({
   getSettings: (...a: unknown[]) => getSettings(...a),
   getLlmProviderStatus: (...a: unknown[]) => getLlmProviderStatus(...a),
   getCustomProviders: (...a: unknown[]) => getCustomProviders(...a),
+  getEmbeddingModelMismatch: (...a: unknown[]) => getEmbeddingModelMismatch(...a),
+  reindexAllSources: (...a: unknown[]) => reindexAllSources(...a),
   getMruCollectionId: vi.fn().mockReturnValue(null),
   setMruCollectionId: vi.fn(),
+}));
+
+vi.mock('./lib/events', () => ({
+  onChatToken: vi.fn().mockResolvedValue(() => {}),
+  onEmbeddingModelMismatch: vi.fn().mockResolvedValue(() => {}),
 }));
 
 describe('App — model-download gate', () => {
@@ -51,6 +60,8 @@ describe('App — model-download gate', () => {
       api_key_configured: false,
     });
     getCustomProviders.mockResolvedValue([]);
+    getEmbeddingModelMismatch.mockResolvedValue({ active_model: 'mock', stale: [] });
+    reindexAllSources.mockResolvedValue(0);
   });
 
   it('shows the ModelDownload gate before the model is ready', async () => {

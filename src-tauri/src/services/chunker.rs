@@ -436,10 +436,10 @@ mod tests {
 
     #[test]
     fn title_case_short_lines_are_headings() {
-        assert!(is_heading("Coriolis and Kua"));
+        assert!(is_heading("Lantern and Mirovia"));
         assert!(is_heading("Combat Rules"));
         assert!(is_heading("The Brave Companions of Old"));
-        assert!(is_heading("Order of the Pariah"));
+        assert!(is_heading("Vows of the Lumen Order"));
         assert!(is_heading("Magic")); // single word, 5 chars
     }
 
@@ -452,7 +452,7 @@ mod tests {
     #[test]
     fn lowercase_non_stopword_disqualifies() {
         // "orbits" is not capitalized → not a heading
-        assert!(!is_heading("Coriolis orbits Kua"));
+        assert!(!is_heading("Lantern orbits Mirovia"));
         // "from" is a stopword (ok lowercase), "stars" is not capitalized
         assert!(!is_heading("Travelers from distant stars"));
     }
@@ -469,7 +469,7 @@ mod tests {
     fn long_title_case_line_is_not_heading() {
         // >10 words is body text, not a heading
         assert!(!is_heading(
-            "The Center of the Third Horizon and the Kua System and the Coriolis Station"
+            "The Center of the Ember Reach and the Velmar System and the Lantern Station"
         ));
     }
 

@@ -830,29 +830,32 @@ Testing is not a phase — it is part of every phase from day one. No feature sh
 
 ### Phase 1 — Core RAG (MVP)
 
+**Status:** Complete (2026-06-03). Retrieval recall@5 = 100% on the Phase 1 query set; see [`docs/phase-1-retrieval-eval.md`](phase-1-retrieval-eval.md).
+
 Goal: Load a PDF, ask a rules question, get a cited answer.
 
-- [ ] Tauri scaffold with IPC commands and event system
-- [ ] `LlmProvider` trait + `OpenAIProvider` + `AnthropicProvider` + `OllamaProvider`
-- [ ] `VectorStore` trait + `SurrealDbVector` implementation
-- [ ] `BlobStore` trait + `LocalFileStore` implementation
-- [ ] SurrealDB embedded setup (RocksDB) + schema via `.surql` migration files
-- [ ] Settings screen: LLM provider config
-- [ ] PDF ingestion pipeline with Tauri event progress streaming
-- [ ] **Ingestion error recovery:** checkpoint per page batch; resume from last checkpoint on retry; cleanup partial chunks on failure
-- [ ] fastembed integration (first-run model download with onboarding screen)
-- [ ] Chunker with section detection
-- [ ] Basic chat UI with streaming responses + citation rendering
-- [ ] **Chat history:** `message` table in SurrealDB, persist + display on page load
-- [ ] **Coverage tooling:** `cargo-llvm-cov` setup in CI from day one
+- [x] Tauri scaffold with IPC commands and event system
+- [x] `LlmProvider` trait + `OpenAIProvider` + `AnthropicProvider` + `OllamaProvider`
+- [x] `VectorStore` trait + `SurrealDbVector` implementation
+- [x] `BlobStore` trait + `LocalFileStore` implementation
+- [x] SurrealDB embedded setup (RocksDB) + schema via `.surql` migration files
+- [x] Settings screen: LLM provider config
+- [x] PDF ingestion pipeline with Tauri event progress streaming
+- [x] **Ingestion error recovery:** on any failure, mark source `'error'` and delete orphan chunks so retry starts clean (true checkpoint/resume deferred — cleanup + retry is the simplest correct behavior)
+- [x] fastembed integration (first-run model download with onboarding screen)
+- [x] Chunker with section detection
+- [x] Basic chat UI with streaming responses + citation rendering
+- [x] **Chat history:** `message` table in SurrealDB, persist + display on page load
+- [x] **Coverage tooling:** `cargo-llvm-cov` setup in CI from day one
+- [x] **Embedding model identity check:** startup warning + re-index banner when `source.embed_model` differs from active provider (ADR-003)
 - **Tests shipped with Phase 1:**
-  - Unit: chunker, section detector, prompt builder, citation parser
-  - Integration: full ingest → query cycle using diverse PDF fixture suite (`single-column`, `multi-column`, `tables`, `stat-block`, `scanned`) + `MockLlmProvider`
-  - Integration: at least one test with real fastembed (small model ~80 MB) to catch dimension errors
-  - Backend E2E: service-layer test with real SurrealDB in-memory — ingest → query → assert citation
-  - CI: fmt, clippy, unit, integration, e2e-backend, cargo-llvm-cov
+  - [x] Unit: chunker, section detector, prompt builder, citation parser
+  - [x] Integration: full ingest → query cycle using diverse PDF fixture suite (`single-column`, `multi-column`, `tables`, `stat-block`, `scanned`) — see `tests/pdf_fixture_ingest.rs`
+  - [x] Integration: real fastembed (Nomic) tests — see `tests/rag_quality_integration.rs` and `tests/retrieval_recall.rs`
+  - [x] Backend E2E: service-layer test with real SurrealDB in-memory — ingest → query → assert citation
+  - [x] CI: fmt, clippy, unit, integration, e2e-backend, cargo-llvm-cov
 
-Milestone: "Ask the rulebook a question and get a cited answer."
+Milestone: "Ask the rulebook a question and get a cited answer." ✓
 
 ### Phase 2 — Campaign & Notes
 

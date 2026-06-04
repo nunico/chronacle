@@ -1,9 +1,13 @@
 //! Regression test for the GM agent's reply quality.
 //!
-//! Constructs a small in-memory "Coriolis-like" document with multi-line
-//! sentences, hyphenated line breaks, and a list of named factions, then
-//! verifies that retrieval returns the correct chunk for two factoid queries
-//! that were failing in production.
+//! Constructs a small in-memory document about an invented fictional setting,
+//! with multi-line sentences, hyphenated line breaks across line boundaries,
+//! and a list of named factions, then verifies that retrieval returns the
+//! correct chunk for two factoid queries that were failing in production.
+//!
+//! The fixture is fully original prose — no third-party game text — so the
+//! test exercises the structural invariants (de-hyphenation, faction-name
+//! retention, ranking) without depending on any copyrighted material.
 //!
 //! The tests use the real Nomic embedding model so they exercise the
 //! prefix logic end-to-end. They skip cleanly if the model isn't cached.
@@ -15,15 +19,15 @@ use chronacle_lib::services::text_normalizer::normalize;
 use std::sync::Arc;
 use surrealdb::Surreal;
 
-fn coriolis_like_fixture() -> ExtractedDoc {
-    let raw = "The center of the Third Horizon is the Kua system, where the space station\n\
-        Coriolis orbits the green jungles of the planet Kua.\n\n\
-        The council factions of today are the Consortium, a group of power-\n\
-        ful corporations; the Zenithian Hegemony, the descen-\n\
-        dents of the captain family onboard Zenith; the Free League, the union\n\
-        of free traders; the mercenaries of the Legion; the secretive Draconites;\n\
-        the divine iconocrates of the Order of the Pariah; Ahlam's Temple;\n\
-        and the Church of the Icons.";
+fn multi_faction_fixture() -> ExtractedDoc {
+    let raw = "The center of the Ember Reach is the Velmar system, where the space station\n\
+        Lantern orbits the silver clouds of the planet Mirovia.\n\n\
+        The council factions of today are the Concordat, an alliance of power-\n\
+        ful corporations; the Mariner Brotherhood, the descen-\n\
+        dents of the founding crews aboard Lantern; the Stellar Guild, the union\n\
+        of free traders; the mercenaries of the Ironhold Pact; the secretive Silent Concord;\n\
+        the devout chantkeepers of the Lumen Order; the Verdant Synod;\n\
+        and the Outer Reach Cartel.";
     let normalized = normalize(raw);
     ExtractedDoc {
         page_count: 1,
@@ -55,7 +59,7 @@ async fn seed_index(
     .await
     .unwrap();
 
-    let doc = coriolis_like_fixture();
+    let doc = multi_faction_fixture();
     let chunks = chunk_document(&doc);
     let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
     let vectors = embed.embed_documents(texts).await.unwrap();
@@ -82,7 +86,7 @@ async fn seed_index(
 }
 
 #[tokio::test]
-async fn coriolis_orbit_question_retrieves_correct_chunk() {
+async fn orbital_station_question_retrieves_correct_chunk() {
     let Ok(provider) = FastEmbedProvider::try_new(None) else {
         eprintln!("Skipping — nomic model not cached");
         return;
@@ -98,7 +102,7 @@ async fn coriolis_orbit_question_retrieves_correct_chunk() {
     let store = seed_index(&db, &embed).await;
 
     let qv = embed
-        .embed_query("What planet is Coriolis orbiting?")
+        .embed_query("What planet is Lantern orbiting?")
         .await
         .unwrap();
     let results = store.search(&qv, &["col1".to_string()], 3).await.unwrap();
@@ -106,8 +110,8 @@ async fn coriolis_orbit_question_retrieves_correct_chunk() {
     let top = &results[0];
     let lower = top.text.to_lowercase();
     assert!(
-        lower.contains("kua") && lower.contains("coriolis"),
-        "top chunk should mention Kua + Coriolis; got: {:?}",
+        lower.contains("mirovia") && lower.contains("lantern"),
+        "top chunk should mention Mirovia + Lantern; got: {:?}",
         top.text
     );
 }
@@ -136,7 +140,7 @@ async fn council_factions_question_retrieves_correct_chunk() {
     let top = &results[0];
     let lower = top.text.to_lowercase();
     assert!(
-        lower.contains("consortium") && lower.contains("free league"),
+        lower.contains("concordat") && lower.contains("stellar guild"),
         "top chunk should list factions; got: {:?}",
         top.text
     );
@@ -183,7 +187,7 @@ async fn retrieval_ranks_target_chunk_above_distractors() {
     .unwrap();
 
     // 20 distractor chunks about unrelated TTRPG topics + 1 target chunk
-    // mentioning Coriolis orbiting Kua.
+    // mentioning Lantern orbiting Mirovia.
     let mut texts: Vec<String> = (0..20)
         .map(|i| {
             format!(
@@ -194,7 +198,7 @@ async fn retrieval_ranks_target_chunk_above_distractors() {
         })
         .collect();
     let target =
-        "The space station Coriolis orbits the green jungles of the planet Kua in the Kua system.";
+        "The space station Lantern orbits the silver clouds of the planet Mirovia in the Velmar system.";
     texts.push(target.to_string());
 
     let vectors = embed.embed_documents(texts.clone()).await.unwrap();
@@ -218,7 +222,7 @@ async fn retrieval_ranks_target_chunk_above_distractors() {
     store.upsert("s1", &indexed).await.unwrap();
 
     let qv = embed
-        .embed_query("What planet does Coriolis orbit?")
+        .embed_query("What planet does Lantern orbit?")
         .await
         .unwrap();
     let results = store.search(&qv, &["col1".to_string()], 5).await.unwrap();
@@ -248,7 +252,7 @@ async fn retrieval_ranks_target_chunk_above_distractors() {
     //    and shouldn't beat a chunk that literally answers the question.
     let top = &results[0];
     assert!(
-        top.text.contains("Coriolis") && top.text.contains("Kua"),
+        top.text.contains("Lantern") && top.text.contains("Mirovia"),
         "target chunk should rank #1; got top: {:?}",
         top.text
     );

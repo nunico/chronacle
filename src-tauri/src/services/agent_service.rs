@@ -90,10 +90,15 @@ pub async fn stream_response(
         None => Vec::new(),
     };
 
-    // 4. Retrieve relevant chunks from the vector store
+    // 4. Retrieve relevant chunks from the vector store.
+    //
+    // top_k = 15: chosen so a canonical enumeration chunk that ranks at
+    // position 11-14 (e.g. a long list-of-regions section that spans pages
+    // in a rulebook) still lands in context. Above ~20 the context gets
+    // noisy and slows answer quality more than it helps recall.
     let results = state
         .vector_store
-        .search(&query_vector, &collection_ids, 10)
+        .search(&query_vector, &collection_ids, 15)
         .await
         .map_err(|e| AgentError::Retrieval(e.to_string()))?;
 
@@ -200,12 +205,25 @@ fn build_rag_system_prompt(context: &str) -> String {
         "You are an expert Game Master assistant.\n\n\
          REFERENCE MATERIAL:\n{context}\n\
          INSTRUCTIONS:\n\
-         - Read every passage above carefully BEFORE deciding whether the answer is present.\n\
-         - The reference passages may use different wording than the user's question \
-           (e.g. the question says \"factions\", the passage says \"groups\" or \"organizations\"). \
-           Treat synonyms, paraphrases, and partial matches as valid evidence.\n\
-         - Answer the question directly in 1–3 sentences. Do NOT quote the passages \
-           verbatim in your answer — the supporting quote belongs inside the citation.\n\
+         - Read every passage above carefully BEFORE answering.\n\
+         - Entity scope is critical. A passage is valid evidence ONLY when it \
+           explicitly attributes a fact to the SAME entity the question is about. \
+           A passage that lists the target entity alongside OTHER entities \
+           (e.g. \"X dominates Vethara, Korim, Suthen and Marrowen\", or \
+           \"in Vethara and in Korim\") does NOT attribute everything in the \
+           list to the target — those are SEPARATE entities. Wording can vary \
+           (synonyms and paraphrases are fine when they refer to the same entity, \
+           e.g. \"factions\" ≈ \"groups\"), but a fact about a different but \
+           co-mentioned entity is NOT evidence for the target.\n\
+         - For list / enumeration questions (\"which are the...\", \"what are the...\", \
+           \"list...\"), enumerate EVERY item the passages explicitly attribute to \
+           the target entity. Do not compress to fit a sentence budget. If the \
+           passages only cover some items, list those and acknowledge that the \
+           reference material may be incomplete.\n\
+         - For other questions, answer in 1–3 sentences. Be concise — the GM is \
+           running a table.\n\
+         - Do NOT quote the passages verbatim in your answer text — the supporting \
+           quote belongs INSIDE the citation marker.\n\
          - Every factual claim must cite its source using this exact format, including \
            a short verbatim quote (1 sentence) from the passage that supports the claim:\n  \
              [Source: \"<source name>\", p.<page>, quote: \"<verbatim sentence>\"]\n  \
@@ -213,8 +231,8 @@ fn build_rag_system_prompt(context: &str) -> String {
            The UI hides the quote from the visible reply and shows it in a popover \
            when the user clicks the citation badge.\n\
          - Only say \"the reference material does not contain this information\" if you \
-           have scanned every passage and found no relevant content, even by paraphrase.\n\
-         - Be concise. The GM is running a table."
+           have scanned every passage and found no relevant content (paraphrase counts \
+           only for the same entity)."
     )
 }
 
@@ -427,6 +445,37 @@ mod tests {
         assert!(prompt.contains("quote: \""));
     }
 
+    /// Regression for a cross-entity-contamination bug observed in production:
+    /// the LLM listed sibling regions as part of the target continent because
+    /// the prompt told it to treat "paraphrases and partial matches" as
+    /// evidence, with no rule about preserving entity scope.
+    ///
+    /// The new prompt must (a) explicitly call out the "X dominates A, B, C and
+    /// D" trap, (b) require enumeration questions to list every attributed item.
+    #[test]
+    fn test_system_prompt_guards_entity_scope_and_enumeration() {
+        let prompt = build_rag_system_prompt("[0] Source: \"x.pdf\", p. 1 — \"\"\ntext\n\n");
+        // Entity-scope rule must be present.
+        assert!(
+            prompt.contains("Entity scope is critical"),
+            "prompt should warn about cross-entity contamination"
+        );
+        // The specific failure shape we observed in production.
+        assert!(
+            prompt.contains("SEPARATE entities"),
+            "prompt should explicitly say co-listed entities are SEPARATE"
+        );
+        // Enumeration questions must not be compressed to 1–3 sentences.
+        assert!(
+            prompt.contains("enumeration questions") || prompt.contains("list / enumeration"),
+            "prompt should call out list / enumeration questions"
+        );
+        assert!(
+            prompt.contains("Do not compress"),
+            "prompt should forbid compressing lists into the 1-3 sentence budget"
+        );
+    }
+
     // ── Citation parsing tests ───────────────────────────────────
 
     #[test]
@@ -465,14 +514,14 @@ mod tests {
 
     #[test]
     fn test_parse_citations_with_inline_quote() {
-        let text = "Coriolis orbits Kua. [Source: \"Quickstart.pdf\", p.9, quote: \"The space station Coriolis orbits the green jungles of the planet Kua.\"]";
+        let text = "Lantern orbits Mirovia. [Source: \"Quickstart.pdf\", p.9, quote: \"The space station Lantern orbits the silver clouds of the planet Mirovia.\"]";
         let citations = parse_citations(text);
         assert_eq!(citations.len(), 1);
         assert_eq!(citations[0].source_name, "Quickstart.pdf");
         assert_eq!(citations[0].page, Some(9));
         assert_eq!(
             citations[0].text_excerpt,
-            "The space station Coriolis orbits the green jungles of the planet Kua."
+            "The space station Lantern orbits the silver clouds of the planet Mirovia."
         );
     }
 
@@ -527,7 +576,9 @@ mod tests {
         .await
         .unwrap();
 
-        persist_message(&db, "user", "question", None).await.unwrap();
+        persist_message(&db, "user", "question", None)
+            .await
+            .unwrap();
         persist_assistant_message(&db, "response with [Source: \"PHB\", p.72].", None)
             .await
             .unwrap();
@@ -654,7 +705,9 @@ mod tests {
             .await
             .unwrap();
         // A separate "global" message that must not leak into the camp1 filter.
-        persist_message(&db, "user", "unscoped", None).await.unwrap();
+        persist_message(&db, "user", "unscoped", None)
+            .await
+            .unwrap();
 
         #[derive(serde::Deserialize)]
         struct Row {
@@ -698,8 +751,12 @@ mod tests {
         .await
         .unwrap();
 
-        persist_message(&db, "user", "first", Some(cid)).await.unwrap();
-        persist_assistant_message(&db, "reply", Some(cid)).await.unwrap();
+        persist_message(&db, "user", "first", Some(cid))
+            .await
+            .unwrap();
+        persist_assistant_message(&db, "reply", Some(cid))
+            .await
+            .unwrap();
 
         // Mirror the exact SQL `commands::get_chat_history` issues.
         let safe_id = cid.replace('`', "``");

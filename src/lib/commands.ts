@@ -296,6 +296,24 @@ export async function checkEmbeddingModel(): Promise<boolean> {
   return invoke<boolean>('check_embedding_model');
 }
 
+export interface StaleModelCount {
+  embed_model: string;
+  source_count: number;
+}
+
+export interface EmbeddingModelMismatch {
+  active_model: string;
+  stale: StaleModelCount[];
+}
+
+/**
+ * Report which indexed sources were embedded with a different model than the
+ * active embedding provider. An empty `stale` array means there's no mismatch.
+ */
+export async function getEmbeddingModelMismatch(): Promise<EmbeddingModelMismatch> {
+  return invoke<EmbeddingModelMismatch>('get_embedding_model_mismatch');
+}
+
 /**
  * Download the embedding model with streaming progress.
  * Progress is delivered via the `model-download-progress` event.

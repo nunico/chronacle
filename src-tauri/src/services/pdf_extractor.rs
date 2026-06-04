@@ -291,12 +291,12 @@ mod tests {
             eprintln!("Skipping — pdfium binary not present at {lib:?}");
             return;
         }
-        let pdf = make_one_page_pdf("Coriolis orbits Kua");
+        let pdf = make_one_page_pdf("Lantern orbits Mirovia");
         let extractor = PdfiumExtractor::new(lib);
         let doc = extractor.extract(&pdf).await.expect("extract");
         assert_eq!(doc.page_count, 1);
         assert!(
-            doc.text.contains("Coriolis") && doc.text.contains("Kua"),
+            doc.text.contains("Lantern") && doc.text.contains("Mirovia"),
             "extracted text missing markers: {:?}",
             doc.text
         );
@@ -371,19 +371,19 @@ mod tests {
             return;
         }
         let pdf = make_pdf_with_styled_heading(
-            "Coriolis and Kua",
-            "The center of the Third Horizon is the Kua system.",
+            "Lantern and Mirovia",
+            "The center of the Ember Reach is the Velmar system.",
         );
         let extractor = PdfiumExtractor::new(lib);
         let doc = extractor.extract(&pdf).await.expect("extract");
         assert!(
-            doc.text.contains("Coriolis and Kua"),
+            doc.text.contains("Lantern and Mirovia"),
             "extracted text missing heading: {:?}",
             doc.text
         );
         assert!(
-            doc.text.contains("\n\nCoriolis and Kua\n\n")
-                || doc.text.starts_with("Coriolis and Kua\n\n"),
+            doc.text.contains("\n\nLantern and Mirovia\n\n")
+                || doc.text.starts_with("Lantern and Mirovia\n\n"),
             "heading should be wrapped in paragraph breaks; got: {:?}",
             doc.text
         );
