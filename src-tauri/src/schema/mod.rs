@@ -108,8 +108,15 @@ mod tests {
             .expect("INFO FOR DB returned None");
 
         for table in &[
-            "npc", "location", "faction", "creature", "item",
-            "event", "player_character", "misc", "relates_to",
+            "npc",
+            "location",
+            "faction",
+            "creature",
+            "item",
+            "event",
+            "player_character",
+            "misc",
+            "relates_to",
         ] {
             assert!(
                 info.tables.contains_key(*table),

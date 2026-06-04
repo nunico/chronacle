@@ -356,6 +356,34 @@ pub async fn delete<C: surrealdb::Connection>(
     Ok(())
 }
 
+/// Create a directed graph edge between two nodes.
+///
+/// `from_kind` and `to_kind` are the table names of the source and target nodes.
+pub async fn relate<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    from_id: &str,
+    from_kind: &str,
+    to_id: &str,
+    to_kind: &str,
+    rel_type: &str,
+    notes: Option<String>,
+) -> Result<(), EntityError> {
+    // Build record IDs directly in the query string because some SurrealDB versions
+    // do not allow type::thing() on the left/right side of RELATE arrows.
+    let query = format!(
+        "RELATE {}:{}->relates_to->{}:{} SET rel_type = $rel_type, notes = $notes, created_at = time::now()",
+        from_kind, from_id, to_kind, to_id
+    );
+    db.query(query)
+        .bind(("rel_type", rel_type.to_owned()))
+        .bind(("notes", notes))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

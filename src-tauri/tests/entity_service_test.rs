@@ -1,5 +1,5 @@
 use chronacle_lib::services::entity_service::{
-    create, get_by_campaign, get_by_id, EntityInput, EntityKind,
+    create, get_by_campaign, get_by_id, relate, EntityInput, EntityKind,
 };
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
@@ -353,4 +353,50 @@ async fn update_with_empty_name_returns_validation_error() {
     .await
     .unwrap_err();
     assert!(matches!(err, EntityError::Validation { ref field, .. } if field == "name"));
+}
+
+#[tokio::test]
+async fn relate_creates_edge_traversable_in_both_directions() {
+    let db = setup_db().await;
+
+    let npc = create(&db, None, EntityKind::Npc, npc_input("Varek"))
+        .await
+        .unwrap();
+    let loc = create(
+        &db,
+        None,
+        EntityKind::Location,
+        EntityInput {
+            name: "The Rusty Flagon".to_string(),
+            summary: None,
+            notes: None,
+            date_start: None,
+            date_end: None,
+            is_ongoing: None,
+            sequence_index: None,
+            era: None,
+            duration_label: None,
+            player_name: None,
+            character_class: None,
+            character_level: None,
+            status: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    relate(&db, &npc.id, "npc", &loc.id, "location", "frequents", None)
+        .await
+        .unwrap();
+
+    // Verify edge exists by selecting all records in the relates_to table.
+    // A simple SELECT * is more reliable than aggregate GROUP ALL across SurrealDB versions.
+    #[derive(serde::Deserialize)]
+    struct EdgeRow {
+        rel_type: String,
+    }
+    let mut resp = db.query("SELECT rel_type FROM relates_to").await.unwrap();
+    let rows: Vec<EdgeRow> = resp.take(0).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].rel_type, "frequents");
 }

@@ -7,8 +7,12 @@
 REMOVE TABLE IF EXISTS entity;
 REMOVE TABLE IF EXISTS relates_to;
 
--- Generic graph edge (connects any two node types)
-DEFINE TABLE relates_to SCHEMAFULL TYPE RELATION FROM ANY TO ANY;
+-- Generic graph edge (connects any two node types.
+-- FROM/TO lists all entity tables explicitly because SurrealDB v2's record<ANY>
+-- type check does not work correctly for heterogeneous RELATE in v2.6.x.
+DEFINE TABLE relates_to SCHEMAFULL TYPE RELATION
+    FROM npc | location | faction | creature | item | event | player_character | misc
+    TO   npc | location | faction | creature | item | event | player_character | misc;
 DEFINE FIELD rel_type   ON relates_to TYPE string;
 DEFINE FIELD notes      ON relates_to TYPE string | NULL DEFAULT NULL;
 DEFINE FIELD created_at ON relates_to TYPE datetime DEFAULT time::now();
