@@ -189,33 +189,33 @@
 </div>
 
 <style>
-  .entity-manager { display: flex; flex-direction: column; gap: 0; height: 100%; }
-  .type-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border, #333); padding: 0 8px; }
+  .entity-manager { display: flex; flex-direction: column; gap: 0; min-height: 60vh; }
+  .type-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); padding: 0 8px; }
   .type-tab {
-    background: none; border: none; color: var(--text-secondary, #aaa);
+    background: none; border: none; color: var(--fg-3);
     padding: 8px 12px; cursor: pointer; font-size: 0.85rem; border-bottom: 2px solid transparent;
     margin-bottom: -1px;
   }
-  .type-tab.active { color: var(--text-primary, #fff); border-bottom-color: var(--accent, #cba6f7); }
-  .content { display: flex; flex: 1; overflow: hidden; }
-  .list-panel { flex: 0 0 260px; border-right: 1px solid var(--border, #333); overflow-y: auto; display: flex; flex-direction: column; }
-  .list-header { padding: 10px; border-bottom: 1px solid var(--border, #333); }
+  .type-tab.active { color: var(--fg-1); border-bottom-color: var(--violet-300); }
+  .content { display: flex; flex: 1; min-height: 0; }
+  .list-panel { flex: 0 0 260px; border-right: 1px solid var(--line); overflow-y: auto; display: flex; flex-direction: column; }
+  .list-header { padding: 10px; border-bottom: 1px solid var(--line); }
   .entity-list { list-style: none; margin: 0; padding: 0; }
   .entity-row {
     display: flex; align-items: center; gap: 4px; padding: 0 8px;
-    border-bottom: 1px solid var(--border, #222);
+    border-bottom: 1px solid var(--line);
   }
-  .entity-row.selected { background: var(--surface-2, #1e1e2e); }
+  .entity-row.selected { background: var(--bg-panel-2); }
   .entity-name {
-    flex: 1; background: none; border: none; color: var(--text-primary, #fff);
+    flex: 1; background: none; border: none; color: var(--fg-1);
     text-align: left; padding: 10px 4px; cursor: pointer; font-size: 0.9rem;
   }
-  .btn-icon { background: none; border: none; color: var(--text-tertiary, #666); cursor: pointer; font-size: 1rem; }
-  .btn-icon.delete:hover { color: var(--error, #f38ba8); }
+  .btn-icon { background: none; border: none; color: var(--fg-4); cursor: pointer; font-size: 1rem; }
+  .btn-icon.delete:hover { color: var(--danger); }
   .form-panel { flex: 1; padding: 16px; overflow-y: auto; }
-  .muted { color: var(--text-secondary, #aaa); font-size: 0.85rem; padding: 16px; }
+  .muted { color: var(--fg-3); font-size: 0.85rem; padding: 16px; }
   .btn-primary {
-    background: var(--accent, #cba6f7); color: #1e1e2e; border: none;
+    background: var(--violet-300); color: var(--bg-abyss); border: none;
     border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 0.85rem; font-weight: 600;
   }
   .overlay {
@@ -223,23 +223,23 @@
     display: flex; align-items: center; justify-content: center; z-index: 100;
   }
   .confirm-box {
-    background: var(--surface-1, #181825); border: 1px solid var(--border, #333);
+    background: var(--bg-panel); border: 1px solid var(--line);
     border-radius: 10px; padding: 20px; max-width: 360px; width: 90%;
   }
-  .confirm-box p { margin: 0 0 16px; color: var(--text-primary, #fff); }
+  .confirm-box p { margin: 0 0 16px; color: var(--fg-1); }
   .actions { display: flex; gap: 8px; }
   .btn-danger {
-    background: var(--error, #f38ba8); color: #1e1e2e; border: none;
+    background: var(--danger); color: var(--bg-abyss); border: none;
     border-radius: 6px; padding: 6px 14px; cursor: pointer; font-weight: 600;
   }
   .btn-ghost {
-    background: transparent; color: var(--text-secondary, #aaa);
-    border: 1px solid var(--border, #333); border-radius: 6px; padding: 6px 14px; cursor: pointer;
+    background: transparent; color: var(--fg-3);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 14px; cursor: pointer;
   }
   .toast {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-    background: var(--surface-2, #1e1e2e); color: var(--text-primary, #fff);
-    border: 1px solid var(--border, #333); border-radius: 8px;
+    background: var(--bg-panel-2); color: var(--fg-1);
+    border: 1px solid var(--line); border-radius: 8px;
     padding: 10px 20px; z-index: 200; font-size: 0.9rem;
   }
 </style>

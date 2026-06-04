@@ -140,20 +140,20 @@
 <style>
   form { display: flex; flex-direction: column; gap: 12px; }
   .field { display: flex; flex-direction: column; gap: 4px; }
-  label { font-size: 0.85rem; color: var(--text-secondary, #aaa); }
+  label { font-size: 0.85rem; color: var(--fg-3); }
   input, textarea, select {
-    background: var(--surface-2, #1e1e2e);
-    border: 1px solid var(--border, #333);
+    background: var(--bg-panel-2);
+    border: 1px solid var(--line);
     border-radius: 6px;
-    color: var(--text-primary, #fff);
+    color: var(--fg-1);
     padding: 6px 10px;
     font-size: 0.9rem;
   }
-  .field-error, .form-error { color: var(--error, #f38ba8); font-size: 0.8rem; margin: 0; }
+  .field-error, .form-error { color: var(--danger); font-size: 0.8rem; margin: 0; }
   .actions { display: flex; gap: 8px; margin-top: 8px; }
   .btn-primary {
-    background: var(--accent, #cba6f7);
-    color: #1e1e2e;
+    background: var(--violet-300);
+    color: var(--bg-abyss);
     border: none;
     border-radius: 6px;
     padding: 6px 16px;
@@ -162,8 +162,8 @@
   }
   .btn-ghost {
     background: transparent;
-    color: var(--text-secondary, #aaa);
-    border: 1px solid var(--border, #333);
+    color: var(--fg-3);
+    border: 1px solid var(--line);
     border-radius: 6px;
     padding: 6px 16px;
     cursor: pointer;

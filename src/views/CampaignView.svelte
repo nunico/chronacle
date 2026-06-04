@@ -735,6 +735,6 @@
   }
   .view-tab.active {
     color: var(--fg-1);
-    border-bottom-color: var(--arcane-400, #cba6f7);
+    border-bottom-color: var(--violet-300);
   }
 </style>
