@@ -87,4 +87,46 @@ mod tests {
             .await
             .expect("collection table should exist after migration 003");
     }
+
+    #[tokio::test]
+    async fn test_migration_004_graph_node_tables_exist() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .expect("in-memory db");
+        db.use_ns("test").use_db("test").await.unwrap();
+        run_migrations(&db).await.expect("migrations");
+
+        for table in &[
+            "npc",
+            "location",
+            "faction",
+            "creature",
+            "item",
+            "event",
+            "player_character",
+            "misc",
+        ] {
+            db.query(&format!("SELECT count() FROM {table} GROUP ALL"))
+                .await
+                .unwrap_or_else(|e| panic!("table {table} should exist: {e}"));
+        }
+
+        // relates_to accepts cross-type edges
+        db.query("SELECT count() FROM relates_to GROUP ALL")
+            .await
+            .expect("relates_to should exist");
+
+        // entity table should be gone — verify via INFO FOR DB rather than querying it,
+        // because SurrealDB in-memory returns Ok (empty) for queries against removed tables.
+        let mut info_result = db.query("INFO FOR DB").await.expect("INFO FOR DB");
+        let info: Option<serde_json::Value> = info_result.take(0).expect("INFO FOR DB result");
+        let info = info.expect("INFO FOR DB returned None");
+        let tables = info
+            .get("tables")
+            .expect("INFO FOR DB should have tables key");
+        assert!(
+            tables.get("entity").is_none(),
+            "entity table should have been removed by migration 004, but INFO FOR DB still lists it"
+        );
+    }
 }
