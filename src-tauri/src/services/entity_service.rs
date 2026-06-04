@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
+use surrealdb::engine::local::Db;
 use surrealdb::sql::Thing;
+use surrealdb::Surreal;
 use thiserror::Error;
 
 // ── Error type ──────────────────────────────────────────────────────────────
@@ -161,6 +163,121 @@ pub struct EntityInput {
     pub character_class: Option<String>,
     pub character_level: Option<i64>,
     pub status: Option<String>,
+}
+
+// ── Service functions ────────────────────────────────────────────────────────
+
+/// Create a new graph node of the given kind scoped to an optional campaign.
+pub async fn create(
+    db: &Surreal<Db>,
+    campaign_id: Option<&str>,
+    kind: EntityKind,
+    input: EntityInput,
+) -> Result<GraphNode, EntityError> {
+    if input.name.trim().is_empty() {
+        return Err(EntityError::Validation {
+            field: "name".to_string(),
+            message: "Name is required".to_string(),
+        });
+    }
+    let table = kind.table_name();
+    let id = uuid::Uuid::new_v4().to_string().replace('-', "");
+    let mut response = db
+        .query(
+            "CREATE type::thing($table, $id) SET
+                campaign        = IF $campaign_id != NONE THEN type::thing('campaign', $campaign_id) ELSE NULL END,
+                name            = $name,
+                summary         = $summary,
+                notes           = $notes,
+                date_start      = $date_start,
+                date_end        = $date_end,
+                is_ongoing      = $is_ongoing,
+                sequence_index  = $sequence_index,
+                era             = $era,
+                duration_label  = $duration_label,
+                player_name     = $player_name,
+                character_class = $character_class,
+                character_level = $character_level,
+                status          = $status,
+                created_at      = time::now(),
+                updated_at      = time::now()",
+        )
+        .bind(("table", table))
+        .bind(("id", id))
+        .bind(("campaign_id", campaign_id.map(|s| s.to_owned())))
+        .bind(("name", input.name.trim().to_owned()))
+        .bind(("summary", input.summary))
+        .bind(("notes", input.notes))
+        .bind(("date_start", input.date_start))
+        .bind(("date_end", input.date_end))
+        .bind(("is_ongoing", input.is_ongoing))
+        .bind(("sequence_index", input.sequence_index))
+        .bind(("era", input.era))
+        .bind(("duration_label", input.duration_label))
+        .bind(("player_name", input.player_name))
+        .bind(("character_class", input.character_class))
+        .bind(("character_level", input.character_level))
+        .bind(("status", input.status))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
+    records
+        .into_iter()
+        .next()
+        .map(Into::into)
+        .ok_or_else(|| EntityError::Database {
+            message: "No record returned after create".to_string(),
+        })
+}
+
+/// Fetch a single node by its raw ID and kind.
+pub async fn get_by_id(
+    db: &Surreal<Db>,
+    id: &str,
+    kind: EntityKind,
+) -> Result<GraphNode, EntityError> {
+    let table = kind.table_name();
+    let mut response = db
+        .query("SELECT * FROM type::thing($table, $id)")
+        .bind(("table", table))
+        .bind(("id", id.to_owned()))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
+    records
+        .into_iter()
+        .next()
+        .map(Into::into)
+        .ok_or_else(|| EntityError::NotFound { id: id.to_string() })
+}
+
+/// List all nodes of a kind for a campaign, ordered by name.
+pub async fn get_by_campaign(
+    db: &Surreal<Db>,
+    campaign_id: &str,
+    kind: EntityKind,
+) -> Result<Vec<GraphNode>, EntityError> {
+    let table = kind.table_name();
+    let mut response = db
+        .query("SELECT * FROM type::table($table) WHERE campaign = type::thing('campaign', $campaign_id) ORDER BY name ASC")
+        .bind(("table", table))
+        .bind(("campaign_id", campaign_id.to_owned()))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
+    Ok(records.into_iter().map(Into::into).collect())
 }
 
 #[cfg(test)]
