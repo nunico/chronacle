@@ -48,7 +48,7 @@
     showForm = false;
     formNode = null;
     formError = null;
-    loadEntities(kind);
+    // $effect fires automatically because activeKind changed
   }
 
   function openCreate() {
@@ -104,7 +104,7 @@
     setTimeout(() => { toast = null; }, 4000);
   }
 
-  // Load initial tab
+  // Reload on kind or campaign change
   $effect(() => {
     if (campaignId) loadEntities(activeKind);
   });
