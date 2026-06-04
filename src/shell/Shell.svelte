@@ -24,7 +24,20 @@
   import NotesView from '../views/NotesView.svelte';
   import SettingsView from '../views/SettingsView.svelte';
   import UploadProgress from '../UploadProgress.svelte';
-  import { findCategory } from './note-categories';
+  import EntityManager from '../components/EntityManager.svelte';
+  import { findCategory, type NoteCategoryId } from './note-categories';
+  import type { EntityKind } from '../lib/commands';
+
+  const ENTITY_KIND_MAP: Partial<Record<NoteCategoryId, EntityKind>> = {
+    npcs: 'npc',
+    locations: 'location',
+    factions: 'faction',
+    creatures: 'creature',
+    items: 'item',
+    events: 'event',
+    player_characters: 'player_character',
+    misc: 'misc',
+  };
 
   const ACTIVE_KEY = 'chronacle_active_campaign_id';
 
@@ -321,6 +334,12 @@
       />
     {:else if view === 'settings'}
       <SettingsView />
+    {:else if ENTITY_KIND_MAP[view.category] && activeCampaignId}
+      <EntityManager campaignId={activeCampaignId} initialKind={ENTITY_KIND_MAP[view.category]} />
+    {:else if ENTITY_KIND_MAP[view.category]}
+      <div class="no-campaign-msg">
+        <p>Select a campaign to manage entities.</p>
+      </div>
     {:else}
       <NotesView category={view.category} />
     {/if}
@@ -556,5 +575,14 @@
   .mismatch-dismiss-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  .no-campaign-msg {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--fg-3);
+    font-family: var(--font-sans);
+    font-size: 14px;
   }
 </style>

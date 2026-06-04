@@ -7,9 +7,10 @@
 
   interface Props {
     campaignId: string;
+    initialKind?: EntityKind;
   }
 
-  let { campaignId }: Props = $props();
+  let { campaignId, initialKind = 'npc' }: Props = $props();
 
   type Tab = { kind: EntityKind; label: string };
   const TABS: Tab[] = [
@@ -23,7 +24,7 @@
     { kind: 'misc',             label: 'Misc' },
   ];
 
-  let activeKind = $state<EntityKind>('npc');
+  let activeKind = $state<EntityKind>(initialKind);
   let entities = $state<GraphNode[]>([]);
   let loading = $state(false);
   let formNode = $state<GraphNode | null>(null); // null = create, non-null = edit
