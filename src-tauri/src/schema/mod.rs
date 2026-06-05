@@ -129,4 +129,46 @@ mod tests {
             "entity table should have been removed by migration 004"
         );
     }
+
+    #[tokio::test]
+    async fn test_migration_005_session_updated_at_and_campaign_index() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .expect("in-memory db");
+        db.use_ns("test").use_db("test").await.unwrap();
+        run_migrations(&db).await.expect("migrations");
+
+        // Insert a session record with updated_at to verify the field exists.
+        db.query(
+            "CREATE session SET \
+             campaign = NULL, \
+             session_number = 1, \
+             title = 'Test Session', \
+             date_played = '2026-06-05', \
+             notes = '', \
+             created_at = time::now(), \
+             updated_at = time::now()",
+        )
+        .await
+        .expect("INSERT session with updated_at should succeed after migration 005");
+
+        // Verify idx_session_campaign appears in the session table info.
+        #[derive(serde::Deserialize)]
+        struct TableInfo {
+            indexes: std::collections::HashMap<String, serde_json::Value>,
+        }
+        let mut resp = db
+            .query("INFO FOR TABLE session")
+            .await
+            .expect("INFO FOR TABLE session");
+        let info: TableInfo = resp
+            .take::<Option<TableInfo>>(0)
+            .expect("parse INFO FOR TABLE session")
+            .expect("INFO FOR TABLE session returned None");
+
+        assert!(
+            info.indexes.contains_key("idx_session_campaign"),
+            "idx_session_campaign index should exist on session table after migration 005"
+        );
+    }
 }
