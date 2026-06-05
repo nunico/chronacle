@@ -371,13 +371,11 @@ pub async fn update<C: surrealdb::Connection>(
     // Awaited synchronously: entity count is small in practice, and spawning would
     // require C: Clone + Send + 'static which conflicts with the generic bound used
     // in tests.
-    if let Some(notes) = &notes_for_wikilinks {
-        if !notes.is_empty() {
-            if let Some(ref cid) = node.campaign_id {
-                let _ =
-                    crate::services::wikilink::parse_and_sync_wikilinks(db, table, id, notes, cid)
-                        .await;
-            }
+    if let Some(ref notes) = notes_for_wikilinks {
+        if let Some(ref cid) = node.campaign_id {
+            let _ =
+                crate::services::wikilink::parse_and_sync_wikilinks(db, table, id, notes, cid)
+                    .await;
         }
     }
 

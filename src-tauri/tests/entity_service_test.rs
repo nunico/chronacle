@@ -532,3 +532,67 @@ async fn update_entity_notes_updates_wikilink_edges() {
         "edge should be removed after notes no longer mention Torvin"
     );
 }
+
+#[tokio::test]
+async fn update_entity_to_empty_notes_removes_wikilink_edges() {
+    let db = setup_db().await;
+    let campaign_id = create_campaign(&db).await;
+
+    // Create target NPC
+    let target = create(
+        &db,
+        Some(&campaign_id),
+        EntityKind::Npc,
+        npc_input("Torvin"),
+    )
+    .await
+    .unwrap();
+
+    // Create source location with notes mentioning Torvin
+    let source = create(
+        &db,
+        Some(&campaign_id),
+        EntityKind::Location,
+        location_input("The Tavern", Some("[[Torvin]] lives here")),
+    )
+    .await
+    .unwrap();
+
+    // Verify the relates_to edge exists
+    let source_record = format!("location:{}", source.id);
+    let target_record = format!("npc:{}", target.id);
+    let mut resp = db
+        .query(format!(
+            "SELECT rel_type FROM relates_to \
+             WHERE in = {source_record} AND out = {target_record}"
+        ))
+        .await
+        .unwrap();
+    let rows: Vec<serde_json::Value> = resp.take(0).unwrap();
+    assert_eq!(rows.len(), 1, "expected one relates_to edge after create");
+
+    // Update source location with empty notes — should clear the stale edge
+    update(
+        &db,
+        &source.id,
+        EntityKind::Location,
+        location_input("The Tavern", Some("")),
+    )
+    .await
+    .unwrap();
+
+    // Edge must be gone
+    let mut resp2 = db
+        .query(format!(
+            "SELECT rel_type FROM relates_to \
+             WHERE in = {source_record} AND out = {target_record}"
+        ))
+        .await
+        .unwrap();
+    let rows2: Vec<serde_json::Value> = resp2.take(0).unwrap();
+    assert_eq!(
+        rows2.len(),
+        0,
+        "stale relates_to edge must be deleted when notes are cleared to empty string"
+    );
+}
