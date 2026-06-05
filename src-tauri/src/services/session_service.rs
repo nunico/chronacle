@@ -192,13 +192,18 @@ pub async fn get_by_id<C: surrealdb::Connection>(
 pub async fn update<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     id: &str,
-    campaign_id: &str,
     input: SessionInput,
 ) -> Result<Session, SessionError> {
     if input.title.trim().is_empty() {
         return Err(SessionError::Validation {
             field: "title".to_string(),
             message: "Title is required".to_string(),
+        });
+    }
+    if input.session_number <= 0 {
+        return Err(SessionError::Validation {
+            field: "session_number".to_string(),
+            message: "Session number must be positive".to_string(),
         });
     }
 
@@ -225,11 +230,19 @@ pub async fn update<C: surrealdb::Connection>(
         message: e.to_string(),
     })?;
 
-    let session = records
+    let record = records
         .into_iter()
         .next()
-        .map(Into::into)
         .ok_or_else(|| SessionError::NotFound { id: id.to_string() })?;
+
+    // Extract campaign_id from the record before converting it into a Session.
+    let campaign_id_for_wikilinks = record
+        .campaign
+        .as_ref()
+        .map(|t| t.id.to_raw())
+        .unwrap_or_default();
+
+    let session: Session = record.into();
 
     // Resolve wikilinks — failure must not block the save.
     // Awaited synchronously: wikilink resolution is fast in practice (entity
@@ -240,7 +253,7 @@ pub async fn update<C: surrealdb::Connection>(
         "session",
         id,
         &input.notes,
-        campaign_id,
+        &campaign_id_for_wikilinks,
     )
     .await;
 
@@ -281,30 +294,6 @@ pub async fn get_entities<C: surrealdb::Connection>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn session_input_validation_empty_title() {
-        // Validation logic is synchronous — we can test the guard without a DB.
-        let input = SessionInput {
-            session_number: 1,
-            title: "  ".to_string(),
-            date_played: "2026-06-05".to_string(),
-            notes: String::new(),
-        };
-        // Guard mirrors the service function.
-        assert!(input.title.trim().is_empty());
-    }
-
-    #[test]
-    fn session_input_validation_zero_session_number() {
-        let input = SessionInput {
-            session_number: 0,
-            title: "Valid Title".to_string(),
-            date_played: "2026-06-05".to_string(),
-            notes: String::new(),
-        };
-        assert!(input.session_number <= 0);
-    }
 
     /// Verify that `Session` fields serialise to the expected JSON keys,
     /// which is what the Tauri IPC bridge sends to the frontend.

@@ -13,26 +13,6 @@ async fn setup_db() -> Surreal<Db> {
     db
 }
 
-/// Create a campaign in the DB and return its raw ID.
-async fn create_campaign(db: &Surreal<Db>) -> String {
-    #[derive(serde::Deserialize)]
-    struct Row {
-        id: surrealdb::sql::Thing,
-    }
-    let mut resp = db
-        .query(
-            "CREATE campaign SET \
-             name = 'Test Campaign', \
-             system = 'D&D 5e', \
-             created_at = time::now(), \
-             updated_at = time::now()",
-        )
-        .await
-        .unwrap();
-    let rows: Vec<Row> = resp.take(0).unwrap();
-    rows.into_iter().next().unwrap().id.id.to_raw()
-}
-
 async fn create_test_campaign(
     db: &Surreal<Db>,
 ) -> chronacle_lib::services::campaign_service::Campaign {
@@ -55,7 +35,7 @@ fn make_input(number: i64, title: &str) -> SessionInput {
 #[tokio::test]
 async fn create_session_returns_session_with_correct_fields() {
     let db = setup_db().await;
-    let campaign_id = create_campaign(&db).await;
+    let campaign_id = create_test_campaign(&db).await.id;
 
     let session = create(&db, &campaign_id, make_input(1, "The Beginning"))
         .await
@@ -75,7 +55,7 @@ async fn create_session_returns_session_with_correct_fields() {
 #[tokio::test]
 async fn create_session_requires_nonempty_title() {
     let db = setup_db().await;
-    let campaign_id = create_campaign(&db).await;
+    let campaign_id = create_test_campaign(&db).await.id;
 
     let err = create(
         &db,
@@ -101,7 +81,7 @@ async fn create_session_requires_nonempty_title() {
 #[tokio::test]
 async fn create_session_requires_positive_session_number() {
     let db = setup_db().await;
-    let campaign_id = create_campaign(&db).await;
+    let campaign_id = create_test_campaign(&db).await.id;
 
     for bad_number in [0_i64, -1, -99] {
         let err = create(
@@ -129,7 +109,7 @@ async fn create_session_requires_positive_session_number() {
 #[tokio::test]
 async fn get_all_sessions_ordered_by_session_number() {
     let db = setup_db().await;
-    let campaign_id = create_campaign(&db).await;
+    let campaign_id = create_test_campaign(&db).await.id;
 
     // Insert out of order
     create(&db, &campaign_id, make_input(3, "Third"))
@@ -156,7 +136,7 @@ async fn get_all_sessions_ordered_by_session_number() {
 #[tokio::test]
 async fn get_session_by_id_returns_correct_session() {
     let db = setup_db().await;
-    let campaign_id = create_campaign(&db).await;
+    let campaign_id = create_test_campaign(&db).await.id;
 
     let created = create(&db, &campaign_id, make_input(1, "Session One"))
         .await
@@ -188,7 +168,7 @@ async fn get_session_by_id_not_found_returns_error() {
 #[tokio::test]
 async fn update_session_changes_fields_and_updates_timestamp() {
     let db = setup_db().await;
-    let campaign_id = create_campaign(&db).await;
+    let campaign_id = create_test_campaign(&db).await.id;
 
     let created = create(&db, &campaign_id, make_input(1, "Old Title"))
         .await
@@ -203,7 +183,6 @@ async fn update_session_changes_fields_and_updates_timestamp() {
     let updated = update(
         &db,
         &created.id,
-        &campaign_id,
         SessionInput {
             session_number: 1,
             title: "New Title".to_string(),
@@ -230,7 +209,7 @@ async fn update_session_changes_fields_and_updates_timestamp() {
 #[tokio::test]
 async fn delete_session_removes_record() {
     let db = setup_db().await;
-    let campaign_id = create_campaign(&db).await;
+    let campaign_id = create_test_campaign(&db).await.id;
 
     let session = create(&db, &campaign_id, make_input(1, "To Be Deleted"))
         .await
@@ -305,4 +284,55 @@ async fn get_session_entities_returns_linked_events() {
     );
     assert_eq!(entities[0].name, "Battle of the Fields");
     assert_eq!(entities[0].kind, "event");
+}
+
+// ── Test 10 ──────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn update_session_rejects_zero_session_number() {
+    let db = setup_db().await;
+    let campaign_id = create_test_campaign(&db).await.id;
+
+    // Create a valid session first.
+    let created = create(&db, &campaign_id, make_input(1, "Original Title"))
+        .await
+        .unwrap();
+
+    // Attempt to update with session_number = 0.
+    let err = update(
+        &db,
+        &created.id,
+        SessionInput {
+            session_number: 0,
+            title: "Updated Title".to_string(),
+            date_played: "2026-06-05".to_string(),
+            notes: String::new(),
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        matches!(&err, SessionError::Validation { field, .. } if field == "session_number"),
+        "expected Validation(session_number), got {err:?}"
+    );
+
+    // Negative values must also be rejected.
+    let err_neg = update(
+        &db,
+        &created.id,
+        SessionInput {
+            session_number: -5,
+            title: "Updated Title".to_string(),
+            date_played: "2026-06-05".to_string(),
+            notes: String::new(),
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        matches!(&err_neg, SessionError::Validation { field, .. } if field == "session_number"),
+        "expected Validation(session_number) for -5, got {err_neg:?}"
+    );
 }

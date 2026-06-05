@@ -38,7 +38,10 @@ pub async fn update_session(
     campaign_id: String,
     input: SessionInput,
 ) -> Result<Session, SessionError> {
-    session_service::update(&state.db, &id, &campaign_id, input).await
+    // campaign_id is accepted for IPC compatibility but not forwarded to the
+    // service — the session record already carries its campaign FK.
+    let _ = campaign_id;
+    session_service::update(&state.db, &id, input).await
 }
 
 #[tauri::command]
