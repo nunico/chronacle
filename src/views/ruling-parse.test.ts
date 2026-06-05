@@ -47,6 +47,29 @@ describe('renderContent', () => {
     expect(html).not.toMatch(/<script>/);
     expect(html).toContain('&lt;script&gt;');
   });
+
+  it('replaces [Entity] with an entity-badge span', () => {
+    const html = renderContent(
+      'Nazirdijan acts [Entity: "Nazirdijan", kind: "player_character"].',
+    );
+    expect(html).toContain('<span class="entity-badge"');
+    expect(html).toContain('title="player_character"');
+    expect(html).toContain('>Nazirdijan<');
+  });
+
+  it('escapes a malicious entity name in [Entity]', () => {
+    const html = renderContent('[Entity: "<script>alert(1)</script>", kind: "npc"]');
+    expect(html).not.toMatch(/<script>/);
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('renders both Source and Entity markers in the same string', () => {
+    const html = renderContent(
+      'Rules apply [Source: "PHB", p.72]. Nazirdijan agrees [Entity: "Nazirdijan", kind: "player_character"].',
+    );
+    expect(html).toContain('class="citation-badge"');
+    expect(html).toContain('class="entity-badge"');
+  });
 });
 
 describe('parseRuling', () => {

@@ -54,14 +54,20 @@ export function splitHeading(quote: string): { heading: string | null; body: str
 const SOURCE_RE =
   /\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+)(?:-\d+)?)?(?:,\s*quote:\s*"([\s\S]*?)")?\s*\]/g;
 
+const ENTITY_RE = /\[Entity:\s*"([^"]+)",\s*kind:\s*"([^"]+)"\s*\]/g;
+
 /** Render message content with clickable citation badges (HTML string). */
 export function renderContent(text: string): string {
-  return text.replace(SOURCE_RE, (_, name: string, page: string | undefined, quote: string | undefined) => {
-    const dataPage = page ? ` data-page="${escapeAttr(page)}"` : '';
-    const dataQuote = quote ? ` data-quote="${escapeAttr(quote)}"` : '';
-    const label = `${escapeAttr(name)}${page ? ` p.${escapeAttr(page)}` : ''}`;
-    return `<button type="button" class="citation-badge" data-source="${escapeAttr(name)}"${dataPage}${dataQuote} title="Show source passage">${label}</button>`;
-  });
+  return text
+    .replace(SOURCE_RE, (_, name: string, page: string | undefined, quote: string | undefined) => {
+      const dataPage = page ? ` data-page="${escapeAttr(page)}"` : '';
+      const dataQuote = quote ? ` data-quote="${escapeAttr(quote)}"` : '';
+      const label = `${escapeAttr(name)}${page ? ` p.${escapeAttr(page)}` : ''}`;
+      return `<button type="button" class="citation-badge" data-source="${escapeAttr(name)}"${dataPage}${dataQuote} title="Show source passage">${label}</button>`;
+    })
+    .replace(ENTITY_RE, (_, name: string, kind: string) =>
+      `<span class="entity-badge" title="${escapeAttr(kind)}">${escapeAttr(name)}</span>`,
+    );
 }
 
 /** Find the index of the first sentence-end character (`.!?\n`) that lies
