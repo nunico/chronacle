@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use regex::Regex;
 use serde::Serialize;
 use surrealdb::sql::Thing;
@@ -9,6 +11,10 @@ use thiserror::Error;
 pub enum WikilinkError {
     #[error("Database error: {message}")]
     Database { message: String },
+    #[error("Invalid identifier '{value}': only [a-zA-Z0-9_] characters are allowed")]
+    InvalidIdentifier { value: String },
+    #[error("Malformed record ID '{value}': expected 'table:id'")]
+    MalformedRecordId { value: String },
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -23,6 +29,10 @@ const ENTITY_TABLES: &[&str] = &[
     "player_character",
     "misc",
 ];
+
+// Compiled once at first use — avoids recompiling the pattern on every call.
+static WIKILINK_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[\[([^\[\]]+)\]\]").expect("wikilink regex is valid"));
 
 // ── Internal structs ─────────────────────────────────────────────────────────
 
@@ -48,10 +58,12 @@ pub async fn parse_and_sync_wikilinks<C: surrealdb::Connection>(
     notes: &str,
     campaign_id: &str,
 ) -> Result<Vec<String>, WikilinkError> {
+    // Guard against injection through the source identifiers.
+    validate_identifier(source_table)?;
+    validate_identifier(source_id)?;
+
     // 1. Extract [[name]] patterns
-    let wikilink_re =
-        Regex::new(r"\[\[([^\[\]]+)\]\]").expect("wikilink regex is valid at compile time");
-    let extracted: Vec<String> = wikilink_re
+    let extracted: Vec<String> = WIKILINK_RE
         .captures_iter(notes)
         .map(|cap| cap[1].trim().to_string())
         .filter(|s| !s.is_empty())
@@ -90,6 +102,20 @@ pub async fn parse_and_sync_wikilinks<C: surrealdb::Connection>(
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+/// Reject any string that contains characters outside `[a-zA-Z0-9_]`.
+///
+/// Applied to every table name and record ID before they are interpolated into
+/// a SurrealQL query string, preventing query-structure injection.
+fn validate_identifier(s: &str) -> Result<(), WikilinkError> {
+    if s.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        Ok(())
+    } else {
+        Err(WikilinkError::InvalidIdentifier {
+            value: s.to_string(),
+        })
+    }
+}
 
 /// Query the `name` and `id` from all 8 entity tables for the given campaign.
 async fn query_all_entity_names<C: surrealdb::Connection>(
@@ -131,6 +157,10 @@ async fn query_all_entity_names<C: surrealdb::Connection>(
 
 /// Upsert `relates_to` edges from `source_table:source_id` to each of
 /// `matched_ids` with `rel_type = "mentioned"`.
+///
+/// SurrealDB `RELATE` does not deduplicate — it always creates a new edge.
+/// To prevent duplicate edges on repeated calls, each target edge is explicitly
+/// deleted before being re-created.
 async fn upsert_mentioned_edges<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     source_table: &str,
@@ -139,17 +169,37 @@ async fn upsert_mentioned_edges<C: surrealdb::Connection>(
 ) -> Result<(), WikilinkError> {
     for target_full_id in matched_ids {
         // target_full_id is e.g. "npc:abc123" — split at the first colon
-        let (to_table, to_id) = split_record_id(target_full_id);
+        let (to_table, to_id) = split_record_id(target_full_id)?;
+
+        // Validate target components before interpolation.
+        validate_identifier(to_table)?;
+        validate_identifier(to_id)?;
+
+        // Delete any pre-existing edge between this exact source and target so
+        // that RELATE does not create a second (duplicate) edge.
+        let delete_query = format!(
+            "DELETE relates_to \
+             WHERE in = {source_table}:{source_id} \
+             AND out = {to_table}:{to_id} \
+             AND rel_type = 'mentioned'"
+        );
+        db.query(delete_query)
+            .await
+            .map_err(|e| WikilinkError::Database {
+                message: e.to_string(),
+            })?;
 
         // Use format! for the record ID syntax on both sides of the arrow,
         // matching the pattern in entity_service::relate.
-        let query = format!(
+        let relate_query = format!(
             "RELATE {source_table}:{source_id}->relates_to->{to_table}:{to_id} \
              SET rel_type = 'mentioned', notes = NULL, created_at = time::now()"
         );
-        db.query(query).await.map_err(|e| WikilinkError::Database {
-            message: e.to_string(),
-        })?;
+        db.query(relate_query)
+            .await
+            .map_err(|e| WikilinkError::Database {
+                message: e.to_string(),
+            })?;
     }
     Ok(())
 }
@@ -196,13 +246,14 @@ async fn delete_stale_mentioned_edges<C: surrealdb::Connection>(
 
 /// Split a full record ID like `"npc:abc123"` into `("npc", "abc123")`.
 ///
-/// Panics if the string contains no `:`, which should never happen for IDs
-/// returned by [`query_all_entity_names`].
-fn split_record_id(full_id: &str) -> (&str, &str) {
-    let pos = full_id
-        .find(':')
-        .unwrap_or_else(|| panic!("record ID must contain ':' but got '{full_id}'"));
-    (&full_id[..pos], &full_id[pos + 1..])
+/// Returns `WikilinkError::MalformedRecordId` if the string contains no `:`
+/// — which should never happen for IDs returned by [`query_all_entity_names`],
+/// but is handled gracefully rather than panicking.
+fn split_record_id(full_id: &str) -> Result<(&str, &str), WikilinkError> {
+    let pos = full_id.find(':').ok_or_else(|| WikilinkError::MalformedRecordId {
+        value: full_id.to_string(),
+    })?;
+    Ok((&full_id[..pos], &full_id[pos + 1..]))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -490,5 +541,113 @@ mod tests {
             .and_then(|v| v.get("count").and_then(|c| c.as_i64()))
             .unwrap_or(0);
         assert_eq!(n, 0, "session source must not create relates_to edges");
+    }
+
+    // ── Test 7: duplicate edges regression ───────────────────────────────────
+
+    /// Calling `parse_and_sync_wikilinks` twice with identical notes must NOT
+    /// create two `relates_to` edges for the same source→target pair.
+    #[tokio::test]
+    async fn repeated_call_same_notes_produces_single_edge() {
+        let db = setup_db().await;
+        let campaign_id = create_campaign(&db).await;
+
+        let torvin = create(&db, Some(&campaign_id), EntityKind::Npc, make_npc("Torvin"))
+            .await
+            .unwrap();
+        let source_npc = create(
+            &db,
+            Some(&campaign_id),
+            EntityKind::Npc,
+            make_npc("SourceNPC"),
+        )
+        .await
+        .unwrap();
+
+        let notes = "We met [[Torvin]] at the inn.";
+
+        // First call
+        parse_and_sync_wikilinks(&db, "npc", &source_npc.id, notes, &campaign_id)
+            .await
+            .unwrap();
+
+        // Second call — same notes, same source
+        parse_and_sync_wikilinks(&db, "npc", &source_npc.id, notes, &campaign_id)
+            .await
+            .unwrap();
+
+        // Count relates_to edges where in = source and rel_type = 'mentioned'
+        let source_record = format!("npc:{}", source_npc.id);
+        let mut resp = db
+            .query(format!(
+                "SELECT count() FROM relates_to \
+                 WHERE in = {source_record} AND rel_type = 'mentioned' \
+                 GROUP ALL"
+            ))
+            .await
+            .unwrap();
+        let count: Option<serde_json::Value> = resp.take(0).unwrap();
+        let n = count
+            .and_then(|v| v.get("count").and_then(|c| c.as_i64()))
+            .unwrap_or(0);
+        assert_eq!(
+            n, 1,
+            "repeated calls with same notes must produce exactly one edge, got {n}"
+        );
+
+        let _ = torvin;
+    }
+
+    // ── Test 8: validate_identifier rejects injection strings ─────────────────
+
+    #[test]
+    fn validate_identifier_rejects_special_chars() {
+        assert!(validate_identifier("npc").is_ok());
+        assert!(validate_identifier("player_character").is_ok());
+        assert!(validate_identifier("abc123").is_ok());
+
+        assert!(validate_identifier("npc; DROP TABLE npc").is_err());
+        assert!(validate_identifier("npc->relates_to").is_err());
+        assert!(validate_identifier("foo:bar").is_err());
+        assert!(validate_identifier("").is_ok()); // empty passes char filter; callers choose to reject via DB
+    }
+
+    // ── Test 9: invalid source_table returns error ────────────────────────────
+
+    #[tokio::test]
+    async fn invalid_source_table_returns_error() {
+        let db = setup_db().await;
+        let campaign_id = create_campaign(&db).await;
+
+        let result = parse_and_sync_wikilinks(
+            &db,
+            "npc; DROP TABLE npc",
+            "someId",
+            "some notes",
+            &campaign_id,
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(WikilinkError::InvalidIdentifier { .. })),
+            "expected InvalidIdentifier error, got {result:?}"
+        );
+    }
+
+    // ── Test 10: split_record_id returns error on missing colon ───────────────
+
+    #[test]
+    fn split_record_id_error_on_missing_colon() {
+        let result = split_record_id("npcabc123");
+        assert!(
+            matches!(result, Err(WikilinkError::MalformedRecordId { .. })),
+            "expected MalformedRecordId, got {result:?}"
+        );
+
+        let ok = split_record_id("npc:abc123");
+        assert!(ok.is_ok());
+        let (table, id) = ok.unwrap();
+        assert_eq!(table, "npc");
+        assert_eq!(id, "abc123");
     }
 }
