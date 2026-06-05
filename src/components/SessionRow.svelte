@@ -17,24 +17,20 @@
   let editNotes = $state(session.notes);
   let linkedEntities = $state<GraphNode[]>([]);
   let loadingEntities = $state(false);
-
-  // Keep local edit state in sync when the session prop changes externally
-  $effect(() => {
-    editTitle = session.title;
-    editDate = session.date_played;
-    editNotes = session.notes;
-  });
+  let entitiesLoaded = $state(false);
 
   function formatDate(dateStr: string): string {
-    // dateStr is YYYY-MM-DD or ISO string
-    const d = new Date(dateStr);
+    if (!dateStr) return '';
+    // Append T12:00:00 to treat as local noon, avoiding UTC midnight off-by-one
+    // when YYYY-MM-DD strings are parsed as UTC and rendered in western timezones
+    const d = new Date(dateStr.includes('T') ? dateStr : dateStr + 'T12:00:00');
     if (isNaN(d.getTime())) return dateStr;
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
   async function toggleExpand() {
     expanded = !expanded;
-    if (expanded && linkedEntities.length === 0 && !loadingEntities) {
+    if (expanded && !entitiesLoaded && !loadingEntities) {
       loadingEntities = true;
       try {
         linkedEntities = await getSessionEntities(session.id);
@@ -42,6 +38,7 @@
         console.error('Failed to load session entities:', e);
       } finally {
         loadingEntities = false;
+        entitiesLoaded = true;
       }
     }
   }
