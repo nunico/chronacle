@@ -246,7 +246,9 @@ pub async fn stream_response(
         Some(cid) => fetch_entity_context(&state.db, cid)
             .await
             .unwrap_or_else(|e| {
-                eprintln!("entity context fetch failed: {e}");
+                if std::env::var("CHRONACLE_RAG_DEBUG").is_ok() {
+                    eprintln!("entity context fetch failed: {e}");
+                }
                 String::new()
             }),
         None => String::new(),
