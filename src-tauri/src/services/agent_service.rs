@@ -398,10 +398,14 @@ fn build_system_prompt(rag_context: &str, entity_context: &str) -> String {
 
     prompt.push_str(
         "- For other questions, answer in 1–3 sentences. Be concise — the GM is \
-         running a table.\n\
-         - Do NOT quote the passages verbatim in your answer text — the supporting \
-         quote belongs INSIDE the citation marker.\n",
+         running a table.\n",
     );
+    if has_rag {
+        prompt.push_str(
+            "- Do NOT quote the passages verbatim in your answer text — the supporting \
+             quote belongs INSIDE the citation marker.\n",
+        );
+    }
 
     if has_rag {
         prompt.push_str(
