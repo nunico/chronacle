@@ -397,6 +397,7 @@ export interface GraphNode {
   sequence_index: number | null; // Rust i64; safe as JS number for realistic ordering values
   era: string | null;
   duration_label: string | null;
+  session_id: string | null; // event only — raw session record ID
   // player_character fields
   player_name: string | null;
   character_class: string | null;
@@ -415,6 +416,7 @@ export interface EntityInput {
   sequenceIndex?: number | null;
   era?: string | null;
   durationLabel?: string | null;
+  sessionId?: string | null; // event only — links event to a session
   // player_character
   playerName?: string | null;
   characterClass?: string | null;

@@ -85,6 +85,7 @@ pub(crate) struct GraphNodeRecord {
     pub sequence_index: Option<i64>,
     pub era: Option<String>,
     pub duration_label: Option<String>,
+    pub session: Option<Thing>, // event only — FK to session record
     // player_character fields
     pub player_name: Option<String>,
     pub character_class: Option<String>,
@@ -109,6 +110,7 @@ impl From<GraphNodeRecord> for GraphNode {
             sequence_index: r.sequence_index,
             era: r.era,
             duration_label: r.duration_label,
+            session_id: r.session.map(|t| t.id.to_raw()),
             player_name: r.player_name,
             character_class: r.character_class,
             character_level: r.character_level,
@@ -135,6 +137,7 @@ pub struct GraphNode {
     pub sequence_index: Option<i64>,
     pub era: Option<String>,
     pub duration_label: Option<String>,
+    pub session_id: Option<String>, // event only — raw session record ID
     // player_character fields
     pub player_name: Option<String>,
     pub character_class: Option<String>,
@@ -156,6 +159,7 @@ pub struct EntityInput {
     pub sequence_index: Option<i64>,
     pub era: Option<String>,
     pub duration_label: Option<String>,
+    pub session_id: Option<String>, // event only — links event to a session
     // player_character
     pub player_name: Option<String>,
     pub character_class: Option<String>,
@@ -196,6 +200,7 @@ pub async fn create<C: surrealdb::Connection>(
                 sequence_index  = $sequence_index,
                 era             = $era,
                 duration_label  = $duration_label,
+                session         = IF $session_id IS NOT NONE THEN type::thing('session', $session_id) ELSE NULL END,
                 player_name     = $player_name,
                 character_class = $character_class,
                 character_level = $character_level,
@@ -215,6 +220,7 @@ pub async fn create<C: surrealdb::Connection>(
         .bind(("sequence_index", input.sequence_index))
         .bind(("era", input.era))
         .bind(("duration_label", input.duration_label))
+        .bind(("session_id", input.session_id))
         .bind(("player_name", input.player_name))
         .bind(("character_class", input.character_class))
         .bind(("character_level", input.character_level))
@@ -323,20 +329,21 @@ pub async fn update<C: surrealdb::Connection>(
     let mut response = db
         .query(
             "UPDATE type::thing($table, $id) SET
-                name         = $name,
-                summary      = $summary,
-                notes        = $notes,
-                date_start   = $date_start,
-                date_end     = $date_end,
-                is_ongoing   = $is_ongoing,
+                name           = $name,
+                summary        = $summary,
+                notes          = $notes,
+                date_start     = $date_start,
+                date_end       = $date_end,
+                is_ongoing     = $is_ongoing,
                 sequence_index = $sequence_index,
-                era          = $era,
+                era            = $era,
                 duration_label = $duration_label,
-                player_name  = $player_name,
+                session        = IF $session_id IS NOT NONE THEN type::thing('session', $session_id) ELSE NULL END,
+                player_name    = $player_name,
                 character_class = $character_class,
                 character_level = $character_level,
-                status       = $status,
-                updated_at   = time::now()",
+                status         = $status,
+                updated_at     = time::now()",
         )
         .bind(("table", table))
         .bind(("id", id.to_owned()))
@@ -349,6 +356,7 @@ pub async fn update<C: surrealdb::Connection>(
         .bind(("sequence_index", input.sequence_index))
         .bind(("era", input.era))
         .bind(("duration_label", input.duration_label))
+        .bind(("session_id", input.session_id))
         .bind(("player_name", input.player_name))
         .bind(("character_class", input.character_class))
         .bind(("character_level", input.character_level))
@@ -373,9 +381,8 @@ pub async fn update<C: surrealdb::Connection>(
     // in tests.
     if let Some(ref notes) = notes_for_wikilinks {
         if let Some(ref cid) = node.campaign_id {
-            let _ =
-                crate::services::wikilink::parse_and_sync_wikilinks(db, table, id, notes, cid)
-                    .await;
+            let _ = crate::services::wikilink::parse_and_sync_wikilinks(db, table, id, notes, cid)
+                .await;
         }
     }
 

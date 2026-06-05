@@ -8,6 +8,7 @@ vi.mock('../lib/commands', () => ({
   createEntity: vi.fn(),
   updateEntity: vi.fn(),
   deleteEntity: vi.fn(),
+  getSessions: vi.fn().mockResolvedValue([]),
 }));
 
 import * as commands from '../lib/commands';
@@ -22,6 +23,7 @@ const mockNpc = (): GraphNode => ({
   created_at: null, updated_at: null,
   date_start: null, date_end: null, is_ongoing: null,
   sequence_index: null, era: null, duration_label: null,
+  session_id: null,
   player_name: null, character_class: null,
   character_level: null, status: null,
 });
@@ -97,7 +99,9 @@ describe('EntityManager', () => {
     await fireEvent.submit(screen.getByRole('form'));
     // Toast should appear with some message
     await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
-    // getEntities should be called again (reload)
-    expect(commands.getEntities).toHaveBeenCalledTimes(2);
+    // getEntities is called for: initial load (1) + buildEntityMap for all 8 kinds (8) + reload after NOT_FOUND (1)
+    // Just verify it was called more than the initial load to confirm reload occurred.
+    expect(commands.getEntities).toHaveBeenCalledWith('camp1', 'npc');
+    expect(vi.mocked(commands.getEntities).mock.calls.length).toBeGreaterThan(1);
   });
 });

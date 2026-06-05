@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { EntityKind, GraphNode, EntityInput } from '../lib/commands';
+  import type { EntityKind, GraphNode, EntityInput, Session } from '../lib/commands';
 
   interface Props {
     kind: EntityKind;
@@ -7,9 +7,10 @@
     error?: { code: string; message: string; field?: string } | null;
     onsave?: (input: EntityInput) => void;
     oncancel?: () => void;
+    sessions?: Session[]; // list of campaign sessions for event dropdown
   }
 
-  let { kind, node = null, error = null, onsave, oncancel }: Props = $props();
+  let { kind, node = null, error = null, onsave, oncancel, sessions = [] }: Props = $props();
 
   let name = $state(node?.name ?? '');
   let summary = $state(node?.summary ?? '');
@@ -21,6 +22,8 @@
   let sequenceIndex = $state(node?.sequence_index?.toString() ?? '');
   let era = $state(node?.era ?? '');
   let durationLabel = $state(node?.duration_label ?? '');
+  // event session FK
+  let sessionId = $state(node?.session_id ?? '');
   // pc fields
   let playerName = $state(node?.player_name ?? '');
   let characterClass = $state(node?.character_class ?? '');
@@ -45,6 +48,7 @@
       sequenceIndex: sequenceIndex ? parseInt(sequenceIndex, 10) : null,
       era: era || null,
       durationLabel: durationLabel || null,
+      sessionId: sessionId || null,
       playerName: playerName || null,
       characterClass: characterClass || null,
       characterLevel: characterLevel ? parseInt(characterLevel, 10) : null,
@@ -98,6 +102,15 @@
         <input type="checkbox" bind:checked={isOngoing} />
         Ongoing
       </label>
+    </div>
+    <div class="field">
+      <label for="ef-session">Session</label>
+      <select id="ef-session" bind:value={sessionId}>
+        <option value="">— none —</option>
+        {#each sessions as s (s.id)}
+          <option value={s.id}>#{s.session_number}: {s.title}</option>
+        {/each}
+      </select>
     </div>
   {/if}
 

@@ -306,6 +306,7 @@ mod tests {
             sequence_index: None,
             era: None,
             duration_label: None,
+            session_id: None,
             player_name: None,
             character_class: None,
             character_level: None,

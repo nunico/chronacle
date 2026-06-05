@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { SvelteMap } from 'svelte/reactivity';
   import {
-    getEntities, createEntity, updateEntity, deleteEntity,
-    type EntityKind, type GraphNode, type EntityInput, type EntityError,
+    getEntities, createEntity, updateEntity, deleteEntity, getSessions,
+    type EntityKind, type GraphNode, type EntityInput, type EntityError, type Session,
   } from '../lib/commands';
   import EntityForm from './EntityForm.svelte';
+  import WikiText from './WikiText.svelte';
 
   interface Props {
     campaignId: string;
@@ -29,6 +31,9 @@
   let formError = $state<EntityError | null>(null);
   let toast = $state<string | null>(null);
   let deleteConfirm = $state<GraphNode | null>(null);
+  // SvelteMap is inherently reactive — no $state wrapper needed
+  let entityMap = new SvelteMap<string, { id: string; kind: string }>();
+  let sessions = $state<Session[]>([]);
 
   async function loadEntities() {
     loading = true;
@@ -41,16 +46,36 @@
     }
   }
 
+  async function buildEntityMap() {
+    const allKinds: EntityKind[] = ['npc', 'location', 'faction', 'creature', 'item', 'event', 'player_character', 'misc'];
+    const results = await Promise.all(allKinds.map(k => getEntities(campaignId, k).catch(() => [])));
+    const m = new SvelteMap<string, { id: string; kind: string }>();
+    results.flat().forEach(node => m.set(node.name, { id: node.id, kind: node.kind }));
+    entityMap = m;
+  }
+
+  async function loadSessions() {
+    try {
+      sessions = await getSessions(campaignId);
+    } catch {
+      sessions = [];
+    }
+  }
+
   function openCreate() {
     formNode = null;
     formError = null;
     showForm = true;
+    buildEntityMap();
+    if (kind === 'event') loadSessions();
   }
 
   function openEdit(node: GraphNode) {
     formNode = node;
     formError = null;
     showForm = true;
+    buildEntityMap();
+    if (kind === 'event') loadSessions();
   }
 
   async function handleSave(input: EntityInput) {
@@ -136,10 +161,16 @@
     <!-- Form panel -->
     {#if showForm}
       <div class="form-panel">
+        {#if formNode?.notes}
+          <div class="notes-preview">
+            <WikiText text={formNode.notes} entities={entityMap} />
+          </div>
+        {/if}
         <EntityForm
           kind={kind}
           node={formNode}
           error={formError}
+          sessions={kind === 'event' ? sessions : []}
           onsave={handleSave}
           oncancel={() => { showForm = false; formNode = null; }}
         />
@@ -184,6 +215,16 @@
   .btn-icon { background: none; border: none; color: var(--fg-4); cursor: pointer; font-size: 1rem; }
   .btn-icon.delete:hover { color: var(--danger); }
   .form-panel { flex: 1; padding: 16px; overflow-y: auto; }
+  .notes-preview {
+    background: var(--bg-panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    font-size: 0.9rem;
+    color: var(--fg-2);
+    line-height: 1.5;
+  }
   .muted { color: var(--fg-3); font-size: 0.85rem; padding: 16px; }
   .btn-primary {
     background: var(--violet-300); color: var(--bg-abyss); border: none;

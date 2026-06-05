@@ -255,6 +255,7 @@ async fn get_session_entities_returns_linked_events() {
             sequence_index: Some(1),
             era: None,
             duration_label: None,
+            session_id: None,
             player_name: None,
             character_class: None,
             character_level: None,
