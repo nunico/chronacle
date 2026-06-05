@@ -335,7 +335,7 @@
     {:else if view === 'settings'}
       <SettingsView />
     {:else if ENTITY_KIND_MAP[view.category] && activeCampaignId}
-      <EntityManager campaignId={activeCampaignId} initialKind={ENTITY_KIND_MAP[view.category]} />
+      <EntityManager campaignId={activeCampaignId} kind={ENTITY_KIND_MAP[view.category]!} />
     {:else if ENTITY_KIND_MAP[view.category]}
       <div class="no-campaign-msg">
         <p>Select a campaign to manage entities.</p>

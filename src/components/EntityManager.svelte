@@ -7,24 +7,21 @@
 
   interface Props {
     campaignId: string;
-    initialKind?: EntityKind;
+    kind: EntityKind;
   }
 
-  let { campaignId, initialKind = 'npc' }: Props = $props();
+  let { campaignId, kind }: Props = $props();
 
-  type Tab = { kind: EntityKind; label: string };
-  const TABS: Tab[] = [
-    { kind: 'npc',              label: 'NPC' },
-    { kind: 'location',         label: 'Location' },
-    { kind: 'faction',          label: 'Faction' },
-    { kind: 'creature',         label: 'Creature' },
-    { kind: 'item',             label: 'Item' },
-    { kind: 'event',            label: 'Event' },
-    { kind: 'player_character', label: 'PC' },
-    { kind: 'misc',             label: 'Misc' },
-  ];
-
-  let activeKind = $state<EntityKind>(initialKind);
+  const KIND_LABEL: Record<EntityKind, string> = {
+    npc: 'NPC',
+    location: 'Location',
+    faction: 'Faction',
+    creature: 'Creature',
+    item: 'Item',
+    event: 'Event',
+    player_character: 'PC',
+    misc: 'Misc',
+  };
   let entities = $state<GraphNode[]>([]);
   let loading = $state(false);
   let formNode = $state<GraphNode | null>(null); // null = create, non-null = edit
@@ -33,7 +30,7 @@
   let toast = $state<string | null>(null);
   let deleteConfirm = $state<GraphNode | null>(null);
 
-  async function loadEntities(kind: EntityKind) {
+  async function loadEntities() {
     loading = true;
     try {
       entities = await getEntities(campaignId, kind);
@@ -42,14 +39,6 @@
     } finally {
       loading = false;
     }
-  }
-
-  function selectTab(kind: EntityKind) {
-    activeKind = kind;
-    showForm = false;
-    formNode = null;
-    formError = null;
-    // $effect fires automatically because activeKind changed
   }
 
   function openCreate() {
@@ -68,10 +57,10 @@
     formError = null;
     try {
       if (formNode) {
-        const updated = await updateEntity(formNode.id, activeKind, input);
+        const updated = await updateEntity(formNode.id, kind, input);
         entities = entities.map(e => e.id === updated.id ? updated : e);
       } else {
-        const created = await createEntity(campaignId, activeKind, input);
+        const created = await createEntity(campaignId, kind, input);
         entities = [created, ...entities];
       }
       showForm = false;
@@ -82,7 +71,7 @@
       } else if (err.code === 'NOT_FOUND') {
         showToastMsg('Entity no longer exists — refresh the list');
         showForm = false;
-        await loadEntities(activeKind);
+        await loadEntities();
       } else {
         showToastMsg(err.message ?? 'An error occurred');
       }
@@ -91,7 +80,7 @@
 
   async function confirmDelete(node: GraphNode) {
     try {
-      await deleteEntity(node.id, activeKind);
+      await deleteEntity(node.id, kind);
       entities = entities.filter(e => e.id !== node.id);
     } catch (e) {
       showToastMsg((e as EntityError).message ?? 'Failed to delete');
@@ -105,41 +94,29 @@
     setTimeout(() => { toast = null; }, 4000);
   }
 
-  // Reload on kind or campaign change
+  // Reset form and reload when kind or campaign changes
   $effect(() => {
-    if (campaignId) loadEntities(activeKind);
+    showForm = false;
+    formNode = null;
+    formError = null;
+    if (campaignId) loadEntities();
   });
 </script>
 
 <div class="entity-manager">
-  <!-- Type tabs -->
-  <div class="type-tabs" role="tablist">
-    {#each TABS as tab (tab.kind)}
-      <button
-        role="tab"
-        aria-selected={activeKind === tab.kind}
-        class="type-tab"
-        class:active={activeKind === tab.kind}
-        onclick={() => selectTab(tab.kind)}
-      >
-        {tab.label}
-      </button>
-    {/each}
-  </div>
-
   <div class="content">
     <!-- List panel -->
     <div class="list-panel">
       <div class="list-header">
         <button class="btn-primary" onclick={openCreate}>
-          + New {TABS.find(t => t.kind === activeKind)?.label}
+          + New {KIND_LABEL[kind]}
         </button>
       </div>
 
       {#if loading}
         <p class="muted">Loading…</p>
       {:else if entities.length === 0}
-        <p class="muted">No {TABS.find(t => t.kind === activeKind)?.label?.toLowerCase()}s yet.</p>
+        <p class="muted">No {KIND_LABEL[kind].toLowerCase()}s yet.</p>
       {:else}
         <ul class="entity-list">
           {#each entities as node (node.id)}
@@ -160,7 +137,7 @@
     {#if showForm}
       <div class="form-panel">
         <EntityForm
-          kind={activeKind}
+          kind={kind}
           node={formNode}
           error={formError}
           onsave={handleSave}
@@ -191,13 +168,6 @@
 
 <style>
   .entity-manager { display: flex; flex-direction: column; gap: 0; min-height: 60vh; }
-  .type-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); padding: 0 8px; }
-  .type-tab {
-    background: none; border: none; color: var(--fg-3);
-    padding: 8px 12px; cursor: pointer; font-size: 0.85rem; border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-  }
-  .type-tab.active { color: var(--fg-1); border-bottom-color: var(--violet-300); }
   .content { display: flex; flex: 1; min-height: 0; }
   .list-panel { flex: 0 0 260px; border-right: 1px solid var(--line); overflow-y: auto; display: flex; flex-direction: column; }
   .list-header { padding: 10px; border-bottom: 1px solid var(--line); }
