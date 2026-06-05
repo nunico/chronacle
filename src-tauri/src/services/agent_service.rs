@@ -178,10 +178,10 @@ pub async fn fetch_entity_context<C: Connection>(
         for r in &events {
             out.push_str(&format!("[event] {}", r.name));
             match (&r.date_start, &r.date_end) {
-                (Some(s), Some(e)) if !s.trim().is_empty() => {
+                (Some(s), Some(e)) if !s.trim().is_empty() && !e.trim().is_empty() => {
                     out.push_str(&format!(" · {s} → {e}"));
                 }
-                (Some(s), None) if !s.trim().is_empty() => {
+                (Some(s), _) if !s.trim().is_empty() => {
                     out.push_str(&format!(" · {s}"));
                 }
                 _ => {}
@@ -1081,5 +1081,33 @@ mod tests {
 
         let ids = resolve_collection_ids(&db, "camp1").await.unwrap();
         assert!(ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_entity_context_event_empty_date_end_no_arrow() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        db.query(
+            "CREATE event SET id='ev1', campaign=type::thing('campaign','camp1'), \
+             name='Siege of Dawnwall', date_start='Year 400', date_end='', \
+             summary=NULL, notes=NULL, is_ongoing=false, \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let result = fetch_entity_context(&db, "camp1").await.unwrap();
+        assert!(result.contains("[event] Siege of Dawnwall"), "missing event: {result}");
+        assert!(result.contains("Year 400"), "missing date_start: {result}");
+        assert!(!result.contains("→"), "unexpected arrow when date_end is empty: {result}");
     }
 }
