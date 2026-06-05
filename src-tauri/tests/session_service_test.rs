@@ -1,5 +1,5 @@
 use chronacle_lib::services::session_service::{
-    create, delete, get_all, get_by_id, update, SessionError, SessionInput,
+    create, delete, get_all, get_by_id, get_entities, update, SessionError, SessionInput,
 };
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
@@ -31,6 +31,14 @@ async fn create_campaign(db: &Surreal<Db>) -> String {
         .unwrap();
     let rows: Vec<Row> = resp.take(0).unwrap();
     rows.into_iter().next().unwrap().id.id.to_raw()
+}
+
+async fn create_test_campaign(
+    db: &Surreal<Db>,
+) -> chronacle_lib::services::campaign_service::Campaign {
+    chronacle_lib::services::campaign_service::create(db, "Test Campaign", "D&D 5e")
+        .await
+        .unwrap()
 }
 
 fn make_input(number: i64, title: &str) -> SessionInput {
@@ -235,4 +243,66 @@ async fn delete_session_removes_record() {
         matches!(&err, SessionError::NotFound { .. }),
         "expected NotFound after delete, got {err:?}"
     );
+}
+
+// ── Test 9 ───────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn get_session_entities_returns_linked_events() {
+    use chronacle_lib::services::entity_service::{
+        create as create_entity, EntityInput, EntityKind,
+    };
+
+    let db = setup_db().await;
+    let campaign = create_test_campaign(&db).await;
+
+    // Create a session
+    let session = create(&db, &campaign.id, make_input(1, "Test Session"))
+        .await
+        .unwrap();
+
+    // Create an event linked to the campaign (session FK added below)
+    let event = create_entity(
+        &db,
+        Some(&campaign.id),
+        EntityKind::Event,
+        EntityInput {
+            name: "Battle of the Fields".to_string(),
+            summary: None,
+            notes: None,
+            date_start: None,
+            date_end: None,
+            is_ongoing: None,
+            sequence_index: Some(1),
+            era: None,
+            duration_label: None,
+            player_name: None,
+            character_class: None,
+            character_level: None,
+            status: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Link the event to the session via the event.session FK
+    db.query(
+        "UPDATE type::thing('event', $event_id) SET session = type::thing('session', $session_id)",
+    )
+    .bind(("event_id", event.id.clone()))
+    .bind(("session_id", session.id.clone()))
+    .await
+    .unwrap();
+
+    // get_entities should return exactly the linked event
+    let entities = get_entities(&db, &session.id).await.unwrap();
+
+    assert_eq!(
+        entities.len(),
+        1,
+        "expected 1 linked entity, got {}",
+        entities.len()
+    );
+    assert_eq!(entities[0].name, "Battle of the Fields");
+    assert_eq!(entities[0].kind, "event");
 }

@@ -125,6 +125,9 @@ pub async fn create<C: surrealdb::Connection>(
             })?;
 
     // Resolve wikilinks — failure must not block the save.
+    // Awaited synchronously: wikilink resolution is fast in practice (entity
+    // count is small), and spawning would require C: Clone + Send + 'static
+    // which conflicts with the generic bound used in tests.
     let _ = crate::services::wikilink::parse_and_sync_wikilinks(
         db,
         "session",
@@ -229,6 +232,9 @@ pub async fn update<C: surrealdb::Connection>(
         .ok_or_else(|| SessionError::NotFound { id: id.to_string() })?;
 
     // Resolve wikilinks — failure must not block the save.
+    // Awaited synchronously: wikilink resolution is fast in practice (entity
+    // count is small), and spawning would require C: Clone + Send + 'static
+    // which conflicts with the generic bound used in tests.
     let _ = crate::services::wikilink::parse_and_sync_wikilinks(
         db,
         "session",
