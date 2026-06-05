@@ -59,6 +59,158 @@ where
     Ok(rows.into_iter().map(|r| r.out.id.to_raw()).collect())
 }
 
+/// Query all entity tables for a campaign and format them as a context block.
+///
+/// Returns an empty string when the campaign has no entities — callers use this
+/// to skip the CAMPAIGN NOTES section entirely.
+pub async fn fetch_entity_context<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    campaign_id: &str,
+) -> Result<String, AgentError> {
+    #[derive(serde::Deserialize)]
+    struct BasicRow {
+        name: String,
+        summary: Option<String>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct PcRow {
+        name: String,
+        summary: Option<String>,
+        player_name: Option<String>,
+        character_class: Option<String>,
+        character_level: Option<i64>,
+        status: Option<String>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct EventRow {
+        name: String,
+        summary: Option<String>,
+        date_start: Option<String>,
+        date_end: Option<String>,
+    }
+
+    let mut resp = db
+        .query("SELECT name, summary, player_name, character_class, character_level, status FROM player_character WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
+        .query("SELECT name, summary FROM npc WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
+        .query("SELECT name, summary FROM location WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
+        .query("SELECT name, summary FROM faction WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
+        .query("SELECT name, summary FROM creature WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
+        .query("SELECT name, summary FROM item WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
+        .query("SELECT name, summary, date_start, date_end FROM event WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
+        .query("SELECT name, summary FROM misc WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
+        .bind(("cid", campaign_id.to_owned()))
+        .await
+        .map_err(|e| AgentError::Db(e.to_string()))?;
+
+    let pcs: Vec<PcRow> = resp.take(0).map_err(|e| AgentError::Db(e.to_string()))?;
+    let npcs: Vec<BasicRow> = resp.take(1).map_err(|e| AgentError::Db(e.to_string()))?;
+    let locations: Vec<BasicRow> = resp.take(2).map_err(|e| AgentError::Db(e.to_string()))?;
+    let factions: Vec<BasicRow> = resp.take(3).map_err(|e| AgentError::Db(e.to_string()))?;
+    let creatures: Vec<BasicRow> = resp.take(4).map_err(|e| AgentError::Db(e.to_string()))?;
+    let items: Vec<BasicRow> = resp.take(5).map_err(|e| AgentError::Db(e.to_string()))?;
+    let events: Vec<EventRow> = resp.take(6).map_err(|e| AgentError::Db(e.to_string()))?;
+    let misc: Vec<BasicRow> = resp.take(7).map_err(|e| AgentError::Db(e.to_string()))?;
+
+    if pcs.is_empty()
+        && npcs.is_empty()
+        && locations.is_empty()
+        && factions.is_empty()
+        && creatures.is_empty()
+        && items.is_empty()
+        && events.is_empty()
+        && misc.is_empty()
+    {
+        return Ok(String::new());
+    }
+
+    let mut out = String::from("Campaign notes (your GM records):\n");
+
+    if !pcs.is_empty() {
+        out.push('\n');
+        for r in &pcs {
+            out.push_str(&format!("[player_character] {}", r.name));
+            if let Some(p) = &r.player_name {
+                out.push_str(&format!(" · Player: {p}"));
+            }
+            if let Some(c) = &r.character_class {
+                out.push_str(&format!(" · Class: {c}"));
+            }
+            if let Some(l) = r.character_level {
+                out.push_str(&format!(" · Level: {l}"));
+            }
+            if let Some(s) = &r.status {
+                out.push_str(&format!(" · Status: {s}"));
+            }
+            if let Some(s) = &r.summary {
+                if !s.trim().is_empty() {
+                    out.push_str(&format!(" · {s}"));
+                }
+            }
+            out.push('\n');
+        }
+    }
+
+    for (rows, kind) in [
+        (&npcs, "npc"),
+        (&locations, "location"),
+        (&factions, "faction"),
+        (&creatures, "creature"),
+        (&items, "item"),
+    ] {
+        if !rows.is_empty() {
+            out.push('\n');
+            for r in rows {
+                out.push_str(&format!("[{kind}] {}", r.name));
+                if let Some(s) = &r.summary {
+                    if !s.trim().is_empty() {
+                        out.push_str(&format!(" · {s}"));
+                    }
+                }
+                out.push('\n');
+            }
+        }
+    }
+
+    if !events.is_empty() {
+        out.push('\n');
+        for r in &events {
+            out.push_str(&format!("[event] {}", r.name));
+            match (&r.date_start, &r.date_end) {
+                (Some(s), Some(e)) if !s.trim().is_empty() => {
+                    out.push_str(&format!(" · {s} → {e}"));
+                }
+                (Some(s), None) if !s.trim().is_empty() => {
+                    out.push_str(&format!(" · {s}"));
+                }
+                _ => {}
+            }
+            if let Some(s) = &r.summary {
+                if !s.trim().is_empty() {
+                    out.push_str(&format!(" · {s}"));
+                }
+            }
+            out.push('\n');
+        }
+    }
+
+    if !misc.is_empty() {
+        out.push('\n');
+        for r in &misc {
+            out.push_str(&format!("[misc] {}", r.name));
+            if let Some(s) = &r.summary {
+                if !s.trim().is_empty() {
+                    out.push_str(&format!(" · {s}"));
+                }
+            }
+            out.push('\n');
+        }
+    }
+
+    Ok(out)
+}
+
 /// Run the full streaming RAG pipeline.
 ///
 /// Returns a channel of streaming tokens. Once the channel is exhausted,
@@ -779,6 +931,137 @@ mod tests {
         assert_eq!(rows[0].role, "user");
         assert_eq!(rows[0].content, "first");
         assert_eq!(rows[1].role, "assistant");
+    }
+
+    #[tokio::test]
+    async fn fetch_entity_context_returns_empty_when_no_entities() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let result = fetch_entity_context(&db, "camp1").await.unwrap();
+        assert!(result.is_empty(), "expected empty string, got: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn fetch_entity_context_includes_player_character_fields() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        db.query(
+            "CREATE player_character SET id='pc1', \
+             campaign=type::thing('campaign','camp1'), \
+             name='Nazirdijan', player_name='Nico', character_class='Wizard', \
+             character_level=5, status='active', summary=NULL, notes=NULL, \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let result = fetch_entity_context(&db, "camp1").await.unwrap();
+        assert!(
+            result.contains("[player_character] Nazirdijan"),
+            "missing entity line: {result}"
+        );
+        assert!(
+            result.contains("Player: Nico"),
+            "missing player_name: {result}"
+        );
+        assert!(result.contains("Class: Wizard"), "missing class: {result}");
+        assert!(result.contains("Level: 5"), "missing level: {result}");
+        assert!(
+            result.contains("Status: active"),
+            "missing status: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_entity_context_omits_empty_sections() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        db.query(
+            "CREATE npc SET id='npc1', campaign=type::thing('campaign','camp1'), \
+             name='Aldric the Smith', summary='village blacksmith', notes=NULL, \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let result = fetch_entity_context(&db, "camp1").await.unwrap();
+        assert!(
+            result.contains("[npc] Aldric the Smith"),
+            "missing npc: {result}"
+        );
+        assert!(
+            result.contains("village blacksmith"),
+            "missing summary: {result}"
+        );
+        assert!(
+            !result.contains("[player_character]"),
+            "unexpected PC section: {result}"
+        );
+        assert!(
+            !result.contains("[location]"),
+            "unexpected location section: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_entity_context_includes_event_dates() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        db.query(
+            "CREATE event SET id='ev1', campaign=type::thing('campaign','camp1'), \
+             name='Battle of Irongate', date_start='Year 312', date_end='Year 313', \
+             summary=NULL, notes=NULL, is_ongoing=false, \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let result = fetch_entity_context(&db, "camp1").await.unwrap();
+        assert!(
+            result.contains("[event] Battle of Irongate"),
+            "missing event: {result}"
+        );
+        assert!(
+            result.contains("Year 312 → Year 313"),
+            "missing dates: {result}"
+        );
     }
 
     #[tokio::test]
