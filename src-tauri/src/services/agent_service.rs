@@ -242,6 +242,16 @@ pub async fn stream_response(
         None => Vec::new(),
     };
 
+    let entity_context = match campaign_id {
+        Some(cid) => fetch_entity_context(&state.db, cid)
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("entity context fetch failed: {e}");
+                String::new()
+            }),
+        None => String::new(),
+    };
+
     // 4. Retrieve relevant chunks from the vector store.
     //
     // top_k = 15: chosen so a canonical enumeration chunk that ranks at
@@ -262,7 +272,7 @@ pub async fn stream_response(
 
     // 5. Build context-augmented system prompt
     let context = build_context(&results);
-    let system_prompt = build_system_prompt(&context, "");
+    let system_prompt = build_system_prompt(&context, &entity_context);
 
     if std::env::var("CHRONACLE_RAG_DEBUG").is_ok() {
         let llm_type = state
