@@ -565,4 +565,16 @@
     border-color: var(--line-strong);
     color: var(--gem);
   }
+  :global(.entity-badge) {
+    display: inline-flex;
+    align-items: baseline;
+    padding: 1px 8px;
+    border-radius: var(--r-full);
+    border: 1px solid var(--line);
+    color: var(--violet-300);
+    background: rgba(184, 166, 255, 0.08);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    margin: 0 2px;
+  }
 </style>
