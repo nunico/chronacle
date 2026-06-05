@@ -32,24 +32,20 @@ describe('EntityManager', () => {
     vi.mocked(commands.getEntities).mockResolvedValue([]);
   });
 
-  it('renders 8 entity type tabs', () => {
-    render(EntityManager, { props: { campaignId: 'camp1' } });
-    for (const label of ['NPC', 'Location', 'Faction', 'Creature', 'Item', 'Event', 'Misc']) {
-      expect(screen.getByRole('tab', { name: new RegExp(label, 'i') })).toBeTruthy();
-    }
-    // Use exact boundary match so "NPC" tab doesn't collide with /PC/i
-    expect(screen.getByRole('tab', { name: /^PC$/ })).toBeTruthy();
+  it('renders New button with the correct label for the given kind', () => {
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
+    expect(screen.getByRole('button', { name: /new npc/i })).toBeTruthy();
   });
 
   it('loads NPC list on mount', async () => {
     vi.mocked(commands.getEntities).mockResolvedValue([mockNpc()]);
-    render(EntityManager, { props: { campaignId: 'camp1' } });
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
     await waitFor(() => expect(screen.getByText('Torvin')).toBeTruthy());
     expect(commands.getEntities).toHaveBeenCalledWith('camp1', 'npc');
   });
 
   it('shows form when New button is clicked', async () => {
-    render(EntityManager, { props: { campaignId: 'camp1' } });
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
     await waitFor(() => screen.getByRole('button', { name: /new npc/i }));
     await fireEvent.click(screen.getByRole('button', { name: /new npc/i }));
     expect(screen.getByLabelText(/name/i)).toBeTruthy();
@@ -59,7 +55,7 @@ describe('EntityManager', () => {
     vi.mocked(commands.createEntity).mockRejectedValue({
       code: 'DATABASE', message: 'disk full',
     });
-    render(EntityManager, { props: { campaignId: 'camp1' } });
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
     await waitFor(() => screen.getByRole('button', { name: /new npc/i }));
     await fireEvent.click(screen.getByRole('button', { name: /new npc/i }));
     // submit the form with a name — find the form and its name input
@@ -73,7 +69,7 @@ describe('EntityManager', () => {
     vi.mocked(commands.createEntity).mockRejectedValue({
       code: 'VALIDATION', message: 'Too long', field: 'name',
     });
-    render(EntityManager, { props: { campaignId: 'camp1' } });
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
     await waitFor(() => screen.getByRole('button', { name: /new npc/i }));
     await fireEvent.click(screen.getByRole('button', { name: /new npc/i }));
     const nameInput = screen.getByLabelText(/^name$/i);
@@ -90,7 +86,7 @@ describe('EntityManager', () => {
       code: 'NOT_FOUND', message: 'Gone',
     });
     vi.mocked(commands.getEntities).mockResolvedValue([mockNpc()]);
-    render(EntityManager, { props: { campaignId: 'camp1' } });
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
     await waitFor(() => expect(screen.getByText('Torvin')).toBeTruthy());
 
     // Open edit form
