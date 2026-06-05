@@ -1,5 +1,6 @@
 use chronacle_lib::services::entity_service::{
-    create, get_by_campaign, get_by_id, relate, EntityInput, EntityKind,
+    create, delete, get_by_campaign, get_by_id, relate, update, EntityError, EntityInput,
+    EntityKind,
 };
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
@@ -131,7 +132,6 @@ async fn get_by_id_returns_created_node() {
 
 #[tokio::test]
 async fn get_by_id_not_found_returns_error() {
-    use chronacle_lib::services::entity_service::EntityError;
     let db = setup_db().await;
     let err = get_by_id(&db, "nonexistent", EntityKind::Npc)
         .await
@@ -164,7 +164,6 @@ async fn get_by_campaign_returns_only_matching_entities() {
 
 #[tokio::test]
 async fn create_with_empty_name_returns_validation_error() {
-    use chronacle_lib::services::entity_service::EntityError;
     let db = setup_db().await;
     let input = EntityInput {
         name: "   ".to_string(),
@@ -217,7 +216,6 @@ async fn get_by_campaign_excludes_other_campaign_entities() {
 
 #[tokio::test]
 async fn get_by_id_with_wrong_kind_returns_not_found() {
-    use chronacle_lib::services::entity_service::EntityError;
     let db = setup_db().await;
     let node = create(&db, None, EntityKind::Npc, npc_input("Torvin"))
         .await
@@ -230,7 +228,6 @@ async fn get_by_id_with_wrong_kind_returns_not_found() {
 
 #[tokio::test]
 async fn update_changes_name_and_notes() {
-    use chronacle_lib::services::entity_service::update;
     let db = setup_db().await;
     let created = create(&db, None, EntityKind::Npc, npc_input("Old Name"))
         .await
@@ -261,7 +258,6 @@ async fn update_changes_name_and_notes() {
 
 #[tokio::test]
 async fn update_not_found_returns_error() {
-    use chronacle_lib::services::entity_service::{update, EntityError};
     let db = setup_db().await;
     let err = update(
         &db,
@@ -290,7 +286,6 @@ async fn update_not_found_returns_error() {
 
 #[tokio::test]
 async fn delete_removes_node() {
-    use chronacle_lib::services::entity_service::{delete, EntityError};
     let db = setup_db().await;
     let created = create(
         &db,
@@ -325,7 +320,6 @@ async fn delete_removes_node() {
 
 #[tokio::test]
 async fn update_with_empty_name_returns_validation_error() {
-    use chronacle_lib::services::entity_service::{update, EntityError};
     let db = setup_db().await;
     let created = create(&db, None, EntityKind::Npc, npc_input("Valid"))
         .await
@@ -399,4 +393,142 @@ async fn relate_creates_edge_traversable_in_both_directions() {
     let rows: Vec<EdgeRow> = resp.take(0).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].rel_type, "frequents");
+}
+
+// ── Helper ────────────────────────────────────────────────────────────────────
+
+/// Create a campaign and return its raw ID string.
+async fn create_campaign(db: &Surreal<Db>) -> String {
+    chronacle_lib::services::campaign_service::create(db, "Test Campaign", "D&D 5e")
+        .await
+        .unwrap()
+        .id
+}
+
+fn location_input(name: &str, notes: Option<&str>) -> EntityInput {
+    EntityInput {
+        name: name.to_string(),
+        summary: Some(String::new()),
+        notes: notes.map(|s| s.to_string()),
+        date_start: None,
+        date_end: None,
+        is_ongoing: None,
+        sequence_index: None,
+        era: None,
+        duration_label: None,
+        player_name: None,
+        character_class: None,
+        character_level: None,
+        status: None,
+    }
+}
+
+// ── Wikilink integration tests ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn create_entity_with_wikilink_creates_relates_to_edge() {
+    let db = setup_db().await;
+    let campaign_id = create_campaign(&db).await;
+
+    // Create target NPC
+    let target = create(
+        &db,
+        Some(&campaign_id),
+        EntityKind::Npc,
+        npc_input("Torvin"),
+    )
+    .await
+    .unwrap();
+
+    // Create source location with notes mentioning Torvin
+    let source = create(
+        &db,
+        Some(&campaign_id),
+        EntityKind::Location,
+        location_input("The Tavern", Some("[[Torvin]] frequents this place")),
+    )
+    .await
+    .unwrap();
+
+    // Verify a relates_to edge was created from source → target
+    #[derive(serde::Deserialize)]
+    struct EdgeRow {
+        rel_type: String,
+    }
+    let source_record = format!("location:{}", source.id);
+    let target_record = format!("npc:{}", target.id);
+    let mut resp = db
+        .query(format!(
+            "SELECT rel_type FROM relates_to \
+             WHERE in = {source_record} AND out = {target_record}"
+        ))
+        .await
+        .unwrap();
+    let rows: Vec<EdgeRow> = resp.take(0).unwrap();
+    assert_eq!(rows.len(), 1, "expected one relates_to edge after create");
+    assert_eq!(rows[0].rel_type, "mentioned");
+}
+
+#[tokio::test]
+async fn update_entity_notes_updates_wikilink_edges() {
+    let db = setup_db().await;
+    let campaign_id = create_campaign(&db).await;
+
+    // Create target NPC
+    let target = create(
+        &db,
+        Some(&campaign_id),
+        EntityKind::Npc,
+        npc_input("Torvin"),
+    )
+    .await
+    .unwrap();
+
+    // Create source location with notes mentioning Torvin
+    let source = create(
+        &db,
+        Some(&campaign_id),
+        EntityKind::Location,
+        location_input("The Tavern", Some("[[Torvin]] frequents this place")),
+    )
+    .await
+    .unwrap();
+
+    // Confirm edge exists
+    let source_record = format!("location:{}", source.id);
+    let target_record = format!("npc:{}", target.id);
+    let mut resp = db
+        .query(format!(
+            "SELECT rel_type FROM relates_to \
+             WHERE in = {source_record} AND out = {target_record}"
+        ))
+        .await
+        .unwrap();
+    let rows: Vec<serde_json::Value> = resp.take(0).unwrap();
+    assert_eq!(rows.len(), 1, "edge should exist before update");
+
+    // Update the location's notes — remove Torvin mention
+    update(
+        &db,
+        &source.id,
+        EntityKind::Location,
+        location_input("The Tavern", Some("A quiet empty place.")),
+    )
+    .await
+    .unwrap();
+
+    // Edge should no longer exist
+    let mut resp2 = db
+        .query(format!(
+            "SELECT rel_type FROM relates_to \
+             WHERE in = {source_record} AND out = {target_record}"
+        ))
+        .await
+        .unwrap();
+    let rows2: Vec<serde_json::Value> = resp2.take(0).unwrap();
+    assert_eq!(
+        rows2.len(),
+        0,
+        "edge should be removed after notes no longer mention Torvin"
+    );
 }

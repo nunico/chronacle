@@ -180,6 +180,9 @@ pub async fn create<C: surrealdb::Connection>(
     }
     let table = kind.table_name();
     let id = uuid::Uuid::new_v4().to_string().replace('-', "");
+    // Clone values needed after the bind chain consumes them.
+    let id_for_wikilinks = id.clone();
+    let notes_for_wikilinks = input.notes.clone();
     let mut response = db
         .query(
             "CREATE type::thing($table, $id) SET
@@ -223,13 +226,36 @@ pub async fn create<C: surrealdb::Connection>(
     let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
         message: e.to_string(),
     })?;
-    records
-        .into_iter()
-        .next()
-        .map(Into::into)
-        .ok_or_else(|| EntityError::Database {
-            message: "No record returned after create".to_string(),
-        })
+    let node: GraphNode =
+        records
+            .into_iter()
+            .next()
+            .map(Into::into)
+            .ok_or_else(|| EntityError::Database {
+                message: "No record returned after create".to_string(),
+            })?;
+
+    // Sync wikilinks in notes to relates_to edges (fire-and-forget: ignore errors
+    // so a wikilink resolution failure never blocks the entity save).
+    // Awaited synchronously: entity count is small in practice, and spawning would
+    // require C: Clone + Send + 'static which conflicts with the generic bound used
+    // in tests.
+    if let Some(notes) = &notes_for_wikilinks {
+        if !notes.is_empty() {
+            if let Some(cid) = campaign_id {
+                let _ = crate::services::wikilink::parse_and_sync_wikilinks(
+                    db,
+                    table,
+                    &id_for_wikilinks,
+                    notes,
+                    cid,
+                )
+                .await;
+            }
+        }
+    }
+
+    Ok(node)
 }
 
 /// Fetch a single node by its raw ID and kind.
@@ -292,6 +318,8 @@ pub async fn update<C: surrealdb::Connection>(
         });
     }
     let table = kind.table_name();
+    // Clone notes before the bind chain consumes input.
+    let notes_for_wikilinks = input.notes.clone();
     let mut response = db
         .query(
             "UPDATE type::thing($table, $id) SET
@@ -332,11 +360,28 @@ pub async fn update<C: surrealdb::Connection>(
     let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
         message: e.to_string(),
     })?;
-    records
+    let node: GraphNode = records
         .into_iter()
         .next()
         .map(Into::into)
-        .ok_or_else(|| EntityError::NotFound { id: id.to_string() })
+        .ok_or_else(|| EntityError::NotFound { id: id.to_string() })?;
+
+    // Sync wikilinks in notes to relates_to edges (fire-and-forget: ignore errors
+    // so a wikilink resolution failure never blocks the entity save).
+    // Awaited synchronously: entity count is small in practice, and spawning would
+    // require C: Clone + Send + 'static which conflicts with the generic bound used
+    // in tests.
+    if let Some(notes) = &notes_for_wikilinks {
+        if !notes.is_empty() {
+            if let Some(ref cid) = node.campaign_id {
+                let _ =
+                    crate::services::wikilink::parse_and_sync_wikilinks(db, table, id, notes, cid)
+                        .await;
+            }
+        }
+    }
+
+    Ok(node)
 }
 
 /// Return all events that reference the given session.
