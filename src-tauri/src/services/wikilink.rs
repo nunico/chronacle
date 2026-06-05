@@ -81,7 +81,7 @@ pub async fn parse_and_sync_wikilinks<C: surrealdb::Connection>(
     let all_entities = query_all_entity_names(db, campaign_id).await?;
 
     // 3. Case-insensitive name matching
-    let matched_ids: Vec<String> = extracted
+    let mut matched_ids: Vec<String> = extracted
         .iter()
         .filter_map(|wikilink_name| {
             let lower = wikilink_name.to_lowercase();
@@ -91,6 +91,11 @@ pub async fn parse_and_sync_wikilinks<C: surrealdb::Connection>(
                 .map(|(id, _)| id.clone())
         })
         .collect();
+
+    // Deduplicate so that repeated wikilinks to the same entity produce a
+    // single edge rather than multiple identical edges.
+    matched_ids.sort_unstable();
+    matched_ids.dedup();
 
     // 4 & 5. Write / sync edges only for entity→entity relations
     if ENTITY_TABLES.contains(&source_table) {
@@ -103,18 +108,27 @@ pub async fn parse_and_sync_wikilinks<C: surrealdb::Connection>(
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
-/// Reject any string that contains characters outside `[a-zA-Z0-9_]`.
+/// Reject any string that is empty or contains characters outside `[a-zA-Z0-9_]`.
 ///
 /// Applied to every table name and record ID before they are interpolated into
 /// a SurrealQL query string, preventing query-structure injection.
 fn validate_identifier(s: &str) -> Result<(), WikilinkError> {
-    if s.chars().all(|c| c.is_alphanumeric() || c == '_') {
+    if !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_') {
         Ok(())
     } else {
         Err(WikilinkError::InvalidIdentifier {
             value: s.to_string(),
         })
     }
+}
+
+/// Validate a full record ID such as `"npc:abc123"` by splitting on `:` and
+/// validating each component with [`validate_identifier`].
+fn validate_record_id(s: &str) -> Result<(), WikilinkError> {
+    let (table, id) = split_record_id(s)?;
+    validate_identifier(table)?;
+    validate_identifier(id)?;
+    Ok(())
 }
 
 /// Query the `name` and `id` from all 8 entity tables for the given campaign.
@@ -228,6 +242,11 @@ async fn delete_stale_mentioned_edges<C: surrealdb::Connection>(
             message: e.to_string(),
         })?;
     } else {
+        // Validate each keep ID before interpolating into the query string.
+        for id in keep_ids {
+            validate_record_id(id)?;
+        }
+
         // Build the NOT IN list as literal record IDs in the query string
         let keep_list = keep_ids.join(", ");
         let query = format!(
@@ -609,7 +628,9 @@ mod tests {
         assert!(validate_identifier("npc; DROP TABLE npc").is_err());
         assert!(validate_identifier("npc->relates_to").is_err());
         assert!(validate_identifier("foo:bar").is_err());
-        assert!(validate_identifier("").is_ok()); // empty passes char filter; callers choose to reject via DB
+        // Empty string is explicitly rejected — an empty identifier would produce
+        // malformed SurrealQL like `WHERE in = :id`.
+        assert!(validate_identifier("").is_err());
     }
 
     // ── Test 9: invalid source_table returns error ────────────────────────────
@@ -649,5 +670,91 @@ mod tests {
         let (table, id) = ok.unwrap();
         assert_eq!(table, "npc");
         assert_eq!(id, "abc123");
+    }
+
+    // ── Test 11: ENTITY_TABLES drift guard ────────────────────────────────────
+
+    /// Every entry in `ENTITY_TABLES` must be recognised by `EntityKind::from_table`,
+    /// and the count must match the number of `EntityKind` variants.
+    /// This test will fail if a new variant is added to one but not the other.
+    #[test]
+    fn entity_tables_matches_entity_kind() {
+        use crate::services::entity_service::EntityKind;
+
+        // All entries in ENTITY_TABLES must round-trip through EntityKind::from_table
+        for t in ENTITY_TABLES {
+            EntityKind::from_table(t).unwrap_or_else(|_| {
+                panic!("ENTITY_TABLES entry '{t}' not in EntityKind")
+            });
+        }
+
+        // Count must match EntityKind variants
+        let kind_count = [
+            EntityKind::Npc,
+            EntityKind::Location,
+            EntityKind::Faction,
+            EntityKind::Creature,
+            EntityKind::Item,
+            EntityKind::Event,
+            EntityKind::PlayerCharacter,
+            EntityKind::Misc,
+        ]
+        .len();
+        assert_eq!(
+            ENTITY_TABLES.len(),
+            kind_count,
+            "ENTITY_TABLES length doesn't match EntityKind variant count"
+        );
+    }
+
+    // ── Test 12: duplicate wikilinks produce a single edge ────────────────────
+
+    /// `[[Torvin]] met [[Torvin]] again` must result in exactly one
+    /// `relates_to` edge, not two.
+    #[tokio::test]
+    async fn duplicate_wikilink_in_notes_produces_single_edge() {
+        let db = setup_db().await;
+        let campaign_id = create_campaign(&db).await;
+
+        let torvin = create(&db, Some(&campaign_id), EntityKind::Npc, make_npc("Torvin"))
+            .await
+            .unwrap();
+        let source_npc = create(
+            &db,
+            Some(&campaign_id),
+            EntityKind::Npc,
+            make_npc("SourceNPC"),
+        )
+        .await
+        .unwrap();
+
+        parse_and_sync_wikilinks(
+            &db,
+            "npc",
+            &source_npc.id,
+            "[[Torvin]] met [[Torvin]] again",
+            &campaign_id,
+        )
+        .await
+        .unwrap();
+
+        let source_record = format!("npc:{}", source_npc.id);
+        let torvin_record = format!("npc:{}", torvin.id);
+        let mut resp = db
+            .query(format!(
+                "SELECT count() FROM relates_to \
+                 WHERE in = {source_record} AND out = {torvin_record} \
+                 AND rel_type = 'mentioned' GROUP ALL"
+            ))
+            .await
+            .unwrap();
+        let count: Option<serde_json::Value> = resp.take(0).unwrap();
+        let n = count
+            .and_then(|v| v.get("count").and_then(|c| c.as_i64()))
+            .unwrap_or(0);
+        assert_eq!(
+            n, 1,
+            "duplicate wikilinks must produce exactly one edge, got {n}"
+        );
     }
 }
