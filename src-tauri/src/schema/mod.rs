@@ -156,7 +156,7 @@ mod tests {
         // Verify idx_session_campaign and updated_at appear in the session table info.
         #[derive(serde::Deserialize)]
         struct TableInfo {
-            fields:  std::collections::HashMap<String, serde_json::Value>,
+            fields: std::collections::HashMap<String, serde_json::Value>,
             indexes: std::collections::HashMap<String, serde_json::Value>,
         }
         let mut resp = db

@@ -236,6 +236,12 @@ pub async fn run() {
             commands::update_entity,
             commands::delete_entity,
             commands::relate_entities,
+            commands::create_session,
+            commands::get_sessions,
+            commands::get_session,
+            commands::update_session,
+            commands::delete_session,
+            commands::get_session_entities,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");

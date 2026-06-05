@@ -6,6 +6,7 @@ pub mod custom_provider_service;
 pub mod entity_service;
 pub mod ingestion_service;
 pub mod pdf_extractor;
+pub mod session_service;
 pub mod settings_service;
 pub mod text_normalizer;
 pub mod wikilink;

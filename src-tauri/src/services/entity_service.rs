@@ -339,6 +339,28 @@ pub async fn update<C: surrealdb::Connection>(
         .ok_or_else(|| EntityError::NotFound { id: id.to_string() })
 }
 
+/// Return all events that reference the given session.
+///
+/// Used by `session_service::get_entities` to surface the events associated
+/// with a session log entry.  In Phase 3 this can be replaced with a proper
+/// session→entity edge traversal once those edges are added to the schema.
+pub async fn get_events_for_session<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    session_id: &str,
+) -> Result<Vec<GraphNode>, EntityError> {
+    let mut response = db
+        .query("SELECT * FROM event WHERE session = type::thing('session', $session_id)")
+        .bind(("session_id", session_id.to_owned()))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
+    Ok(records.into_iter().map(Into::into).collect())
+}
+
 /// Hard-delete a graph node by id.
 pub async fn delete<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,

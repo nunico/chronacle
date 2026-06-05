@@ -269,9 +269,11 @@ async fn delete_stale_mentioned_edges<C: surrealdb::Connection>(
 /// — which should never happen for IDs returned by [`query_all_entity_names`],
 /// but is handled gracefully rather than panicking.
 fn split_record_id(full_id: &str) -> Result<(&str, &str), WikilinkError> {
-    let pos = full_id.find(':').ok_or_else(|| WikilinkError::MalformedRecordId {
-        value: full_id.to_string(),
-    })?;
+    let pos = full_id
+        .find(':')
+        .ok_or_else(|| WikilinkError::MalformedRecordId {
+            value: full_id.to_string(),
+        })?;
     Ok((&full_id[..pos], &full_id[pos + 1..]))
 }
 
@@ -683,9 +685,8 @@ mod tests {
 
         // All entries in ENTITY_TABLES must round-trip through EntityKind::from_table
         for t in ENTITY_TABLES {
-            EntityKind::from_table(t).unwrap_or_else(|_| {
-                panic!("ENTITY_TABLES entry '{t}' not in EntityKind")
-            });
+            EntityKind::from_table(t)
+                .unwrap_or_else(|_| panic!("ENTITY_TABLES entry '{t}' not in EntityKind"));
         }
 
         // Count must match EntityKind variants
