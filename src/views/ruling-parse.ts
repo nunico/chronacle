@@ -66,7 +66,7 @@ export function renderContent(text: string): string {
       return `<button type="button" class="citation-badge" data-source="${escapeAttr(name)}"${dataPage}${dataQuote} title="Show source passage">${label}</button>`;
     })
     .replace(ENTITY_RE, (_, name: string, kind: string) =>
-      `<span class="entity-badge" title="${escapeAttr(kind)}">${escapeAttr(name)}</span>`,
+      `<span class="entity-badge" title="${escapeAttr(kind.trim())}">${escapeAttr(name)}</span>`,
     );
 }
 
