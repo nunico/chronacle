@@ -13,6 +13,7 @@
 /// - `002_embedding_index.surql` — (reserved; not yet created)
 /// - `003_collections.surql` — collection table, subscribes_to relation, collection fields on source/chunk
 /// - `004_graph_entities.surql` — 8 typed graph node tables (npc, location, faction, creature, item, event, player_character, misc); relates_to updated to FROM ANY TO ANY
+/// - `005_session_update.surql` — adds `updated_at` field and `idx_session_campaign` index to `session`
 use std::path::Path;
 
 /// Run all pending schema migrations against the given database.
@@ -152,9 +153,10 @@ mod tests {
         .await
         .expect("INSERT session with updated_at should succeed after migration 005");
 
-        // Verify idx_session_campaign appears in the session table info.
+        // Verify idx_session_campaign and updated_at appear in the session table info.
         #[derive(serde::Deserialize)]
         struct TableInfo {
+            fields:  std::collections::HashMap<String, serde_json::Value>,
             indexes: std::collections::HashMap<String, serde_json::Value>,
         }
         let mut resp = db
@@ -166,6 +168,10 @@ mod tests {
             .expect("parse INFO FOR TABLE session")
             .expect("INFO FOR TABLE session returned None");
 
+        assert!(
+            info.fields.contains_key("updated_at"),
+            "updated_at field should exist on session table after migration 005"
+        );
         assert!(
             info.indexes.contains_key("idx_session_campaign"),
             "idx_session_campaign index should exist on session table after migration 005"
