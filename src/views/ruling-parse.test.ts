@@ -140,4 +140,19 @@ describe('parseRuling', () => {
     expect(r.cites).toHaveLength(1);
     expect(r.cites[0].label).toBe('Rulebook.pdf p.298');
   });
+
+  // Regression: same period-inside-marker bug as [Source:], but for [Entity:].
+  // If the entity name contains a period (e.g. "Dr. Aldric"), findVerdictBoundary
+  // used to treat that period as the sentence boundary, splitting the marker
+  // across verdict and whyText so the entity badge never rendered correctly.
+  it('entity name with period does not split the marker at the period', () => {
+    const text =
+      'Aldric is present [Entity: "Dr. Aldric", kind: "npc"]. More detail here [Entity: "Dr. Aldric", kind: "npc"].';
+    const ruling = parseRuling(text);
+    // The entity marker must not bleed into verdict as raw markup.
+    expect(ruling.verdict).not.toContain('[Entity:');
+    // The why (rendered HTML) must contain the entity badge derived from the full marker.
+    expect(ruling.why).toContain('Dr. Aldric');
+    expect(ruling.why).toContain('class="entity-badge"');
+  });
 });

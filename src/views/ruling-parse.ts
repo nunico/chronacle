@@ -90,6 +90,12 @@ export function findVerdictBoundary(text: string): number {
       i = end + 1;
       continue;
     }
+    if (text.startsWith('[Entity:', i)) {
+      const end = text.indexOf(']', i);
+      if (end === -1) return -1;
+      i = end + 1;
+      continue;
+    }
     const c = text[i];
     if (c === '.' || c === '!' || c === '?' || c === '\n') return i;
     i++;
@@ -126,8 +132,10 @@ export function parseRuling(text: string): RulingData {
     whyText = text.slice(sentenceEnd + 1).trim();
   }
 
-  // Strip the verdict of any source markers, then render why with badges.
-  verdict = verdict.replace(SOURCE_RE, '').trim();
+  // Strip the verdict of any citation/entity markers, then render why with badges.
+  SOURCE_RE.lastIndex = 0;
+  ENTITY_RE.lastIndex = 0;
+  verdict = verdict.replace(SOURCE_RE, '').replace(ENTITY_RE, '').trim();
   const why = renderContent(whyText);
 
   return { verdict, why, cites };
