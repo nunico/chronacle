@@ -8,3 +8,4 @@ pub mod ingestion_service;
 pub mod pdf_extractor;
 pub mod settings_service;
 pub mod text_normalizer;
+pub mod wikilink;
