@@ -558,6 +558,7 @@
     background: rgba(91, 120, 255, 0.08);
     font-family: var(--font-mono);
     font-size: 12px;
+    line-height: 1;
     margin: 0 2px;
     cursor: pointer;
   }
@@ -575,6 +576,7 @@
     background: rgba(184, 166, 255, 0.08);
     font-family: var(--font-mono);
     font-size: 12px;
+    line-height: 1;
     margin: 0 2px;
   }
 </style>
