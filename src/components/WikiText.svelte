@@ -41,11 +41,11 @@
 </script>
 
 <span class="wiki-text">
-  {#each segments as seg, i (i)}
+  {#each segments as seg, i (`${seg.kind}-${seg.kind === 'text' ? seg.content : seg.name}-${i}`)}
     {#if seg.kind === 'text'}
       {seg.content}
     {:else if seg.kind === 'entity'}
-      <button class="entity-badge" title={seg.entityKind} onclick={() => onEntityClick?.(seg.id, seg.entityKind)}>
+      <button type="button" class="entity-badge" title={seg.entityKind} onclick={() => onEntityClick?.(seg.id, seg.entityKind)}>
         {seg.name}
       </button>
     {:else}
