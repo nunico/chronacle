@@ -48,10 +48,13 @@
 
   async function buildEntityMap() {
     const allKinds: EntityKind[] = ['npc', 'location', 'faction', 'creature', 'item', 'event', 'player_character', 'misc'];
-    const results = await Promise.all(allKinds.map(k => getEntities(campaignId, k).catch(() => [])));
-    const m = new SvelteMap<string, { id: string; kind: string }>();
-    results.flat().forEach(node => m.set(node.name, { id: node.id, kind: node.kind }));
-    entityMap = m;
+    try {
+      const results = await Promise.all(allKinds.map(k => getEntities(campaignId, k).catch(() => [])));
+      entityMap.clear();
+      results.flat().forEach(node => entityMap.set(node.name, { id: node.id, kind: node.kind }));
+    } catch {
+      // ignore — entity map is best-effort
+    }
   }
 
   async function loadSessions() {

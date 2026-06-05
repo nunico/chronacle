@@ -405,6 +405,69 @@ async fn relate_creates_edge_traversable_in_both_directions() {
     assert_eq!(rows[0].rel_type, "frequents");
 }
 
+#[tokio::test]
+async fn create_event_with_session_id_stores_session_link() {
+    let db = setup_db().await;
+
+    // Create a campaign
+    let campaign = chronacle_lib::services::campaign_service::create(&db, "Test Campaign", "D&D 5e")
+        .await
+        .unwrap();
+
+    // Create a session first
+    let session = chronacle_lib::services::session_service::create(
+        &db,
+        &campaign.id,
+        chronacle_lib::services::session_service::SessionInput {
+            session_number: 1,
+            title: "Session One".to_string(),
+            date_played: "2026-06-05".to_string(),
+            notes: String::new(),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Create an event with session_id set
+    let event = create(
+        &db,
+        Some(&campaign.id),
+        EntityKind::Event,
+        EntityInput {
+            name: "Battle".to_string(),
+            summary: None,
+            notes: None,
+            date_start: None,
+            date_end: None,
+            is_ongoing: None,
+            sequence_index: None,
+            era: None,
+            duration_label: None,
+            player_name: None,
+            character_class: None,
+            character_level: None,
+            status: None,
+            session_id: Some(session.id.clone()),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Verify session_id is returned
+    assert_eq!(
+        event.session_id,
+        Some(session.id.clone()),
+        "event.session_id should be the session's id"
+    );
+
+    // Verify get_session_entities returns this event
+    let entities = chronacle_lib::services::session_service::get_entities(&db, &session.id)
+        .await
+        .unwrap();
+    assert_eq!(entities.len(), 1);
+    assert_eq!(entities[0].name, "Battle");
+}
+
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 /// Create a campaign and return its raw ID string.
