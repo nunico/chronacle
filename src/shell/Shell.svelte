@@ -25,6 +25,7 @@
   import SettingsView from '../views/SettingsView.svelte';
   import UploadProgress from '../UploadProgress.svelte';
   import EntityManager from '../components/EntityManager.svelte';
+  import SessionLogView from '../views/SessionLogView.svelte';
   import { findCategory, type NoteCategoryId } from './note-categories';
   import type { EntityKind } from '../lib/commands';
 
@@ -334,6 +335,12 @@
       />
     {:else if view === 'settings'}
       <SettingsView />
+    {:else if typeof view === 'object' && view.category === 'sessions' && activeCampaignId}
+      <SessionLogView campaignId={activeCampaignId} />
+    {:else if typeof view === 'object' && view.category === 'sessions'}
+      <div class="no-campaign-msg">
+        <p>Select a campaign to view sessions.</p>
+      </div>
     {:else if ENTITY_KIND_MAP[view.category] && activeCampaignId}
       <EntityManager campaignId={activeCampaignId} kind={ENTITY_KIND_MAP[view.category]!} />
     {:else if ENTITY_KIND_MAP[view.category]}

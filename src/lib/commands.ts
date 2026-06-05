@@ -466,3 +466,47 @@ export async function relateEntities(
 ): Promise<void> {
   return invoke<void>('relate_entities', { fromId, fromKind, toId, toKind, relType, notes });
 }
+
+// ── Session Types & Commands ────────────────────────────────────────────
+
+export interface Session {
+  id: string;
+  campaign_id: string | null;
+  session_number: number;
+  title: string;
+  date_played: string;
+  notes: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SessionInput {
+  sessionNumber: number;
+  title: string;
+  datePlayed: string;
+  notes: string;
+}
+
+export async function createSession(campaignId: string, input: SessionInput): Promise<Session> {
+  return invoke<Session>('create_session', { campaignId, input });
+}
+
+export async function getSessions(campaignId: string): Promise<Session[]> {
+  return invoke<Session[]>('get_sessions', { campaignId });
+}
+
+export async function getSession(id: string): Promise<Session> {
+  return invoke<Session>('get_session', { id });
+}
+
+export async function updateSession(id: string, input: SessionInput): Promise<Session> {
+  return invoke<Session>('update_session', { id, input });
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  return invoke<void>('delete_session', { id });
+}
+
+export async function getSessionEntities(sessionId: string): Promise<GraphNode[]> {
+  return invoke<GraphNode[]>('get_session_entities', { sessionId });
+}
