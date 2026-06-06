@@ -35,12 +35,8 @@ pub async fn get_session(
 pub async fn update_session(
     state: State<'_, Arc<AppState>>,
     id: String,
-    campaign_id: String,
     input: SessionInput,
 ) -> Result<Session, SessionError> {
-    // campaign_id is accepted for IPC compatibility but not forwarded to the
-    // service — the session record already carries its campaign FK.
-    let _ = campaign_id;
     session_service::update(&state.db, &id, input).await
 }
 
@@ -73,7 +69,7 @@ mod tests {
         let _ = create_session as fn(_, _, _) -> _;
         let _ = get_sessions as fn(_, _) -> _;
         let _ = get_session as fn(_, _) -> _;
-        let _ = update_session as fn(_, _, _, _) -> _;
+        let _ = update_session as fn(_, _, _) -> _;
         let _ = delete_session as fn(_, _) -> _;
         let _ = get_session_entities as fn(_, _) -> _;
     }
