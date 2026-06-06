@@ -1,6 +1,7 @@
 <script lang="ts">
   import { updateSession, deleteSession, getSessionEntities, type Session, type GraphNode } from '../lib/commands';
   import WikiText from './WikiText.svelte';
+  import WikiLinkEditor from './WikiLinkEditor.svelte';
 
   interface Props {
     session: Session;
@@ -113,14 +114,14 @@
 
       <div class="field-col">
         <label for="notes-{session.id}" class="field-label">Notes</label>
-        <textarea
+        <WikiLinkEditor
           id="notes-{session.id}"
-          class="field-textarea"
           bind:value={editNotes}
+          entities={entityMap}
           onblur={saveField}
           rows={6}
           placeholder="Session recap, rewards, open threads… Use [[Entity Name]] to link."
-        ></textarea>
+        />
         {#if editNotes}
           <div class="wiki-preview">
             <WikiText text={editNotes} entities={entityMap} />
@@ -256,24 +257,6 @@
   }
 
   .field-input:focus {
-    outline: none;
-    border-color: var(--line-glow);
-  }
-
-  .field-textarea {
-    width: 100%;
-    padding: 8px 10px;
-    border: 1px solid var(--line);
-    border-radius: var(--r-sm);
-    background: var(--bg-inset);
-    color: var(--fg-1);
-    font-family: var(--font-sans);
-    font-size: 13.5px;
-    resize: vertical;
-    box-sizing: border-box;
-  }
-
-  .field-textarea:focus {
     outline: none;
     border-color: var(--line-glow);
   }

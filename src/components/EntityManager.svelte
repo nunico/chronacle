@@ -174,6 +174,7 @@
           node={formNode}
           error={formError}
           sessions={kind === 'event' ? sessions : []}
+          {entityMap}
           onsave={handleSave}
           oncancel={() => { showForm = false; formNode = null; }}
         />

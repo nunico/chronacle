@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { EntityKind, GraphNode, EntityInput, Session } from '../lib/commands';
+  import WikiLinkEditor from './WikiLinkEditor.svelte';
 
   interface Props {
     kind: EntityKind;
@@ -8,9 +9,10 @@
     onsave?: (input: EntityInput) => void;
     oncancel?: () => void;
     sessions?: Session[]; // list of campaign sessions for event dropdown
+    entityMap?: Map<string, { id: string; kind: string }>; // for wikilink autocomplete
   }
 
-  let { kind, node = null, error = null, onsave, oncancel, sessions = [] }: Props = $props();
+  let { kind, node = null, error = null, onsave, oncancel, sessions = [], entityMap = new Map() }: Props = $props();
 
   let name = $state(node?.name ?? '');
   let summary = $state(node?.summary ?? '');
@@ -73,7 +75,13 @@
 
   <div class="field">
     <label for="ef-notes">Notes</label>
-    <textarea id="ef-notes" bind:value={notes} rows="4"></textarea>
+    <WikiLinkEditor
+      id="ef-notes"
+      bind:value={notes}
+      entities={entityMap}
+      rows={4}
+      placeholder="Use [[Entity Name]] to link."
+    />
   </div>
 
   {#if kind === 'event'}
@@ -154,7 +162,7 @@
   form { display: flex; flex-direction: column; gap: 12px; }
   .field { display: flex; flex-direction: column; gap: 4px; }
   label { font-size: 0.85rem; color: var(--fg-3); }
-  input, textarea, select {
+  input, select {
     background: var(--bg-panel-2);
     border: 1px solid var(--line);
     border-radius: 6px;
