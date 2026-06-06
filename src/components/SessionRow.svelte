@@ -2,6 +2,7 @@
   import { updateSession, deleteSession, getSessionEntities, type Session, type GraphNode } from '../lib/commands';
   import WikiText from './WikiText.svelte';
   import WikiLinkEditor from './WikiLinkEditor.svelte';
+  import { formatDate } from '../lib/date-utils';
 
   interface Props {
     session: Session;
@@ -19,15 +20,6 @@
   let linkedEntities = $state<GraphNode[]>([]);
   let loadingEntities = $state(false);
   let entitiesLoaded = $state(false);
-
-  function formatDate(dateStr: string): string {
-    if (!dateStr) return '';
-    // Append T12:00:00 to treat as local noon, avoiding UTC midnight off-by-one
-    // when YYYY-MM-DD strings are parsed as UTC and rendered in western timezones
-    const d = new Date(dateStr.includes('T') ? dateStr : dateStr + 'T12:00:00');
-    if (isNaN(d.getTime())) return dateStr;
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  }
 
   async function toggleExpand() {
     expanded = !expanded;
