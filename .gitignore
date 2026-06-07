@@ -46,3 +46,9 @@ src-tauri/resources/pdfium/*
 !.crew/graphs/
 !.crew/artifacts/.gitkeep
 !.crew/graphs/.gitkeep
+
+# zed
+.zed/
+
+# graphify
+graphify-out/
