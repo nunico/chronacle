@@ -410,9 +410,10 @@ async fn create_event_with_session_id_stores_session_link() {
     let db = setup_db().await;
 
     // Create a campaign
-    let campaign = chronacle_lib::services::campaign_service::create(&db, "Test Campaign", "D&D 5e")
-        .await
-        .unwrap();
+    let campaign =
+        chronacle_lib::services::campaign_service::create(&db, "Test Campaign", "D&D 5e")
+            .await
+            .unwrap();
 
     // Create a session first
     let session = chronacle_lib::services::session_service::create(

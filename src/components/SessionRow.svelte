@@ -2,7 +2,7 @@
   import { updateSession, deleteSession, getSessionEntities, type Session, type GraphNode } from '../lib/commands';
   import WikiText from './WikiText.svelte';
   import WikiLinkEditor from './WikiLinkEditor.svelte';
-  import { formatDate } from '../lib/date-utils';
+  import { formatDate } from '../lib/locale.svelte';
 
   interface Props {
     session: Session;

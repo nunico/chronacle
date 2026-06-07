@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { initLocale } from './lib/locale.svelte';
   import ModelDownload from './ModelDownload.svelte';
   import Shell from './shell/Shell.svelte';
 
@@ -7,6 +9,10 @@
   function onModelReady() {
     modelReady = true;
   }
+
+  onMount(() => {
+    initLocale();
+  });
 </script>
 
 {#if !modelReady}

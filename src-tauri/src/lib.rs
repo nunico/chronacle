@@ -152,6 +152,7 @@ pub async fn run() {
     });
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(state.clone())
         .setup(move |app| {

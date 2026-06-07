@@ -32,6 +32,7 @@ fastembed = { version = "5", features = ["ort-load-dynamic"] }
 futures-util = "0.3"
 unicode-segmentation = "1"
 pdfium-render = { version = "0.8", features = ["thread_safe", "image"] }
+tauri-plugin-os = "2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
