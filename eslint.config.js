@@ -1,52 +1,41 @@
+// @ts-check
+import { defineConfig } from 'eslint/config';
 import js from '@eslint/js';
-import tsParser from '@typescript-eslint/parser';
-import typescriptEslint from '@typescript-eslint/eslint-plugin';
-import sveltePlugin from 'eslint-plugin-svelte';
+import ts from 'typescript-eslint';
+import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
+import svelteConfig from './svelte.config.js';
 
-export default [
+export default defineConfig(
   {
-    ignores: ['.agents/*', '.claude/*', 'dist/*'],
+    ignores: ['.agents/*', '.claude/*', 'dist/*', 'target/*'],
   },
+  { languageOptions: { globals: { ...globals.browser } } },
   js.configs.recommended,
-  ...sveltePlugin.configs['flat/recommended'],
+  ts.configs.strict,
+  ts.configs.stylistic,
+  svelte.configs.recommended,
   {
-    files: ['**/*.ts'],
-    plugins: {
-      '@typescript-eslint': typescriptEslint,
-    },
-    languageOptions: {
-      parser: tsParser,
-      sourceType: 'module',
-      ecmaVersion: 2022,
-      globals: {
-        ...globals.browser,
-        ...globals.node,
-      },
-    },
+    files: ['**/*.{js,ts}'],
     rules: {
-      ...typescriptEslint.configs.recommended.rules,
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       'no-console': 'off',
     },
   },
   {
-    files: ['**/*.svelte'],
-    plugins: {
-      '@typescript-eslint': typescriptEslint,
-    },
+    files: ['**/*.svelte', '**/*.svelte.ts'],
     languageOptions: {
-      globals: {
-        ...globals.browser,
-      },
+      globals: { ...globals.browser, ...globals.svelte },
       parserOptions: {
-        parser: tsParser,
+        projectService: true,
+        extraFileExtensions: ['.svelte'],
+        parser: ts.parser,
+        svelteConfig,
       },
     },
     rules: {
-      ...typescriptEslint.configs.recommended.rules,
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       'no-console': 'off',
     },
   },
-];
+);
