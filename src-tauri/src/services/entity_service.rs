@@ -285,28 +285,91 @@ pub async fn create<C: surrealdb::Connection>(
         })?;
     }
 
-    // 3. Fetch back with backward-traversal aliases to populate campaign/collection.
-    let fetch_sql = format!(
-        "SELECT *, {SELECT_SCOPE_ALIASES} FROM type::thing($table, $id)"
-    );
+    // 3. Build the GraphNode from what we already know — no re-fetch needed.
+    //    The backward-traversal aliases used in other read paths
+    //    (SELECT_SCOPE_ALIASES) rely on edge table lookups that are unreliable
+    //    immediately after creation in the RocksDB engine. Since campaign_id and
+    //    collection_id are function parameters we can populate them directly.
     let mut fetch_resp = db
-        .query(fetch_sql)
+        .query("SELECT * FROM type::thing($table, $id)")
         .bind(("table", table))
         .bind(("id", id.clone()))
         .await
         .map_err(|e| EntityError::Database {
             message: e.to_string(),
         })?;
-    let records: Vec<GraphNodeRecord> = fetch_resp.take(0).map_err(|e| EntityError::Database {
+
+    // GraphNodeRecord.campaign / .collection will be None here (no aliases),
+    // but we override them from the function parameters below.
+    #[derive(serde::Deserialize)]
+    struct StoredRecord {
+        id: surrealdb::sql::Thing,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        summary: Option<String>,
+        #[serde(default)]
+        notes: Option<String>,
+        #[serde(default)]
+        created_at: Option<String>,
+        #[serde(default)]
+        updated_at: Option<String>,
+        #[serde(default)]
+        date_start: Option<String>,
+        #[serde(default)]
+        date_end: Option<String>,
+        #[serde(default)]
+        is_ongoing: Option<bool>,
+        #[serde(default)]
+        sequence_index: Option<i64>,
+        #[serde(default)]
+        era: Option<String>,
+        #[serde(default)]
+        duration_label: Option<String>,
+        #[serde(default)]
+        session: Option<surrealdb::sql::Thing>,
+        #[serde(default)]
+        player_name: Option<String>,
+        #[serde(default)]
+        character_class: Option<String>,
+        #[serde(default)]
+        character_level: Option<i64>,
+        #[serde(default)]
+        status: Option<String>,
+    }
+
+    let recs: Vec<StoredRecord> = fetch_resp.take(0).map_err(|e| EntityError::Database {
         message: e.to_string(),
     })?;
-    let node: GraphNode = records
+    let rec = recs
         .into_iter()
         .next()
-        .map(Into::into)
         .ok_or_else(|| EntityError::Database {
             message: "No record returned after create".to_string(),
         })?;
+
+    let node = GraphNode {
+        id: rec.id.id.to_raw(),
+        kind: rec.id.tb.clone(),
+        campaign_id: campaign_id.map(|s| s.to_owned()),
+        collection_id: collection_id.map(|s| s.to_owned()),
+        name: rec.name,
+        summary: rec.summary,
+        notes: rec.notes,
+        created_at: rec.created_at,
+        updated_at: rec.updated_at,
+        date_start: rec.date_start,
+        date_end: rec.date_end,
+        is_ongoing: rec.is_ongoing,
+        sequence_index: rec.sequence_index,
+        era: rec.era,
+        duration_label: rec.duration_label,
+        session_id: rec.session.map(|t| t.id.to_raw()),
+        player_name: rec.player_name,
+        character_class: rec.character_class,
+        character_level: rec.character_level,
+        status: rec.status,
+    };
 
     // 4. Sync wikilinks in notes to relates_to edges (fire-and-forget: ignore errors
     //    so a wikilink resolution failure never blocks the entity save).
