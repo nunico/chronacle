@@ -342,7 +342,7 @@
         <p>Select a campaign to view sessions.</p>
       </div>
     {:else if ENTITY_KIND_MAP[view.category] && activeCampaignId}
-      <EntityManager campaignId={activeCampaignId} kind={ENTITY_KIND_MAP[view.category]!} />
+      <EntityManager campaignId={activeCampaignId} kind={ENTITY_KIND_MAP[view.category] as EntityKind} />
     {:else if ENTITY_KIND_MAP[view.category]}
       <div class="no-campaign-msg">
         <p>Select a campaign to manage entities.</p>

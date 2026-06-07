@@ -188,7 +188,7 @@
       <div class="confirm-box">
         <p>Delete <strong>{deleteConfirm.name}</strong>? This cannot be undone.</p>
         <div class="actions">
-          <button class="btn-danger" onclick={() => confirmDelete(deleteConfirm!)}>Delete</button>
+          <button class="btn-danger" onclick={() => confirmDelete(deleteConfirm as GraphNode)}>Delete</button>
           <button class="btn-ghost" onclick={() => { deleteConfirm = null; }}>Cancel</button>
         </div>
       </div>

@@ -455,7 +455,7 @@ export async function updateEntity(
 }
 
 export async function deleteEntity(id: string, kind: EntityKind): Promise<void> {
-  return invoke<void>('delete_entity', { id, kind });
+  return invoke<never>('delete_entity', { id, kind });
 }
 
 export async function relateEntities(
@@ -466,7 +466,7 @@ export async function relateEntities(
   relType: string,
   notes?: string | null,
 ): Promise<void> {
-  return invoke<void>('relate_entities', { fromId, fromKind, toId, toKind, relType, notes });
+  return invoke<never>('relate_entities', { fromId, fromKind, toId, toKind, relType, notes });
 }
 
 // ── Session Types & Commands ────────────────────────────────────────────
@@ -506,7 +506,7 @@ export async function updateSession(id: string, input: SessionInput): Promise<Se
 }
 
 export async function deleteSession(id: string): Promise<void> {
-  return invoke<void>('delete_session', { id });
+  return invoke<never>('delete_session', { id });
 }
 
 export async function getSessionEntities(sessionId: string): Promise<GraphNode[]> {

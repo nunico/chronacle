@@ -38,7 +38,7 @@
   class="backdrop"
   role="presentation"
   onclick={onBackdropClick}
-  onkeydown={() => {}}
+  onkeydown={() => { /* empty */ }}
 ></div>
 
 <div class="popover" role="dialog" aria-label="Switch campaign" bind:this={popoverEl}>

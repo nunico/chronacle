@@ -26,7 +26,7 @@
       const name = m[1];
       const key = [...entities.keys()].find(k => k.toLowerCase() === name.toLowerCase());
       if (key) {
-        const e = entities.get(key)!;
+        const e = entities.get(key) as { id: string, kind: string };
         result.push({ kind: 'entity', name, id: e.id, entityKind: e.kind });
       } else {
         result.push({ kind: 'unmatched', name });

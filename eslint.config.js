@@ -18,6 +18,7 @@ export default defineConfig(
   {
     files: ['**/*.{js,ts}'],
     rules: {
+      '@typescript-eslint/array-type': ['error', { default: 'array-simple' }],
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       'no-console': 'off',
     },
@@ -34,8 +35,15 @@ export default defineConfig(
       },
     },
     rules: {
+      '@typescript-eslint/array-type': ['error', { default: 'array-simple' }],
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       'no-console': 'off',
     },
   },
+  {
+    files: ['**/*.{spec,test}.{js,ts}'],
+    rules: {
+      '@typescript-eslint/no-empty-function': 'off',
+    }
+  }
 );
