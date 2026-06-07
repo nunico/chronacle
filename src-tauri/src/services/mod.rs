@@ -1,5 +1,6 @@
 pub mod agent_service;
 pub mod campaign_service;
+pub mod extraction_service;
 pub mod chunker;
 pub mod collection_service;
 pub mod custom_provider_service;

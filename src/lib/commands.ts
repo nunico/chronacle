@@ -512,3 +512,26 @@ export async function deleteSession(id: string): Promise<void> {
 export async function getSessionEntities(sessionId: string): Promise<GraphNode[]> {
   return invoke<GraphNode[]>('get_session_entities', { sessionId });
 }
+
+// ── Entity Extraction ────────────────────────────────────────────────────────
+
+export interface ExtractionSummary {
+  entities_created: number;
+  relations_created: number;
+}
+
+export interface ExtractionProgress {
+  batch: number;
+  total_batches: number;
+  entities_found: number;
+}
+
+/**
+ * Trigger LLM-powered entity extraction for a collection.
+ * Progress is delivered via the `extract-progress` Tauri event.
+ */
+export async function extractEntitiesFromCollection(
+  collectionId: string,
+): Promise<ExtractionSummary> {
+  return invoke<ExtractionSummary>('extract_entities_from_collection', { collectionId });
+}

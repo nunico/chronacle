@@ -59,13 +59,19 @@ where
     Ok(rows.into_iter().map(|r| r.out.id.to_raw()).collect())
 }
 
-/// Query all entity tables for a campaign and format them as a context block.
+/// Query entity tables for a campaign (and optionally subscribed collections)
+/// and format them as a context block.
 ///
-/// Returns an empty string when the campaign has no entities — callers use this
-/// to skip the CAMPAIGN NOTES section entirely.
+/// Campaign-scoped entities are always included in full. Collection-scoped
+/// entities are retrieved via MTREE KNN search when `query_embedding` is
+/// `Some`, falling back to a full scan otherwise (tests, mock provider).
+///
+/// Returns an empty string when no entities are found.
 pub async fn fetch_entity_context<C: Connection>(
     db: &surrealdb::Surreal<C>,
     campaign_id: &str,
+    collection_ids: &[String],
+    query_embedding: Option<&[f32]>,
 ) -> Result<String, AgentError> {
     #[derive(serde::Deserialize)]
     struct BasicRow {
@@ -91,15 +97,16 @@ pub async fn fetch_entity_context<C: Connection>(
         date_end: Option<String>,
     }
 
+    // ── Campaign entities (always full scan) ─────────────────────────────────
     let mut resp = db
-        .query("SELECT name, summary, player_name, character_class, character_level, status FROM player_character WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
-        .query("SELECT name, summary FROM npc WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
-        .query("SELECT name, summary FROM location WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
-        .query("SELECT name, summary FROM faction WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
-        .query("SELECT name, summary FROM creature WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
-        .query("SELECT name, summary FROM item WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
-        .query("SELECT name, summary, date_start, date_end FROM event WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
-        .query("SELECT name, summary FROM misc WHERE campaign = type::thing('campaign', $cid) ORDER BY name ASC")
+        .query("SELECT name, summary, player_name, character_class, character_level, status FROM player_character WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary FROM npc WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary FROM location WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary FROM faction WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary FROM creature WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary FROM item WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, date_start, date_end FROM event WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary FROM misc WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
         .bind(("cid", campaign_id.to_owned()))
         .await
         .map_err(|e| AgentError::Db(e.to_string()))?;
@@ -113,6 +120,44 @@ pub async fn fetch_entity_context<C: Connection>(
     let events: Vec<EventRow> = resp.take(6).map_err(|e| AgentError::Db(e.to_string()))?;
     let misc: Vec<BasicRow> = resp.take(7).map_err(|e| AgentError::Db(e.to_string()))?;
 
+    // ── Collection entities (top-k per table via MTREE, full scan as fallback) ─
+    // Retrieved as a flat Vec<BasicRow> across all tables for the context block.
+    let mut col_entities: Vec<(String, BasicRow)> = Vec::new(); // (kind, row)
+    if !collection_ids.is_empty() {
+        // Build a WHERE clause that matches entities in any of the given collections.
+        // Each `collection:id->in_collection` traversal returns the entity IDs for
+        // that collection; OR-ing them covers multiple subscriptions.
+        let col_filter: String = collection_ids
+            .iter()
+            .map(|cid| {
+                // Subquery form: find entity IDs via in_collection edges from the collection.
+                let safe = cid.replace('\'', "\\'");
+                format!("id IN (SELECT VALUE out FROM in_collection WHERE in = type::thing('collection', '{safe}'))")
+            })
+            .collect::<Vec<_>>()
+            .join(" OR ");
+
+        for table in &["npc", "location", "faction", "creature", "item", "event", "player_character", "misc"] {
+            let sql = if let Some(qv) = query_embedding {
+                // MTREE KNN: order by cosine distance, top 10 per table.
+                let vec_str = qv.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(",");
+                format!(
+                    "SELECT name, summary FROM {table} \
+                     WHERE ({col_filter}) AND embedding IS NOT NONE \
+                     ORDER BY embedding <|10|> [{vec_str}] LIMIT 10"
+                )
+            } else {
+                // Full scan fallback (no embedding provider / test paths).
+                format!("SELECT name, summary FROM {table} WHERE {col_filter} LIMIT 50")
+            };
+            let mut r = db.query(sql).await.map_err(|e| AgentError::Db(e.to_string()))?;
+            let rows: Vec<BasicRow> = r.take(0).map_err(|e| AgentError::Db(e.to_string()))?;
+            for row in rows {
+                col_entities.push((table.to_string(), row));
+            }
+        }
+    }
+
     if pcs.is_empty()
         && npcs.is_empty()
         && locations.is_empty()
@@ -121,6 +166,7 @@ pub async fn fetch_entity_context<C: Connection>(
         && items.is_empty()
         && events.is_empty()
         && misc.is_empty()
+        && col_entities.is_empty()
     {
         return Ok(String::new());
     }
@@ -208,6 +254,20 @@ pub async fn fetch_entity_context<C: Connection>(
         }
     }
 
+    // ── Collection entities section ──────────────────────────────────────────
+    if !col_entities.is_empty() {
+        out.push_str("\nCollection knowledge (from subscribed rulebooks):\n");
+        for (kind, r) in &col_entities {
+            out.push_str(&format!("[{kind}] {}", r.name));
+            if let Some(s) = &r.summary {
+                if !s.trim().is_empty() {
+                    out.push_str(&format!(" · {s}"));
+                }
+            }
+            out.push('\n');
+        }
+    }
+
     Ok(out)
 }
 
@@ -243,7 +303,7 @@ pub async fn stream_response(
     };
 
     let entity_context = match campaign_id {
-        Some(cid) => fetch_entity_context(&state.db, cid)
+        Some(cid) => fetch_entity_context(&state.db, cid, &collection_ids, Some(&query_vector))
             .await
             .unwrap_or_else(|e| {
                 eprintln!("entity context fetch failed: {e}");
@@ -1007,7 +1067,7 @@ mod tests {
         .await
         .unwrap();
 
-        let result = fetch_entity_context(&db, "camp1").await.unwrap();
+        let result = fetch_entity_context(&db, "camp1", &[], None).await.unwrap();
         assert!(result.is_empty(), "expected empty string, got: {result:?}");
     }
 
@@ -1026,15 +1086,17 @@ mod tests {
         .unwrap();
         db.query(
             "CREATE player_character SET id='pc1', \
-             campaign=type::thing('campaign','camp1'), \
              name='Nazirdijan', player_name='Nico', character_class='Wizard', \
              character_level=5, status='active', summary=NULL, notes=NULL, \
-             created_at=time::now(), updated_at=time::now()",
+             created_at=time::now(), updated_at=time::now(); \
+             LET $src = type::thing('campaign','camp1'); \
+             LET $dst = type::thing('player_character','pc1'); \
+             RELATE $src->in_campaign->$dst SET created_at = time::now()",
         )
         .await
         .unwrap();
 
-        let result = fetch_entity_context(&db, "camp1").await.unwrap();
+        let result = fetch_entity_context(&db, "camp1", &[], None).await.unwrap();
         assert!(
             result.contains("[player_character] Nazirdijan"),
             "missing entity line: {result}"
@@ -1065,14 +1127,17 @@ mod tests {
         .await
         .unwrap();
         db.query(
-            "CREATE npc SET id='npc1', campaign=type::thing('campaign','camp1'), \
+            "CREATE npc SET id='npc1', \
              name='Aldric the Smith', summary='village blacksmith', notes=NULL, \
-             created_at=time::now(), updated_at=time::now()",
+             created_at=time::now(), updated_at=time::now(); \
+             LET $src = type::thing('campaign','camp1'); \
+             LET $dst = type::thing('npc','npc1'); \
+             RELATE $src->in_campaign->$dst SET created_at = time::now()",
         )
         .await
         .unwrap();
 
-        let result = fetch_entity_context(&db, "camp1").await.unwrap();
+        let result = fetch_entity_context(&db, "camp1", &[], None).await.unwrap();
         assert!(
             result.contains("[npc] Aldric the Smith"),
             "missing npc: {result}"
@@ -1105,15 +1170,18 @@ mod tests {
         .await
         .unwrap();
         db.query(
-            "CREATE event SET id='ev1', campaign=type::thing('campaign','camp1'), \
+            "CREATE event SET id='ev1', \
              name='Battle of Irongate', date_start='Year 312', date_end='Year 313', \
              summary=NULL, notes=NULL, is_ongoing=false, \
-             created_at=time::now(), updated_at=time::now()",
+             created_at=time::now(), updated_at=time::now(); \
+             LET $src = type::thing('campaign','camp1'); \
+             LET $dst = type::thing('event','ev1'); \
+             RELATE $src->in_campaign->$dst SET created_at = time::now()",
         )
         .await
         .unwrap();
 
-        let result = fetch_entity_context(&db, "camp1").await.unwrap();
+        let result = fetch_entity_context(&db, "camp1", &[], None).await.unwrap();
         assert!(
             result.contains("[event] Battle of Irongate"),
             "missing event: {result}"
@@ -1240,15 +1308,18 @@ mod tests {
         .await
         .unwrap();
         db.query(
-            "CREATE event SET id='ev1', campaign=type::thing('campaign','camp1'), \
+            "CREATE event SET id='ev1', \
              name='Siege of Dawnwall', date_start='Year 400', date_end='', \
              summary=NULL, notes=NULL, is_ongoing=false, \
-             created_at=time::now(), updated_at=time::now()",
+             created_at=time::now(), updated_at=time::now(); \
+             LET $src = type::thing('campaign','camp1'); \
+             LET $dst = type::thing('event','ev1'); \
+             RELATE $src->in_campaign->$dst SET created_at = time::now()",
         )
         .await
         .unwrap();
 
-        let result = fetch_entity_context(&db, "camp1").await.unwrap();
+        let result = fetch_entity_context(&db, "camp1", &[], None).await.unwrap();
         assert!(
             result.contains("[event] Siege of Dawnwall"),
             "missing event: {result}"

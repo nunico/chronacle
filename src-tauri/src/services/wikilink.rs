@@ -17,6 +17,21 @@ pub enum WikilinkError {
     MalformedRecordId { value: String },
 }
 
+// ── Scope ─────────────────────────────────────────────────────────────────────
+
+/// Determines which entities are candidates for wikilink resolution.
+pub enum WikilinkScope<'a> {
+    /// Source is a campaign entity. Resolves against:
+    ///   - all entities in the campaign (`in_campaign` edges), AND
+    ///   - all entities in collections the campaign subscribes to
+    ///     (`subscribes_to->in_collection` chained traversal).
+    Campaign { campaign_id: &'a str },
+
+    /// Source is a collection entity. Resolves against:
+    ///   - all entities in the same collection only (`in_collection` edges).
+    Collection { collection_id: &'a str },
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const ENTITY_TABLES: &[&str] = &[
@@ -45,7 +60,7 @@ struct EntityNameRow {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Parse `[[name]]` wikilinks from `notes`, resolve them against all entity
-/// tables for `campaign_id`, and (when `source_table` is one of the 8 entity
+/// tables within `scope`, and (when `source_table` is one of the 8 entity
 /// tables) maintain `relates_to` edges with `rel_type = "mentioned"`.
 ///
 /// Returns the full record IDs (e.g. `"npc:abc123"`) of every matched entity.
@@ -56,7 +71,7 @@ pub async fn parse_and_sync_wikilinks<C: surrealdb::Connection>(
     source_table: &str,
     source_id: &str,
     notes: &str,
-    campaign_id: &str,
+    scope: WikilinkScope<'_>,
 ) -> Result<Vec<String>, WikilinkError> {
     // Guard against injection through the source identifiers.
     validate_identifier(source_table)?;
@@ -77,8 +92,8 @@ pub async fn parse_and_sync_wikilinks<C: surrealdb::Connection>(
         return Ok(vec![]);
     }
 
-    // 2. Query all entity names for the campaign across all 8 tables
-    let all_entities = query_all_entity_names(db, campaign_id).await?;
+    // 2. Query all entity names within the scope across all 8 tables.
+    let all_entities = query_all_entity_names(db, &scope).await?;
 
     // 3. Case-insensitive name matching
     let mut matched_ids: Vec<String> = extracted
@@ -131,42 +146,85 @@ fn validate_record_id(s: &str) -> Result<(), WikilinkError> {
     Ok(())
 }
 
-/// Query the `name` and `id` from all 8 entity tables for the given campaign.
+/// Query the `name` and `id` from all 8 entity tables within the given scope.
+///
+/// **Campaign scope**: entities reachable via `in_campaign` edges from the
+/// campaign, OR via chained `subscribes_to->in_collection` traversal (i.e.
+/// entities in any collection the campaign subscribes to).
+///
+/// **Collection scope**: entities reachable via `in_collection` edges from
+/// the collection only.
 async fn query_all_entity_names<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
-    campaign_id: &str,
+    scope: &WikilinkScope<'_>,
 ) -> Result<Vec<(String, String)>, WikilinkError> {
-    // Build one query per table and collect results across all statements.
-    // SurrealDB does not support UNION across tables in the same SELECT
-    // statement in v2, so we issue the statements in a single multi-query
-    // and take each response index.
     let mut query = String::new();
-    for table in ENTITY_TABLES {
-        query.push_str(&format!(
-            "SELECT id, name FROM {table} WHERE campaign = type::thing('campaign', $campaign_id);"
-        ));
-    }
 
-    let mut response = db
-        .query(query)
-        .bind(("campaign_id", campaign_id.to_owned()))
-        .await
-        .map_err(|e| WikilinkError::Database {
-            message: e.to_string(),
-        })?;
+    match scope {
+        WikilinkScope::Campaign { campaign_id } => {
+            for table in ENTITY_TABLES {
+                // Entities in the campaign OR in any subscribed collection.
+                // `campaign:$cid->subscribes_to->in_collection` chains:
+                //   campaign → subscribes_to edge → collection → in_collection edge → entity
+                query.push_str(&format!(
+                    "SELECT id, name FROM {table} \
+                     WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $campaign_id)) \
+                        OR id IN (SELECT VALUE out FROM in_collection \
+                                  WHERE in IN (SELECT VALUE out FROM subscribes_to \
+                                               WHERE in = type::thing('campaign', $campaign_id)));"
+                ));
+            }
+            let mut response = db
+                .query(query)
+                .bind(("campaign_id", (*campaign_id).to_owned()))
+                .await
+                .map_err(|e| WikilinkError::Database {
+                    message: e.to_string(),
+                })?;
 
-    let mut results: Vec<(String, String)> = Vec::new();
-    for i in 0..ENTITY_TABLES.len() {
-        let rows: Vec<EntityNameRow> = response.take(i).map_err(|e| WikilinkError::Database {
-            message: e.to_string(),
-        })?;
-        for row in rows {
-            let record_id = format!("{}:{}", row.id.tb, row.id.id.to_raw());
-            results.push((record_id, row.name));
+            let mut results: Vec<(String, String)> = Vec::new();
+            for i in 0..ENTITY_TABLES.len() {
+                let rows: Vec<EntityNameRow> =
+                    response.take(i).map_err(|e| WikilinkError::Database {
+                        message: e.to_string(),
+                    })?;
+                for row in rows {
+                    let record_id = format!("{}:{}", row.id.tb, row.id.id.to_raw());
+                    results.push((record_id, row.name));
+                }
+            }
+            Ok(results)
+        }
+
+        WikilinkScope::Collection { collection_id } => {
+            for table in ENTITY_TABLES {
+                query.push_str(&format!(
+                    "SELECT id, name FROM {table} \
+                     WHERE id IN (SELECT VALUE out FROM in_collection WHERE in = type::thing('collection', $collection_id));"
+                ));
+            }
+            let mut response = db
+                .query(query)
+                .bind(("collection_id", (*collection_id).to_owned()))
+                .await
+                .map_err(|e| WikilinkError::Database {
+                    message: e.to_string(),
+                })?;
+
+            let mut results: Vec<(String, String)> = Vec::new();
+            for i in 0..ENTITY_TABLES.len() {
+                let rows: Vec<EntityNameRow> =
+                    response.take(i).map_err(|e| WikilinkError::Database {
+                        message: e.to_string(),
+                    })?;
+                for row in rows {
+                    let record_id = format!("{}:{}", row.id.tb, row.id.id.to_raw());
+                    results.push((record_id, row.name));
+                }
+            }
+            Ok(results)
         }
     }
-
-    Ok(results)
 }
 
 /// Upsert `relates_to` edges from `source_table:source_id` to each of
@@ -220,11 +278,6 @@ async fn upsert_mentioned_edges<C: surrealdb::Connection>(
 
 /// Delete stale `relates_to` edges where the source is this record,
 /// `rel_type = "mentioned"`, and the target is NOT in `keep_ids`.
-///
-/// The NOT IN list is built directly into the query string using fully-qualified
-/// record IDs (e.g. `npc:abc123`), matching the pattern used in
-/// [`entity_service::relate`] which also embeds record IDs in the query string
-/// because SurrealDB v2 does not support `type::thing()` in all positions.
 async fn delete_stale_mentioned_edges<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     source_table: &str,
@@ -264,10 +317,6 @@ async fn delete_stale_mentioned_edges<C: surrealdb::Connection>(
 }
 
 /// Split a full record ID like `"npc:abc123"` into `("npc", "abc123")`.
-///
-/// Returns `WikilinkError::MalformedRecordId` if the string contains no `:`
-/// — which should never happen for IDs returned by [`query_all_entity_names`],
-/// but is handled gracefully rather than panicking.
 fn split_record_id(full_id: &str) -> Result<(&str, &str), WikilinkError> {
     let pos = full_id
         .find(':')
@@ -334,6 +383,26 @@ mod tests {
         rows.into_iter().next().unwrap().id.id.to_raw()
     }
 
+    /// Helper: create a collection and return its ID.
+    async fn create_collection(db: &Surreal<Db>) -> String {
+        #[derive(serde::Deserialize)]
+        struct Row {
+            id: Thing,
+        }
+        let mut resp = db
+            .query(
+                "CREATE collection SET \
+                 name = 'Test Collection', \
+                 description = NULL, \
+                 created_at = time::now(), \
+                 updated_at = time::now()",
+            )
+            .await
+            .unwrap();
+        let rows: Vec<Row> = resp.take(0).unwrap();
+        rows.into_iter().next().unwrap().id.id.to_raw()
+    }
+
     // ── Test 1: empty notes ──────────────────────────────────────────────────
 
     #[tokio::test]
@@ -341,9 +410,15 @@ mod tests {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        let result = parse_and_sync_wikilinks(&db, "npc", "someId", "", &campaign_id)
-            .await
-            .unwrap();
+        let result = parse_and_sync_wikilinks(
+            &db,
+            "npc",
+            "someId",
+            "",
+            WikilinkScope::Campaign { campaign_id: &campaign_id },
+        )
+        .await
+        .unwrap();
 
         assert!(result.is_empty());
 
@@ -366,10 +441,15 @@ mod tests {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        let result =
-            parse_and_sync_wikilinks(&db, "npc", "someId", "[[NonExistentName]]", &campaign_id)
-                .await
-                .unwrap();
+        let result = parse_and_sync_wikilinks(
+            &db,
+            "npc",
+            "someId",
+            "[[NonExistentName]]",
+            WikilinkScope::Campaign { campaign_id: &campaign_id },
+        )
+        .await
+        .unwrap();
 
         assert!(result.is_empty());
     }
@@ -381,17 +461,15 @@ mod tests {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        // Create an entity with lowercase name "torvin"
-        let npc = create(&db, Some(&campaign_id), EntityKind::Npc, make_npc("torvin"))
+        let npc = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("torvin"))
             .await
             .unwrap();
         let expected_id = format!("npc:{}", npc.id);
 
-        // Source is a different NPC; use a placeholder source ID to avoid
-        // having the target == source in the RELATE call.
         let source_npc = create(
             &db,
             Some(&campaign_id),
+            None,
             EntityKind::Npc,
             make_npc("SourceNPC"),
         )
@@ -403,7 +481,7 @@ mod tests {
             "npc",
             &source_npc.id,
             "We met [[Torvin]] at the inn.",
-            &campaign_id,
+            WikilinkScope::Campaign { campaign_id: &campaign_id },
         )
         .await
         .unwrap();
@@ -418,30 +496,29 @@ mod tests {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        let torvin = create(&db, Some(&campaign_id), EntityKind::Npc, make_npc("Torvin"))
+        let torvin = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Torvin"))
             .await
             .unwrap();
         let source_npc = create(
             &db,
             Some(&campaign_id),
+            None,
             EntityKind::Npc,
             make_npc("SourceNPC"),
         )
         .await
         .unwrap();
 
-        // First call: [[Torvin]] creates an edge
         parse_and_sync_wikilinks(
             &db,
             "npc",
             &source_npc.id,
             "We met [[Torvin]] at the inn.",
-            &campaign_id,
+            WikilinkScope::Campaign { campaign_id: &campaign_id },
         )
         .await
         .unwrap();
 
-        // Confirm edge exists
         let mut resp = db
             .query("SELECT count() FROM relates_to GROUP ALL")
             .await
@@ -452,20 +529,18 @@ mod tests {
             .unwrap_or(0);
         assert_eq!(n, 1, "edge should exist after first call");
 
-        // Second call: no wikilinks → stale edge should be deleted
         let result2 = parse_and_sync_wikilinks(
             &db,
             "npc",
             &source_npc.id,
             "The inn was empty.",
-            &campaign_id,
+            WikilinkScope::Campaign { campaign_id: &campaign_id },
         )
         .await
         .unwrap();
 
         assert!(result2.is_empty());
 
-        // Edge must be gone
         let mut resp2 = db
             .query("SELECT count() FROM relates_to GROUP ALL")
             .await
@@ -476,7 +551,6 @@ mod tests {
             .unwrap_or(0);
         assert_eq!(n2, 0, "stale edge should be deleted after second call");
 
-        // Suppress unused variable warning from first call — we already verified above
         let _ = torvin;
     }
 
@@ -487,12 +561,13 @@ mod tests {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        let torvin = create(&db, Some(&campaign_id), EntityKind::Npc, make_npc("Torvin"))
+        let torvin = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Torvin"))
             .await
             .unwrap();
         let ironhold = create(
             &db,
             Some(&campaign_id),
+            None,
             EntityKind::Location,
             make_npc("Ironhold"),
         )
@@ -502,6 +577,7 @@ mod tests {
         let source_npc = create(
             &db,
             Some(&campaign_id),
+            None,
             EntityKind::Npc,
             make_npc("SourceNPC"),
         )
@@ -513,7 +589,7 @@ mod tests {
             "npc",
             &source_npc.id,
             "[[Torvin]] traveled to [[Ironhold]] yesterday.",
-            &campaign_id,
+            WikilinkScope::Campaign { campaign_id: &campaign_id },
         )
         .await
         .unwrap();
@@ -536,24 +612,22 @@ mod tests {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        let torvin = create(&db, Some(&campaign_id), EntityKind::Npc, make_npc("Torvin"))
+        let torvin = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Torvin"))
             .await
             .unwrap();
 
-        // source_table = "session" — should not touch relates_to
         let result = parse_and_sync_wikilinks(
             &db,
             "session",
             "somesessionid",
             "[[Torvin]] appeared.",
-            &campaign_id,
+            WikilinkScope::Campaign { campaign_id: &campaign_id },
         )
         .await
         .unwrap();
 
         assert_eq!(result, vec![format!("npc:{}", torvin.id)]);
 
-        // No relates_to edges written
         let mut resp = db
             .query("SELECT count() FROM relates_to GROUP ALL")
             .await
@@ -567,19 +641,18 @@ mod tests {
 
     // ── Test 7: duplicate edges regression ───────────────────────────────────
 
-    /// Calling `parse_and_sync_wikilinks` twice with identical notes must NOT
-    /// create two `relates_to` edges for the same source→target pair.
     #[tokio::test]
     async fn repeated_call_same_notes_produces_single_edge() {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        let torvin = create(&db, Some(&campaign_id), EntityKind::Npc, make_npc("Torvin"))
+        let torvin = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Torvin"))
             .await
             .unwrap();
         let source_npc = create(
             &db,
             Some(&campaign_id),
+            None,
             EntityKind::Npc,
             make_npc("SourceNPC"),
         )
@@ -588,17 +661,13 @@ mod tests {
 
         let notes = "We met [[Torvin]] at the inn.";
 
-        // First call
-        parse_and_sync_wikilinks(&db, "npc", &source_npc.id, notes, &campaign_id)
+        parse_and_sync_wikilinks(&db, "npc", &source_npc.id, notes, WikilinkScope::Campaign { campaign_id: &campaign_id })
+            .await
+            .unwrap();
+        parse_and_sync_wikilinks(&db, "npc", &source_npc.id, notes, WikilinkScope::Campaign { campaign_id: &campaign_id })
             .await
             .unwrap();
 
-        // Second call — same notes, same source
-        parse_and_sync_wikilinks(&db, "npc", &source_npc.id, notes, &campaign_id)
-            .await
-            .unwrap();
-
-        // Count relates_to edges where in = source and rel_type = 'mentioned'
         let source_record = format!("npc:{}", source_npc.id);
         let mut resp = db
             .query(format!(
@@ -631,8 +700,6 @@ mod tests {
         assert!(validate_identifier("npc; DROP TABLE npc").is_err());
         assert!(validate_identifier("npc->relates_to").is_err());
         assert!(validate_identifier("foo:bar").is_err());
-        // Empty string is explicitly rejected — an empty identifier would produce
-        // malformed SurrealQL like `WHERE in = :id`.
         assert!(validate_identifier("").is_err());
     }
 
@@ -648,7 +715,7 @@ mod tests {
             "npc; DROP TABLE npc",
             "someId",
             "some notes",
-            &campaign_id,
+            WikilinkScope::Campaign { campaign_id: &campaign_id },
         )
         .await;
 
@@ -677,20 +744,15 @@ mod tests {
 
     // ── Test 11: ENTITY_TABLES drift guard ────────────────────────────────────
 
-    /// Every entry in `ENTITY_TABLES` must be recognised by `EntityKind::from_table`,
-    /// and the count must match the number of `EntityKind` variants.
-    /// This test will fail if a new variant is added to one but not the other.
     #[test]
     fn entity_tables_matches_entity_kind() {
         use crate::services::entity_service::EntityKind;
 
-        // All entries in ENTITY_TABLES must round-trip through EntityKind::from_table
         for t in ENTITY_TABLES {
             EntityKind::from_table(t)
                 .unwrap_or_else(|_| panic!("ENTITY_TABLES entry '{t}' not in EntityKind"));
         }
 
-        // Count must match EntityKind variants
         let kind_count = [
             EntityKind::Npc,
             EntityKind::Location,
@@ -711,19 +773,18 @@ mod tests {
 
     // ── Test 12: duplicate wikilinks produce a single edge ────────────────────
 
-    /// `[[Torvin]] met [[Torvin]] again` must result in exactly one
-    /// `relates_to` edge, not two.
     #[tokio::test]
     async fn duplicate_wikilink_in_notes_produces_single_edge() {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        let torvin = create(&db, Some(&campaign_id), EntityKind::Npc, make_npc("Torvin"))
+        let torvin = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Torvin"))
             .await
             .unwrap();
         let source_npc = create(
             &db,
             Some(&campaign_id),
+            None,
             EntityKind::Npc,
             make_npc("SourceNPC"),
         )
@@ -735,7 +796,7 @@ mod tests {
             "npc",
             &source_npc.id,
             "[[Torvin]] met [[Torvin]] again",
-            &campaign_id,
+            WikilinkScope::Campaign { campaign_id: &campaign_id },
         )
         .await
         .unwrap();
@@ -758,5 +819,85 @@ mod tests {
             n, 1,
             "duplicate wikilinks must produce exactly one edge, got {n}"
         );
+    }
+
+    // ── Test 13: collection scope only resolves same-collection entities ───────
+
+    #[tokio::test]
+    async fn collection_scope_resolves_same_collection_entities() {
+        let db = setup_db().await;
+        let col_id = create_collection(&db).await;
+
+        let npc = create(&db, None, Some(&col_id), EntityKind::Npc, make_npc("Goblin"))
+            .await
+            .unwrap();
+        let expected_id = format!("npc:{}", npc.id);
+
+        // A campaign entity with the same name — must NOT match under collection scope
+        let campaign_id = create_campaign(&db).await;
+        create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Goblin"))
+            .await
+            .unwrap();
+
+        let source_npc = create(&db, None, Some(&col_id), EntityKind::Npc, make_npc("SourceNPC"))
+            .await
+            .unwrap();
+
+        let result = parse_and_sync_wikilinks(
+            &db,
+            "npc",
+            &source_npc.id,
+            "We fought [[Goblin]].",
+            WikilinkScope::Collection { collection_id: &col_id },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], expected_id, "should match collection entity, not campaign entity");
+    }
+
+    // ── Test 14: campaign scope resolves subscribed collection entities ────────
+
+    #[tokio::test]
+    async fn campaign_scope_resolves_subscribed_collection_entities() {
+        let db = setup_db().await;
+        let campaign_id = create_campaign(&db).await;
+        let col_id = create_collection(&db).await;
+
+        // Subscribe campaign to collection
+        db.query(
+            "LET $in  = type::thing('campaign',   $cid); \
+             LET $out = type::thing('collection', $colid); \
+             RELATE $in->subscribes_to->$out SET created_at = time::now()",
+        )
+        .bind(("cid", campaign_id.clone()))
+        .bind(("colid", col_id.clone()))
+        .await
+        .unwrap();
+
+        // Create collection entity
+        let col_npc = create(&db, None, Some(&col_id), EntityKind::Npc, make_npc("Dungeon Master"))
+            .await
+            .unwrap();
+        let expected_id = format!("npc:{}", col_npc.id);
+
+        // Create campaign entity source
+        let source = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Player"))
+            .await
+            .unwrap();
+
+        let result = parse_and_sync_wikilinks(
+            &db,
+            "npc",
+            &source.id,
+            "Asked the [[Dungeon Master]] for help.",
+            WikilinkScope::Campaign { campaign_id: &campaign_id },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], expected_id);
     }
 }

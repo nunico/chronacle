@@ -133,7 +133,7 @@ pub async fn create<C: surrealdb::Connection>(
         "session",
         &id,
         &input.notes,
-        campaign_id,
+        crate::services::wikilink::WikilinkScope::Campaign { campaign_id },
     )
     .await;
 
@@ -253,7 +253,9 @@ pub async fn update<C: surrealdb::Connection>(
         "session",
         id,
         &input.notes,
-        &campaign_id_for_wikilinks,
+        crate::services::wikilink::WikilinkScope::Campaign {
+            campaign_id: &campaign_id_for_wikilinks,
+        },
     )
     .await;
 

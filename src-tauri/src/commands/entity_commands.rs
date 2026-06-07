@@ -40,7 +40,7 @@ pub async fn create_entity(
     input: EntityInput,
 ) -> Result<GraphNode, EntityError> {
     let k = parse_kind(&kind)?;
-    entity_service::create(&state.db, Some(&campaign_id), k, input).await
+    entity_service::create(&state.db, Some(&campaign_id), None, k, input).await
 }
 
 #[tauri::command]

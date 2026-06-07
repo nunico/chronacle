@@ -4,6 +4,9 @@ pub use entity_commands::*;
 pub mod session_commands;
 pub use session_commands::*;
 
+pub mod extraction_commands;
+pub use extraction_commands::*;
+
 use std::sync::Arc;
 
 use crate::AppState;

@@ -11,6 +11,8 @@ pub enum EntityError {
     NotFound { id: String },
     #[error("Entity does not belong to the specified campaign")]
     CampaignMismatch,
+    #[error("Collection entity cannot link to a campaign entity")]
+    CrossLinkViolation,
     #[error("Unknown entity kind: '{kind}'")]
     InvalidKind { kind: String },
     #[error("Validation error on field '{field}': {message}")]
@@ -65,14 +67,31 @@ impl EntityKind {
     }
 }
 
+// ── SELECT alias clause ───────────────────────────────────────────────────────
+
+/// Appended to every SELECT that needs to populate `campaign` and `collection`
+/// in `GraphNodeRecord` via backward edge traversal.
+///
+/// Using `array::first(...)` to project a single record (or NULL when no edge
+/// exists) from the `in_campaign` / `in_collection` edge tables.
+const SELECT_SCOPE_ALIASES: &str =
+    "array::first(<-in_campaign<-campaign) AS campaign, \
+     array::first(<-in_collection<-collection) AS collection";
+
 // ── Data structs ─────────────────────────────────────────────────────────────
 
 /// Internal SurrealDB record — all type-specific fields are Option so a single
 /// struct deserializes any node table.
+///
+/// `campaign` and `collection` are NOT stored scalar fields — they are projected
+/// via the `SELECT_SCOPE_ALIASES` clause in every SELECT query.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct GraphNodeRecord {
     pub id: Thing,
+    // populated via backward traversal: array::first(<-in_campaign<-campaign)
     pub campaign: Option<Thing>,
+    // populated via backward traversal: array::first(<-in_collection<-collection)
+    pub collection: Option<Thing>,
     pub name: String,
     pub summary: Option<String>,
     pub notes: Option<String>,
@@ -99,6 +118,7 @@ impl From<GraphNodeRecord> for GraphNode {
             id: r.id.id.to_raw(),
             kind: r.id.tb.clone(),
             campaign_id: r.campaign.map(|t| t.id.to_raw()),
+            collection_id: r.collection.map(|t| t.id.to_raw()),
             name: r.name,
             summary: r.summary,
             notes: r.notes,
@@ -125,6 +145,7 @@ pub struct GraphNode {
     pub id: String,
     pub kind: String,
     pub campaign_id: Option<String>,
+    pub collection_id: Option<String>,
     pub name: String,
     pub summary: Option<String>,
     pub notes: Option<String>,
@@ -169,10 +190,15 @@ pub struct EntityInput {
 
 // ── Service functions ────────────────────────────────────────────────────────
 
-/// Create a new graph node of the given kind scoped to an optional campaign.
+/// Create a new graph node of the given kind, scoped to a campaign or collection.
+///
+/// Scope membership is recorded via `in_campaign` or `in_collection` edge tables
+/// (not scalar fields). After creation, any `[[wikilinks]]` in `notes` are
+/// resolved against the same scope and synced to `relates_to` edges.
 pub async fn create<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     campaign_id: Option<&str>,
+    collection_id: Option<&str>,
     kind: EntityKind,
     input: EntityInput,
 ) -> Result<GraphNode, EntityError> {
@@ -184,77 +210,121 @@ pub async fn create<C: surrealdb::Connection>(
     }
     let table = kind.table_name();
     let id = uuid::Uuid::new_v4().to_string().replace('-', "");
-    // Clone values needed after the bind chain consumes them.
     let id_for_wikilinks = id.clone();
     let notes_for_wikilinks = input.notes.clone();
-    let mut response = db
-        .query(
-            "CREATE type::thing($table, $id) SET
-                campaign        = IF $campaign_id IS NOT NONE THEN type::thing('campaign', $campaign_id) ELSE NULL END,
-                name            = $name,
-                summary         = $summary,
-                notes           = $notes,
-                date_start      = $date_start,
-                date_end        = $date_end,
-                is_ongoing      = $is_ongoing,
-                sequence_index  = $sequence_index,
-                era             = $era,
-                duration_label  = $duration_label,
-                session         = IF $session_id IS NOT NONE THEN type::thing('session', $session_id) ELSE NULL END,
-                player_name     = $player_name,
-                character_class = $character_class,
-                character_level = $character_level,
-                status          = $status,
-                created_at      = time::now(),
-                updated_at      = time::now()",
+
+    // 1. Create the entity record. Scope (campaign/collection) is NOT a field
+    //    here — it is stored as an edge in the next step.
+    db.query(
+        "CREATE type::thing($table, $id) SET
+            name            = $name,
+            summary         = $summary,
+            notes           = $notes,
+            date_start      = $date_start,
+            date_end        = $date_end,
+            is_ongoing      = $is_ongoing,
+            sequence_index  = $sequence_index,
+            era             = $era,
+            duration_label  = $duration_label,
+            session         = IF $session_id IS NOT NONE THEN type::thing('session', $session_id) ELSE NULL END,
+            player_name     = $player_name,
+            character_class = $character_class,
+            character_level = $character_level,
+            status          = $status,
+            created_at      = time::now(),
+            updated_at      = time::now()",
+    )
+    .bind(("table", table))
+    .bind(("id", id.clone()))
+    .bind(("name", input.name.trim().to_owned()))
+    .bind(("summary", input.summary))
+    .bind(("notes", input.notes))
+    .bind(("date_start", input.date_start))
+    .bind(("date_end", input.date_end))
+    .bind(("is_ongoing", input.is_ongoing))
+    .bind(("sequence_index", input.sequence_index))
+    .bind(("era", input.era))
+    .bind(("duration_label", input.duration_label))
+    .bind(("session_id", input.session_id))
+    .bind(("player_name", input.player_name))
+    .bind(("character_class", input.character_class))
+    .bind(("character_level", input.character_level))
+    .bind(("status", input.status))
+    .await
+    .map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
+
+    // 2. Create the scope edge.
+    if let Some(cid) = campaign_id {
+        db.query(
+            "LET $src = type::thing('campaign', $cid); \
+             LET $dst = type::thing($table, $id); \
+             RELATE $src->in_campaign->$dst SET created_at = time::now()",
         )
+        .bind(("cid", cid.to_owned()))
         .bind(("table", table))
-        .bind(("id", id))
-        .bind(("campaign_id", campaign_id.map(|s| s.to_owned())))
-        .bind(("name", input.name.trim().to_owned()))
-        .bind(("summary", input.summary))
-        .bind(("notes", input.notes))
-        .bind(("date_start", input.date_start))
-        .bind(("date_end", input.date_end))
-        .bind(("is_ongoing", input.is_ongoing))
-        .bind(("sequence_index", input.sequence_index))
-        .bind(("era", input.era))
-        .bind(("duration_label", input.duration_label))
-        .bind(("session_id", input.session_id))
-        .bind(("player_name", input.player_name))
-        .bind(("character_class", input.character_class))
-        .bind(("character_level", input.character_level))
-        .bind(("status", input.status))
+        .bind(("id", id.clone()))
         .await
         .map_err(|e| EntityError::Database {
             message: e.to_string(),
         })?;
-    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+    }
+    if let Some(col) = collection_id {
+        db.query(
+            "LET $src = type::thing('collection', $col); \
+             LET $dst = type::thing($table, $id); \
+             RELATE $src->in_collection->$dst SET created_at = time::now()",
+        )
+        .bind(("col", col.to_owned()))
+        .bind(("table", table))
+        .bind(("id", id.clone()))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    }
+
+    // 3. Fetch back with backward-traversal aliases to populate campaign/collection.
+    let fetch_sql = format!(
+        "SELECT *, {SELECT_SCOPE_ALIASES} FROM type::thing($table, $id)"
+    );
+    let mut fetch_resp = db
+        .query(fetch_sql)
+        .bind(("table", table))
+        .bind(("id", id.clone()))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let records: Vec<GraphNodeRecord> = fetch_resp.take(0).map_err(|e| EntityError::Database {
         message: e.to_string(),
     })?;
-    let node: GraphNode =
-        records
-            .into_iter()
-            .next()
-            .map(Into::into)
-            .ok_or_else(|| EntityError::Database {
-                message: "No record returned after create".to_string(),
-            })?;
+    let node: GraphNode = records
+        .into_iter()
+        .next()
+        .map(Into::into)
+        .ok_or_else(|| EntityError::Database {
+            message: "No record returned after create".to_string(),
+        })?;
 
-    // Sync wikilinks in notes to relates_to edges (fire-and-forget: ignore errors
-    // so a wikilink resolution failure never blocks the entity save).
-    // Awaited synchronously: entity count is small in practice, and spawning would
-    // require C: Clone + Send + 'static which conflicts with the generic bound used
-    // in tests.
+    // 4. Sync wikilinks in notes to relates_to edges (fire-and-forget: ignore errors
+    //    so a wikilink resolution failure never blocks the entity save).
     if let Some(notes) = &notes_for_wikilinks {
         if !notes.is_empty() {
-            if let Some(cid) = campaign_id {
+            use crate::services::wikilink::WikilinkScope;
+            let scope = match (campaign_id, collection_id) {
+                (Some(cid), _) => Some(WikilinkScope::Campaign { campaign_id: cid }),
+                (_, Some(col)) => Some(WikilinkScope::Collection { collection_id: col }),
+                _ => None,
+            };
+            if let Some(scope) = scope {
                 let _ = crate::services::wikilink::parse_and_sync_wikilinks(
                     db,
                     table,
                     &id_for_wikilinks,
                     notes,
-                    cid,
+                    scope,
                 )
                 .await;
             }
@@ -271,8 +341,9 @@ pub async fn get_by_id<C: surrealdb::Connection>(
     kind: EntityKind,
 ) -> Result<GraphNode, EntityError> {
     let table = kind.table_name();
+    let sql = format!("SELECT *, {SELECT_SCOPE_ALIASES} FROM type::thing($table, $id)");
     let mut response = db
-        .query("SELECT * FROM type::thing($table, $id)")
+        .query(sql)
         .bind(("table", table))
         .bind(("id", id.to_owned()))
         .await
@@ -290,14 +361,22 @@ pub async fn get_by_id<C: surrealdb::Connection>(
 }
 
 /// List all nodes of a kind for a campaign, ordered by name.
+///
+/// Queries via `in_campaign` edge traversal rather than a scalar `campaign` field.
 pub async fn get_by_campaign<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     campaign_id: &str,
     kind: EntityKind,
 ) -> Result<Vec<GraphNode>, EntityError> {
     let table = kind.table_name();
+    let sql = format!(
+        "SELECT *, {SELECT_SCOPE_ALIASES} \
+         FROM type::table($table) \
+         WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $campaign_id)) \
+         ORDER BY name ASC"
+    );
     let mut response = db
-        .query("SELECT * FROM type::table($table) WHERE campaign = type::thing('campaign', $campaign_id) ORDER BY name ASC")
+        .query(sql)
         .bind(("table", table))
         .bind(("campaign_id", campaign_id.to_owned()))
         .await
@@ -308,6 +387,65 @@ pub async fn get_by_campaign<C: surrealdb::Connection>(
         message: e.to_string(),
     })?;
     Ok(records.into_iter().map(Into::into).collect())
+}
+
+/// List all nodes of a kind for a collection, ordered by name.
+pub async fn get_by_collection<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    collection_id: &str,
+    kind: EntityKind,
+) -> Result<Vec<GraphNode>, EntityError> {
+    let table = kind.table_name();
+    let sql = format!(
+        "SELECT *, {SELECT_SCOPE_ALIASES} \
+         FROM type::table($table) \
+         WHERE id IN (SELECT VALUE out FROM in_collection WHERE in = type::thing('collection', $collection_id)) \
+         ORDER BY name ASC"
+    );
+    let mut response = db
+        .query(sql)
+        .bind(("table", table))
+        .bind(("collection_id", collection_id.to_owned()))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
+    Ok(records.into_iter().map(Into::into).collect())
+}
+
+/// Find a collection-scoped entity by name (case-insensitive) and kind.
+///
+/// Used by `ExtractionService` for deduplication before creating new entities.
+pub async fn find_by_name_and_collection<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    collection_id: &str,
+    name: &str,
+    kind: EntityKind,
+) -> Result<Option<GraphNode>, EntityError> {
+    let table = kind.table_name();
+    let sql = format!(
+        "SELECT *, {SELECT_SCOPE_ALIASES} \
+         FROM type::table($table) \
+         WHERE id IN (SELECT VALUE out FROM in_collection WHERE in = type::thing('collection', $collection_id)) \
+             AND string::lowercase(name) = string::lowercase($name) \
+         LIMIT 1"
+    );
+    let mut response = db
+        .query(sql)
+        .bind(("table", table))
+        .bind(("collection_id", collection_id.to_owned()))
+        .bind(("name", name.to_owned()))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
+    Ok(records.into_iter().next().map(Into::into))
 }
 
 /// Update an existing graph node. Returns NotFound if the record doesn't exist.
@@ -324,27 +462,28 @@ pub async fn update<C: surrealdb::Connection>(
         });
     }
     let table = kind.table_name();
-    // Clone notes before the bind chain consumes input.
     let notes_for_wikilinks = input.notes.clone();
+    let update_sql = format!(
+        "UPDATE type::thing($table, $id) SET
+            name           = $name,
+            summary        = $summary,
+            notes          = $notes,
+            date_start     = $date_start,
+            date_end       = $date_end,
+            is_ongoing     = $is_ongoing,
+            sequence_index = $sequence_index,
+            era            = $era,
+            duration_label = $duration_label,
+            session        = IF $session_id IS NOT NONE THEN type::thing('session', $session_id) ELSE NULL END,
+            player_name    = $player_name,
+            character_class = $character_class,
+            character_level = $character_level,
+            status         = $status,
+            updated_at     = time::now();
+         SELECT *, {SELECT_SCOPE_ALIASES} FROM type::thing($table, $id)"
+    );
     let mut response = db
-        .query(
-            "UPDATE type::thing($table, $id) SET
-                name           = $name,
-                summary        = $summary,
-                notes          = $notes,
-                date_start     = $date_start,
-                date_end       = $date_end,
-                is_ongoing     = $is_ongoing,
-                sequence_index = $sequence_index,
-                era            = $era,
-                duration_label = $duration_label,
-                session        = IF $session_id IS NOT NONE THEN type::thing('session', $session_id) ELSE NULL END,
-                player_name    = $player_name,
-                character_class = $character_class,
-                character_level = $character_level,
-                status         = $status,
-                updated_at     = time::now()",
-        )
+        .query(update_sql)
         .bind(("table", table))
         .bind(("id", id.to_owned()))
         .bind(("name", input.name.trim().to_owned()))
@@ -365,7 +504,8 @@ pub async fn update<C: surrealdb::Connection>(
         .map_err(|e| EntityError::Database {
             message: e.to_string(),
         })?;
-    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+    // The UPDATE is at index 0; the SELECT is at index 1.
+    let records: Vec<GraphNodeRecord> = response.take(1).map_err(|e| EntityError::Database {
         message: e.to_string(),
     })?;
     let node: GraphNode = records
@@ -374,14 +514,16 @@ pub async fn update<C: surrealdb::Connection>(
         .map(Into::into)
         .ok_or_else(|| EntityError::NotFound { id: id.to_string() })?;
 
-    // Sync wikilinks in notes to relates_to edges (fire-and-forget: ignore errors
-    // so a wikilink resolution failure never blocks the entity save).
-    // Awaited synchronously: entity count is small in practice, and spawning would
-    // require C: Clone + Send + 'static which conflicts with the generic bound used
-    // in tests.
+    // Sync wikilinks in notes to relates_to edges (fire-and-forget).
     if let Some(ref notes) = notes_for_wikilinks {
-        if let Some(ref cid) = node.campaign_id {
-            let _ = crate::services::wikilink::parse_and_sync_wikilinks(db, table, id, notes, cid)
+        use crate::services::wikilink::WikilinkScope;
+        let scope = match (node.campaign_id.as_deref(), node.collection_id.as_deref()) {
+            (Some(cid), _) => Some(WikilinkScope::Campaign { campaign_id: cid }),
+            (_, Some(col)) => Some(WikilinkScope::Collection { collection_id: col }),
+            _ => None,
+        };
+        if let Some(scope) = scope {
+            let _ = crate::services::wikilink::parse_and_sync_wikilinks(db, table, id, notes, scope)
                 .await;
         }
     }
@@ -390,16 +532,16 @@ pub async fn update<C: surrealdb::Connection>(
 }
 
 /// Return all events that reference the given session.
-///
-/// Used by `session_service::get_entities` to surface the events associated
-/// with a session log entry.  In Phase 3 this can be replaced with a proper
-/// session→entity edge traversal once those edges are added to the schema.
 pub async fn get_events_for_session<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     session_id: &str,
 ) -> Result<Vec<GraphNode>, EntityError> {
+    let sql = format!(
+        "SELECT *, {SELECT_SCOPE_ALIASES} FROM event \
+         WHERE session = type::thing('session', $session_id)"
+    );
     let mut response = db
-        .query("SELECT * FROM event WHERE session = type::thing('session', $session_id)")
+        .query(sql)
         .bind(("session_id", session_id.to_owned()))
         .await
         .map_err(|e| EntityError::Database {
@@ -498,5 +640,206 @@ mod tests {
     fn entity_kind_from_table_unknown_returns_invalid_kind() {
         let err = EntityKind::from_table("goblin").unwrap_err();
         assert!(matches!(err, EntityError::InvalidKind { kind } if kind == "goblin"));
+    }
+
+    #[tokio::test]
+    async fn create_with_campaign_id_populates_campaign_via_edge() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let node = create(
+            &db,
+            Some("camp1"),
+            None,
+            EntityKind::Npc,
+            EntityInput {
+                name: "Torvin".to_string(),
+                summary: None,
+                notes: None,
+                date_start: None,
+                date_end: None,
+                is_ongoing: None,
+                sequence_index: None,
+                era: None,
+                duration_label: None,
+                session_id: None,
+                player_name: None,
+                character_class: None,
+                character_level: None,
+                status: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(node.campaign_id.as_deref(), Some("camp1"));
+        assert!(node.collection_id.is_none());
+
+        // Verify in_campaign edge was written
+        let mut resp = db
+            .query("SELECT count() FROM in_campaign WHERE in = type::thing('campaign','camp1') GROUP ALL")
+            .await
+            .unwrap();
+        #[derive(serde::Deserialize)]
+        struct C { count: i64 }
+        let counts: Vec<C> = resp.take(0).unwrap();
+        assert_eq!(counts.first().map(|c| c.count).unwrap_or(0), 1);
+    }
+
+    #[tokio::test]
+    async fn create_with_collection_id_populates_collection_via_edge() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE collection SET id='col1', name='PHB', description=NULL, \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let node = create(
+            &db,
+            None,
+            Some("col1"),
+            EntityKind::Npc,
+            EntityInput {
+                name: "Goblin".to_string(),
+                summary: None,
+                notes: None,
+                date_start: None,
+                date_end: None,
+                is_ongoing: None,
+                sequence_index: None,
+                era: None,
+                duration_label: None,
+                session_id: None,
+                player_name: None,
+                character_class: None,
+                character_level: None,
+                status: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(node.campaign_id.is_none());
+        assert_eq!(node.collection_id.as_deref(), Some("col1"));
+    }
+
+    #[tokio::test]
+    async fn get_by_campaign_returns_only_campaign_entities() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='5e', \
+             created_at=time::now(), updated_at=time::now(); \
+             CREATE collection SET id='col1', name='PHB', description=NULL, \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let input = |name: &str| EntityInput {
+            name: name.to_string(),
+            summary: None, notes: None, date_start: None, date_end: None,
+            is_ongoing: None, sequence_index: None, era: None, duration_label: None,
+            session_id: None, player_name: None, character_class: None,
+            character_level: None, status: None,
+        };
+
+        create(&db, Some("camp1"), None, EntityKind::Npc, input("Torvin")).await.unwrap();
+        create(&db, None, Some("col1"), EntityKind::Npc, input("Goblin")).await.unwrap();
+
+        let results = get_by_campaign(&db, "camp1", EntityKind::Npc).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Torvin");
+    }
+
+    #[tokio::test]
+    async fn get_by_collection_returns_only_collection_entities() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='5e', \
+             created_at=time::now(), updated_at=time::now(); \
+             CREATE collection SET id='col1', name='PHB', description=NULL, \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let input = |name: &str| EntityInput {
+            name: name.to_string(),
+            summary: None, notes: None, date_start: None, date_end: None,
+            is_ongoing: None, sequence_index: None, era: None, duration_label: None,
+            session_id: None, player_name: None, character_class: None,
+            character_level: None, status: None,
+        };
+
+        create(&db, Some("camp1"), None, EntityKind::Npc, input("Torvin")).await.unwrap();
+        create(&db, None, Some("col1"), EntityKind::Npc, input("Goblin")).await.unwrap();
+
+        let results = get_by_collection(&db, "col1", EntityKind::Npc).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Goblin");
+    }
+
+    #[tokio::test]
+    async fn find_by_name_and_collection_is_case_insensitive() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE collection SET id='col1', name='PHB', description=NULL, \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let input = |name: &str| EntityInput {
+            name: name.to_string(),
+            summary: None, notes: None, date_start: None, date_end: None,
+            is_ongoing: None, sequence_index: None, era: None, duration_label: None,
+            session_id: None, player_name: None, character_class: None,
+            character_level: None, status: None,
+        };
+
+        create(&db, None, Some("col1"), EntityKind::Npc, input("The Iron Fist")).await.unwrap();
+
+        let found = find_by_name_and_collection(&db, "col1", "the iron fist", EntityKind::Npc)
+            .await
+            .unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "The Iron Fist");
+
+        let not_found = find_by_name_and_collection(&db, "col1", "other", EntityKind::Npc)
+            .await
+            .unwrap();
+        assert!(not_found.is_none());
     }
 }
