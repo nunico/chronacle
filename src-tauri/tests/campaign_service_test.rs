@@ -83,15 +83,13 @@ async fn get_all_returns_multiple_campaigns() {
     let db = setup_db().await;
 
     let first = create(&db, "Alpha Campaign", "D&D 5e").await.unwrap();
-    let second = create(&db, "Beta Campaign", "Call of Cthulhu").await.unwrap();
+    let second = create(&db, "Beta Campaign", "Call of Cthulhu")
+        .await
+        .unwrap();
 
     let all = get_all(&db).await.unwrap();
 
-    assert!(
-        all.len() >= 2,
-        "expected at least 2 campaigns, got {}",
-        all.len()
-    );
+    assert_eq!(all.len(), 2, "Expected exactly 2 campaigns");
 
     let ids: Vec<&str> = all.iter().map(|c| c.id.as_str()).collect();
     assert!(

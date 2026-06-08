@@ -28,9 +28,7 @@ async fn fetch_history(db: &Surreal<Db>, campaign_id: Option<&str>) -> Vec<(Stri
                  WHERE campaign = campaign:`{safe_id}` ORDER BY created_at ASC"
             )
         }
-        None => {
-            "SELECT role, content, created_at FROM message ORDER BY created_at ASC".to_string()
-        }
+        None => "SELECT role, content, created_at FROM message ORDER BY created_at ASC".to_string(),
     };
 
     let mut resp = db.query(sql).await.unwrap();
@@ -106,7 +104,11 @@ async fn campaign_messages_in_global_query() {
     // The None query has no WHERE filter — both messages should be returned.
     let history = fetch_history(&db, None).await;
 
-    assert_eq!(history.len(), 2, "both messages should appear in global query");
+    assert_eq!(
+        history.len(),
+        2,
+        "both messages should appear in global query"
+    );
 }
 
 // ── Test 4 ───────────────────────────────────────────────────────────────────
@@ -137,9 +139,11 @@ async fn messages_ordered_by_creation_time() {
     let db = setup_db().await;
 
     persist_message(&db, "user", "first", None).await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-    persist_assistant_message(&db, "second", None).await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    persist_assistant_message(&db, "second", None)
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     persist_message(&db, "user", "third", None).await.unwrap();
 
     let history = fetch_history(&db, None).await;
