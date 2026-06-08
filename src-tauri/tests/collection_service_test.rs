@@ -17,7 +17,7 @@ async fn setup_db() -> Surreal<Db> {
     db
 }
 
-async fn make_campaign(db: &Surreal<Db>) -> campaign_service::Campaign {
+async fn create_test_campaign(db: &Surreal<Db>) -> campaign_service::Campaign {
     campaign_service::create(db, "Test Campaign", "D&D 5e")
         .await
         .unwrap()
@@ -53,18 +53,17 @@ async fn create_collection_without_description() {
 // ── Test 3 ───────────────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn get_all_returns_all_collections() {
+async fn get_all_returns_collections_ordered_by_name() {
     let db = setup_db().await;
 
-    create(&db, "Alpha", None).await.unwrap();
-    create(&db, "Beta", None).await.unwrap();
+    create(&db, "Zzz", None).await.unwrap();
+    create(&db, "Aaa", None).await.unwrap();
 
     let all = get_all(&db).await.unwrap();
 
     assert_eq!(all.len(), 2);
-    let names: Vec<&str> = all.iter().map(|c| c.name.as_str()).collect();
-    assert!(names.contains(&"Alpha"));
-    assert!(names.contains(&"Beta"));
+    assert_eq!(all[0].name, "Aaa");
+    assert_eq!(all[1].name, "Zzz");
 }
 
 // ── Test 4 ───────────────────────────────────────────────────────────────────
@@ -79,6 +78,17 @@ async fn get_by_id_returns_collection() {
     assert_eq!(fetched.id, created.id);
     assert_eq!(fetched.name, "Pathfinder 2e");
     assert_eq!(fetched.description.as_deref(), Some("PF2e core"));
+}
+
+// ── Test 4b ──────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn get_by_id_not_found_returns_error() {
+    let db = setup_db().await;
+
+    let result = get_by_id(&db, "nonexistent_id").await;
+
+    assert!(result.is_err());
 }
 
 // ── Test 5 ───────────────────────────────────────────────────────────────────
@@ -107,7 +117,7 @@ async fn delete_collection_removes_it() {
     delete(&db, &col.id).await.unwrap();
 
     let all = get_all(&db).await.unwrap();
-    assert!(!all.iter().any(|c| c.id == col.id));
+    assert!(all.is_empty());
 }
 
 // ── Test 7 ───────────────────────────────────────────────────────────────────
@@ -117,7 +127,7 @@ async fn delete_collection_blocked_when_campaign_subscribed() {
     let db = setup_db().await;
 
     let col = create(&db, "Protected", None).await.unwrap();
-    let campaign = make_campaign(&db).await;
+    let campaign = create_test_campaign(&db).await;
 
     add_campaign_collection(&db, &campaign.id, &col.id)
         .await
@@ -126,10 +136,41 @@ async fn delete_collection_blocked_when_campaign_subscribed() {
     let result = delete(&db, &col.id).await;
 
     assert!(result.is_err());
-    let msg = result.unwrap_err().to_lowercase();
+    let msg = result.unwrap_err();
     assert!(
-        msg.contains("subscribed") || msg.contains("subscription"),
-        "expected error message to contain 'subscribed' or 'subscription', got: {msg}"
+        msg.contains("campaigns are subscribed"),
+        "Expected 'campaigns are subscribed' error, got: {msg}"
+    );
+}
+
+// ── Test 7b ──────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn delete_collection_blocked_when_source_exists() {
+    let db = setup_db().await;
+    let col = create(&db, "With Sources", None).await.unwrap();
+
+    // Insert a source record that references this collection.
+    // Must set campaign=NULL explicitly (SCHEMAFULL, no DEFAULT for this field in 001)
+    // and indexed_at because it has no DEFAULT.
+    db.query(
+        "CREATE source SET campaign=NULL, \
+         collection=type::thing('collection', $cid), \
+         filename='test.pdf', display_name='Test', source_type='rules', \
+         page_count=1, indexed_at=time::now(), index_status='done', \
+         embed_model='nomic-embed-text-v1.5'",
+    )
+    .bind(("cid", col.id.clone()))
+    .await
+    .unwrap();
+
+    let result = delete(&db, &col.id).await;
+
+    assert!(result.is_err());
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("sources exist"),
+        "Expected 'sources exist' error, got: {msg}"
     );
 }
 
@@ -140,7 +181,7 @@ async fn add_campaign_collection_creates_subscription() {
     let db = setup_db().await;
 
     let col = create(&db, "D&D 5e Core", None).await.unwrap();
-    let campaign = make_campaign(&db).await;
+    let campaign = create_test_campaign(&db).await;
 
     add_campaign_collection(&db, &campaign.id, &col.id)
         .await
@@ -159,7 +200,7 @@ async fn add_campaign_collection_is_idempotent() {
     let db = setup_db().await;
 
     let col = create(&db, "Idempotent Test", None).await.unwrap();
-    let campaign = make_campaign(&db).await;
+    let campaign = create_test_campaign(&db).await;
 
     add_campaign_collection(&db, &campaign.id, &col.id)
         .await
@@ -179,7 +220,7 @@ async fn remove_campaign_collection_unsubscribes() {
     let db = setup_db().await;
 
     let col = create(&db, "To Remove", None).await.unwrap();
-    let campaign = make_campaign(&db).await;
+    let campaign = create_test_campaign(&db).await;
 
     add_campaign_collection(&db, &campaign.id, &col.id)
         .await
@@ -188,8 +229,8 @@ async fn remove_campaign_collection_unsubscribes() {
         .await
         .unwrap();
 
-    let cols = get_campaign_collections(&db, &campaign.id).await.unwrap();
-    assert!(!cols.iter().any(|c| c.id == col.id));
+    let subscribed = get_campaign_collections(&db, &campaign.id).await.unwrap();
+    assert!(subscribed.is_empty());
 }
 
 // ── Test 11 ──────────────────────────────────────────────────────────────────
@@ -200,7 +241,7 @@ async fn get_campaign_collections_excludes_unsubscribed() {
 
     let col_a = create(&db, "Collection A", None).await.unwrap();
     let col_b = create(&db, "Collection B", None).await.unwrap();
-    let campaign = make_campaign(&db).await;
+    let campaign = create_test_campaign(&db).await;
 
     // Subscribe to col_a only
     add_campaign_collection(&db, &campaign.id, &col_a.id)
