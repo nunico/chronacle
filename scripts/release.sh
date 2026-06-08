@@ -34,19 +34,13 @@ fi
 
 echo "Bumping version to $VERSION..."
 
-# tauri.conf.json
 node -e "
   const fs = require('fs');
   const conf = JSON.parse(fs.readFileSync('$TAURI_CONF', 'utf8'));
   conf.version = '$VERSION';
   fs.writeFileSync('$TAURI_CONF', JSON.stringify(conf, null, '\t') + '\n');
-"
-
-# src-tauri/Cargo.toml — update the [package] version field only (first occurrence)
-node -e "
-  const fs = require('fs');
-  const content = fs.readFileSync('$CARGO_TOML', 'utf8');
-  fs.writeFileSync('$CARGO_TOML', content.replace(/^version = \"[^\"]+\"/m, 'version = \"$VERSION\"'));
+  const toml = fs.readFileSync('$CARGO_TOML', 'utf8');
+  fs.writeFileSync('$CARGO_TOML', toml.replace(/^version = \"[^\"]+\"/m, 'version = \"$VERSION\"'));
 "
 
 git -C "$ROOT" add "$TAURI_CONF" "$CARGO_TOML"
