@@ -80,7 +80,7 @@ async fn get_by_id_returns_collection() {
     assert_eq!(fetched.description.as_deref(), Some("PF2e core"));
 }
 
-// ── Test 4b ──────────────────────────────────────────────────────────────────
+// ── Test 5 ───────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn get_by_id_not_found_returns_error() {
@@ -88,10 +88,11 @@ async fn get_by_id_not_found_returns_error() {
 
     let result = get_by_id(&db, "nonexistent_id").await;
 
-    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.contains("not found"), "Expected not-found error, got: {err}");
 }
 
-// ── Test 5 ───────────────────────────────────────────────────────────────────
+// ── Test 6 ───────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn update_collection_changes_name_and_description() {
@@ -107,7 +108,7 @@ async fn update_collection_changes_name_and_description() {
     assert_eq!(updated.description.as_deref(), Some("New desc"));
 }
 
-// ── Test 6 ───────────────────────────────────────────────────────────────────
+// ── Test 7 ───────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn delete_collection_removes_it() {
@@ -120,7 +121,7 @@ async fn delete_collection_removes_it() {
     assert!(all.is_empty());
 }
 
-// ── Test 7 ───────────────────────────────────────────────────────────────────
+// ── Test 8 ───────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn delete_collection_blocked_when_campaign_subscribed() {
@@ -143,7 +144,7 @@ async fn delete_collection_blocked_when_campaign_subscribed() {
     );
 }
 
-// ── Test 7b ──────────────────────────────────────────────────────────────────
+// ── Test 9 ───────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn delete_collection_blocked_when_source_exists() {
@@ -162,7 +163,9 @@ async fn delete_collection_blocked_when_source_exists() {
     )
     .bind(("cid", col.id.clone()))
     .await
-    .unwrap();
+    .unwrap()
+    .check()
+    .expect("source INSERT must succeed for test precondition to hold");
 
     let result = delete(&db, &col.id).await;
 
@@ -174,7 +177,7 @@ async fn delete_collection_blocked_when_source_exists() {
     );
 }
 
-// ── Test 8 ───────────────────────────────────────────────────────────────────
+// ── Test 10 ──────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn add_campaign_collection_creates_subscription() {
@@ -193,7 +196,7 @@ async fn add_campaign_collection_creates_subscription() {
     assert_eq!(cols[0].id, col.id);
 }
 
-// ── Test 9 ───────────────────────────────────────────────────────────────────
+// ── Test 11 ──────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn add_campaign_collection_is_idempotent() {
@@ -213,7 +216,7 @@ async fn add_campaign_collection_is_idempotent() {
     assert_eq!(cols.len(), 1, "expected exactly 1 entry, got {}", cols.len());
 }
 
-// ── Test 10 ──────────────────────────────────────────────────────────────────
+// ── Test 12 ──────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn remove_campaign_collection_unsubscribes() {
@@ -233,7 +236,7 @@ async fn remove_campaign_collection_unsubscribes() {
     assert!(subscribed.is_empty());
 }
 
-// ── Test 11 ──────────────────────────────────────────────────────────────────
+// ── Test 13 ──────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn get_campaign_collections_excludes_unsubscribed() {
