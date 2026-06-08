@@ -43,13 +43,11 @@ node -e "
 "
 
 # src-tauri/Cargo.toml — update the [package] version field only (first occurrence)
-python3 -c "
-import re, sys
-path = sys.argv[1]; ver = sys.argv[2]
-content = open(path).read()
-content = re.sub(r'^version = \"[^\"]+\"', f'version = \"{ver}\"', content, count=1, flags=re.MULTILINE)
-open(path, 'w').write(content)
-" "$CARGO_TOML" "$VERSION"
+node -e "
+  const fs = require('fs');
+  const content = fs.readFileSync('$CARGO_TOML', 'utf8');
+  fs.writeFileSync('$CARGO_TOML', content.replace(/^version = \"[^\"]+\"/m, 'version = \"$VERSION\"'));
+"
 
 git -C "$ROOT" add "$TAURI_CONF" "$CARGO_TOML"
 git -C "$ROOT" commit -m "chore: bump version to $VERSION"
