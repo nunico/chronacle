@@ -49,11 +49,17 @@ describe('SettingsView', () => {
   it('displays current provider status after mount', async () => {
     render(SettingsView);
     await waitFor(() => expect(commands.getLlmProviderStatus).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.getByText('openai')).toBeTruthy();
+    });
   });
 
   it('shows custom providers section', async () => {
     render(SettingsView);
     await waitFor(() => expect(commands.getCustomProviders).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /custom providers/i })).toBeTruthy();
+    });
   });
 
   it('lists a custom provider when one exists', async () => {
@@ -70,12 +76,15 @@ describe('SettingsView', () => {
     await waitFor(() => expect(screen.getByText('My Ollama')).toBeTruthy());
   });
 
-  it('calls reconfigureLlmProvider after saving settings', async () => {
+  it('calls updateSetting for all four setting fields when Save Settings is clicked', async () => {
     render(SettingsView);
     // Wait for mount to complete
     await waitFor(() => expect(commands.getSettings).toHaveBeenCalled());
     const saveButton = screen.getByRole('button', { name: /save settings/i });
     await fireEvent.click(saveButton);
-    await waitFor(() => expect(commands.updateSetting).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(commands.updateSetting).toHaveBeenCalledTimes(4);
+    });
+    expect(commands.updateSetting).toHaveBeenCalledWith('llm_provider', expect.any(String));
   });
 });
