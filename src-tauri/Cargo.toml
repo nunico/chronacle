@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "A TTRPG GM assistant — load rules PDFs, take notes, query with cited answers."
 edition = "2021"
 rust-version = "1.95"
-license = "AGPL-3.0 WITH branding-exception"
-license-file = "LICENSE"
+license-file = "../LICENSE"
+publish = false
 
 [[bin]]
 name = "chronacle"
