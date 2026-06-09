@@ -356,6 +356,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "downloads ~80 MB model; run locally with: cargo test -- --ignored"]
     async fn test_fastembed_document_and_query_paths_compile() {
         // Confirms the trait surface is wired correctly. Returns same-dimension
         // vectors for both methods. all-MiniLM-L6-v2 doesn't use prefixes, but
@@ -478,6 +479,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "downloads ~80 MB model; run locally with: cargo test -- --ignored"]
     async fn test_fastembed_try_new_small() {
         match FastEmbedProvider::try_new_small() {
             Ok(provider) => {
