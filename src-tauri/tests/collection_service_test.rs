@@ -1,8 +1,8 @@
 use chronacle_lib::services::{
     campaign_service,
     collection_service::{
-        add_campaign_collection, create, delete, get_all, get_by_id,
-        get_campaign_collections, remove_campaign_collection, update,
+        add_campaign_collection, create, delete, get_all, get_by_id, get_campaign_collections,
+        remove_campaign_collection, update,
     },
 };
 use surrealdb::engine::local::Db;
@@ -72,7 +72,9 @@ async fn get_all_returns_collections_ordered_by_name() {
 async fn get_by_id_returns_collection() {
     let db = setup_db().await;
 
-    let created = create(&db, "Pathfinder 2e", Some("PF2e core")).await.unwrap();
+    let created = create(&db, "Pathfinder 2e", Some("PF2e core"))
+        .await
+        .unwrap();
     let fetched = get_by_id(&db, &created.id).await.unwrap();
 
     assert_eq!(fetched.id, created.id);
@@ -89,7 +91,10 @@ async fn get_by_id_not_found_returns_error() {
     let result = get_by_id(&db, "nonexistent_id").await;
 
     let err = result.unwrap_err();
-    assert!(err.contains("not found"), "Expected not-found error, got: {err}");
+    assert!(
+        err.contains("not found"),
+        "Expected not-found error, got: {err}"
+    );
 }
 
 // ── Test 6 ───────────────────────────────────────────────────────────────────
@@ -213,7 +218,12 @@ async fn add_campaign_collection_is_idempotent() {
         .unwrap();
 
     let cols = get_campaign_collections(&db, &campaign.id).await.unwrap();
-    assert_eq!(cols.len(), 1, "expected exactly 1 entry, got {}", cols.len());
+    assert_eq!(
+        cols.len(),
+        1,
+        "expected exactly 1 entry, got {}",
+        cols.len()
+    );
 }
 
 // ── Test 12 ──────────────────────────────────────────────────────────────────

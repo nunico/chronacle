@@ -225,7 +225,9 @@ pub async fn extract_from_collection<C: Connection>(
         .bind(("cid", collection_id.to_owned()))
         .await
         .map_err(|e| ExtractionError::Db(e.to_string()))?;
-    let chunks: Vec<ChunkRow> = resp.take(0).map_err(|e| ExtractionError::Db(e.to_string()))?;
+    let chunks: Vec<ChunkRow> = resp
+        .take(0)
+        .map_err(|e| ExtractionError::Db(e.to_string()))?;
 
     if chunks.is_empty() {
         return Ok(ExtractionResult {
@@ -271,10 +273,14 @@ pub async fn extract_from_collection<C: Connection>(
         for ent in &parsed.entities {
             let kind = parse_kind(&ent.kind);
             // Dedup: skip if this entity already exists in this collection.
-            let existing =
-                entity_service::find_by_name_and_collection(db, collection_id, &ent.name, kind.clone())
-                    .await
-                    .map_err(|e| ExtractionError::Db(e.to_string()))?;
+            let existing = entity_service::find_by_name_and_collection(
+                db,
+                collection_id,
+                &ent.name,
+                kind.clone(),
+            )
+            .await
+            .map_err(|e| ExtractionError::Db(e.to_string()))?;
 
             let origin_node = if let Some(node) = existing {
                 node
@@ -488,8 +494,10 @@ mod tests {
             &self,
             _system_prompt: &str,
             _messages: &[ChatMessage],
-        ) -> Result<tokio::sync::mpsc::Receiver<Result<String, crate::providers::llm_provider::LlmError>>, crate::providers::llm_provider::LlmError>
-        {
+        ) -> Result<
+            tokio::sync::mpsc::Receiver<Result<String, crate::providers::llm_provider::LlmError>>,
+            crate::providers::llm_provider::LlmError,
+        > {
             let (tx, rx) = tokio::sync::mpsc::channel(4);
             let resp = self.response.clone();
             tokio::spawn(async move {
@@ -530,7 +538,9 @@ mod tests {
         .bind(("cid", col_id.clone()))
         .await
         .unwrap();
-        let zeros = std::iter::repeat_n("0.0", 768).collect::<Vec<_>>().join(",");
+        let zeros = std::iter::repeat_n("0.0", 768)
+            .collect::<Vec<_>>()
+            .join(",");
         db.query(format!(
             "CREATE chunk SET id='chunk1', \
              text='The Iron Fist controls the eastern docks. Commander Varn leads them.', \
@@ -586,7 +596,9 @@ mod tests {
             .await
             .unwrap();
         #[derive(serde::Deserialize)]
-        struct C { count: i64 }
+        struct C {
+            count: i64,
+        }
         let counts: Vec<C> = resp.take(0).unwrap();
         assert_eq!(counts.first().map(|c| c.count).unwrap_or(0), 2);
     }
@@ -606,7 +618,9 @@ mod tests {
         }"#
         .to_string();
 
-        let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm { response: fixed_json.clone() });
+        let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+            response: fixed_json.clone(),
+        });
         let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
 
         let r1 = extract_from_collection(&db, &llm, &embed, &col_id, |_| {})
@@ -615,11 +629,16 @@ mod tests {
         assert_eq!(r1.entities_created, 1);
 
         // Second run with same response — should dedup
-        let llm2: Arc<dyn LlmProvider> = Arc::new(MockLlm { response: fixed_json });
+        let llm2: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+            response: fixed_json,
+        });
         let r2 = extract_from_collection(&db, &llm2, &embed, &col_id, |_| {})
             .await
             .unwrap();
-        assert_eq!(r2.entities_created, 0, "duplicate entity must not be re-created");
+        assert_eq!(
+            r2.entities_created, 0,
+            "duplicate entity must not be re-created"
+        );
     }
 
     #[tokio::test]
@@ -647,9 +666,14 @@ mod tests {
         // Only the faction is created — the wikilink ref stays as text, no extra entity
         assert_eq!(result.entities_created, 1);
 
-        let factions =
-            entity_service::get_by_collection(&db, &col_id, EntityKind::Faction).await.unwrap();
-        assert!(factions[0].notes.as_deref().unwrap_or("").contains("[[The Emperor's Court]]"));
+        let factions = entity_service::get_by_collection(&db, &col_id, EntityKind::Faction)
+            .await
+            .unwrap();
+        assert!(factions[0]
+            .notes
+            .as_deref()
+            .unwrap_or("")
+            .contains("[[The Emperor's Court]]"));
     }
 
     #[tokio::test]
@@ -672,10 +696,17 @@ mod tests {
                 name: "Campaign NPC".to_string(),
                 summary: None,
                 notes: None,
-                date_start: None, date_end: None, is_ongoing: None,
-                sequence_index: None, era: None, duration_label: None,
-                session_id: None, player_name: None, character_class: None,
-                character_level: None, status: None,
+                date_start: None,
+                date_end: None,
+                is_ongoing: None,
+                sequence_index: None,
+                era: None,
+                duration_label: None,
+                session_id: None,
+                player_name: None,
+                character_class: None,
+                character_level: None,
+                status: None,
             },
         )
         .await

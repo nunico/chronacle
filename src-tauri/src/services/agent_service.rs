@@ -137,10 +137,23 @@ pub async fn fetch_entity_context<C: Connection>(
             .collect::<Vec<_>>()
             .join(" OR ");
 
-        for table in &["npc", "location", "faction", "creature", "item", "event", "player_character", "misc"] {
+        for table in &[
+            "npc",
+            "location",
+            "faction",
+            "creature",
+            "item",
+            "event",
+            "player_character",
+            "misc",
+        ] {
             let sql = if let Some(qv) = query_embedding {
                 // MTREE KNN: order by cosine distance, top 10 per table.
-                let vec_str = qv.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(",");
+                let vec_str = qv
+                    .iter()
+                    .map(|f| f.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
                 format!(
                     "SELECT name, summary FROM {table} \
                      WHERE ({col_filter}) AND embedding IS NOT NONE \
@@ -150,7 +163,10 @@ pub async fn fetch_entity_context<C: Connection>(
                 // Full scan fallback (no embedding provider / test paths).
                 format!("SELECT name, summary FROM {table} WHERE {col_filter} LIMIT 50")
             };
-            let mut r = db.query(sql).await.map_err(|e| AgentError::Db(e.to_string()))?;
+            let mut r = db
+                .query(sql)
+                .await
+                .map_err(|e| AgentError::Db(e.to_string()))?;
             let rows: Vec<BasicRow> = r.take(0).map_err(|e| AgentError::Db(e.to_string()))?;
             for row in rows {
                 col_entities.push((table.to_string(), row));

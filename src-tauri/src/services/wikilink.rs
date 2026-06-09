@@ -415,7 +415,9 @@ mod tests {
             "npc",
             "someId",
             "",
-            WikilinkScope::Campaign { campaign_id: &campaign_id },
+            WikilinkScope::Campaign {
+                campaign_id: &campaign_id,
+            },
         )
         .await
         .unwrap();
@@ -446,7 +448,9 @@ mod tests {
             "npc",
             "someId",
             "[[NonExistentName]]",
-            WikilinkScope::Campaign { campaign_id: &campaign_id },
+            WikilinkScope::Campaign {
+                campaign_id: &campaign_id,
+            },
         )
         .await
         .unwrap();
@@ -461,9 +465,15 @@ mod tests {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        let npc = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("torvin"))
-            .await
-            .unwrap();
+        let npc = create(
+            &db,
+            Some(&campaign_id),
+            None,
+            EntityKind::Npc,
+            make_npc("torvin"),
+        )
+        .await
+        .unwrap();
         let expected_id = format!("npc:{}", npc.id);
 
         let source_npc = create(
@@ -481,7 +491,9 @@ mod tests {
             "npc",
             &source_npc.id,
             "We met [[Torvin]] at the inn.",
-            WikilinkScope::Campaign { campaign_id: &campaign_id },
+            WikilinkScope::Campaign {
+                campaign_id: &campaign_id,
+            },
         )
         .await
         .unwrap();
@@ -496,9 +508,15 @@ mod tests {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        let torvin = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Torvin"))
-            .await
-            .unwrap();
+        let torvin = create(
+            &db,
+            Some(&campaign_id),
+            None,
+            EntityKind::Npc,
+            make_npc("Torvin"),
+        )
+        .await
+        .unwrap();
         let source_npc = create(
             &db,
             Some(&campaign_id),
@@ -514,7 +532,9 @@ mod tests {
             "npc",
             &source_npc.id,
             "We met [[Torvin]] at the inn.",
-            WikilinkScope::Campaign { campaign_id: &campaign_id },
+            WikilinkScope::Campaign {
+                campaign_id: &campaign_id,
+            },
         )
         .await
         .unwrap();
@@ -534,7 +554,9 @@ mod tests {
             "npc",
             &source_npc.id,
             "The inn was empty.",
-            WikilinkScope::Campaign { campaign_id: &campaign_id },
+            WikilinkScope::Campaign {
+                campaign_id: &campaign_id,
+            },
         )
         .await
         .unwrap();
@@ -561,9 +583,15 @@ mod tests {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        let torvin = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Torvin"))
-            .await
-            .unwrap();
+        let torvin = create(
+            &db,
+            Some(&campaign_id),
+            None,
+            EntityKind::Npc,
+            make_npc("Torvin"),
+        )
+        .await
+        .unwrap();
         let ironhold = create(
             &db,
             Some(&campaign_id),
@@ -589,7 +617,9 @@ mod tests {
             "npc",
             &source_npc.id,
             "[[Torvin]] traveled to [[Ironhold]] yesterday.",
-            WikilinkScope::Campaign { campaign_id: &campaign_id },
+            WikilinkScope::Campaign {
+                campaign_id: &campaign_id,
+            },
         )
         .await
         .unwrap();
@@ -612,16 +642,24 @@ mod tests {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        let torvin = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Torvin"))
-            .await
-            .unwrap();
+        let torvin = create(
+            &db,
+            Some(&campaign_id),
+            None,
+            EntityKind::Npc,
+            make_npc("Torvin"),
+        )
+        .await
+        .unwrap();
 
         let result = parse_and_sync_wikilinks(
             &db,
             "session",
             "somesessionid",
             "[[Torvin]] appeared.",
-            WikilinkScope::Campaign { campaign_id: &campaign_id },
+            WikilinkScope::Campaign {
+                campaign_id: &campaign_id,
+            },
         )
         .await
         .unwrap();
@@ -646,9 +684,15 @@ mod tests {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        let torvin = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Torvin"))
-            .await
-            .unwrap();
+        let torvin = create(
+            &db,
+            Some(&campaign_id),
+            None,
+            EntityKind::Npc,
+            make_npc("Torvin"),
+        )
+        .await
+        .unwrap();
         let source_npc = create(
             &db,
             Some(&campaign_id),
@@ -661,12 +705,28 @@ mod tests {
 
         let notes = "We met [[Torvin]] at the inn.";
 
-        parse_and_sync_wikilinks(&db, "npc", &source_npc.id, notes, WikilinkScope::Campaign { campaign_id: &campaign_id })
-            .await
-            .unwrap();
-        parse_and_sync_wikilinks(&db, "npc", &source_npc.id, notes, WikilinkScope::Campaign { campaign_id: &campaign_id })
-            .await
-            .unwrap();
+        parse_and_sync_wikilinks(
+            &db,
+            "npc",
+            &source_npc.id,
+            notes,
+            WikilinkScope::Campaign {
+                campaign_id: &campaign_id,
+            },
+        )
+        .await
+        .unwrap();
+        parse_and_sync_wikilinks(
+            &db,
+            "npc",
+            &source_npc.id,
+            notes,
+            WikilinkScope::Campaign {
+                campaign_id: &campaign_id,
+            },
+        )
+        .await
+        .unwrap();
 
         let source_record = format!("npc:{}", source_npc.id);
         let mut resp = db
@@ -715,7 +775,9 @@ mod tests {
             "npc; DROP TABLE npc",
             "someId",
             "some notes",
-            WikilinkScope::Campaign { campaign_id: &campaign_id },
+            WikilinkScope::Campaign {
+                campaign_id: &campaign_id,
+            },
         )
         .await;
 
@@ -778,9 +840,15 @@ mod tests {
         let db = setup_db().await;
         let campaign_id = create_campaign(&db).await;
 
-        let torvin = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Torvin"))
-            .await
-            .unwrap();
+        let torvin = create(
+            &db,
+            Some(&campaign_id),
+            None,
+            EntityKind::Npc,
+            make_npc("Torvin"),
+        )
+        .await
+        .unwrap();
         let source_npc = create(
             &db,
             Some(&campaign_id),
@@ -796,7 +864,9 @@ mod tests {
             "npc",
             &source_npc.id,
             "[[Torvin]] met [[Torvin]] again",
-            WikilinkScope::Campaign { campaign_id: &campaign_id },
+            WikilinkScope::Campaign {
+                campaign_id: &campaign_id,
+            },
         )
         .await
         .unwrap();
@@ -828,33 +898,56 @@ mod tests {
         let db = setup_db().await;
         let col_id = create_collection(&db).await;
 
-        let npc = create(&db, None, Some(&col_id), EntityKind::Npc, make_npc("Goblin"))
-            .await
-            .unwrap();
+        let npc = create(
+            &db,
+            None,
+            Some(&col_id),
+            EntityKind::Npc,
+            make_npc("Goblin"),
+        )
+        .await
+        .unwrap();
         let expected_id = format!("npc:{}", npc.id);
 
         // A campaign entity with the same name — must NOT match under collection scope
         let campaign_id = create_campaign(&db).await;
-        create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Goblin"))
-            .await
-            .unwrap();
+        create(
+            &db,
+            Some(&campaign_id),
+            None,
+            EntityKind::Npc,
+            make_npc("Goblin"),
+        )
+        .await
+        .unwrap();
 
-        let source_npc = create(&db, None, Some(&col_id), EntityKind::Npc, make_npc("SourceNPC"))
-            .await
-            .unwrap();
+        let source_npc = create(
+            &db,
+            None,
+            Some(&col_id),
+            EntityKind::Npc,
+            make_npc("SourceNPC"),
+        )
+        .await
+        .unwrap();
 
         let result = parse_and_sync_wikilinks(
             &db,
             "npc",
             &source_npc.id,
             "We fought [[Goblin]].",
-            WikilinkScope::Collection { collection_id: &col_id },
+            WikilinkScope::Collection {
+                collection_id: &col_id,
+            },
         )
         .await
         .unwrap();
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0], expected_id, "should match collection entity, not campaign entity");
+        assert_eq!(
+            result[0], expected_id,
+            "should match collection entity, not campaign entity"
+        );
     }
 
     // ── Test 14: campaign scope resolves subscribed collection entities ────────
@@ -877,22 +970,36 @@ mod tests {
         .unwrap();
 
         // Create collection entity
-        let col_npc = create(&db, None, Some(&col_id), EntityKind::Npc, make_npc("Dungeon Master"))
-            .await
-            .unwrap();
+        let col_npc = create(
+            &db,
+            None,
+            Some(&col_id),
+            EntityKind::Npc,
+            make_npc("Dungeon Master"),
+        )
+        .await
+        .unwrap();
         let expected_id = format!("npc:{}", col_npc.id);
 
         // Create campaign entity source
-        let source = create(&db, Some(&campaign_id), None, EntityKind::Npc, make_npc("Player"))
-            .await
-            .unwrap();
+        let source = create(
+            &db,
+            Some(&campaign_id),
+            None,
+            EntityKind::Npc,
+            make_npc("Player"),
+        )
+        .await
+        .unwrap();
 
         let result = parse_and_sync_wikilinks(
             &db,
             "npc",
             &source.id,
             "Asked the [[Dungeon Master]] for help.",
-            WikilinkScope::Campaign { campaign_id: &campaign_id },
+            WikilinkScope::Campaign {
+                campaign_id: &campaign_id,
+            },
         )
         .await
         .unwrap();

@@ -36,7 +36,7 @@ fn npc_input(name: &str) -> EntityInput {
 #[tokio::test]
 async fn create_npc_returns_node_with_correct_kind() {
     let db = setup_db().await;
-    let node = create(&db, None, EntityKind::Npc, npc_input("Torvin"))
+    let node = create(&db, None, None, EntityKind::Npc, npc_input("Torvin"))
         .await
         .unwrap();
     assert_eq!(node.kind, "npc");
@@ -65,7 +65,9 @@ async fn create_event_stores_temporal_fields() {
         character_level: None,
         status: None,
     };
-    let node = create(&db, None, EntityKind::Event, input).await.unwrap();
+    let node = create(&db, None, None, EntityKind::Event, input)
+        .await
+        .unwrap();
     assert_eq!(node.kind, "event");
     assert_eq!(node.date_start.as_deref(), Some("Year 312"));
     assert_eq!(node.sequence_index, Some(42));
@@ -91,7 +93,7 @@ async fn create_player_character_stores_pc_fields() {
         character_level: Some(7),
         status: Some("active".to_string()),
     };
-    let node = create(&db, None, EntityKind::PlayerCharacter, input)
+    let node = create(&db, None, None, EntityKind::PlayerCharacter, input)
         .await
         .unwrap();
     assert_eq!(node.kind, "player_character");
@@ -105,6 +107,7 @@ async fn get_by_id_returns_created_node() {
     let db = setup_db().await;
     let created = create(
         &db,
+        None,
         None,
         EntityKind::Location,
         EntityInput {
@@ -152,10 +155,16 @@ async fn get_by_campaign_returns_only_matching_entities() {
             .await
             .unwrap();
 
-    let n1 = create(&db, Some(&campaign.id), EntityKind::Npc, npc_input("Nym"))
-        .await
-        .unwrap();
-    let _n2 = create(&db, None, EntityKind::Npc, npc_input("Orphan NPC"))
+    let n1 = create(
+        &db,
+        Some(&campaign.id),
+        None,
+        EntityKind::Npc,
+        npc_input("Nym"),
+    )
+    .await
+    .unwrap();
+    let _n2 = create(&db, None, None, EntityKind::Npc, npc_input("Orphan NPC"))
         .await
         .unwrap();
 
@@ -185,7 +194,9 @@ async fn create_with_empty_name_returns_validation_error() {
         character_level: None,
         status: None,
     };
-    let err = create(&db, None, EntityKind::Npc, input).await.unwrap_err();
+    let err = create(&db, None, None, EntityKind::Npc, input)
+        .await
+        .unwrap_err();
     assert!(matches!(err, EntityError::Validation { ref field, .. } if field == "name"));
 }
 
@@ -201,6 +212,7 @@ async fn get_by_campaign_excludes_other_campaign_entities() {
     create(
         &db,
         Some(&c1.id),
+        None,
         EntityKind::Npc,
         npc_input("Belongs to C1"),
     )
@@ -209,6 +221,7 @@ async fn get_by_campaign_excludes_other_campaign_entities() {
     create(
         &db,
         Some(&c2.id),
+        None,
         EntityKind::Npc,
         npc_input("Belongs to C2"),
     )
@@ -222,7 +235,7 @@ async fn get_by_campaign_excludes_other_campaign_entities() {
 #[tokio::test]
 async fn get_by_id_with_wrong_kind_returns_not_found() {
     let db = setup_db().await;
-    let node = create(&db, None, EntityKind::Npc, npc_input("Torvin"))
+    let node = create(&db, None, None, EntityKind::Npc, npc_input("Torvin"))
         .await
         .unwrap();
     let err = get_by_id(&db, &node.id, EntityKind::Location)
@@ -234,7 +247,7 @@ async fn get_by_id_with_wrong_kind_returns_not_found() {
 #[tokio::test]
 async fn update_changes_name_and_notes() {
     let db = setup_db().await;
-    let created = create(&db, None, EntityKind::Npc, npc_input("Old Name"))
+    let created = create(&db, None, None, EntityKind::Npc, npc_input("Old Name"))
         .await
         .unwrap();
 
@@ -297,6 +310,7 @@ async fn delete_removes_node() {
     let created = create(
         &db,
         None,
+        None,
         EntityKind::Faction,
         EntityInput {
             name: "The Crimson Hand".to_string(),
@@ -329,7 +343,7 @@ async fn delete_removes_node() {
 #[tokio::test]
 async fn update_with_empty_name_returns_validation_error() {
     let db = setup_db().await;
-    let created = create(&db, None, EntityKind::Npc, npc_input("Valid"))
+    let created = create(&db, None, None, EntityKind::Npc, npc_input("Valid"))
         .await
         .unwrap();
     let err = update(
@@ -362,11 +376,12 @@ async fn update_with_empty_name_returns_validation_error() {
 async fn relate_creates_edge_traversable_in_both_directions() {
     let db = setup_db().await;
 
-    let npc = create(&db, None, EntityKind::Npc, npc_input("Varek"))
+    let npc = create(&db, None, None, EntityKind::Npc, npc_input("Varek"))
         .await
         .unwrap();
     let loc = create(
         &db,
+        None,
         None,
         EntityKind::Location,
         EntityInput {
@@ -433,6 +448,7 @@ async fn create_event_with_session_id_stores_session_link() {
     let event = create(
         &db,
         Some(&campaign.id),
+        None,
         EntityKind::Event,
         EntityInput {
             name: "Battle".to_string(),
@@ -509,6 +525,7 @@ async fn create_entity_with_wikilink_creates_relates_to_edge() {
     let target = create(
         &db,
         Some(&campaign_id),
+        None,
         EntityKind::Npc,
         npc_input("Torvin"),
     )
@@ -519,6 +536,7 @@ async fn create_entity_with_wikilink_creates_relates_to_edge() {
     let source = create(
         &db,
         Some(&campaign_id),
+        None,
         EntityKind::Location,
         location_input("The Tavern", Some("[[Torvin]] frequents this place")),
     )
@@ -553,6 +571,7 @@ async fn update_entity_notes_updates_wikilink_edges() {
     let target = create(
         &db,
         Some(&campaign_id),
+        None,
         EntityKind::Npc,
         npc_input("Torvin"),
     )
@@ -563,6 +582,7 @@ async fn update_entity_notes_updates_wikilink_edges() {
     let source = create(
         &db,
         Some(&campaign_id),
+        None,
         EntityKind::Location,
         location_input("The Tavern", Some("[[Torvin]] frequents this place")),
     )
@@ -617,6 +637,7 @@ async fn update_entity_to_empty_notes_removes_wikilink_edges() {
     let target = create(
         &db,
         Some(&campaign_id),
+        None,
         EntityKind::Npc,
         npc_input("Torvin"),
     )
@@ -627,6 +648,7 @@ async fn update_entity_to_empty_notes_removes_wikilink_edges() {
     let source = create(
         &db,
         Some(&campaign_id),
+        None,
         EntityKind::Location,
         location_input("The Tavern", Some("[[Torvin]] lives here")),
     )

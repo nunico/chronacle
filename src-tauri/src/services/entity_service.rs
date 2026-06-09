@@ -74,8 +74,7 @@ impl EntityKind {
 ///
 /// Using `array::first(...)` to project a single record (or NULL when no edge
 /// exists) from the `in_campaign` / `in_collection` edge tables.
-const SELECT_SCOPE_ALIASES: &str =
-    "array::first(<-in_campaign<-campaign) AS campaign, \
+const SELECT_SCOPE_ALIASES: &str = "array::first(<-in_campaign<-campaign) AS campaign, \
      array::first(<-in_collection<-collection) AS collection";
 
 // ── Data structs ─────────────────────────────────────────────────────────────
@@ -586,8 +585,9 @@ pub async fn update<C: surrealdb::Connection>(
             _ => None,
         };
         if let Some(scope) = scope {
-            let _ = crate::services::wikilink::parse_and_sync_wikilinks(db, table, id, notes, scope)
-                .await;
+            let _ =
+                crate::services::wikilink::parse_and_sync_wikilinks(db, table, id, notes, scope)
+                    .await;
         }
     }
 
@@ -754,7 +754,9 @@ mod tests {
             .await
             .unwrap();
         #[derive(serde::Deserialize)]
-        struct C { count: i64 }
+        struct C {
+            count: i64,
+        }
         let counts: Vec<C> = resp.take(0).unwrap();
         assert_eq!(counts.first().map(|c| c.count).unwrap_or(0), 1);
     }
@@ -822,16 +824,31 @@ mod tests {
 
         let input = |name: &str| EntityInput {
             name: name.to_string(),
-            summary: None, notes: None, date_start: None, date_end: None,
-            is_ongoing: None, sequence_index: None, era: None, duration_label: None,
-            session_id: None, player_name: None, character_class: None,
-            character_level: None, status: None,
+            summary: None,
+            notes: None,
+            date_start: None,
+            date_end: None,
+            is_ongoing: None,
+            sequence_index: None,
+            era: None,
+            duration_label: None,
+            session_id: None,
+            player_name: None,
+            character_class: None,
+            character_level: None,
+            status: None,
         };
 
-        create(&db, Some("camp1"), None, EntityKind::Npc, input("Torvin")).await.unwrap();
-        create(&db, None, Some("col1"), EntityKind::Npc, input("Goblin")).await.unwrap();
+        create(&db, Some("camp1"), None, EntityKind::Npc, input("Torvin"))
+            .await
+            .unwrap();
+        create(&db, None, Some("col1"), EntityKind::Npc, input("Goblin"))
+            .await
+            .unwrap();
 
-        let results = get_by_campaign(&db, "camp1", EntityKind::Npc).await.unwrap();
+        let results = get_by_campaign(&db, "camp1", EntityKind::Npc)
+            .await
+            .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "Torvin");
     }
@@ -855,16 +872,31 @@ mod tests {
 
         let input = |name: &str| EntityInput {
             name: name.to_string(),
-            summary: None, notes: None, date_start: None, date_end: None,
-            is_ongoing: None, sequence_index: None, era: None, duration_label: None,
-            session_id: None, player_name: None, character_class: None,
-            character_level: None, status: None,
+            summary: None,
+            notes: None,
+            date_start: None,
+            date_end: None,
+            is_ongoing: None,
+            sequence_index: None,
+            era: None,
+            duration_label: None,
+            session_id: None,
+            player_name: None,
+            character_class: None,
+            character_level: None,
+            status: None,
         };
 
-        create(&db, Some("camp1"), None, EntityKind::Npc, input("Torvin")).await.unwrap();
-        create(&db, None, Some("col1"), EntityKind::Npc, input("Goblin")).await.unwrap();
+        create(&db, Some("camp1"), None, EntityKind::Npc, input("Torvin"))
+            .await
+            .unwrap();
+        create(&db, None, Some("col1"), EntityKind::Npc, input("Goblin"))
+            .await
+            .unwrap();
 
-        let results = get_by_collection(&db, "col1", EntityKind::Npc).await.unwrap();
+        let results = get_by_collection(&db, "col1", EntityKind::Npc)
+            .await
+            .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "Goblin");
     }
@@ -886,13 +918,30 @@ mod tests {
 
         let input = |name: &str| EntityInput {
             name: name.to_string(),
-            summary: None, notes: None, date_start: None, date_end: None,
-            is_ongoing: None, sequence_index: None, era: None, duration_label: None,
-            session_id: None, player_name: None, character_class: None,
-            character_level: None, status: None,
+            summary: None,
+            notes: None,
+            date_start: None,
+            date_end: None,
+            is_ongoing: None,
+            sequence_index: None,
+            era: None,
+            duration_label: None,
+            session_id: None,
+            player_name: None,
+            character_class: None,
+            character_level: None,
+            status: None,
         };
 
-        create(&db, None, Some("col1"), EntityKind::Npc, input("The Iron Fist")).await.unwrap();
+        create(
+            &db,
+            None,
+            Some("col1"),
+            EntityKind::Npc,
+            input("The Iron Fist"),
+        )
+        .await
+        .unwrap();
 
         let found = find_by_name_and_collection(&db, "col1", "the iron fist", EntityKind::Npc)
             .await

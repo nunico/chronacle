@@ -244,6 +244,7 @@ async fn get_session_entities_returns_linked_events() {
     let event = create_entity(
         &db,
         Some(&campaign.id),
+        None,
         EntityKind::Event,
         EntityInput {
             name: "Battle of the Fields".to_string(),
