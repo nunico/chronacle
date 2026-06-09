@@ -86,6 +86,7 @@ async fn seed_index(
 }
 
 #[tokio::test]
+#[ignore = "downloads ~700 MB Nomic model; run locally with: cargo test -- --ignored"]
 async fn orbital_station_question_retrieves_correct_chunk() {
     let Ok(provider) = FastEmbedProvider::try_new(None) else {
         eprintln!("Skipping — nomic model not cached");
@@ -117,6 +118,7 @@ async fn orbital_station_question_retrieves_correct_chunk() {
 }
 
 #[tokio::test]
+#[ignore = "downloads ~700 MB Nomic model; run locally with: cargo test -- --ignored"]
 async fn council_factions_question_retrieves_correct_chunk() {
     let Ok(provider) = FastEmbedProvider::try_new(None) else {
         eprintln!("Skipping — nomic model not cached");
@@ -158,6 +160,7 @@ async fn council_factions_question_retrieves_correct_chunk() {
 /// random order would almost never put the target at #1 — this test would
 /// catch that.
 #[tokio::test]
+#[ignore = "downloads ~700 MB Nomic model; run locally with: cargo test -- --ignored"]
 async fn retrieval_ranks_target_chunk_above_distractors() {
     let Ok(provider) = FastEmbedProvider::try_new(None) else {
         eprintln!("Skipping — nomic model not cached");
