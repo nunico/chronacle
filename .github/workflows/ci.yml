@@ -57,7 +57,7 @@ jobs:
         run: cargo test
 
       - name: Check the crate graph
-        run: cargo deny check
+        uses: EmbarkStudios/cargo-deny-action@v2
 
   # ── Frontend checks (PR + merge) ──────────────────────────────────
   frontend-check:
