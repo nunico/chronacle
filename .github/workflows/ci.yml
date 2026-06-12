@@ -42,7 +42,7 @@ jobs:
             librsvg2-dev libayatana-appindicator3-dev
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2.0.0"
+        run: cargo install tauri-cli --version "^2.0.0" --locked
 
       - name: Generate Icons
         run: cd src-tauri/ && cargo tauri icon
@@ -73,8 +73,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 11
 
       - name: Install dependencies
         run: pnpm install --config.minimum-release-age=0
@@ -130,8 +128,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 11
 
       - name: Install system deps
         run: |
