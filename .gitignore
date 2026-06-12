@@ -9,7 +9,6 @@ dist/
 
 # ── Tauri ─────────────────────────────────────────────────────────────
 src-tauri/target/
-src-tauri/icons/
 *.tar.gz
 *.dmg
 *.AppImage
