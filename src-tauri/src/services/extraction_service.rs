@@ -37,11 +37,27 @@ pub struct ExtractionResult {
     pub entities: Vec<GraphNode>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtractionPhase {
+    Resolving,
+    Searching,
+    Extracting,
+    Relating,
+    Embedding,
+    Done,
+    Empty,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ExtractionProgress {
-    pub batch: usize,
-    pub total_batches: usize,
+    pub phase: ExtractionPhase,
+    /// Human-readable, e.g. "Found 12 passages".
+    pub detail: String,
+    /// Running total across the whole extraction run.
     pub entities_found: usize,
+    /// Running total across the whole extraction run.
+    pub relations_found: usize,
 }
 
 // ── LLM response schema ───────────────────────────────────────────────────────
@@ -199,6 +215,132 @@ async fn embed_entity<C: Connection>(
     Ok(())
 }
 
+// ── Batch persistence helper ──────────────────────────────────────────────────
+
+/// Persist one parsed LLM batch into `collection_id`, deduplicating by
+/// name+kind within the collection. Returns (entities_created, relations_created)
+/// and pushes any newly created nodes onto `all_nodes`.
+async fn persist_batch<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    embed: &Arc<dyn EmbeddingProvider>,
+    collection_id: &str,
+    parsed: &LlmResponse,
+    all_nodes: &mut Vec<GraphNode>,
+) -> Result<(usize, usize), ExtractionError> {
+    let mut entities_created = 0usize;
+    let mut relations_created = 0usize;
+
+    for ent in &parsed.entities {
+        let kind = parse_kind(&ent.kind);
+        let existing =
+            entity_service::find_by_name_and_collection(db, collection_id, &ent.name, kind.clone())
+                .await
+                .map_err(|e| ExtractionError::Db(e.to_string()))?;
+
+        let origin_node = if let Some(node) = existing {
+            node
+        } else {
+            let node = entity_service::create(
+                db,
+                None,
+                Some(collection_id),
+                kind,
+                EntityInput {
+                    name: ent.name.clone(),
+                    summary: ent.summary.clone(),
+                    notes: ent.notes.clone(),
+                    date_start: None,
+                    date_end: None,
+                    is_ongoing: None,
+                    sequence_index: None,
+                    era: None,
+                    duration_label: None,
+                    session_id: None,
+                    player_name: None,
+                    character_class: None,
+                    character_level: None,
+                    status: None,
+                },
+            )
+            .await
+            .map_err(|e| ExtractionError::Db(e.to_string()))?;
+            let _ = embed_entity(db, embed, &node).await;
+            entities_created += 1;
+            all_nodes.push(node.clone());
+            node
+        };
+
+        for rel in &ent.relations {
+            let rel_kind = parse_kind(&rel.kind);
+            let existing_rel = entity_service::find_by_name_and_collection(
+                db,
+                collection_id,
+                &rel.name,
+                rel_kind.clone(),
+            )
+            .await
+            .map_err(|e| ExtractionError::Db(e.to_string()))?;
+
+            let rel_node = if let Some(node) = existing_rel {
+                node
+            } else {
+                let node = entity_service::create(
+                    db,
+                    None,
+                    Some(collection_id),
+                    rel_kind,
+                    EntityInput {
+                        name: rel.name.clone(),
+                        summary: rel.summary.clone(),
+                        notes: rel.notes.clone(),
+                        date_start: None,
+                        date_end: None,
+                        is_ongoing: None,
+                        sequence_index: None,
+                        era: None,
+                        duration_label: None,
+                        session_id: None,
+                        player_name: None,
+                        character_class: None,
+                        character_level: None,
+                        status: None,
+                    },
+                )
+                .await
+                .map_err(|e| ExtractionError::Db(e.to_string()))?;
+                let _ = embed_entity(db, embed, &node).await;
+                entities_created += 1;
+                all_nodes.push(node.clone());
+                node
+            };
+
+            if rel_node.campaign_id.is_some() {
+                eprintln!(
+                    "extraction: skipping cross-link {} → {} (collection→campaign forbidden)",
+                    origin_node.name, rel_node.name
+                );
+                continue;
+            }
+
+            let result = entity_service::relate(
+                db,
+                &origin_node.id,
+                &origin_node.kind,
+                &rel_node.id,
+                &rel_node.kind,
+                &rel.rel_type,
+                None,
+            )
+            .await;
+            if result.is_ok() {
+                relations_created += 1;
+            }
+        }
+    }
+
+    Ok((entities_created, relations_created))
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Run LLM extraction on all chunks of `collection_id`.
@@ -268,131 +410,24 @@ pub async fn extract_from_collection<C: Connection>(
         let raw = llm_complete(llm.as_ref(), system_prompt, &messages).await?;
         let parsed = parse_extraction_response(&raw);
 
-        let mut batch_entities_found = 0usize;
-
-        for ent in &parsed.entities {
-            let kind = parse_kind(&ent.kind);
-            // Dedup: skip if this entity already exists in this collection.
-            let existing = entity_service::find_by_name_and_collection(
-                db,
-                collection_id,
-                &ent.name,
-                kind.clone(),
-            )
-            .await
-            .map_err(|e| ExtractionError::Db(e.to_string()))?;
-
-            let origin_node = if let Some(node) = existing {
-                node
-            } else {
-                let node = entity_service::create(
-                    db,
-                    None,
-                    Some(collection_id),
-                    kind,
-                    EntityInput {
-                        name: ent.name.clone(),
-                        summary: ent.summary.clone(),
-                        notes: ent.notes.clone(),
-                        date_start: None,
-                        date_end: None,
-                        is_ongoing: None,
-                        sequence_index: None,
-                        era: None,
-                        duration_label: None,
-                        session_id: None,
-                        player_name: None,
-                        character_class: None,
-                        character_level: None,
-                        status: None,
-                    },
-                )
-                .await
-                .map_err(|e| ExtractionError::Db(e.to_string()))?;
-                let _ = embed_entity(db, embed, &node).await;
-                entities_created += 1;
-                batch_entities_found += 1;
-                all_nodes.push(node.clone());
-                node
-            };
-
-            // Level-1 relations.
-            for rel in &ent.relations {
-                let rel_kind = parse_kind(&rel.kind);
-                let existing_rel = entity_service::find_by_name_and_collection(
-                    db,
-                    collection_id,
-                    &rel.name,
-                    rel_kind.clone(),
-                )
-                .await
-                .map_err(|e| ExtractionError::Db(e.to_string()))?;
-
-                let rel_node = if let Some(node) = existing_rel {
-                    node
-                } else {
-                    let node = entity_service::create(
-                        db,
-                        None,
-                        Some(collection_id),
-                        rel_kind,
-                        EntityInput {
-                            name: rel.name.clone(),
-                            summary: rel.summary.clone(),
-                            notes: rel.notes.clone(),
-                            date_start: None,
-                            date_end: None,
-                            is_ongoing: None,
-                            sequence_index: None,
-                            era: None,
-                            duration_label: None,
-                            session_id: None,
-                            player_name: None,
-                            character_class: None,
-                            character_level: None,
-                            status: None,
-                        },
-                    )
-                    .await
-                    .map_err(|e| ExtractionError::Db(e.to_string()))?;
-                    let _ = embed_entity(db, embed, &node).await;
-                    entities_created += 1;
-                    batch_entities_found += 1;
-                    all_nodes.push(node.clone());
-                    node
-                };
-
-                // Cross-link guard: collection → campaign links are forbidden.
-                if rel_node.campaign_id.is_some() {
-                    eprintln!(
-                        "extraction: skipping cross-link {} → {} (collection→campaign forbidden)",
-                        origin_node.name, rel_node.name
-                    );
-                    continue;
-                }
-
-                let result = entity_service::relate(
-                    db,
-                    &origin_node.id,
-                    &origin_node.kind,
-                    &rel_node.id,
-                    &rel_node.kind,
-                    &rel.rel_type,
-                    None,
-                )
-                .await;
-                if result.is_ok() {
-                    relations_created += 1;
-                }
-            }
-        }
+        let (ec, rc) = persist_batch(db, embed, collection_id, &parsed, &mut all_nodes).await?;
+        entities_created += ec;
+        relations_created += rc;
 
         on_progress(ExtractionProgress {
-            batch: batch_idx + 1,
-            total_batches,
-            entities_found: batch_entities_found,
+            phase: ExtractionPhase::Extracting,
+            detail: format!("Batch {}/{}", batch_idx + 1, total_batches),
+            entities_found: entities_created,
+            relations_found: relations_created,
         });
     }
+
+    on_progress(ExtractionProgress {
+        phase: ExtractionPhase::Done,
+        detail: format!("Created {entities_created} entities, {relations_created} relations"),
+        entities_found: entities_created,
+        relations_found: relations_created,
+    });
 
     Ok(ExtractionResult {
         entities_created,
@@ -674,6 +709,28 @@ mod tests {
             .as_deref()
             .unwrap_or("")
             .contains("[[The Emperor's Court]]"));
+    }
+
+    #[tokio::test]
+    async fn extract_from_collection_emits_done_phase_with_cumulative_counts() {
+        let (db, col_id) = setup_db_with_collection().await;
+        let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+            response: r#"{"entities":[{"name":"The Iron Fist","kind":"faction","summary":"x","notes":null,"relations":[{"name":"Commander Varn","kind":"npc","rel_type":"commands","summary":"y","notes":null}]}]}"#.to_string(),
+        });
+        let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+
+        let phases = std::sync::Mutex::new(Vec::<ExtractionProgress>::new());
+        extract_from_collection(&db, &llm, &embed, &col_id, |p| {
+            phases.lock().unwrap().push(p);
+        })
+        .await
+        .unwrap();
+
+        let phases = phases.into_inner().unwrap();
+        let done = phases.last().expect("at least one progress event");
+        assert_eq!(done.phase, ExtractionPhase::Done);
+        assert_eq!(done.entities_found, 2);
+        assert_eq!(done.relations_found, 1);
     }
 
     #[tokio::test]
