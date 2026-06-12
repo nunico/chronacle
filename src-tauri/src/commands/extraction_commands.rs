@@ -19,7 +19,7 @@ pub struct ExtractionSummary {
 /// returns immediately.  Progress is emitted via `extract-progress` events;
 /// the command resolves with `ExtractionSummary` when all batches are done.
 ///
-/// Event payload: `{ batch: number, total_batches: number, entities_found: number }`
+/// Event payload: `{ phase: string, detail: string, entities_found: number, relations_found: number }`
 #[tauri::command]
 pub async fn extract_entities_from_collection(
     app_handle: tauri::AppHandle,
@@ -49,14 +49,7 @@ pub async fn extract_entities_from_collection(
         &embed,
         &cid,
         move |progress| {
-            let _ = app.emit(
-                "extract-progress",
-                serde_json::json!({
-                    "batch": progress.batch,
-                    "total_batches": progress.total_batches,
-                    "entities_found": progress.entities_found,
-                }),
-            );
+            let _ = app.emit("extract-progress", &progress);
         },
     )
     .await
