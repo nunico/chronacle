@@ -155,6 +155,40 @@ Source text:
     )
 }
 
+/// Build a seed-anchored extraction prompt: focus on `name` and the entities
+/// directly related to it, rather than extracting everything in the text.
+#[allow(dead_code)] // Used by tests; will be called by seed extraction task
+fn build_seed_prompt(name: &str, chunk_text: &str) -> String {
+    format!(
+        r#"You are an expert at extracting structured game entities from TTRPG source material.
+
+Build a complete profile of the entity named "{name}" using ONLY the source text below.
+- Output "{name}" as a single level-0 entity with its kind, a concise summary (1-2 sentences), and notes.
+- Include entities DIRECTLY related to "{name}" in its "relations" array (allies, members, locations, leaders, etc.).
+- For entities mentioned only in passing, write their names as [[wikilinks]] inside notes — do NOT extract them separately.
+- If "{name}" is not described in the text, return an empty "entities" array.
+
+Return ONLY valid JSON matching this exact schema (no markdown, no explanation):
+
+{{
+  "entities": [
+    {{
+      "name": "string",
+      "kind": "npc|location|faction|creature|item|event|player_character|misc",
+      "summary": "string",
+      "notes": "optional string, may contain [[wikilinks]]",
+      "relations": [
+        {{ "name": "string", "kind": "string", "rel_type": "string", "summary": "string", "notes": "optional string" }}
+      ]
+    }}
+  ]
+}}
+
+Source text:
+{chunk_text}"#
+    )
+}
+
 /// Parse the LLM response, tolerating truncated or partially-valid JSON.
 fn parse_extraction_response(raw: &str) -> LlmResponse {
     // Strip markdown code fences if present.
@@ -449,6 +483,15 @@ mod tests {
     fn build_extraction_prompt_contains_chunk_text() {
         let prompt = build_extraction_prompt("The Iron Fist faction rules the docks.");
         assert!(prompt.contains("The Iron Fist faction rules the docks."));
+        assert!(prompt.contains("entities"));
+        assert!(prompt.contains("JSON"));
+    }
+
+    #[test]
+    fn build_seed_prompt_anchors_on_entity_name() {
+        let prompt = build_seed_prompt("Commander Varn", "Varn leads the Iron Fist.");
+        assert!(prompt.contains("Commander Varn"));
+        assert!(prompt.contains("Varn leads the Iron Fist."));
         assert!(prompt.contains("entities"));
         assert!(prompt.contains("JSON"));
     }
