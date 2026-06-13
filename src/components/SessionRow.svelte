@@ -14,9 +14,12 @@
   const { session, entityMap, onUpdate, onDelete }: Props = $props();
 
   let expanded = $state(false);
-  let editTitle = $state(session.title);
-  let editDate = $state(session.date_played);
-  let editNotes = $state(session.notes);
+  // Writable $derived: edit fields seed from `session` and re-seed when the
+  // prop changes (the row instance is reused across updates since the list is
+  // keyed by session.id), while bind:value edits still override until then.
+  let editTitle = $derived(session.title);
+  let editDate = $derived(session.date_played);
+  let editNotes = $derived(session.notes);
   let linkedEntities = $state<GraphNode[]>([]);
   let loadingEntities = $state(false);
   let entitiesLoaded = $state(false);
