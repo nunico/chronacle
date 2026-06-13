@@ -598,6 +598,14 @@ pub async fn find_by_name_and_collection<C: surrealdb::Connection>(
     Ok(records.into_iter().next().map(Into::into))
 }
 
+/// Map an `Option` to a SurrealDB value, using explicit `NULL` for `None`.
+///
+/// Binding `Option::None` directly serializes to SurrealDB `NONE`, which
+/// SCHEMAFULL `… | NULL` fields reject. Use this for every nullable field bind.
+fn opt_value<T: Into<surrealdb::sql::Value>>(opt: Option<T>) -> surrealdb::sql::Value {
+    opt.map_or(surrealdb::sql::Value::Null, Into::into)
+}
+
 /// Update an existing graph node. Returns NotFound if the record doesn't exist.
 pub async fn update<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
@@ -637,19 +645,23 @@ pub async fn update<C: surrealdb::Connection>(
         .bind(("table", table))
         .bind(("id", id.to_owned()))
         .bind(("name", input.name.trim().to_owned()))
-        .bind(("summary", input.summary))
-        .bind(("notes", input.notes))
-        .bind(("date_start", input.date_start))
-        .bind(("date_end", input.date_end))
+        // Nullable fields: bind explicit NULL (not NONE) on `None`. The graph
+        // entity tables are SCHEMAFULL with `string | NULL` / `int | NULL`
+        // fields, which reject NONE — binding `Option::None` directly would
+        // silently abort the UPDATE and leave the old value in place.
+        .bind(("summary", opt_value(input.summary)))
+        .bind(("notes", opt_value(input.notes)))
+        .bind(("date_start", opt_value(input.date_start)))
+        .bind(("date_end", opt_value(input.date_end)))
         .bind(("is_ongoing", input.is_ongoing))
-        .bind(("sequence_index", input.sequence_index))
-        .bind(("era", input.era))
-        .bind(("duration_label", input.duration_label))
+        .bind(("sequence_index", opt_value(input.sequence_index)))
+        .bind(("era", opt_value(input.era)))
+        .bind(("duration_label", opt_value(input.duration_label)))
         .bind(("session_id", input.session_id))
-        .bind(("player_name", input.player_name))
-        .bind(("character_class", input.character_class))
-        .bind(("character_level", input.character_level))
-        .bind(("status", input.status))
+        .bind(("player_name", opt_value(input.player_name)))
+        .bind(("character_class", opt_value(input.character_class)))
+        .bind(("character_level", opt_value(input.character_level)))
+        .bind(("status", opt_value(input.status)))
         .await
         .map_err(|e| EntityError::Database {
             message: e.to_string(),
@@ -1365,5 +1377,113 @@ mod tests {
             .await
             .unwrap();
         assert!(not_found.is_none());
+    }
+
+    #[tokio::test]
+    async fn update_clears_nullable_fields_to_null_not_none() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        // Create an npc with a summary and notes…
+        let node = create(
+            &db,
+            Some("camp1"),
+            None,
+            EntityKind::Npc,
+            EntityInput {
+                name: "Torvin".to_string(),
+                summary: Some("Old summary.".to_string()),
+                notes: Some("Old notes.".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // …then clear them. Binding `None` must persist SurrealDB NULL, not NONE,
+        // which the SCHEMAFULL `string | NULL` fields would reject.
+        let updated = update(
+            &db,
+            &node.id,
+            EntityKind::Npc,
+            EntityInput {
+                name: "Torvin".to_string(),
+                summary: None,
+                notes: None,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("update should not error when clearing nullable fields");
+        assert_eq!(updated.summary, None);
+        assert_eq!(updated.notes, None);
+
+        // Confirm it actually persisted (not just the returned value).
+        let refetched = get_by_id(&db, &node.id, EntityKind::Npc).await.unwrap();
+        assert_eq!(
+            refetched.summary, None,
+            "summary should be cleared in the DB"
+        );
+        assert_eq!(refetched.notes, None, "notes should be cleared in the DB");
+    }
+
+    #[tokio::test]
+    async fn update_clears_nullable_event_fields() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let node = create(
+            &db,
+            Some("camp1"),
+            None,
+            EntityKind::Event,
+            EntityInput {
+                name: "The Siege".to_string(),
+                date_start: Some("1402".to_string()),
+                era: Some("Third Age".to_string()),
+                sequence_index: Some(3),
+                is_ongoing: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let updated = update(
+            &db,
+            &node.id,
+            EntityKind::Event,
+            EntityInput {
+                name: "The Siege".to_string(),
+                date_start: None,
+                era: None,
+                sequence_index: None,
+                is_ongoing: Some(false),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("clearing nullable event fields should not error");
+        assert_eq!(updated.date_start, None);
+        assert_eq!(updated.era, None);
+        assert_eq!(updated.sequence_index, None);
     }
 }
