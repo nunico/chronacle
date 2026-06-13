@@ -368,7 +368,7 @@
 
 <div class="scroll" bind:this={scrollEl} onscroll={handleScroll}>
   <div class="thread" onclick={handleThreadClick} role="presentation">
-    {#each messages as msg, i (i)}
+    {#each messages as msg, i (msg)}
       {#if msg.role === 'user'}
         <div class="msg user">
           <div class="bubble">{msg.content}</div>

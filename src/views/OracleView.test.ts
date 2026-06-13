@@ -72,6 +72,38 @@ describe('OracleView', () => {
     });
   });
 
+  it('does not leak a card\'s expand state to a different message at the same index after reload', async () => {
+    // Ruling A at index 0, with a collapsible citation.
+    m.getChatHistory.mockResolvedValue([
+      { role: 'assistant', content: 'Answer A. [Source: "BookA", p.1, quote: "Alpha passage."]' },
+    ]);
+    const { container, rerender } = render(OracleView, {
+      props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn() },
+    });
+
+    // Expand the citation on ruling A via the RulingCard toggle (button.cite).
+    const citeToggle = await waitFor(() => {
+      const btn = container.querySelector('button.cite');
+      if (!btn) throw new Error('cite toggle not rendered yet');
+      return btn;
+    });
+    await fireEvent.click(citeToggle);
+    // The expanded passage shows as visible text (getByText ignores data-quote attrs).
+    await waitFor(() => expect(screen.getByText('Alpha passage.')).toBeTruthy());
+
+    // Reload the thread (campaign switch) with a *different* ruling at index 0.
+    m.getChatHistory.mockResolvedValue([
+      { role: 'assistant', content: 'Answer B. [Source: "BookB", p.2, quote: "Beta passage."]' },
+    ]);
+    await rerender({ activeCampaignId: 'camp-2', onOpenUpload: vi.fn() });
+
+    // The new card must render collapsed — keying by message object (not index)
+    // gives it a fresh instance instead of inheriting A's expanded state.
+    await waitFor(() => expect(screen.getByText(/Answer B/)).toBeTruthy());
+    expect(screen.queryByText('Beta passage.')).toBeNull();
+    expect(screen.queryByText('Alpha passage.')).toBeNull();
+  });
+
   it('Enter submits, calling chatSend with the active campaign id', async () => {
     render(OracleView, {
       props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn() },
