@@ -26,9 +26,12 @@
   let {
     activeCampaignId,
     onOpenUpload,
+    focusNonce = 0,
   }: {
     activeCampaignId: string | null;
     onOpenUpload: () => void;
+    /// Bumped by the `/` shortcut to move focus into the chat box.
+    focusNonce?: number;
   } = $props();
 
   let messages = $state<Array<{ role: string; content: string; gmOnly?: boolean }>>([]);
@@ -91,6 +94,11 @@
     void currentResponse;
     void isLoading;
     if (scrollEl && atBottom) scrollEl.scrollTop = scrollEl.scrollHeight;
+  });
+
+  // The `/` shortcut bumps focusNonce; move focus into the chat box.
+  $effect(() => {
+    if (focusNonce > 0) inputEl?.focus();
   });
 
   function handleScroll() {

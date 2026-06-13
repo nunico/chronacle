@@ -48,6 +48,10 @@ vi.mock('../lib/commands', () => ({
   getChunkForCitation: vi.fn().mockResolvedValue(null),
   getMruCollectionId: vi.fn().mockReturnValue(null),
   setMruCollectionId: vi.fn(),
+  getEntities: vi.fn().mockResolvedValue([]),
+  createEntity: vi.fn(),
+  updateEntity: vi.fn(),
+  deleteEntity: vi.fn(),
 }));
 
 vi.mock('../lib/events', () => ({
@@ -67,9 +71,7 @@ describe('Shell upload flow', () => {
     eventHandlers.clear();
     clearToasts();
     globalThis.localStorage?.clear();
-    getCampaigns.mockResolvedValue([
-      { id: 'camp-1', name: 'Test Campaign', system: 'D&D 5e' },
-    ]);
+    getCampaigns.mockResolvedValue([{ id: 'camp-1', name: 'Test Campaign', system: 'D&D 5e' }]);
     getCollections.mockResolvedValue([{ id: 'col-1', name: 'Core Books' }]);
     getChatHistory.mockResolvedValue([]);
     getEmbeddingModelMismatch.mockResolvedValue({ active_model: 'mock', stale: [] });
@@ -209,5 +211,75 @@ describe('Shell upload flow', () => {
     await waitFor(() => {
       expect(screen.getByText('Ready!')).toBeTruthy();
     });
+  });
+});
+
+describe('Shell keyboard shortcuts', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    eventHandlers.clear();
+    clearToasts();
+    globalThis.localStorage?.clear();
+    getCampaigns.mockResolvedValue([{ id: 'camp-1', name: 'Test Campaign', system: 'D&D 5e' }]);
+    getCollections.mockResolvedValue([{ id: 'col-1', name: 'Core Books' }]);
+    getChatHistory.mockResolvedValue([]);
+    getEmbeddingModelMismatch.mockResolvedValue({ active_model: 'mock', stale: [] });
+    getEntityCounts.mockResolvedValue({
+      npc: 0,
+      location: 0,
+      faction: 0,
+      creature: 0,
+      item: 0,
+      event: 0,
+      player_character: 0,
+      misc: 0,
+    });
+    getSessions.mockResolvedValue([]);
+  });
+
+  it('? opens the shortcuts help overlay and Escape closes it', async () => {
+    render(Shell);
+    await screen.findByRole('button', { name: /NPCs/i });
+
+    await fireEvent.keyDown(document.body, { key: '?' });
+    expect(await screen.findByText(/Keyboard shortcuts/i)).toBeTruthy();
+
+    await fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByText(/Keyboard shortcuts/i)).toBeNull());
+  });
+
+  it('g n navigates to the NPC manager', async () => {
+    render(Shell);
+    await screen.findByRole('button', { name: /NPCs/i });
+
+    await fireEvent.keyDown(document.body, { key: 'g' });
+    await fireEvent.keyDown(document.body, { key: 'n' });
+
+    expect(await screen.findByRole('button', { name: /New NPC/i })).toBeTruthy();
+  });
+
+  it('c opens the create form inside an entity manager', async () => {
+    render(Shell);
+    await screen.findByRole('button', { name: /NPCs/i });
+    await fireEvent.keyDown(document.body, { key: 'g' });
+    await fireEvent.keyDown(document.body, { key: 'n' });
+    await screen.findByRole('button', { name: /New NPC/i });
+
+    await fireEvent.keyDown(document.body, { key: 'c' });
+    // The create form (EntityForm) exposes a labelled name field.
+    expect(await screen.findByLabelText(/name/i)).toBeTruthy();
+  });
+
+  it('does not trigger shortcuts while typing in a field', async () => {
+    render(Shell);
+    await screen.findByRole('button', { name: /NPCs/i });
+    await fireEvent.keyDown(document.body, { key: 'g' });
+    await fireEvent.keyDown(document.body, { key: 'n' });
+    await fireEvent.keyDown(document.body, { key: 'c' });
+    const nameField = await screen.findByLabelText(/name/i);
+
+    // Pressing ? while focused in the name field must NOT open the overlay.
+    await fireEvent.keyDown(nameField, { key: '?' });
+    expect(screen.queryByText(/Keyboard shortcuts/i)).toBeNull();
   });
 });

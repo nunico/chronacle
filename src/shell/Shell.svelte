@@ -33,6 +33,12 @@
   import SessionLogView from '../views/SessionLogView.svelte';
   import { findCategory, type NoteCategoryId } from './note-categories';
   import type { EntityKind } from '../lib/commands';
+  import {
+    resolveNavChord,
+    isEditableTarget,
+    SHORTCUT_HELP,
+    type NavTarget,
+  } from '../lib/shortcuts';
 
   const ENTITY_KIND_MAP: Partial<Record<NoteCategoryId, EntityKind>> = {
     npcs: 'npc',
@@ -82,6 +88,82 @@
     void view;
     refreshRailCounts(activeCampaignId);
   });
+
+  // ── Keyboard shortcuts (Vim-style g-chords; see lib/shortcuts.ts) ──────────
+  let leader = $state(false); // true while a `g`-chord awaits its second key
+  let leaderTimer: ReturnType<typeof setTimeout> | null = null;
+  let showHelp = $state(false);
+  // Nonces: bumping one signals the relevant child view to act (focus / create).
+  let chatFocusNonce = $state(0);
+  let entityCreateNonce = $state(0);
+
+  function clearLeader() {
+    leader = false;
+    if (leaderTimer) {
+      clearTimeout(leaderTimer);
+      leaderTimer = null;
+    }
+  }
+
+  function navTo(target: NavTarget) {
+    if (target === 'oracle' || target === 'settings') view = target;
+    else view = { kind: 'notebook', category: target.category };
+  }
+
+  function handleWindowKey(e: KeyboardEvent) {
+    // Escape always cancels a pending chord and closes the help overlay.
+    if (e.key === 'Escape') {
+      clearLeader();
+      showHelp = false;
+      return;
+    }
+    // We only bind bare keys — never hijack OS/browser modifier combos.
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    // Don't fire while the GM is typing in a field.
+    if (isEditableTarget(e.target)) return;
+    // While a modal/picker owns the screen, let it have the keyboard.
+    if (switcherOpen || showPicker) return;
+    // With the help overlay open, only `?` (toggle off) is live; Esc handled above.
+    if (showHelp) {
+      if (e.key === '?') {
+        e.preventDefault();
+        showHelp = false;
+      }
+      return;
+    }
+
+    // Second key of a `g`-chord → navigate.
+    if (leader) {
+      const target = resolveNavChord(e.key);
+      clearLeader();
+      if (target) {
+        e.preventDefault();
+        navTo(target);
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case 'g':
+        e.preventDefault();
+        leader = true;
+        leaderTimer = setTimeout(clearLeader, 1500);
+        break;
+      case '?':
+        e.preventDefault();
+        showHelp = true;
+        break;
+      case '/':
+        e.preventDefault();
+        view = 'oracle';
+        chatFocusNonce++;
+        break;
+      case 'c':
+        e.preventDefault();
+        entityCreateNonce++;
+        break;
+    }
+  }
 
   // Upload dialog state (lifted from old App.svelte)
   type UploadPhase = 'idle' | 'active' | 'done' | 'error';
@@ -229,8 +311,7 @@
       return { title: 'Oracle', sub: 'Ask in plain language — answers come cited' };
     if (view === 'campaign')
       return { title: 'Campaign', sub: 'Manage details & subscribed source collections' };
-    if (view === 'settings')
-      return { title: 'Settings', sub: 'Provider, models, and re-indexing' };
+    if (view === 'settings') return { title: 'Settings', sub: 'Provider, models, and re-indexing' };
     const cat = findCategory(view.category);
     return { title: cat.label, sub: cat.sub };
   });
@@ -370,6 +451,8 @@
   }
 </script>
 
+<svelte:window onkeydown={handleWindowKey} />
+
 <div class="app">
   <CampaignRail
     {view}
@@ -390,6 +473,39 @@
     />
   {/if}
 
+  {#if showHelp}
+    <div
+      class="help-backdrop"
+      role="button"
+      tabindex="-1"
+      aria-label="Close shortcuts"
+      onclick={() => (showHelp = false)}
+      onkeydown={(e) => e.key === 'Enter' && (showHelp = false)}
+    >
+      <div
+        class="help-card"
+        role="dialog"
+        aria-label="Keyboard shortcuts"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={() => {
+          /* swallow so backdrop key handler doesn't double-fire */
+        }}
+        tabindex="-1"
+      >
+        <h2>Keyboard shortcuts</h2>
+        <dl class="help-list">
+          {#each SHORTCUT_HELP as row (row.keys)}
+            <div class="help-row">
+              <dt><kbd>{row.keys}</kbd></dt>
+              <dd>{row.label}</dd>
+            </div>
+          {/each}
+        </dl>
+        <p class="help-hint">Press <kbd>?</kbd> or <kbd>Esc</kbd> to close.</p>
+      </div>
+    </div>
+  {/if}
+
   <main class="main">
     <Topbar title={head.title} sub={head.sub} />
     {#if mismatch && !mismatchDismissed}
@@ -397,9 +513,10 @@
         <div class="mismatch-text">
           <strong>Embedding model changed.</strong>
           {totalStaleSources}
-          source{totalStaleSources === 1 ? '' : 's'} indexed with a different model
-          ({mismatch.stale.map((s) => s.embed_model).join(', ')}). Retrieval quality will suffer
-          until they are re-indexed with the active model ({mismatch.active_model}).
+          source{totalStaleSources === 1 ? '' : 's'} indexed with a different model ({mismatch.stale
+            .map((s) => s.embed_model)
+            .join(', ')}). Retrieval quality will suffer until they are re-indexed with the active
+          model ({mismatch.active_model}).
           {#if reindexProgress}
             <div class="mismatch-progress">
               Re-indexing {reindexProgress.current}/{reindexProgress.total} — {reindexProgress.step}
@@ -422,21 +539,27 @@
             class="mismatch-reindex-btn"
             onclick={handleReindex}
             disabled={reindexing}
-            data-testid="mismatch-reindex">
+            data-testid="mismatch-reindex"
+          >
             {reindexing ? 'Re-indexing…' : 'Re-index now'}
           </button>
           <button
             class="mismatch-dismiss-btn"
             onclick={() => (mismatchDismissed = true)}
             disabled={reindexing}
-            data-testid="mismatch-dismiss">
+            data-testid="mismatch-dismiss"
+          >
             Dismiss
           </button>
         </div>
       </div>
     {/if}
     {#if view === 'oracle'}
-      <OracleView {activeCampaignId} onOpenUpload={() => openFilePicker()} />
+      <OracleView
+        {activeCampaignId}
+        onOpenUpload={() => openFilePicker()}
+        focusNonce={chatFocusNonce}
+      />
     {:else if view === 'campaign'}
       <CampaignView
         {activeCampaignId}
@@ -454,7 +577,11 @@
         <p>Select a campaign to view sessions.</p>
       </div>
     {:else if ENTITY_KIND_MAP[view.category] && activeCampaignId}
-      <EntityManager campaignId={activeCampaignId} kind={ENTITY_KIND_MAP[view.category] as EntityKind} />
+      <EntityManager
+        campaignId={activeCampaignId}
+        kind={ENTITY_KIND_MAP[view.category] as EntityKind}
+        createNonce={entityCreateNonce}
+      />
     {:else if ENTITY_KIND_MAP[view.category]}
       <div class="no-campaign-msg">
         <p>Select a campaign to manage entities.</p>
@@ -505,17 +632,21 @@
             />
             <button class="picker-create-btn" onclick={handlePickerCreateNew}>Create</button>
             <button class="picker-cancel-btn" onclick={() => (showNewCollectionInput = false)}
-              >Cancel</button>
+              >Cancel</button
+            >
           </div>
         {:else}
           <button class="picker-new-btn" onclick={() => (showNewCollectionInput = true)}
-            >+ Create new collection</button>
+            >+ Create new collection</button
+          >
         {/if}
         <div class="picker-actions">
           <button class="picker-cancel-btn" data-testid="picker-cancel" onclick={cancelPicker}
-            >Cancel</button>
+            >Cancel</button
+          >
           <button class="picker-confirm-btn" disabled={!pickerCollectionId} onclick={confirmUpload}
-            >Upload</button>
+            >Upload</button
+          >
         </div>
       </div>
     </div>
@@ -523,6 +654,70 @@
 </div>
 
 <style>
+  /* ── Keyboard-shortcuts help overlay ─────────────────────────────────── */
+  .help-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.5);
+    cursor: default;
+  }
+  .help-card {
+    width: min(420px, 90vw);
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 20px 24px;
+    border: 1px solid var(--line-strong, var(--line));
+    border-radius: var(--r-md, 10px);
+    background: var(--bg-panel);
+    color: var(--fg-1);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  }
+  .help-card h2 {
+    margin: 0 0 14px;
+    font-size: 1rem;
+    color: var(--fg-1);
+  }
+  .help-list {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .help-row {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .help-row dt {
+    flex: 0 0 64px;
+    margin: 0;
+    text-align: right;
+  }
+  .help-row dd {
+    margin: 0;
+    color: var(--fg-2);
+    font-size: 0.9rem;
+  }
+  .help-hint {
+    margin: 16px 0 0;
+    font-size: 0.8rem;
+    color: var(--fg-3);
+  }
+  kbd {
+    display: inline-block;
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--bg-panel-2, var(--bg-inset));
+    color: var(--violet-300, #a78bfa);
+    font-family: var(--font-mono, monospace);
+    font-size: 0.78rem;
+  }
+
   .app {
     display: grid;
     grid-template-columns: 264px 1fr;
