@@ -539,6 +539,7 @@ export type ExtractionPhase =
   | 'extracting'
   | 'relating'
   | 'embedding'
+  | 'enriching'
   | 'done'
   | 'empty';
 

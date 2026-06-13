@@ -20,6 +20,7 @@
   let apiKey = $state('');
   let model = $state('');
   let baseUrl = $state('');
+  let enrichNeighbors = $state(false);
 
   let isSaving = $state(false);
   let isConnecting = $state(false);
@@ -83,6 +84,7 @@
       apiKey = settings['llm_api_key'] ?? '';
       model = settings['llm_model'] ?? '';
       baseUrl = settings['llm_base_url'] ?? '';
+      enrichNeighbors = settings['extraction_enrich_neighbors'] === 'true';
     } catch (e) {
       showError(`Failed to load settings: ${e}`);
     }
@@ -126,6 +128,16 @@
       showError(`Failed to save: ${e}`);
     } finally {
       isSaving = false;
+    }
+  }
+
+  async function saveEnrichNeighbors() {
+    try {
+      await updateSetting('extraction_enrich_neighbors', enrichNeighbors ? 'true' : 'false');
+      showSuccess('Settings saved.');
+    } catch (e) {
+      enrichNeighbors = !enrichNeighbors; // revert optimistic toggle
+      showError(`Failed to save: ${e}`);
     }
   }
 
@@ -499,6 +511,24 @@
       <div class="reindex-success">Re-indexed {reindexedCount} source(s).</div>
     {/if}
   </section>
+
+  <section class="config-section">
+    <h3>Entity Extraction</h3>
+    <label class="toggle-row">
+      <input
+        type="checkbox"
+        bind:checked={enrichNeighbors}
+        onchange={saveEnrichNeighbors}
+      />
+      <span>Enrich related entities</span>
+    </label>
+    <p class="muted">
+      After extracting an entity, run a second pass that re-searches the rulebook
+      for each related entity and rewrites its summary to describe the entity
+      itself rather than its link to the original. More accurate, but slower and
+      uses more LLM calls. Capped at 20 related entities per extraction.
+    </p>
+  </section>
 </div>
 
 <style>
@@ -633,6 +663,17 @@ input:focus {
   font-size: 13px;
   color: var(--fg-3);
   margin: 0 0 10px;
+}
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+.toggle-row input {
+  width: auto;
+  margin: 0;
 }
 hr {
   border: none;

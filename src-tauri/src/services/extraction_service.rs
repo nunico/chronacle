@@ -46,6 +46,7 @@ pub enum ExtractionPhase {
     Extracting,
     Relating,
     Embedding,
+    Enriching,
     Done,
     Empty,
 }
@@ -99,6 +100,11 @@ const CHARS_PER_TOKEN: usize = 4;
 /// Target token budget per LLM batch.
 const BATCH_TOKEN_BUDGET: usize = 4000;
 const BATCH_CHAR_BUDGET: usize = BATCH_TOKEN_BUDGET * CHARS_PER_TOKEN;
+
+/// Maximum number of neighbor entities to enrich in the second pass. Caps the
+/// extra LLM + embedding cost of seed-anchored enrichment (opt-in via the
+/// `extraction_enrich_neighbors` setting).
+const MAX_ENRICH: usize = 20;
 
 /// Drain the streaming LLM channel into a complete response string.
 async fn llm_complete(
@@ -196,6 +202,50 @@ Source text:
     )
 }
 
+/// Build a profile prompt for the second enrichment pass: describe ONE entity
+/// from its own passages, with no relations (depth-1, description only).
+fn build_profile_prompt(name: &str, chunk_text: &str) -> String {
+    format!(
+        r#"You are an expert at describing game entities from TTRPG source material.
+
+Describe ONLY the entity named "{name}" using the source text below.
+- "summary": a short, concise description of "{name}" ITSELF — who or what it is — in 1 sentence. Do NOT describe how it relates to other entities, UNLESS "{name}" is inherently about a relationship (e.g. an association, alliance, or pact between parties), in which case that relationship is its identity and belongs here.
+- "notes": a more thorough description, including how "{name}" relates to others. May contain [[wikilinks]]. Use an empty string if there is nothing beyond the summary.
+- If "{name}" is not described in the text, return empty strings.
+
+Do NOT extract any other entities or relations.
+
+Return ONLY valid JSON matching this exact schema (no markdown, no explanation):
+
+{{ "summary": "string", "notes": "string" }}
+
+Source text:
+{chunk_text}"#
+    )
+}
+
+/// Summary/notes returned by the profile (enrichment) pass.
+#[derive(Debug, Default, Deserialize)]
+struct ProfileFields {
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    notes: Option<String>,
+}
+
+/// Parse a profile-pass response, tolerating markdown fences and malformed JSON.
+fn parse_profile_response(raw: &str) -> ProfileFields {
+    let trimmed = raw.trim();
+    let json_str = if let Some(s) = trimmed.strip_prefix("```json") {
+        s.trim_end_matches("```").trim()
+    } else if let Some(s) = trimmed.strip_prefix("```") {
+        s.trim_end_matches("```").trim()
+    } else {
+        trimmed
+    };
+    serde_json::from_str(json_str).unwrap_or_default()
+}
+
 /// Parse the LLM response, tolerating truncated or partially-valid JSON.
 fn parse_extraction_response(raw: &str) -> LlmResponse {
     // Strip markdown code fences if present.
@@ -238,13 +288,16 @@ async fn embed_entity<C: Connection>(
 
 /// Persist one parsed LLM batch into `collection_id`, deduplicating by
 /// name+kind within the collection. Returns (entities_created, relations_created)
-/// and pushes any newly created nodes onto `all_nodes`.
+/// and pushes any newly created nodes onto `all_nodes`. Newly created *relation*
+/// (neighbor) nodes are additionally pushed onto `enrich_queue` so the caller can
+/// run the second-pass enrichment on them.
 async fn persist_batch<C: Connection>(
     db: &surrealdb::Surreal<C>,
     embed: &Arc<dyn EmbeddingProvider>,
     collection_id: &str,
     parsed: &LlmResponse,
     all_nodes: &mut Vec<GraphNode>,
+    enrich_queue: &mut Vec<GraphNode>,
 ) -> Result<(usize, usize), ExtractionError> {
     let mut entities_created = 0usize;
     let mut relations_created = 0usize;
@@ -340,6 +393,7 @@ async fn persist_batch<C: Connection>(
                 }
                 entities_created += 1;
                 all_nodes.push(node.clone());
+                enrich_queue.push(node.clone());
                 node
             };
 
@@ -368,6 +422,190 @@ async fn persist_batch<C: Connection>(
     }
 
     Ok((entities_created, relations_created))
+}
+
+// ── Passage search + second-pass enrichment ────────────────────────────────────
+
+/// Gather candidate passages for `needle_lower` within a single collection by
+/// the union of semantic search (`query_vec`) and a lexical `CONTAINS` scan.
+/// Deduplicates by bare chunk id (semantic ids are `chunk:<id>`, lexical `<id>`).
+async fn search_passages<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    vector_store: &Arc<dyn VectorStore>,
+    query_vec: &[f32],
+    collection_id: &str,
+    needle_lower: &str,
+) -> Result<Vec<String>, ExtractionError> {
+    // 1. Semantic hits (all belong to `collection_id` — single id passed).
+    let semantic = vector_store
+        .search(
+            query_vec,
+            std::slice::from_ref(&collection_id.to_string()),
+            SEED_SEARCH_K,
+        )
+        .await
+        .map_err(|e| ExtractionError::Db(e.to_string()))?;
+
+    // 2. Lexical hits within this collection.
+    #[derive(serde::Deserialize)]
+    struct Row {
+        id: surrealdb::sql::Thing,
+        text: String,
+    }
+    let mut resp = db
+        .query(
+            "SELECT id, text FROM chunk \
+             WHERE collection = type::thing('collection', $cid) \
+             AND string::contains(string::lowercase(text), $needle)",
+        )
+        .bind(("cid", collection_id.to_owned()))
+        .bind(("needle", needle_lower.to_owned()))
+        .await
+        .map_err(|e| ExtractionError::Db(e.to_string()))?;
+    let lexical: Vec<Row> = resp
+        .take(0)
+        .map_err(|e| ExtractionError::Db(e.to_string()))?;
+
+    // 3. Union by chunk id, preserving text.
+    let mut seen = std::collections::HashSet::new();
+    let mut passages: Vec<String> = Vec::new();
+    for r in &semantic {
+        if seen.insert(r.chunk_id.trim_start_matches("chunk:").to_string()) {
+            passages.push(r.text.clone());
+        }
+    }
+    for r in lexical {
+        if seen.insert(r.id.id.to_raw()) {
+            passages.push(r.text);
+        }
+    }
+    Ok(passages)
+}
+
+/// Read the opt-in `extraction_enrich_neighbors` setting (defaults to false).
+async fn enrich_neighbors_enabled<C: Connection>(db: &surrealdb::Surreal<C>) -> bool {
+    #[derive(serde::Deserialize)]
+    struct Row {
+        value: String,
+    }
+    let row: Option<Row> = db
+        .query("SELECT * FROM setting:extraction_enrich_neighbors")
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .and_then(|rows: Vec<Row>| rows.into_iter().next());
+    matches!(row, Some(r) if r.value == "true")
+}
+
+/// Split passages into character-budgeted batches for LLM calls.
+fn batch_passages(passages: Vec<String>) -> Vec<String> {
+    let mut batches: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for p in passages {
+        if !current.is_empty() && current.len() + p.len() > BATCH_CHAR_BUDGET {
+            batches.push(std::mem::take(&mut current));
+        }
+        current.push_str(&p);
+        current.push('\n');
+    }
+    if !current.is_empty() {
+        batches.push(current);
+    }
+    batches
+}
+
+/// Second-pass enrichment: re-search the collection for `node`'s own name,
+/// build an entity-centric profile via the LLM, and update its summary/notes
+/// in place (then re-embed). Best-effort — returns whether the node was updated.
+async fn enrich_entity<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    llm: &Arc<dyn LlmProvider>,
+    embed: &Arc<dyn EmbeddingProvider>,
+    vector_store: &Arc<dyn VectorStore>,
+    node: &GraphNode,
+) -> Result<bool, ExtractionError> {
+    let Some(collection_id) = node.collection_id.as_deref() else {
+        return Ok(false);
+    };
+
+    let query_vec = embed
+        .embed_documents(vec![node.name.clone()])
+        .await
+        .map_err(|e| ExtractionError::Embedding(e.to_string()))?
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+    let needle = node.name.to_lowercase();
+
+    let passages = search_passages(db, vector_store, &query_vec, collection_id, &needle).await?;
+    if passages.is_empty() {
+        return Ok(false);
+    }
+
+    let system_prompt = "You are a structured data extraction assistant. Return ONLY valid JSON.";
+    // Longest non-empty wins across batches.
+    let mut best_summary: Option<String> = None;
+    let mut best_notes: Option<String> = None;
+    for chunk_text in batch_passages(passages) {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: build_profile_prompt(&node.name, &chunk_text),
+        }];
+        let raw = llm_complete(llm.as_ref(), system_prompt, &messages).await?;
+        let fields = parse_profile_response(&raw);
+        if let Some(s) = fields.summary.filter(|s| !s.trim().is_empty()) {
+            if best_summary.as_ref().is_none_or(|b| s.len() > b.len()) {
+                best_summary = Some(s);
+            }
+        }
+        if let Some(n) = fields.notes.filter(|n| !n.trim().is_empty()) {
+            if best_notes.as_ref().is_none_or(|b| n.len() > b.len()) {
+                best_notes = Some(n);
+            }
+        }
+    }
+
+    // Nothing usable came back — leave the first-pass values untouched.
+    if best_summary.is_none() && best_notes.is_none() {
+        return Ok(false);
+    }
+
+    let new_summary = best_summary.or_else(|| node.summary.clone());
+    let new_notes = best_notes.or_else(|| node.notes.clone());
+
+    // Targeted update of only summary/notes — these graph-entity tables are
+    // SCHEMAFULL with just name/summary/notes, so we must not SET unrelated
+    // event/player-character fields. Bind explicit NULL (not NONE) for empty
+    // fields: the schema types them `string | NULL`, which rejects NONE.
+    use surrealdb::sql::Value;
+    let summary_val = new_summary.clone().map_or(Value::Null, Value::from);
+    let notes_val = new_notes.clone().map_or(Value::Null, Value::from);
+    db.query(
+        "UPDATE type::thing($table, $id) \
+         SET summary = $summary, notes = $notes, updated_at = time::now()",
+    )
+    .bind(("table", node.kind.clone()))
+    .bind(("id", node.id.clone()))
+    .bind(("summary", summary_val))
+    .bind(("notes", notes_val))
+    .await
+    .map_err(|e| ExtractionError::Db(e.to_string()))?
+    .check()
+    .map_err(|e| ExtractionError::Db(e.to_string()))?;
+
+    // Re-embed with the enriched text (name + summary + notes).
+    let updated = GraphNode {
+        summary: new_summary,
+        notes: new_notes,
+        ..node.clone()
+    };
+    if let Err(e) = entity_service::embed_node(db, embed, &updated).await {
+        eprintln!(
+            "extraction: failed to re-embed enriched entity {} ({}): {e}",
+            updated.name, updated.kind
+        );
+    }
+    Ok(true)
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -415,49 +653,11 @@ pub async fn extract_seed_anchored<C: Connection>(
     let mut entities_created = 0usize;
     let mut relations_created = 0usize;
     let mut all_nodes: Vec<GraphNode> = Vec::new();
+    let mut enrich_queue: Vec<GraphNode> = Vec::new();
     let mut total_passages = 0usize;
 
     for cid in &collection_ids {
-        // 1. Semantic hits (all belong to `cid` because we pass a single id).
-        let semantic = vector_store
-            .search(&query_vec, std::slice::from_ref(cid), SEED_SEARCH_K)
-            .await
-            .map_err(|e| ExtractionError::Db(e.to_string()))?;
-
-        // 2. Lexical hits within this collection.
-        #[derive(serde::Deserialize)]
-        struct Row {
-            id: surrealdb::sql::Thing,
-            text: String,
-        }
-        let mut resp = db
-            .query(
-                "SELECT id, text FROM chunk \
-                 WHERE collection = type::thing('collection', $cid) \
-                 AND string::contains(string::lowercase(text), $needle)",
-            )
-            .bind(("cid", cid.clone()))
-            .bind(("needle", needle.clone()))
-            .await
-            .map_err(|e| ExtractionError::Db(e.to_string()))?;
-        let lexical: Vec<Row> = resp
-            .take(0)
-            .map_err(|e| ExtractionError::Db(e.to_string()))?;
-
-        // 3. Union by chunk id, preserving text.
-        // Dedup by bare chunk id; semantic chunk_id is "chunk:<id>", lexical is "<id>".
-        let mut seen = std::collections::HashSet::new();
-        let mut passages: Vec<String> = Vec::new();
-        for r in &semantic {
-            if seen.insert(r.chunk_id.trim_start_matches("chunk:").to_string()) {
-                passages.push(r.text.clone());
-            }
-        }
-        for r in lexical {
-            if seen.insert(r.id.id.to_raw()) {
-                passages.push(r.text);
-            }
-        }
+        let passages = search_passages(db, vector_store, &query_vec, cid, &needle).await?;
         if passages.is_empty() {
             continue;
         }
@@ -470,19 +670,8 @@ pub async fn extract_seed_anchored<C: Connection>(
             relations_found: relations_created,
         });
 
-        // 4. Batch passages by char budget and run the seed prompt per batch.
-        let mut batches: Vec<String> = Vec::new();
-        let mut current = String::new();
-        for p in passages {
-            if !current.is_empty() && current.len() + p.len() > BATCH_CHAR_BUDGET {
-                batches.push(std::mem::take(&mut current));
-            }
-            current.push_str(&p);
-            current.push('\n');
-        }
-        if !current.is_empty() {
-            batches.push(current);
-        }
+        // Batch passages by char budget and run the seed prompt per batch.
+        let batches = batch_passages(passages);
 
         let system_prompt =
             "You are a structured data extraction assistant. Return ONLY valid JSON.";
@@ -501,9 +690,32 @@ pub async fn extract_seed_anchored<C: Connection>(
                 relations_found: relations_created,
             });
 
-            let (ec, rc) = persist_batch(db, embed, cid, &parsed, &mut all_nodes).await?;
+            let (ec, rc) =
+                persist_batch(db, embed, cid, &parsed, &mut all_nodes, &mut enrich_queue).await?;
             entities_created += ec;
             relations_created += rc;
+        }
+    }
+
+    // Second pass: enrich neighbor entities with their own entity-centric
+    // profile. Opt-in and capped to bound the extra LLM/embedding cost.
+    if total_passages > 0 && enrich_neighbors_enabled(db).await {
+        for (i, node) in enrich_queue.iter().take(MAX_ENRICH).enumerate() {
+            on_progress(ExtractionProgress {
+                phase: ExtractionPhase::Enriching,
+                detail: format!(
+                    "Enriching \"{}\" ({}/{})",
+                    node.name,
+                    i + 1,
+                    enrich_queue.len().min(MAX_ENRICH)
+                ),
+                entities_found: entities_created,
+                relations_found: relations_created,
+            });
+            // Best-effort: a failed enrichment must not abort the whole run.
+            if let Err(e) = enrich_entity(db, llm, embed, vector_store, node).await {
+                eprintln!("extraction: enrichment failed for {}: {e}", node.name);
+            }
         }
     }
 
@@ -585,6 +797,9 @@ pub async fn extract_from_collection<C: Connection>(
     let mut entities_created = 0usize;
     let mut relations_created = 0usize;
     let mut all_nodes: Vec<GraphNode> = Vec::new();
+    // The full sweep extracts every chunk, so neighbors already get their own
+    // passages — no second-pass enrichment is needed. Discarded.
+    let mut enrich_queue: Vec<GraphNode> = Vec::new();
 
     // 3. Process each batch.
     for (batch_idx, chunk_text) in batches.iter().enumerate() {
@@ -597,7 +812,15 @@ pub async fn extract_from_collection<C: Connection>(
         let raw = llm_complete(llm.as_ref(), system_prompt, &messages).await?;
         let parsed = parse_extraction_response(&raw);
 
-        let (ec, rc) = persist_batch(db, embed, collection_id, &parsed, &mut all_nodes).await?;
+        let (ec, rc) = persist_batch(
+            db,
+            embed,
+            collection_id,
+            &parsed,
+            &mut all_nodes,
+            &mut enrich_queue,
+        )
+        .await?;
         entities_created += ec;
         relations_created += rc;
 
@@ -1132,6 +1355,214 @@ mod tests {
         assert_eq!(
             result.entities_created, 1,
             "semantic-only hit should still extract"
+        );
+    }
+
+    // ── Unit: profile prompt + parsing (second-pass enrichment) ──────────────
+
+    #[test]
+    fn build_profile_prompt_anchors_on_name_and_omits_relations() {
+        let prompt = build_profile_prompt("The Iron Fist", "The Iron Fist rules the docks.");
+        assert!(prompt.contains("The Iron Fist"));
+        assert!(prompt.contains("The Iron Fist rules the docks."));
+        assert!(prompt.contains("summary"));
+        assert!(prompt.contains("notes"));
+        // The profile pass must NOT ask for relations (depth-1, description only).
+        assert!(!prompt.contains("\"relations\""));
+    }
+
+    #[test]
+    fn parse_profile_response_extracts_summary_and_notes() {
+        let json = r#"{"summary":"A militant faction.","notes":"Led by [[Varn]]."}"#;
+        let fields = parse_profile_response(json);
+        assert_eq!(fields.summary.as_deref(), Some("A militant faction."));
+        assert_eq!(fields.notes.as_deref(), Some("Led by [[Varn]]."));
+    }
+
+    #[test]
+    fn parse_profile_response_returns_empty_on_malformed_json() {
+        let fields = parse_profile_response("not json {{{");
+        assert!(fields.summary.is_none());
+        assert!(fields.notes.is_none());
+    }
+
+    // ── MockLlm that branches between the seed prompt and the profile prompt ──
+
+    /// Returns `seed` for prompts that request relations (seed/extraction
+    /// schema) and `profile` for the description-only profile prompt.
+    struct BranchingLlm {
+        seed: String,
+        profile: String,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for BranchingLlm {
+        fn provider_type(&self) -> &'static str {
+            "mock_branching"
+        }
+        async fn chat_stream(
+            &self,
+            _system_prompt: &str,
+            messages: &[ChatMessage],
+        ) -> Result<
+            tokio::sync::mpsc::Receiver<Result<String, crate::providers::llm_provider::LlmError>>,
+            crate::providers::llm_provider::LlmError,
+        > {
+            let is_seed = messages
+                .first()
+                .map(|m| m.content.contains("\"relations\""))
+                .unwrap_or(false);
+            let resp = if is_seed {
+                self.seed.clone()
+            } else {
+                self.profile.clone()
+            };
+            let (tx, rx) = tokio::sync::mpsc::channel(4);
+            tokio::spawn(async move {
+                let _ = tx.send(Ok(resp)).await;
+            });
+            Ok(rx)
+        }
+    }
+
+    async fn link_campaign_to_collection(
+        db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+        col_id: &str,
+    ) {
+        db.query(
+            "CREATE campaign SET id='camp1', name='C', system='5e', created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        db.query(
+            "LET $in  = type::thing('campaign',   'camp1'); \
+             LET $out = type::thing('collection', $cid); \
+             RELATE $in->subscribes_to->$out SET created_at=time::now()",
+        )
+        .bind(("cid", col_id.to_owned()))
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn seed_anchored_enriches_neighbor_when_setting_enabled() {
+        let (db, col_id) = setup_db_with_collection().await;
+        link_campaign_to_collection(&db, &col_id).await;
+        crate::services::settings_service::upsert(&db, "extraction_enrich_neighbors", "true")
+            .await
+            .unwrap();
+
+        // Seed pass: neighbor "The Iron Fist" gets a relation-flavored summary.
+        let llm: Arc<dyn LlmProvider> = Arc::new(BranchingLlm {
+            seed: r#"{"entities":[{"name":"Commander Varn","kind":"npc","summary":"Leader.","notes":null,"relations":[{"name":"The Iron Fist","kind":"faction","rel_type":"commands","summary":"The militia Varn commands.","notes":null}]}]}"#.to_string(),
+            profile: r#"{"summary":"A militant faction controlling the eastern docks.","notes":"Led by [[Commander Varn]]."}"#.to_string(),
+        });
+        let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+        let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore { results: vec![] });
+
+        extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Commander Varn", |_| {})
+            .await
+            .unwrap();
+
+        let factions = entity_service::get_by_collection(&db, &col_id, EntityKind::Faction)
+            .await
+            .unwrap();
+        let fist = factions
+            .iter()
+            .find(|n| n.name == "The Iron Fist")
+            .expect("neighbor should exist");
+        assert_eq!(
+            fist.summary.as_deref(),
+            Some("A militant faction controlling the eastern docks."),
+            "enrichment should replace the relation-flavored summary with an entity-centric one"
+        );
+        assert_eq!(fist.notes.as_deref(), Some("Led by [[Commander Varn]]."));
+    }
+
+    #[tokio::test]
+    async fn seed_anchored_skips_enrichment_when_setting_disabled() {
+        let (db, col_id) = setup_db_with_collection().await;
+        link_campaign_to_collection(&db, &col_id).await;
+        // Setting left unset → defaults to off.
+
+        let llm: Arc<dyn LlmProvider> = Arc::new(BranchingLlm {
+            seed: r#"{"entities":[{"name":"Commander Varn","kind":"npc","summary":"Leader.","notes":null,"relations":[{"name":"The Iron Fist","kind":"faction","rel_type":"commands","summary":"The militia Varn commands.","notes":null}]}]}"#.to_string(),
+            profile: r#"{"summary":"SHOULD NOT BE USED","notes":null}"#.to_string(),
+        });
+        let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+        let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore { results: vec![] });
+
+        extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Commander Varn", |_| {})
+            .await
+            .unwrap();
+
+        let factions = entity_service::get_by_collection(&db, &col_id, EntityKind::Faction)
+            .await
+            .unwrap();
+        let fist = factions.iter().find(|n| n.name == "The Iron Fist").unwrap();
+        assert_eq!(
+            fist.summary.as_deref(),
+            Some("The militia Varn commands."),
+            "without the setting, the first-pass summary must be left untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn seed_anchored_caps_enrichment_at_max() {
+        let (db, col_id) = setup_db_with_collection().await;
+        link_campaign_to_collection(&db, &col_id).await;
+        crate::services::settings_service::upsert(&db, "extraction_enrich_neighbors", "true")
+            .await
+            .unwrap();
+
+        // Seed response with MAX_ENRICH + 1 distinct neighbors.
+        let mut rels = String::new();
+        for i in 0..(MAX_ENRICH + 1) {
+            if i > 0 {
+                rels.push(',');
+            }
+            rels.push_str(&format!(
+                r#"{{"name":"Neighbor{i}","kind":"npc","rel_type":"knows","summary":"rel{i}","notes":null}}"#
+            ));
+        }
+        let seed = format!(
+            r#"{{"entities":[{{"name":"Commander Varn","kind":"npc","summary":"Leader.","notes":null,"relations":[{rels}]}}]}}"#
+        );
+
+        // Non-empty semantic results so every neighbor search yields passages.
+        let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore {
+            results: vec![SearchResult {
+                chunk_id: "chunk:sem".to_string(),
+                source_id: "source:s1".to_string(),
+                source_name: "Book".to_string(),
+                text: "Some descriptive passage about a figure.".to_string(),
+                page_start: 1,
+                page_end: 1,
+                section_heading: "Lore".to_string(),
+                source_type: "lore".to_string(),
+                distance: 0.1,
+            }],
+        });
+        let llm: Arc<dyn LlmProvider> = Arc::new(BranchingLlm {
+            seed,
+            profile: r#"{"summary":"PROFILED","notes":null}"#.to_string(),
+        });
+        let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+
+        extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Commander Varn", |_| {})
+            .await
+            .unwrap();
+
+        let npcs = entity_service::get_by_collection(&db, &col_id, EntityKind::Npc)
+            .await
+            .unwrap();
+        let enriched = npcs
+            .iter()
+            .filter(|n| n.summary.as_deref() == Some("PROFILED"))
+            .count();
+        assert_eq!(
+            enriched, MAX_ENRICH,
+            "enrichment must be capped at MAX_ENRICH neighbors"
         );
     }
 }

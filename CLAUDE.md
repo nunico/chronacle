@@ -66,7 +66,7 @@ Tests ship with every feature — never after.
 - `source.campaign = NULL` → global source (shared across all campaigns).
 - SurrealDB partitioned by `campaign` record link; retrieval searches global + campaign chunks.
 - `entity.sequence_index` is the canonical ordering key; `date_start`/`date_end` are opaque strings — never parsed.
-- `setting` keys: `llm_provider`, `llm_model`, `llm_api_key` (encrypted), `llm_base_url`, `embedding_backend`, `active_campaign_id`, `vault_sync_path`, `vault_include_gm_only`.
+- `setting` keys: `llm_provider`, `llm_model`, `llm_api_key` (encrypted), `llm_base_url`, `embedding_backend`, `active_campaign_id`, `vault_sync_path`, `vault_include_gm_only`, `extraction_enrich_neighbors` (opt-in second-pass that rewrites related-entity summaries to be entity-centric; off by default, capped at 20/extraction).
 - `message` table stores chat history from Phase 1.
 
 ## Phases
