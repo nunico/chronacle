@@ -869,11 +869,12 @@ Milestone: "Ask the rulebook a question and get a cited answer." ✓
 
 ### Phase 2 — Campaign & Notes
 
-**Status:** In progress (~90%). Entity/campaign/session CRUD, all 8 entity types, the
-notes editor, notes indexing/retrieval (entity + session), and `is_gm_only` end-to-end
-(data model → propagation → form toggles → chat shield) are complete and tested; source
-scoping resolved as collection-based. Remaining: keyboard shortcuts, a source-upload
-GM-only toggle, and the remaining Phase 2 test gaps (event ordering, backend E2E). See
+**Status:** In progress (~95%). Entity/campaign/session CRUD, all 8 entity types, the
+notes editor, notes indexing/retrieval (entity + session), `is_gm_only` end-to-end
+(data model → propagation → form toggles → chat shield), and the Phase 2 test suite
+(event timeline ordering, notes→retrieval, is_gm_only propagation, campaign→NPC+event
+backend E2E) are complete; source scoping resolved as collection-based. Remaining:
+keyboard-first shortcuts and a source-upload GM-only toggle. See
 [`docs/superpowers/plans/2026-06-13-phase-2-finalization.md`](superpowers/plans/2026-06-13-phase-2-finalization.md).
 
 Goal: Multi-campaign support, hybrid notes, lore retrieval.
@@ -888,9 +889,9 @@ Goal: Multi-campaign support, hybrid notes, lore retrieval.
 - [x] Collection-scoped sources — sources attach to collections; campaigns `subscribes_to` collections (migration `003_collections.surql`). *Supersedes the original "global vs campaign-scoped (NULL)" design — there is no global source scope.*
 - [ ] Keyboard-first shortcuts (GM is at the table) — *partial: modal/autocomplete/chat keys exist; no global GM shortcut layer (quick-search, create-entity, navigation)*
 - **Tests shipped with Phase 2:**
-  - [x] Unit: entity CRUD service (`entity_service_test.rs`) — *event `sequence_index` ordering test still missing*
+  - [x] Unit: entity CRUD service (`entity_service_test.rs`); event `sequence_index` timeline ordering (`order_events_for_timeline` unit + `get_events_timeline` integration)
   - [x] Integration: notes indexing → retrieval (entity/session note embedding + context inclusion tested in `entity_service`/`session_service`/`agent_service`); is_gm_only propagation into vector index (`vector_store` upsert→search round-trip) + message flag round-trip (`chat_history_test`)
-  - [ ] Backend E2E: create campaign → add NPC + event → query → assert both appear in response
+  - [x] Backend E2E: create campaign → add NPC + event → query → assert both appear in response (`tests/e2e_campaign_notes_query.rs`)
   - [x] Component tests: entity form validation + GM-secret toggle (`EntityForm.test.ts`); chat GM-only badge (`OracleView.test.ts`)
 
 Milestone: "Run a full session, take notes on NPCs and events, ask a lore question and get cited answers from both the sourcebook and your own notes."

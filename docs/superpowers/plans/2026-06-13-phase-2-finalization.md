@@ -138,7 +138,15 @@ implementation work remains.
 
 **Files:** new `src/lib/actions/shortcuts.ts` (or store), `Shell.svelte`, view components.
 
-### 5. Tests (ship with each item above — TDD)
+### 5. Tests (ship with each item above — TDD) — DONE (2026-06-13)
+
+**Shipped:** event timeline ordering — `order_events_for_timeline` (pure unit test) +
+`get_events_timeline` (integration test, `entity_service_test.rs`); notes→retrieval and
+`is_gm_only` propagation integration tests (delivered with items 1–2); backend E2E
+`tests/e2e_campaign_notes_query.rs` (campaign → NPC + event → `fetch_entity_context` →
+both surface, unrelated campaign sees nothing); GM-secret toggle + chat-badge component
+tests (delivered with item 2). Original detail:
+
 
 - **Unit (Rust):** event `sequence_index` ordering / timeline retrieval in
   `entity_service_test.rs`.
@@ -164,9 +172,10 @@ implementation work remains.
 
 ## Suggested sequencing
 
-1. Item 1 (notes indexing — entities **and** sessions) + its tests — unblocks the milestone.
-2. Item 2 (`is_gm_only`) + its tests.
-3. Item 5 remaining tests (event ordering, backend E2E).
-4. Item 4 (keyboard shortcuts) — last, or split to a follow-up.
+1. ~~Item 1 (notes indexing — entities **and** sessions) + its tests~~ — DONE.
+2. ~~Item 2 (`is_gm_only`) + its tests~~ — DONE.
+3. ~~Item 5 remaining tests (event ordering, backend E2E)~~ — DONE.
+4. Item 4 (keyboard shortcuts) — last remaining; a source-upload GM-only toggle is a
+   small adjacent follow-up.
 
 (Item 3, source scoping, is already resolved — doc-only, no work.)
