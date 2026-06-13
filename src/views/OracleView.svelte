@@ -224,11 +224,12 @@
     extraction = { status: 'running', title, detail: 'Starting…', entitiesFound: 0, relationsFound: 0 };
     try {
       const summary = await start();
+      const wasEmpty = extraction?.status === 'empty';
       extraction = {
-        status: extraction?.status === 'empty' ? 'empty' : 'done',
-        title: 'Extraction complete',
-        detail: extraction?.status === 'empty'
-          ? extraction.detail
+        status: wasEmpty ? 'empty' : 'done',
+        title: wasEmpty ? 'Nothing found' : 'Extraction complete',
+        detail: wasEmpty
+          ? extraction!.detail
           : `Created ${summary.entities_created} entities, ${summary.relations_created} relations`,
         entitiesFound: summary.entities_created,
         relationsFound: summary.relations_created,
