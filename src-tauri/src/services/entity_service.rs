@@ -470,6 +470,32 @@ pub async fn get_by_campaign<C: surrealdb::Connection>(
     Ok(records.into_iter().map(Into::into).collect())
 }
 
+/// Order events for a timeline by their canonical key.
+///
+/// `sequence_index` is the ordering key (lower = earlier); unsequenced events
+/// (`NULL`) sort last so a half-filled timeline still reads sensibly, and ties
+/// are broken by name for a stable order. `date_start` is never parsed — it is
+/// an opaque in-world string (see CLAUDE.md), so `sequence_index` is canonical.
+pub fn order_events_for_timeline(mut events: Vec<GraphNode>) -> Vec<GraphNode> {
+    use std::cmp::Ordering;
+    events.sort_by(|a, b| match (a.sequence_index, b.sequence_index) {
+        (Some(x), Some(y)) => x.cmp(&y).then_with(|| a.name.cmp(&b.name)),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => a.name.cmp(&b.name),
+    });
+    events
+}
+
+/// Fetch a campaign's events in timeline order (see [`order_events_for_timeline`]).
+pub async fn get_events_timeline<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    campaign_id: &str,
+) -> Result<Vec<GraphNode>, EntityError> {
+    let events = get_by_campaign(db, campaign_id, EntityKind::Event).await?;
+    Ok(order_events_for_timeline(events))
+}
+
 /// List all nodes of a kind for a collection, ordered by name.
 /// Count entities of every kind that belong to a campaign.
 ///
@@ -929,6 +955,59 @@ mod tests {
                 .unwrap()
                 .is_gm_only,
             "toggle-off must persist to the DB"
+        );
+    }
+
+    #[test]
+    fn order_events_for_timeline_sorts_by_sequence_then_name_nulls_last() {
+        fn event(name: &str, seq: Option<i64>) -> GraphNode {
+            GraphNode {
+                id: name.to_string(),
+                kind: "event".to_string(),
+                campaign_id: None,
+                collection_id: None,
+                name: name.to_string(),
+                summary: None,
+                notes: None,
+                is_gm_only: false,
+                created_at: None,
+                updated_at: None,
+                date_start: None,
+                date_end: None,
+                is_ongoing: None,
+                sequence_index: seq,
+                era: None,
+                duration_label: None,
+                session_id: None,
+                player_name: None,
+                character_class: None,
+                character_level: None,
+                status: None,
+            }
+        }
+        // Deliberately unsorted, with a tie at seq=2 and two unsequenced events.
+        let input = vec![
+            event("Unplaced B", None),
+            event("Second", Some(2)),
+            event("Third", Some(3)),
+            event("Also Second", Some(2)),
+            event("First", Some(1)),
+            event("Unplaced A", None),
+        ];
+        let ordered: Vec<String> = order_events_for_timeline(input)
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(
+            ordered,
+            vec![
+                "First",       // seq 1
+                "Also Second", // seq 2, name tiebreak before "Second"
+                "Second",      // seq 2
+                "Third",       // seq 3
+                "Unplaced A",  // NULL seq, name order
+                "Unplaced B",
+            ]
         );
     }
 

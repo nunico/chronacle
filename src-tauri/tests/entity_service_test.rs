@@ -1,6 +1,6 @@
 use chronacle_lib::services::entity_service::{
-    create, delete, get_by_campaign, get_by_id, relate, update, EntityError, EntityInput,
-    EntityKind,
+    create, delete, get_by_campaign, get_by_id, get_events_timeline, relate, update, EntityError,
+    EntityInput, EntityKind,
 };
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
@@ -704,5 +704,54 @@ async fn update_entity_to_empty_notes_removes_wikilink_edges() {
         rows2.len(),
         0,
         "stale relates_to edge must be deleted when notes are cleared to empty string"
+    );
+}
+
+#[tokio::test]
+async fn get_events_timeline_orders_by_sequence_index_nulls_last() {
+    let db = setup_db().await;
+    let campaign = chronacle_lib::services::campaign_service::create(&db, "Saga", "D&D 5e")
+        .await
+        .unwrap();
+
+    let event = |name: &str, seq: Option<i64>| EntityInput {
+        name: name.to_string(),
+        sequence_index: seq,
+        ..Default::default()
+    };
+
+    // Insert out of order, with an unsequenced event in the middle.
+    for (name, seq) in [
+        ("The Cataclysm", Some(30)),
+        ("The Founding", Some(10)),
+        ("A Forgotten Skirmish", None),
+        ("The Schism", Some(20)),
+    ] {
+        create(
+            &db,
+            Some(&campaign.id),
+            None,
+            EntityKind::Event,
+            event(name, seq),
+        )
+        .await
+        .unwrap();
+    }
+
+    let timeline: Vec<String> = get_events_timeline(&db, &campaign.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|e| e.name)
+        .collect();
+
+    assert_eq!(
+        timeline,
+        vec![
+            "The Founding",         // seq 10
+            "The Schism",           // seq 20
+            "The Cataclysm",        // seq 30
+            "A Forgotten Skirmish", // unsequenced — last
+        ]
     );
 }
