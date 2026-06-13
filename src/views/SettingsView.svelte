@@ -129,7 +129,29 @@
     }
   }
 
+  /** Client-side checks before hitting the backend: cloud providers need a
+   * key, and a non-empty base URL must at least parse. Returns an error
+   * message, or null when the form is valid. */
+  function validateConnection(): string | null {
+    if (showApiKey && !apiKey.trim()) {
+      return 'An API key is required for this provider.';
+    }
+    if (baseUrl.trim()) {
+      try {
+        new URL(baseUrl.trim());
+      } catch {
+        return 'The base URL is not a valid URL (expected e.g. http://localhost:11434).';
+      }
+    }
+    return null;
+  }
+
   async function connect() {
+    const validationError = validateConnection();
+    if (validationError) {
+      showError(validationError);
+      return;
+    }
     isConnecting = true;
     statusMessage = '';
     try {

@@ -76,6 +76,34 @@ describe('SettingsView', () => {
     await waitFor(() => expect(screen.getByText('My Ollama')).toBeTruthy());
   });
 
+  it('blocks Connect with an inline error when the API key is empty', async () => {
+    render(SettingsView);
+    const apiKey = await screen.findByLabelText(/api key/i);
+    await fireEvent.input(apiKey, { target: { value: '   ' } });
+    await fireEvent.click(screen.getByRole('button', { name: /connect/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/api key is required/i)).toBeTruthy();
+    });
+    expect(commands.reconfigureLlmProvider).not.toHaveBeenCalled();
+    expect(commands.updateSetting).not.toHaveBeenCalled();
+  });
+
+  it('blocks Connect with an inline error when the base URL is malformed', async () => {
+    vi.mocked(commands.getSettings).mockResolvedValue({
+      llm_provider: 'ollama',
+      llm_base_url: 'not a url',
+    });
+    render(SettingsView);
+    await waitFor(() => {
+      expect((screen.getByLabelText(/base url/i) as HTMLInputElement).value).toBe('not a url');
+    });
+    await fireEvent.click(screen.getByRole('button', { name: /connect/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/not a valid url/i)).toBeTruthy();
+    });
+    expect(commands.reconfigureLlmProvider).not.toHaveBeenCalled();
+  });
+
   it('calls updateSetting for all four setting fields when Save Settings is clicked', async () => {
     render(SettingsView);
     // Wait for mount to complete
