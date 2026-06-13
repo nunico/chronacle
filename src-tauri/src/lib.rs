@@ -70,7 +70,7 @@ fn pdfium_library_path() -> std::path::PathBuf {
 fn app_data_dir() -> std::path::PathBuf {
     let dir = dirs_next::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("com.chronacle.app");
+        .join("dev.tea-driven.chronacle.desktop");
 
     if !dir.exists() {
         std::fs::create_dir_all(&dir).expect("Failed to create app data directory");

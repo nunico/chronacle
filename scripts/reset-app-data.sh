@@ -2,8 +2,8 @@
 #
 # Purge Chronacle's local app data so the app starts from a clean slate.
 #
-# Removes from the app data dir (~/Library/Application Support/com.chronacle.app
-# on macOS, $XDG_DATA_HOME or ~/.local/share/com.chronacle.app on Linux):
+# Removes from the app data dir (~/Library/Application Support/dev.tea-driven.chronacle.desktop
+# on macOS, $XDG_DATA_HOME or ~/.local/share/dev.tea-driven.chronacle.desktop on Linux):
 #   - chronacle.db   (SurrealDB / RocksDB: campaigns, sources, chunks,
 #                     settings incl. the encrypted API key, chat history)
 #   - pdfs/          (ingested PDF blobs)
@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-DATA_DIR_NAME="com.chronacle.app"
+DATA_DIR_NAME="dev.tea-driven.chronacle.desktop"
 BUNDLE_ID="dev.tea-driven.chronacle.desktop"
 
 wipe_all=false
