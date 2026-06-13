@@ -1,0 +1,6 @@
+{
+  "spec": "tests/e2e/ui/*.e2e.mjs",
+  "timeout": 180000,
+  "parallel": false,
+  "bail": false
+}

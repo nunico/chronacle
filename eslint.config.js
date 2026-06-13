@@ -45,5 +45,10 @@ export default defineConfig(
     rules: {
       '@typescript-eslint/no-empty-function': 'off',
     }
+  },
+  {
+    // tauri-driver E2E harness — Node scripts with Mocha globals.
+    files: ['tests/e2e/ui/**/*.mjs'],
+    languageOptions: { globals: { ...globals.node, ...globals.mocha } },
   }
 );

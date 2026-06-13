@@ -1,0 +1,62 @@
+# tauri-driver UI E2E (Linux only).
+#
+# tauri-driver supports Linux (WebKitWebDriver) and Windows (Edge) only — there
+# is no macOS support — so this runs exclusively on ubuntu under Xvfb. It drives
+# the real built app: real Rust backend, SurrealDB, PDF extraction and
+# embeddings, with only the LLM swapped for a deterministic local stub.
+#
+# Heavy (release build + embedding-model download), so it runs on merge to main
+# and on manual dispatch, not on every PR.
+name: E2E UI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 'lts/*'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            librsvg2-dev libayatana-appindicator3-dev \
+            webkit2gtk-driver xvfb
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      - name: Install JS dependencies
+        run: pnpm install --config.minimum-release-age=0
+
+      - name: Build frontend (embedded into the app binary)
+        run: pnpm build
+
+      - name: Build app (release)
+        run: cargo build --release --bin chronacle
+
+      - name: Run UI E2E under Xvfb
+        run: xvfb-run -a pnpm e2e:ui
