@@ -129,7 +129,18 @@ collections); the `campaign = NULL` global-source model is dropped. The architec
 doc's Multi-Campaign section and Phase 2 checklist have been updated to match. No
 implementation work remains.
 
-### 4. Keyboard-first shortcuts (lower priority)
+### 4. Keyboard-first shortcuts — DONE (2026-06-13)
+
+**Shipped (Vim-style g-chords, per user choice):** `lib/shortcuts.ts` (pure, unit-tested
+g-chord map + editable-target suppression + help rows); `Shell.svelte` global handler with
+a leader-key state machine — `g` then `o/p/n/l/f/c/i/e/s/m/,` navigates, `c` = new entity,
+`/` = focus chat, `?` = help overlay, Esc = close; suppressed while typing or when a
+modal/picker is open. Cross-view signals (`focusNonce`/`createNonce`) drive chat focus and
+the entity create form. Tests: resolver/suppression unit + Shell integration (nav, create,
+help toggle, typing suppression). Only follow-up: a source-upload GM-only toggle UI.
+
+Original detail:
+
 
 - Add a global shortcut layer: quick-search (`/`), new entity (e.g. Ctrl/Cmd+N),
   view navigation. Build on `src/lib/actions/modal.ts` focus handling.

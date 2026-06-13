@@ -869,12 +869,13 @@ Milestone: "Ask the rulebook a question and get a cited answer." ✓
 
 ### Phase 2 — Campaign & Notes
 
-**Status:** In progress (~95%). Entity/campaign/session CRUD, all 8 entity types, the
-notes editor, notes indexing/retrieval (entity + session), `is_gm_only` end-to-end
-(data model → propagation → form toggles → chat shield), and the Phase 2 test suite
-(event timeline ordering, notes→retrieval, is_gm_only propagation, campaign→NPC+event
-backend E2E) are complete; source scoping resolved as collection-based. Remaining:
-keyboard-first shortcuts and a source-upload GM-only toggle. See
+**Status:** Effectively complete (~98%). Entity/campaign/session CRUD, all 8 entity
+types, the notes editor, notes indexing/retrieval (entity + session), `is_gm_only`
+end-to-end (data model → propagation → form toggles → chat shield), keyboard-first
+g-chord navigation, and the Phase 2 test suite (event timeline ordering, notes→retrieval,
+is_gm_only propagation, campaign→NPC+event backend E2E) are all complete; source scoping
+resolved as collection-based. Only nice-to-have left: a source-upload GM-only toggle in
+the UI (backend already supports it). See
 [`docs/superpowers/plans/2026-06-13-phase-2-finalization.md`](superpowers/plans/2026-06-13-phase-2-finalization.md).
 
 Goal: Multi-campaign support, hybrid notes, lore retrieval.
@@ -887,7 +888,7 @@ Goal: Multi-campaign support, hybrid notes, lore retrieval.
 - [x] **`is_gm_only` introduced:** field on source, session, all 8 entity tables, chunk, and message (migrations `008`/`009`); chunks inherit it from their source at index time and `SearchResult` carries it (retrieval never filters — only tags); entity/session form toggles; chat shield — `stream_response` flags answers drawing on GM-only chunks, persisted on the message and rendered as a "GM only" badge in `OracleView`. *(Source-upload toggle UI still pending — backend `upload_source` already accepts the param.)*
 - [x] Notes indexing pipeline (entity + session notes → embed → SurrealDB) — `entity_service::embed_node` (name+summary+notes, single source of truth, called by manual create/update **and** extraction) + `session_service::embed_session` (migration `007_session_embedding.surql`); `agent_service::fetch_entity_context` now includes entity *and* session note excerpts in the LLM context
 - [x] Collection-scoped sources — sources attach to collections; campaigns `subscribes_to` collections (migration `003_collections.surql`). *Supersedes the original "global vs campaign-scoped (NULL)" design — there is no global source scope.*
-- [ ] Keyboard-first shortcuts (GM is at the table) — *partial: modal/autocomplete/chat keys exist; no global GM shortcut layer (quick-search, create-entity, navigation)*
+- [x] Keyboard-first shortcuts (GM is at the table) — Vim-style g-chords for navigation (`g o/p/n/l/f/c/i/e/s/m/,`), `c` new entity, `/` focus chat, `?` help overlay, Esc close; suppressed while typing (`lib/shortcuts.ts` + `Shell.svelte`); unit + Shell integration tests
 - **Tests shipped with Phase 2:**
   - [x] Unit: entity CRUD service (`entity_service_test.rs`); event `sequence_index` timeline ordering (`order_events_for_timeline` unit + `get_events_timeline` integration)
   - [x] Integration: notes indexing → retrieval (entity/session note embedding + context inclusion tested in `entity_service`/`session_service`/`agent_service`); is_gm_only propagation into vector index (`vector_store` upsert→search round-trip) + message flag round-trip (`chat_history_test`)
