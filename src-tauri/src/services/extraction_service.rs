@@ -125,9 +125,12 @@ fn build_extraction_prompt(chunk_text: &str) -> String {
 
 Extract all named entities from the following text. For each entity:
 - Identify its kind (one of: npc, location, faction, creature, item, event, player_character, misc)
-- Write a concise summary (1-2 sentences)
 - For entities directly related to a level-0 entity, include them in that entity's "relations" array
 - For entities mentioned only in passing (level 2+), write their names as [[wikilinks]] inside the notes field — do NOT extract them as separate entities
+
+Field rules (apply to BOTH top-level entities and entities in "relations"):
+- "summary": a short, concise description of the entity ITSELF — who or what it is — in 1 sentence. Do NOT describe how it relates to any other entity here. The ONLY exception is when the entity is inherently about a relationship (e.g. an association, alliance, or pact between parties); then the relationship is its identity and belongs in the summary.
+- "notes": a more thorough description, including how this entity relates to others (its role, ties, and the connection to the entity it was extracted alongside). May contain [[wikilinks]]. Leave empty if there is nothing beyond the summary.
 
 Return ONLY valid JSON matching this exact schema (no markdown, no explanation):
 
@@ -136,15 +139,15 @@ Return ONLY valid JSON matching this exact schema (no markdown, no explanation):
     {{
       "name": "string",
       "kind": "npc|location|faction|creature|item|event|player_character|misc",
-      "summary": "string",
-      "notes": "optional string, may contain [[wikilinks]] for deeper references",
+      "summary": "short, concise description of the entity itself",
+      "notes": "optional longer description incl. relationships, may contain [[wikilinks]]",
       "relations": [
         {{
           "name": "string",
           "kind": "string",
           "rel_type": "string (e.g. leads, commands, located_in, allied_with)",
-          "summary": "string",
-          "notes": "optional string"
+          "summary": "short, concise description of this entity itself — NOT its relation to the parent",
+          "notes": "optional longer description incl. how it relates to the parent entity"
         }}
       ]
     }}
@@ -163,10 +166,14 @@ fn build_seed_prompt(name: &str, chunk_text: &str) -> String {
         r#"You are an expert at extracting structured game entities from TTRPG source material.
 
 Build a complete profile of the entity named "{name}" using ONLY the source text below.
-- Output "{name}" as a single level-0 entity with its kind, a concise summary (1-2 sentences), and notes.
+- Output "{name}" as a single level-0 entity with its kind, summary, and notes.
 - Include entities DIRECTLY related to "{name}" in its "relations" array (allies, members, locations, leaders, etc.).
 - For entities mentioned only in passing, write their names as [[wikilinks]] inside notes — do NOT extract them separately.
 - If "{name}" is not described in the text, return an empty "entities" array.
+
+Field rules (apply to BOTH "{name}" and entities in "relations"):
+- "summary": a short, concise description of the entity ITSELF — who or what it is — in 1 sentence. Do NOT describe how a related entity connects to "{name}" here. The ONLY exception is when the entity is inherently about a relationship (e.g. an association, alliance, or pact between parties); then the relationship is its identity and belongs in the summary.
+- "notes": a more thorough description, including how the entity relates to "{name}" (its role, ties, and connection). May contain [[wikilinks]]. Leave empty if there is nothing beyond the summary.
 
 Return ONLY valid JSON matching this exact schema (no markdown, no explanation):
 
@@ -175,10 +182,10 @@ Return ONLY valid JSON matching this exact schema (no markdown, no explanation):
     {{
       "name": "string",
       "kind": "npc|location|faction|creature|item|event|player_character|misc",
-      "summary": "string",
-      "notes": "optional string, may contain [[wikilinks]]",
+      "summary": "short, concise description of the entity itself",
+      "notes": "optional longer description incl. relationships, may contain [[wikilinks]]",
       "relations": [
-        {{ "name": "string", "kind": "string", "rel_type": "string", "summary": "string", "notes": "optional string" }}
+        {{ "name": "string", "kind": "string", "rel_type": "string", "summary": "short, concise description of this entity itself — NOT its relation to {name}", "notes": "optional longer description incl. how it relates to {name}" }}
       ]
     }}
   ]
