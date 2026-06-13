@@ -450,10 +450,11 @@ pub async fn extract_seed_anchored<C: Connection>(
             .map_err(|e| ExtractionError::Db(e.to_string()))?;
 
         // 3. Union by chunk id, preserving text.
+        // Dedup by bare chunk id; semantic chunk_id is "chunk:<id>", lexical is "<id>".
         let mut seen = std::collections::HashSet::new();
         let mut passages: Vec<String> = Vec::new();
         for r in &semantic {
-            if seen.insert(r.chunk_id.clone()) {
+            if seen.insert(r.chunk_id.trim_start_matches("chunk:").to_string()) {
                 passages.push(r.text.clone());
             }
         }
@@ -1095,5 +1096,47 @@ mod tests {
             .unwrap();
         assert_eq!(result.entities_created, 1);
         assert_eq!(result.relations_created, 0);
+    }
+
+    #[tokio::test]
+    async fn seed_anchored_uses_semantic_hits_without_lexical_match() {
+        let (db, col_id) = setup_db_with_collection().await;
+        db.query(
+            "CREATE campaign SET id='camp1', name='C', system='5e', created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        db.query("LET $in = type::thing('campaign','camp1'); LET $out = type::thing('collection', $cid); RELATE $in->subscribes_to->$out SET created_at=time::now()")
+            .bind(("cid", col_id.clone()))
+            .await
+            .unwrap();
+
+        // Semantic result whose text does NOT contain the seed name "Mystery Lord".
+        let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+            response: r#"{"entities":[{"name":"Mystery Lord","kind":"npc","summary":"A figure.","notes":null,"relations":[]}]}"#.to_string(),
+        });
+        let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+        let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore {
+            results: vec![SearchResult {
+                chunk_id: "chunk:semchunk".to_string(),
+                source_id: "source:s1".to_string(),
+                source_name: "Book".to_string(),
+                text: "An enigmatic ruler governs from the shadows.".to_string(),
+                page_start: 1,
+                page_end: 1,
+                section_heading: "Lore".to_string(),
+                source_type: "lore".to_string(),
+                distance: 0.1,
+            }],
+        });
+
+        let result = extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Mystery Lord", |_| {})
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.entities_created, 1,
+            "semantic-only hit should still extract"
+        );
     }
 }
