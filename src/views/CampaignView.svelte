@@ -11,15 +11,11 @@
     createCampaign,
     updateCampaign,
     deleteCampaign,
-    extractEntitiesFromCollection,
     type Collection,
     type Campaign,
     type Source,
-    type ExtractionProgress,
   } from '../lib/commands';
   import { collectionIcon } from './collection-icons';
-  import { listen } from '@tauri-apps/api/event';
-  import type { UnlistenFn } from '@tauri-apps/api/event';
   import EntityManager from '../components/EntityManager.svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
@@ -111,33 +107,6 @@
           error = String(e);
         }
       }
-    }
-  }
-
-  // ── Extraction ───────────────────────────────────────────────────────────
-  let extractingColId = $state<string | null>(null);
-  let extractionProgress = $state<ExtractionProgress | null>(null);
-  let extractionToast = $state<string | null>(null);
-
-  async function runExtraction(colId: string) {
-    if (extractingColId) return; // one at a time
-    extractingColId = colId;
-    extractionProgress = null;
-    extractionToast = null;
-
-    let unlisten: UnlistenFn | null = null;
-    try {
-      unlisten = await listen<ExtractionProgress>('extract-progress', (ev) => {
-        extractionProgress = ev.payload;
-      });
-      const summary = await extractEntitiesFromCollection(colId);
-      extractionToast = `Extracted ${summary.entities_created} entities and ${summary.relations_created} relations.`;
-    } catch (e) {
-      extractionToast = `Extraction failed: ${String(e)}`;
-    } finally {
-      unlisten?.();
-      extractingColId = null;
-      extractionProgress = null;
     }
   }
 
@@ -376,26 +345,6 @@
                 <Icon name="plus" size={14} />
                 Add book
               </button>
-              {#if list.some((s) => s.index_status === 'done')}
-                <button
-                  class="add-book extract-btn"
-                  disabled={extractingColId !== null}
-                  onclick={() => runExtraction(c.id)}
-                >
-                  {#if extractingColId === c.id}
-                    <Icon name="loader" size={14} />
-                    {extractionProgress
-                      ? `Batch ${extractionProgress.batch}/${extractionProgress.total_batches} · ${extractionProgress.entities_found} found`
-                      : 'Extracting…'}
-                  {:else}
-                    <Icon name="sparkles" size={14} />
-                    Extract entities
-                  {/if}
-                </button>
-              {/if}
-              {#if extractionToast && extractingColId === null}
-                <p class="extract-toast">{extractionToast}</p>
-              {/if}
             </div>
           {/if}
         </div>
@@ -787,19 +736,5 @@
   .view-tab.active {
     color: var(--fg-1);
     border-bottom-color: var(--violet-300);
-  }
-  .extract-btn {
-    color: var(--accent, #7c5cfc);
-    border-color: var(--accent, #7c5cfc);
-  }
-  .extract-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-  .extract-toast {
-    font-size: 0.75rem;
-    color: var(--text-muted, #888);
-    padding: 4px 8px;
-    margin: 2px 0 0;
   }
 </style>
