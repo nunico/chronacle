@@ -104,4 +104,38 @@ describe('EntityManager', () => {
     expect(commands.getEntities).toHaveBeenCalledWith('camp1', 'npc');
     expect(vi.mocked(commands.getEntities).mock.calls.length).toBeGreaterThan(1);
   });
+
+  it('updates form fields when switching from one entity to another', async () => {
+    const torvin = mockNpc();
+    const brakka: GraphNode = { ...mockNpc(), id: 'npc2', name: 'Brakka', summary: 'Orc chieftain' };
+    vi.mocked(commands.getEntities).mockResolvedValue([torvin, brakka]);
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
+    await waitFor(() => screen.getByText('Torvin'));
+
+    // Edit Torvin
+    await fireEvent.click(screen.getByText('Torvin'));
+    await waitFor(() => {
+      expect((screen.getByLabelText(/^name$/i) as HTMLInputElement).value).toBe('Torvin');
+    });
+
+    // Switch to Brakka — fields must follow the newly selected entity
+    await fireEvent.click(screen.getByText('Brakka'));
+    await waitFor(() => {
+      expect((screen.getByLabelText(/^name$/i) as HTMLInputElement).value).toBe('Brakka');
+    });
+    expect((screen.getByLabelText(/^summary$/i) as HTMLInputElement).value).toBe('Orc chieftain');
+  });
+
+  it('Escape closes the delete confirmation without deleting', async () => {
+    vi.mocked(commands.getEntities).mockResolvedValue([mockNpc()]);
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
+    await waitFor(() => screen.getByText('Torvin'));
+    await fireEvent.click(screen.getByRole('button', { name: /delete torvin/i }));
+    const dialog = await screen.findByRole('dialog');
+    await fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(commands.deleteEntity).not.toHaveBeenCalled();
+  });
 });

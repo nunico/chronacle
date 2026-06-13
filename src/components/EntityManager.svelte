@@ -6,6 +6,7 @@
   } from '../lib/commands';
   import EntityForm from './EntityForm.svelte';
   import WikiText from './WikiText.svelte';
+  import { modalBehavior } from '../lib/actions/modal';
 
   interface Props {
     campaignId: string;
@@ -169,22 +170,29 @@
             <WikiText text={formNode.notes} entities={entityMap} />
           </div>
         {/if}
-        <EntityForm
-          kind={kind}
-          node={formNode}
-          error={formError}
-          sessions={kind === 'event' ? sessions : []}
-          {entityMap}
-          onsave={handleSave}
-          oncancel={() => { showForm = false; formNode = null; }}
-        />
+        {#key formNode?.id}
+          <EntityForm
+            kind={kind}
+            node={formNode}
+            error={formError}
+            sessions={kind === 'event' ? sessions : []}
+            {entityMap}
+            onsave={handleSave}
+            oncancel={() => { showForm = false; formNode = null; }}
+          />
+        {/key}
       </div>
     {/if}
   </div>
 
   <!-- Delete confirmation -->
   {#if deleteConfirm}
-    <div class="overlay" role="dialog" aria-modal="true">
+    <div
+      class="overlay"
+      role="dialog"
+      aria-modal="true"
+      use:modalBehavior={{ onClose: () => { deleteConfirm = null; } }}
+    >
       <div class="confirm-box">
         <p>Delete <strong>{deleteConfirm.name}</strong>? This cannot be undone.</p>
         <div class="actions">
