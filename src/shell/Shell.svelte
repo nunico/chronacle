@@ -11,11 +11,16 @@
     setMruCollectionId,
     getEmbeddingModelMismatch,
     reindexAllSources,
+    getEntityCounts,
+    getSessions,
     type Campaign,
     type Collection,
     type EmbeddingModelMismatch,
   } from '../lib/commands';
   import { onEmbeddingModelMismatch } from '../lib/events';
+  import { modalBehavior } from '../lib/actions/modal';
+  import { showToast } from '../lib/toast.svelte';
+  import Toast from '../components/Toast.svelte';
   import CampaignRail, { type View } from './CampaignRail.svelte';
   import CampaignSwitcher from './CampaignSwitcher.svelte';
   import Topbar from './Topbar.svelte';
@@ -46,9 +51,41 @@
   let campaigns = $state<Campaign[]>([]);
   let activeCampaignId = $state<string | null>(null);
   let switcherOpen = $state(false);
+  let railCounts = $state<Partial<Record<NoteCategoryId, number>>>({});
+
+  async function refreshRailCounts(campaignId: string | null) {
+    if (!campaignId) {
+      railCounts = {};
+      return;
+    }
+    try {
+      const [counts, sessions] = await Promise.all([
+        getEntityCounts(campaignId),
+        getSessions(campaignId),
+      ]);
+      const next: Partial<Record<NoteCategoryId, number>> = { sessions: sessions.length };
+      for (const [cat, kind] of Object.entries(ENTITY_KIND_MAP) as Array<
+        [NoteCategoryId, EntityKind]
+      >) {
+        next[cat] = counts[kind] ?? 0;
+      }
+      railCounts = next;
+    } catch {
+      // Counts are decorative — fall back to placeholders on failure.
+      railCounts = {};
+    }
+  }
+
+  // Refresh whenever the campaign changes or the user navigates (e.g. after
+  // creating or deleting entities in a manager view).
+  $effect(() => {
+    void view;
+    refreshRailCounts(activeCampaignId);
+  });
 
   // Upload dialog state (lifted from old App.svelte)
-  let isUploading = $state(false);
+  type UploadPhase = 'idle' | 'active' | 'done' | 'error';
+  let uploadPhase = $state<UploadPhase>('idle');
   let uploadProgress = $state(0);
   let uploadStatus = $state('');
   let uploadedSourceName = $state('');
@@ -66,6 +103,8 @@
   let mismatch = $state<EmbeddingModelMismatch | null>(null);
   let reindexing = $state(false);
   let mismatchDismissed = $state(false);
+  let reindexProgress = $state<{ current: number; total: number; step: string } | null>(null);
+  let reindexError = $state('');
 
   onMount(async () => {
     try {
@@ -116,7 +155,23 @@
   async function handleReindex() {
     if (reindexing) return;
     reindexing = true;
+    reindexError = '';
+    reindexProgress = null;
+    let unlistenProgress: UnlistenFn | null = null;
     try {
+      unlistenProgress = await listen<{
+        source_id: string;
+        current: number;
+        total: number;
+        progress: number;
+        step: string;
+      }>('reindex-progress', (event) => {
+        reindexProgress = {
+          current: event.payload.current,
+          total: event.payload.total,
+          step: event.payload.step,
+        };
+      });
       await reindexAllSources();
       const report = await getEmbeddingModelMismatch();
       if (report.stale.length === 0) {
@@ -126,8 +181,10 @@
         mismatch = report;
       }
     } catch (e) {
-      console.error('reindex failed:', e);
+      reindexError = `Re-indexing failed: ${String(e)}`;
     } finally {
+      if (unlistenProgress) unlistenProgress();
+      reindexProgress = null;
       reindexing = false;
     }
   }
@@ -138,8 +195,14 @@
 
   function setActiveCampaignId(id: string | null) {
     activeCampaignId = id;
-    if (id) localStorage.setItem(ACTIVE_KEY, id);
-    else localStorage.removeItem(ACTIVE_KEY);
+    // Same defensive guard as the read in onMount: `localStorage` can be
+    // undefined in some test environments.
+    try {
+      if (id) localStorage.setItem(ACTIVE_KEY, id);
+      else localStorage.removeItem(ACTIVE_KEY);
+    } catch {
+      /* persistence is best-effort */
+    }
   }
 
   async function refreshCampaigns() {
@@ -173,6 +236,10 @@
   });
 
   async function openFilePicker(initialCollectionId?: string) {
+    if (uploadPhase === 'active') {
+      showToast('An upload is already in progress — wait for it to finish.', 'info');
+      return;
+    }
     const selected = await open({
       multiple: false,
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
@@ -231,8 +298,22 @@
     await startUpload(path, name, colId);
   }
 
+  function cancelPicker() {
+    showPicker = false;
+    pendingPath = null;
+    pendingName = null;
+  }
+
+  function resetUpload() {
+    uploadPhase = 'idle';
+    uploadStatus = '';
+    uploadProgress = 0;
+    uploadedSourceName = '';
+  }
+
   async function startUpload(path: string, name: string, collectionId: string) {
-    isUploading = true;
+    if (uploadPhase === 'active') return;
+    uploadPhase = 'active';
     uploadProgress = 0;
     uploadStatus = 'Uploading…';
     uploadedSourceName = name;
@@ -244,11 +325,14 @@
         status: string;
         progress: number;
         step?: string;
+        current?: number | null;
+        total?: number | null;
       }>('ingestion-progress', (event) => {
         uploadProgress = Math.round(event.payload.progress * 100);
         if (event.payload.status === 'done') {
           uploadStatus = 'Ready!';
           uploadProgress = 100;
+          uploadPhase = 'done';
         } else if (event.payload.step) {
           uploadStatus = event.payload.step;
         } else {
@@ -259,18 +343,29 @@
         'ingestion-error',
         (event) => {
           uploadStatus = `Error: ${event.payload.error}`;
-          console.error('Ingestion error:', event.payload.error);
-          isUploading = false;
+          uploadPhase = 'error';
+          showToast(`"${name}" failed to index: ${event.payload.error}`, 'error');
         },
       );
       await uploadSource(path, name, 'rules', collectionId);
+      // The 'done' progress event normally lands before the command resolves,
+      // but don't leave the strip stuck on 'active' if it was dropped.
+      if (uploadPhase === 'active') {
+        uploadStatus = 'Ready!';
+        uploadProgress = 100;
+        uploadPhase = 'done';
+      }
     } catch (e) {
-      uploadStatus = `Upload failed: ${String(e)}`;
-      isUploading = false;
+      // The ingestion-error event usually fires first with a cleaner message;
+      // only surface the rejection if it didn't.
+      if (uploadPhase !== 'error') {
+        uploadStatus = `Upload failed: ${String(e)}`;
+        uploadPhase = 'error';
+        showToast(`"${name}" failed to upload: ${String(e)}`, 'error');
+      }
     } finally {
       if (unlistenProgress) unlistenProgress();
       if (unlistenError) unlistenError();
-      isUploading = false;
     }
   }
 </script>
@@ -279,6 +374,7 @@
   <CampaignRail
     {view}
     {activeCampaign}
+    counts={railCounts}
     setView={(v) => (view = v)}
     onOpenSwitcher={() => (switcherOpen = true)}
     onOpenUpload={() => openFilePicker()}
@@ -304,6 +400,22 @@
           source{totalStaleSources === 1 ? '' : 's'} indexed with a different model
           ({mismatch.stale.map((s) => s.embed_model).join(', ')}). Retrieval quality will suffer
           until they are re-indexed with the active model ({mismatch.active_model}).
+          {#if reindexProgress}
+            <div class="mismatch-progress">
+              Re-indexing {reindexProgress.current}/{reindexProgress.total} — {reindexProgress.step}
+              <div class="mismatch-progress-bar">
+                <div
+                  class="mismatch-progress-fill"
+                  style="width: {reindexProgress.total > 0
+                    ? Math.round((reindexProgress.current / reindexProgress.total) * 100)
+                    : 0}%"
+                ></div>
+              </div>
+            </div>
+          {/if}
+          {#if reindexError}
+            <div class="mismatch-error">{reindexError}</div>
+          {/if}
         </div>
         <div class="mismatch-actions">
           <button
@@ -352,22 +464,31 @@
     {/if}
 
     <UploadProgress
+      phase={uploadPhase}
       filename={uploadedSourceName}
       status={uploadStatus}
       progress={uploadProgress}
-      isActive={isUploading}
+      onDismiss={resetUpload}
     />
   </main>
 
+  <Toast />
+
   {#if showPicker}
     <div class="picker-overlay">
-      <div class="picker-dialog" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+      <div
+        class="picker-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="picker-title"
+        use:modalBehavior={{ onClose: cancelPicker }}
+      >
         <h3 id="picker-title">Add "{pendingName}" to collection</h3>
         {#if pickerError}
           <div class="picker-error">{pickerError}</div>
         {/if}
         {#if collections.length > 0}
-          <select bind:value={pickerCollectionId} class="picker-select">
+          <select bind:value={pickerCollectionId} class="picker-select" data-autofocus>
             {#each collections as col (col.id)}
               <option value={col.id}>{col.name}</option>
             {/each}
@@ -391,14 +512,8 @@
             >+ Create new collection</button>
         {/if}
         <div class="picker-actions">
-          <button
-            class="picker-cancel-btn"
-            data-testid="picker-cancel"
-            onclick={() => {
-              showPicker = false;
-              pendingPath = null;
-              pendingName = null;
-            }}>Cancel</button>
+          <button class="picker-cancel-btn" data-testid="picker-cancel" onclick={cancelPicker}
+            >Cancel</button>
           <button class="picker-confirm-btn" disabled={!pickerCollectionId} onclick={confirmUpload}
             >Upload</button>
         </div>
@@ -547,6 +662,29 @@
   }
   .mismatch-text strong {
     color: var(--fg-1);
+  }
+  .mismatch-progress {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--fg-2);
+  }
+  .mismatch-progress-bar {
+    margin-top: 4px;
+    height: 3px;
+    background: var(--line);
+    border-radius: 2px;
+    overflow: hidden;
+    max-width: 320px;
+  }
+  .mismatch-progress-fill {
+    height: 100%;
+    background: var(--grad-arcane);
+    transition: width 0.3s ease;
+  }
+  .mismatch-error {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--danger);
   }
   .mismatch-actions {
     display: flex;

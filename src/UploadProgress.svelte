@@ -1,28 +1,47 @@
 <script lang="ts">
+  export type UploadPhase = 'idle' | 'active' | 'done' | 'error';
+
   let {
+    phase,
     filename,
     status,
     progress,
-    isActive,
+    onDismiss,
   }: {
+    phase: UploadPhase;
     filename: string;
     status: string;
     progress: number;
-    isActive: boolean;
+    onDismiss: () => void;
   } = $props();
+
+  const AUTO_HIDE_MS = 4000;
+
+  // Success state lingers briefly so the user sees completion, then clears
+  // itself. Errors stay until explicitly dismissed.
+  $effect(() => {
+    if (phase !== 'done') return;
+    const t = setTimeout(onDismiss, AUTO_HIDE_MS);
+    return () => clearTimeout(t);
+  });
 </script>
 
-{#if isActive || status}
-  <div class="upload-status">
+{#if phase !== 'idle'}
+  <div class="upload-status" class:error={phase === 'error'} role="status">
     <span class="upload-filename">{filename}</span>
     <span class="upload-progress-text">{status}</span>
-    {#if isActive}
+    {#if phase === 'active' || phase === 'done'}
       <div class="progress-bar-container">
         <div class="progress-bar">
           <div class="progress-fill" style="width: {progress}%"></div>
         </div>
         <span class="progress-pct">{progress}%</span>
       </div>
+    {/if}
+    {#if phase === 'error'}
+      <button type="button" class="dismiss-btn" aria-label="Dismiss" onclick={onDismiss}>
+        ×
+      </button>
     {/if}
   </div>
 {/if}
@@ -43,6 +62,27 @@
 
   .upload-progress-text {
     color: var(--arcane-500);
+  }
+
+  .upload-status.error .upload-progress-text {
+    color: var(--danger);
+  }
+
+  .dismiss-btn {
+    margin-left: 0.5rem;
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    color: var(--fg-3);
+    font-size: 0.85rem;
+    line-height: 1;
+    padding: 1px 6px;
+    cursor: pointer;
+  }
+
+  .dismiss-btn:hover {
+    color: var(--fg-1);
+    border-color: var(--line-strong);
   }
 
   .progress-bar-container {

@@ -13,12 +13,14 @@
   let {
     view,
     activeCampaign,
+    counts = {},
     setView,
     onOpenSwitcher,
     onOpenUpload,
   }: {
     view: View;
     activeCampaign: Campaign | null;
+    counts?: Partial<Record<NoteCategoryId, number>>;
     setView: (v: View) => void;
     onOpenSwitcher: () => void;
     onOpenUpload: () => void;
@@ -73,7 +75,7 @@
           >
             <Icon name={c.icon} size={18} className="ic" />
             {c.label}
-            <span class="ct">—</span>
+            <span class="ct">{counts[c.id] ?? '—'}</span>
           </button>
         {/each}
       </nav>
