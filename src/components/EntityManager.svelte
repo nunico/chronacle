@@ -170,17 +170,15 @@
             <WikiText text={formNode.notes} entities={entityMap} />
           </div>
         {/if}
-        {#key formNode?.id}
-          <EntityForm
-            kind={kind}
-            node={formNode}
-            error={formError}
-            sessions={kind === 'event' ? sessions : []}
-            {entityMap}
-            onsave={handleSave}
-            oncancel={() => { showForm = false; formNode = null; }}
-          />
-        {/key}
+        <EntityForm
+          kind={kind}
+          node={formNode}
+          error={formError}
+          sessions={kind === 'event' ? sessions : []}
+          {entityMap}
+          onsave={handleSave}
+          oncancel={() => { showForm = false; formNode = null; }}
+        />
       </div>
     {/if}
   </div>

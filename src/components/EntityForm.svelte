@@ -14,23 +14,26 @@
 
   let { kind, node = null, error = null, onsave, oncancel, sessions = [], entityMap = new Map() }: Props = $props();
 
-  let name = $state(node?.name ?? '');
-  let summary = $state(node?.summary ?? '');
-  let notes = $state(node?.notes ?? '');
+  // Writable $derived: each field seeds from `node` and recomputes when a
+  // different entity is selected, while remaining editable via bind:value
+  // (user edits override the derived until `node` changes again).
+  let name = $derived(node?.name ?? '');
+  let summary = $derived(node?.summary ?? '');
+  let notes = $derived(node?.notes ?? '');
   // event fields
-  let dateStart = $state(node?.date_start ?? '');
-  let dateEnd = $state(node?.date_end ?? '');
-  let isOngoing = $state(node?.is_ongoing ?? false);
-  let sequenceIndex = $state(node?.sequence_index?.toString() ?? '');
-  let era = $state(node?.era ?? '');
-  let durationLabel = $state(node?.duration_label ?? '');
+  let dateStart = $derived(node?.date_start ?? '');
+  let dateEnd = $derived(node?.date_end ?? '');
+  let isOngoing = $derived(node?.is_ongoing ?? false);
+  let sequenceIndex = $derived(node?.sequence_index?.toString() ?? '');
+  let era = $derived(node?.era ?? '');
+  let durationLabel = $derived(node?.duration_label ?? '');
   // event session FK
-  let sessionId = $state(node?.session_id ?? '');
+  let sessionId = $derived(node?.session_id ?? '');
   // pc fields
-  let playerName = $state(node?.player_name ?? '');
-  let characterClass = $state(node?.character_class ?? '');
-  let characterLevel = $state(node?.character_level?.toString() ?? '');
-  let status = $state(node?.status ?? '');
+  let playerName = $derived(node?.player_name ?? '');
+  let characterClass = $derived(node?.character_class ?? '');
+  let characterLevel = $derived(node?.character_level?.toString() ?? '');
+  let status = $derived(node?.status ?? '');
 
   let nameError = $state('');
 
