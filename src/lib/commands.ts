@@ -87,6 +87,14 @@ export async function chatSend(
 }
 
 /**
+ * Cancel the in-flight chat response, if any. The backend emits a final
+ * `chat-token` event with `done: true` so the UI resolves its loading state.
+ */
+export async function chatCancel(): Promise<void> {
+  return invoke('chat_cancel');
+}
+
+/**
  * Current LLM provider status returned from the backend.
  */
 export interface LlmProviderStatus {
@@ -438,6 +446,11 @@ export async function getEntity(id: string, kind: EntityKind): Promise<GraphNode
   return invoke<GraphNode>('get_entity', { id, kind });
 }
 
+/** Per-kind entity counts for a campaign, keyed by kind (`npc`, `location`, …). */
+export async function getEntityCounts(campaignId: string): Promise<Record<EntityKind, number>> {
+  return invoke<Record<EntityKind, number>>('get_entity_counts', { campaignId });
+}
+
 export async function createEntity(
   campaignId: string,
   kind: EntityKind,
@@ -520,18 +533,39 @@ export interface ExtractionSummary {
   relations_created: number;
 }
 
+export type ExtractionPhase =
+  | 'resolving'
+  | 'searching'
+  | 'extracting'
+  | 'relating'
+  | 'embedding'
+  | 'done'
+  | 'empty';
+
 export interface ExtractionProgress {
-  batch: number;
-  total_batches: number;
+  phase: ExtractionPhase;
+  detail: string;
   entities_found: number;
+  relations_found: number;
 }
 
 /**
- * Trigger LLM-powered entity extraction for a collection.
- * Progress is delivered via the `extract-progress` Tauri event.
+ * Seed-anchored extraction of a single named entity. Progress arrives via the
+ * `extract-progress` Tauri event.
  */
-export async function extractEntitiesFromCollection(
-  collectionId: string,
+export async function extractEntityByName(
+  campaignId: string,
+  name: string,
 ): Promise<ExtractionSummary> {
-  return invoke<ExtractionSummary>('extract_entities_from_collection', { collectionId });
+  return invoke<ExtractionSummary>('extract_entity_by_name', { campaignId, name });
+}
+
+/** Full sweep across all collections linked to the campaign. Cancellable. */
+export async function extractAllFromCampaign(campaignId: string): Promise<ExtractionSummary> {
+  return invoke<ExtractionSummary>('extract_all_from_campaign', { campaignId });
+}
+
+/** Abort the in-flight extraction, if any. */
+export async function cancelExtraction(): Promise<void> {
+  return invoke('cancel_extraction');
 }
