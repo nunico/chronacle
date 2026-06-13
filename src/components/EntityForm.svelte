@@ -12,7 +12,15 @@
     entityMap?: Map<string, { id: string; kind: string }>; // for wikilink autocomplete
   }
 
-  let { kind, node = null, error = null, onsave, oncancel, sessions = [], entityMap = new Map() }: Props = $props();
+  let {
+    kind,
+    node = null,
+    error = null,
+    onsave,
+    oncancel,
+    sessions = [],
+    entityMap = new Map(),
+  }: Props = $props();
 
   // Writable $derived: each field seeds from `node` and recomputes when a
   // different entity is selected, while remaining editable via bind:value
@@ -20,6 +28,7 @@
   let name = $derived(node?.name ?? '');
   let summary = $derived(node?.summary ?? '');
   let notes = $derived(node?.notes ?? '');
+  let gmOnly = $derived(node?.is_gm_only ?? false);
   // event fields
   let dateStart = $derived(node?.date_start ?? '');
   let dateEnd = $derived(node?.date_end ?? '');
@@ -47,6 +56,7 @@
       name: name.trim(),
       summary: summary || null,
       notes: notes || null,
+      isGmOnly: gmOnly,
       dateStart: dateStart || null,
       dateEnd: dateEnd || null,
       isOngoing: isOngoing || null,
@@ -63,7 +73,13 @@
   }
 </script>
 
-<form aria-label="entity form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+<form
+  aria-label="entity form"
+  onsubmit={(e) => {
+    e.preventDefault();
+    handleSubmit();
+  }}
+>
   <div class="field">
     <label for="ef-name">Name</label>
     <input id="ef-name" type="text" bind:value={name} />
@@ -85,6 +101,13 @@
       rows={4}
       placeholder="Use [[Entity Name]] to link."
     />
+  </div>
+
+  <div class="field checkbox">
+    <label>
+      <input type="checkbox" bind:checked={gmOnly} />
+      GM only (secret)
+    </label>
   </div>
 
   {#if kind === 'event'}
@@ -162,10 +185,22 @@
 </form>
 
 <style>
-  form { display: flex; flex-direction: column; gap: 12px; }
-  .field { display: flex; flex-direction: column; gap: 4px; }
-  label { font-size: 0.85rem; color: var(--fg-3); }
-  input, select {
+  form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  label {
+    font-size: 0.85rem;
+    color: var(--fg-3);
+  }
+  input,
+  select {
     background: var(--bg-panel-2);
     border: 1px solid var(--line);
     border-radius: 6px;
@@ -173,8 +208,17 @@
     padding: 6px 10px;
     font-size: 0.9rem;
   }
-  .field-error, .form-error { color: var(--danger); font-size: 0.8rem; margin: 0; }
-  .actions { display: flex; gap: 8px; margin-top: 8px; }
+  .field-error,
+  .form-error {
+    color: var(--danger);
+    font-size: 0.8rem;
+    margin: 0;
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
   .btn-primary {
     background: var(--violet-300);
     color: var(--bg-abyss);

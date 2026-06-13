@@ -186,6 +186,7 @@ async fn ingest_source_inner(
         chunks,
         source_id,
         &source_info.collection_id,
+        source_info.is_gm_only,
         on_progress.as_ref(),
     )
     .await?;
@@ -271,6 +272,8 @@ pub(crate) struct SourceInfo {
     pub(crate) filename: String,
     /// Every source must belong to a collection — non-nullable per schema.
     pub(crate) collection_id: String,
+    /// GM-secret flag; chunks inherit it so it propagates into the vector index.
+    pub(crate) is_gm_only: bool,
 }
 
 /// Embed chunks using the embedding provider, tagging each with the source's collection.
@@ -284,6 +287,7 @@ async fn embed_chunks(
     chunks: Vec<RawChunk>,
     source_id: &str,
     collection_id: &str,
+    is_gm_only: bool,
     on_progress: &(dyn Fn(IngestionProgress) + Send + Sync),
 ) -> Result<Vec<IndexedChunk>, IngestionError> {
     if chunks.is_empty() {
@@ -333,6 +337,7 @@ async fn embed_chunks(
             page_end: chunk.page_end,
             section_heading: chunk.section_heading,
             source_type: String::new(),
+            is_gm_only,
             embedding,
             embed_model: embed_model.clone(),
         })
@@ -351,7 +356,10 @@ where
     C: Connection,
 {
     let mut response = db
-        .query("SELECT filename, collection FROM source WHERE id = type::thing('source', $id)")
+        .query(
+            "SELECT filename, collection, is_gm_only FROM source \
+             WHERE id = type::thing('source', $id)",
+        )
         .bind(("id", source_id.to_owned()))
         .await
         .map_err(|e| IngestionError::Db(format!("Failed to query source: {e}")))?;
@@ -361,6 +369,8 @@ where
         filename: String,
         /// Non-optional: matches `source.collection TYPE record<collection>` schema.
         collection: surrealdb::sql::Thing,
+        #[serde(default)]
+        is_gm_only: bool,
     }
 
     let rows: Vec<Row> = response
@@ -372,6 +382,7 @@ where
         .map(|r| SourceInfo {
             filename: r.filename,
             collection_id: r.collection.id.to_raw(),
+            is_gm_only: r.is_gm_only,
         })
         .ok_or_else(|| IngestionError::Db(format!("Source '{source_id}' not found")))
 }
@@ -473,7 +484,7 @@ mod tests {
         let captured = updates.clone();
         let on_progress = move |p: IngestionProgress| captured.lock().unwrap().push(p);
 
-        let indexed = embed_chunks(&provider, chunks, "src1", "col1", &on_progress)
+        let indexed = embed_chunks(&provider, chunks, "src1", "col1", false, &on_progress)
             .await
             .unwrap();
 
@@ -513,7 +524,7 @@ mod tests {
         let captured = updates.clone();
         let on_progress = move |p: IngestionProgress| captured.lock().unwrap().push(p);
 
-        let indexed = embed_chunks(&provider, Vec::new(), "src1", "col1", &on_progress)
+        let indexed = embed_chunks(&provider, Vec::new(), "src1", "col1", false, &on_progress)
             .await
             .unwrap();
 

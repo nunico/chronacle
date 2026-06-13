@@ -27,6 +27,7 @@ fn make_input(number: i64, title: &str) -> SessionInput {
         title: title.to_string(),
         date_played: "2026-06-05".to_string(),
         notes: String::new(),
+        is_gm_only: None,
     }
 }
 
@@ -65,6 +66,7 @@ async fn create_session_requires_nonempty_title() {
             title: "   ".to_string(),
             date_played: "2026-06-05".to_string(),
             notes: String::new(),
+            is_gm_only: None,
         },
     )
     .await
@@ -92,6 +94,7 @@ async fn create_session_requires_positive_session_number() {
                 title: "Valid Title".to_string(),
                 date_played: "2026-06-05".to_string(),
                 notes: String::new(),
+                is_gm_only: None,
             },
         )
         .await
@@ -188,6 +191,7 @@ async fn update_session_changes_fields_and_updates_timestamp() {
             title: "New Title".to_string(),
             date_played: "2026-07-01".to_string(),
             notes: "Updated notes".to_string(),
+            is_gm_only: None,
         },
     )
     .await
@@ -250,6 +254,7 @@ async fn get_session_entities_returns_linked_events() {
             name: "Battle of the Fields".to_string(),
             summary: None,
             notes: None,
+            is_gm_only: None,
             date_start: None,
             date_end: None,
             is_ongoing: None,
@@ -309,6 +314,7 @@ async fn update_session_rejects_zero_session_number() {
             title: "Updated Title".to_string(),
             date_played: "2026-06-05".to_string(),
             notes: String::new(),
+            is_gm_only: None,
         },
     )
     .await
@@ -328,6 +334,7 @@ async fn update_session_rejects_zero_session_number() {
             title: "Updated Title".to_string(),
             date_played: "2026-06-05".to_string(),
             notes: String::new(),
+            is_gm_only: None,
         },
     )
     .await

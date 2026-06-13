@@ -775,6 +775,7 @@ mod tests {
             page_end: 72,
             section_heading: "Fighter Class Features".into(),
             source_type: "rules".into(),
+            is_gm_only: false,
             distance: 0.15,
         }];
 

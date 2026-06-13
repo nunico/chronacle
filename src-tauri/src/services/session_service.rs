@@ -29,6 +29,8 @@ struct SessionRecord {
     pub title: String,
     pub date_played: String,
     pub notes: String,
+    #[serde(default)]
+    pub is_gm_only: bool,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
 }
@@ -42,6 +44,7 @@ impl From<SessionRecord> for Session {
             title: r.title,
             date_played: r.date_played,
             notes: r.notes,
+            is_gm_only: r.is_gm_only,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
@@ -58,17 +61,20 @@ pub struct Session {
     pub title: String,
     pub date_played: String,
     pub notes: String,
+    pub is_gm_only: bool,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInput {
     pub session_number: i64,
     pub title: String,
     pub date_played: String,
     pub notes: String,
+    #[serde(default)]
+    pub is_gm_only: Option<bool>,
 }
 
 // ── Service functions ────────────────────────────────────────────────────────
@@ -101,6 +107,7 @@ pub async fn create<C: surrealdb::Connection>(
                 title          = $title,
                 date_played    = $date_played,
                 notes          = $notes,
+                is_gm_only      = $gm_only,
                 created_at     = time::now(),
                 updated_at     = time::now()",
         )
@@ -110,6 +117,7 @@ pub async fn create<C: surrealdb::Connection>(
         .bind(("title", input.title.trim().to_owned()))
         .bind(("date_played", input.date_played.clone()))
         .bind(("notes", input.notes.clone()))
+        .bind(("gm_only", input.is_gm_only.unwrap_or(false)))
         .await
         .map_err(|e| SessionError::Database {
             message: e.to_string(),
@@ -218,6 +226,7 @@ pub async fn update<C: surrealdb::Connection>(
                 title          = $title,
                 date_played    = $date_played,
                 notes          = $notes,
+                is_gm_only      = $gm_only,
                 updated_at     = time::now()",
         )
         .bind(("id", id.to_owned()))
@@ -225,6 +234,7 @@ pub async fn update<C: surrealdb::Connection>(
         .bind(("title", input.title.trim().to_owned()))
         .bind(("date_played", input.date_played.clone()))
         .bind(("notes", input.notes.clone()))
+        .bind(("gm_only", input.is_gm_only.unwrap_or(false)))
         .await
         .map_err(|e| SessionError::Database {
             message: e.to_string(),
@@ -350,6 +360,7 @@ mod tests {
             title: "The Heist".to_string(),
             date_played: "2026-06-05".to_string(),
             notes: "Notes here".to_string(),
+            is_gm_only: false,
             created_at: None,
             updated_at: None,
         };
@@ -359,6 +370,52 @@ mod tests {
         assert_eq!(v["session_number"], 3);
         assert_eq!(v["title"], "The Heist");
         assert_eq!(v["date_played"], "2026-06-05");
+    }
+
+    #[tokio::test]
+    async fn create_and_update_persist_is_gm_only() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='T', system='5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let created = create(
+            &db,
+            "camp1",
+            SessionInput {
+                session_number: 1,
+                title: "Secret Session".to_string(),
+                date_played: "2026-06-05".to_string(),
+                notes: "GM-only recap".to_string(),
+                is_gm_only: Some(true),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(created.is_gm_only);
+        assert!(get_by_id(&db, &created.id).await.unwrap().is_gm_only);
+
+        let toggled = update(
+            &db,
+            &created.id,
+            SessionInput {
+                session_number: 1,
+                title: "Secret Session".to_string(),
+                date_played: "2026-06-05".to_string(),
+                notes: "GM-only recap".to_string(),
+                is_gm_only: Some(false),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!toggled.is_gm_only);
     }
 
     #[tokio::test]
@@ -383,6 +440,7 @@ mod tests {
                 title: "The Awakening".to_string(),
                 date_played: "2026-06-05".to_string(),
                 notes: "The party met in the tavern and took the job.".to_string(),
+                is_gm_only: None,
             },
         )
         .await

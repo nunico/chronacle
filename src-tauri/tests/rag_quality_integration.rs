@@ -77,6 +77,7 @@ async fn seed_index(
             page_end: c.page_end,
             section_heading: c.section_heading.clone(),
             source_type: "rules".into(),
+            is_gm_only: false,
             embedding: v,
             embed_model: "nomic-embed-text-v1.5".into(),
         })
@@ -218,6 +219,7 @@ async fn retrieval_ranks_target_chunk_above_distractors() {
             page_end: 1,
             section_heading: String::new(),
             source_type: "rules".into(),
+            is_gm_only: false,
             embedding: v,
             embed_model: "nomic-embed-text-v1.5".into(),
         })

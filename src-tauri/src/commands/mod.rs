@@ -160,10 +160,12 @@ pub async fn upload_source(
     display_name: Option<String>,
     source_type: Option<String>,
     collection_id: String,
+    is_gm_only: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     if collection_id.trim().is_empty() {
         return Err("collection_id is required".to_string());
     }
+    let is_gm_only = is_gm_only.unwrap_or(false);
 
     let path = std::path::PathBuf::from(&file_path);
     let filename = path
@@ -208,6 +210,7 @@ pub async fn upload_source(
                 indexed_at = time::now(),
                 index_status = 'pending',
                 embed_model = $embed_model,
+                is_gm_only = $is_gm_only,
                 collection = type::thing('collection', $collection_id)",
         )
         .bind(("id", source_id.to_owned()))
@@ -215,6 +218,7 @@ pub async fn upload_source(
         .bind(("display_name", display_name.to_owned()))
         .bind(("source_type", source_type.to_owned()))
         .bind(("embed_model", embed_model.to_owned()))
+        .bind(("is_gm_only", is_gm_only))
         .bind(("collection_id", collection_id.clone()))
         .await
         .map_err(|e| format!("Failed to create source record: {e}"))?
@@ -235,6 +239,7 @@ pub async fn upload_source(
         "index_status": "pending",
         "embed_model": embed_model,
         "collection_id": collection_id,
+        "is_gm_only": is_gm_only,
     });
 
     // Build the progress callback — emits Tauri events from each pipeline stage

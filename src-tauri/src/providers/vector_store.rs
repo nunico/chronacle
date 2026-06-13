@@ -11,6 +11,9 @@ pub struct SearchResult {
     pub page_end: i64,
     pub section_heading: String,
     pub source_type: String,
+    /// Inherited from the chunk's source — GM-secret material. Never filters the
+    /// result out (single-user app); the UI uses it to flag the answer.
+    pub is_gm_only: bool,
     pub distance: f64,
 }
 
@@ -68,6 +71,9 @@ pub struct IndexedChunk {
     pub page_end: i64,
     pub section_heading: String,
     pub source_type: String,
+    /// Inherited from the source at index time so GM-secret PDFs propagate the
+    /// flag into the vector index.
+    pub is_gm_only: bool,
     pub embedding: Vec<f32>,
     pub embed_model: String,
 }
@@ -139,6 +145,7 @@ where
                     page_end = $page_end,
                     section_heading = $section_heading,
                     source_type = $source_type,
+                    is_gm_only = $is_gm_only,
                     embedding = {embedding_field},
                     embed_model = $embed_model"
             );
@@ -152,6 +159,7 @@ where
                 .bind(("page_end", chunk.page_end))
                 .bind(("section_heading", chunk.section_heading.clone()))
                 .bind(("source_type", chunk.source_type.clone()))
+                .bind(("is_gm_only", chunk.is_gm_only))
                 .bind(("embed_model", chunk.embed_model.clone()))
                 .await
                 .map_err(|e| VectorStoreError::Db(e.to_string()))?
@@ -207,6 +215,7 @@ where
                 page_end,
                 section_heading,
                 source_type,
+                is_gm_only,
                 vector::distance::knn() AS distance
             FROM chunk
             WHERE embedding <|{limit}|> [{vec_str}]
@@ -231,6 +240,8 @@ where
             page_end: i64,
             section_heading: String,
             source_type: String,
+            #[serde(default)]
+            is_gm_only: bool,
             #[serde(deserialize_with = "deserialize_distance")]
             distance: f64,
         }
@@ -275,6 +286,7 @@ where
                 page_end: r.page_end,
                 section_heading: r.section_heading,
                 source_type: r.source_type,
+                is_gm_only: r.is_gm_only,
                 distance: r.distance,
             })
             .collect())
@@ -412,5 +424,73 @@ mod tests {
         // No subscriptions — empty result
         let results = store.search(&query, &[], 10).await.unwrap();
         assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn upsert_propagates_is_gm_only_into_search_results() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE collection SET id='col1', name='C1', created_at=time::now(), updated_at=time::now(); \
+             CREATE source SET id='s1', collection=type::thing('collection','col1'), \
+             filename='secret.pdf', display_name='Secret', source_type='lore', page_count=1, \
+             indexed_at=time::now(), index_status='done', embed_model='nomic-embed-text-v1.5', \
+             is_gm_only=true",
+        )
+        .await
+        .unwrap();
+
+        let mut embedding = vec![0.0f32; 768];
+        embedding[0] = 1.0;
+
+        let store = SurrealDbVector::new(db);
+        // A GM-only chunk and a public chunk in the same collection.
+        store
+            .upsert(
+                "s1",
+                &[
+                    IndexedChunk {
+                        chunk_id: "gm".to_string(),
+                        collection_id: "col1".to_string(),
+                        text: "GM secret".to_string(),
+                        page_start: 1,
+                        page_end: 1,
+                        section_heading: String::new(),
+                        source_type: "lore".to_string(),
+                        is_gm_only: true,
+                        embedding: embedding.clone(),
+                        embed_model: "nomic-embed-text-v1.5".to_string(),
+                    },
+                    IndexedChunk {
+                        chunk_id: "pub".to_string(),
+                        collection_id: "col1".to_string(),
+                        text: "Public".to_string(),
+                        page_start: 2,
+                        page_end: 2,
+                        section_heading: String::new(),
+                        source_type: "lore".to_string(),
+                        is_gm_only: false,
+                        embedding: embedding.clone(),
+                        embed_model: "nomic-embed-text-v1.5".to_string(),
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+
+        let results = store
+            .search(&embedding, &["col1".to_string()], 10)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 2, "GM-only chunks are NOT filtered out");
+
+        let gm = results.iter().find(|r| r.text == "GM secret").unwrap();
+        let public = results.iter().find(|r| r.text == "Public").unwrap();
+        assert!(gm.is_gm_only, "GM chunk must carry the flag");
+        assert!(!public.is_gm_only, "public chunk must not be flagged");
     }
 }
