@@ -499,6 +499,8 @@ fn build_system_prompt(rag_context: &str, entity_context: &str) -> String {
              this exact format, including a short verbatim quote (1 sentence) from the \
              passage that supports the claim:\n  \
                [Source: \"<source name>\", p.<page>, quote: \"<verbatim sentence>\"]\n  \
+             Use the singular key `quote:` with exactly ONE sentence — never \
+             `quotes:` or multiple excerpts. Emit a separate marker per source.\n  \
              Example: [Source: \"PHB\", p.72, quote: \"A fighter can use Action Surge once per rest.\"]\n  \
              The UI hides the quote from the visible reply and shows it in a popover \
              when the user clicks the citation badge.\n\
@@ -643,8 +645,11 @@ pub struct Citation {
 /// When a quote is present, it's stored as `text_excerpt`. When absent, the
 /// 80 characters following the citation marker are used as a degraded fallback.
 fn parse_citations(response: &str) -> Vec<Citation> {
+    // Tolerant of model format drift: singular `quote:` or plural `quotes:`, and
+    // any trailing content (a second excerpt, stray prose) up to the closing `]`
+    // is consumed so the marker still parses. First quoted excerpt is captured.
     let re = regex::Regex::new(
-        r#"(?s)\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+)(?:-\d+)?)?(?:,\s*quote:\s*"(.*?)")?\s*\]"#,
+        r#"(?s)\[Source:\s*"([^"]+)"(?:,\s*p\.\s*(\d+)(?:-\d+)?)?(?:,\s*quotes?:\s*"(.*?)")?[^\]]*\]"#,
     )
     .expect("valid citation regex");
 
@@ -820,6 +825,23 @@ mod tests {
         assert_eq!(citations.len(), 1);
         assert_eq!(citations[0].page, Some(45));
         assert_eq!(citations[0].text_excerpt, "Combat proceeds in rounds.");
+    }
+
+    // Field regression: the model drifted to plural `quotes:` with two excerpts
+    // joined by "and". The strict `quote:` + `]` anchor failed to match, so the
+    // citation was dropped (and the raw marker leaked into the rendered reply).
+    #[test]
+    fn test_parse_citations_plural_quotes_with_multiple_excerpts() {
+        let text = "[Source: \"Coriolis EN.pdf\", p.214-215, quotes: \"Secure dangerous artifacts for... the Draconites\" and \"Prevent the spread of dangerous bionics for... the Draconites\"]";
+        let citations = parse_citations(text);
+        assert_eq!(citations.len(), 1);
+        assert_eq!(citations[0].source_name, "Coriolis EN.pdf");
+        assert_eq!(citations[0].page, Some(214));
+        // The first excerpt is captured as the supporting quote.
+        assert_eq!(
+            citations[0].text_excerpt,
+            "Secure dangerous artifacts for... the Draconites"
+        );
     }
 
     #[test]

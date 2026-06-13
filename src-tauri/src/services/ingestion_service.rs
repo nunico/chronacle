@@ -19,11 +19,51 @@ use surrealdb::Connection;
 ///
 /// `fraction` advances from 0.0 to 1.0 across all stages.
 /// `step` is a human-readable label like "Extracting text from PDF".
+/// `current`/`total` carry item counts for batched stages (e.g. embedding
+/// "64 of 120 chunks") so the UI can show fine-grained activity. They are
+/// `None` for single-shot stages that have no countable unit of work.
 #[derive(Debug, Clone)]
 pub struct IngestionProgress {
     pub fraction: f32,
     pub step: String,
+    pub current: Option<u32>,
+    pub total: Option<u32>,
 }
+
+impl IngestionProgress {
+    /// A single-shot stage with no countable work (extraction, DB write, …).
+    fn stage(fraction: f32, step: impl Into<String>) -> Self {
+        Self {
+            fraction,
+            step: step.into(),
+            current: None,
+            total: None,
+        }
+    }
+
+    /// A batched stage reporting `current`/`total` items processed so far.
+    fn counted(fraction: f32, step: impl Into<String>, current: u32, total: u32) -> Self {
+        Self {
+            fraction,
+            step: step.into(),
+            current: Some(current),
+            total: Some(total),
+        }
+    }
+}
+
+/// Text extraction reports per-page progress across this fraction range,
+/// interpolated linearly by page number.
+const EXTRACT_FRACTION_START: f32 = 0.08;
+const EXTRACT_FRACTION_END: f32 = 0.20;
+
+/// Chunks are embedded in batches of this size so the UI sees steady progress
+/// through what is otherwise the longest, opaque stage of ingestion.
+const EMBED_BATCH_SIZE: usize = 32;
+/// The embedding stage spans this fraction range; per-batch progress is
+/// interpolated linearly across it.
+const EMBED_FRACTION_START: f32 = 0.30;
+const EMBED_FRACTION_END: f32 = 0.85;
 
 /// Errors that can arise during ingestion.
 #[derive(Debug, thiserror::Error)]
@@ -72,10 +112,7 @@ async fn ingest_source_inner(
     source_id: &str,
     on_progress: Arc<dyn Fn(IngestionProgress) + Send + Sync>,
 ) -> Result<(), IngestionError> {
-    on_progress(IngestionProgress {
-        fraction: 0.02,
-        step: "Reading source metadata".into(),
-    });
+    on_progress(IngestionProgress::stage(0.02, "Reading source metadata"));
 
     state
         .db
@@ -86,37 +123,59 @@ async fn ingest_source_inner(
 
     let source_info = get_source_info(&state.db, source_id).await?;
 
-    on_progress(IngestionProgress {
-        fraction: 0.05,
-        step: "Loading PDF file from storage".into(),
-    });
+    on_progress(IngestionProgress::stage(
+        0.05,
+        "Loading PDF file from storage",
+    ));
     let pdf_data = state
         .blob_store
         .retrieve(source_id, &source_info.filename)
         .await
         .map_err(|e| IngestionError::Store(e.to_string()))?;
 
-    on_progress(IngestionProgress {
-        fraction: 0.20,
-        step: "Extracting text from PDF pages".into(),
-    });
+    on_progress(IngestionProgress::stage(
+        EXTRACT_FRACTION_START,
+        "Extracting text from PDF pages",
+    ));
+    let page_progress = on_progress.clone();
+    let on_page: crate::services::pdf_extractor::PageProgressFn =
+        Arc::new(move |page: usize, total: usize| {
+            let span = EXTRACT_FRACTION_END - EXTRACT_FRACTION_START;
+            let fraction = if total == 0 {
+                EXTRACT_FRACTION_END
+            } else {
+                EXTRACT_FRACTION_START + span * (page as f32 / total as f32)
+            };
+            page_progress(IngestionProgress::counted(
+                fraction,
+                format!("Extracting text from page {page}/{total}"),
+                page as u32,
+                total as u32,
+            ));
+        });
     let extracted = state
         .pdf_extractor
-        .extract(&pdf_data)
+        .extract_with_progress(&pdf_data, on_page)
         .await
         .map_err(|e| IngestionError::PdfExtraction(e.to_string()))?;
     let extracted = normalize_extracted(&extracted);
 
-    on_progress(IngestionProgress {
-        fraction: 0.25,
-        step: "Splitting text into searchable chunks".into(),
-    });
+    on_progress(IngestionProgress::stage(
+        0.25,
+        format!(
+            "Splitting {} pages into searchable chunks",
+            extracted.page_count
+        ),
+    ));
     let chunks = chunk_text(&extracted, source_id)?;
+    let chunk_count = chunks.len();
+    on_progress(IngestionProgress::counted(
+        0.28,
+        format!("Split into {chunk_count} chunks"),
+        chunk_count as u32,
+        chunk_count as u32,
+    ));
 
-    on_progress(IngestionProgress {
-        fraction: 0.30,
-        step: "Generating vector embeddings for chunks".into(),
-    });
     let embed_provider = state
         .embedding_provider
         .read()
@@ -127,25 +186,23 @@ async fn ingest_source_inner(
         chunks,
         source_id,
         &source_info.collection_id,
+        on_progress.as_ref(),
     )
     .await?;
 
     drop(embed_provider);
 
-    on_progress(IngestionProgress {
-        fraction: 0.85,
-        step: "Writing chunks to database".into(),
-    });
+    on_progress(IngestionProgress::stage(
+        0.85,
+        format!("Writing {chunk_count} chunks to database"),
+    ));
     state
         .vector_store
         .upsert(source_id, &indexed)
         .await
         .map_err(|e| IngestionError::Db(e.to_string()))?;
 
-    on_progress(IngestionProgress {
-        fraction: 0.98,
-        step: "Finalizing indexing".into(),
-    });
+    on_progress(IngestionProgress::stage(0.98, "Finalizing indexing"));
     state
         .db
         .query("UPDATE source SET index_status = 'done', page_count = $page_count WHERE id = type::thing('source', $id)")
@@ -217,21 +274,50 @@ pub(crate) struct SourceInfo {
 }
 
 /// Embed chunks using the embedding provider, tagging each with the source's collection.
+///
+/// Embedding is the longest stage of ingestion, so chunks are processed in
+/// batches of [`EMBED_BATCH_SIZE`] and `on_progress` is called after each batch
+/// with a running `current`/`total` count. The reported fraction is
+/// interpolated linearly across [`EMBED_FRACTION_START`]..[`EMBED_FRACTION_END`].
 async fn embed_chunks(
     provider: &Arc<dyn EmbeddingProvider>,
     chunks: Vec<RawChunk>,
     source_id: &str,
     collection_id: &str,
+    on_progress: &(dyn Fn(IngestionProgress) + Send + Sync),
 ) -> Result<Vec<IndexedChunk>, IngestionError> {
     if chunks.is_empty() {
         return Ok(Vec::new());
     }
 
+    let total = chunks.len();
     let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
-    let embeddings = provider
-        .embed_documents(texts)
-        .await
-        .map_err(|e| IngestionError::Embedding(e.to_string()))?;
+
+    on_progress(IngestionProgress::counted(
+        EMBED_FRACTION_START,
+        format!("Embedding chunks 0/{total}"),
+        0,
+        total as u32,
+    ));
+
+    let mut embeddings: Vec<Vec<f32>> = Vec::with_capacity(total);
+    for batch in texts.chunks(EMBED_BATCH_SIZE) {
+        let batch_embeddings = provider
+            .embed_documents(batch.to_vec())
+            .await
+            .map_err(|e| IngestionError::Embedding(e.to_string()))?;
+        embeddings.extend(batch_embeddings);
+
+        let done = embeddings.len();
+        let span = EMBED_FRACTION_END - EMBED_FRACTION_START;
+        let fraction = EMBED_FRACTION_START + span * (done as f32 / total as f32);
+        on_progress(IngestionProgress::counted(
+            fraction,
+            format!("Embedding chunks {done}/{total}"),
+            done as u32,
+            total as u32,
+        ));
+    }
 
     let embed_model = provider.model_name().to_string();
     let cid = collection_id.to_owned();
@@ -364,6 +450,75 @@ mod tests {
         assert_eq!(normalized.pages[1].page_num, 2);
         assert!(normalized.text.contains(p1));
         assert!(normalized.text.contains(p2));
+    }
+
+    #[tokio::test]
+    async fn embed_chunks_emits_per_batch_progress_with_counts() {
+        use crate::providers::embedding::MockEmbeddingProvider;
+        use std::sync::Mutex;
+
+        let provider: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(8));
+        // 70 chunks → spans multiple EMBED_BATCH_SIZE (32) batches.
+        let chunk_count = 70;
+        let chunks: Vec<RawChunk> = (0..chunk_count)
+            .map(|i| RawChunk {
+                text: format!("chunk number {i}"),
+                page_start: 1,
+                page_end: 1,
+                section_heading: String::new(),
+            })
+            .collect();
+
+        let updates = Arc::new(Mutex::new(Vec::<IngestionProgress>::new()));
+        let captured = updates.clone();
+        let on_progress = move |p: IngestionProgress| captured.lock().unwrap().push(p);
+
+        let indexed = embed_chunks(&provider, chunks, "src1", "col1", &on_progress)
+            .await
+            .unwrap();
+
+        assert_eq!(indexed.len(), chunk_count);
+
+        let ups = updates.lock().unwrap();
+        // Initial 0/total plus one per batch (ceil(70/32) = 3) → 4 updates.
+        assert_eq!(ups.len(), 4, "expected granular per-batch updates: {ups:?}");
+
+        // Every update carries running counts.
+        for u in ups.iter() {
+            assert_eq!(u.total, Some(chunk_count as u32));
+            assert!(u.current.is_some());
+        }
+
+        // First reports nothing done, last reports everything done.
+        assert_eq!(ups.first().unwrap().current, Some(0));
+        let last = ups.last().unwrap();
+        assert_eq!(last.current, Some(chunk_count as u32));
+        assert!(last.step.contains("70/70"), "step was: {}", last.step);
+
+        // Fractions advance monotonically and stay within the embedding band.
+        for w in ups.windows(2) {
+            assert!(w[1].fraction >= w[0].fraction, "fractions must not regress");
+        }
+        assert!((ups.first().unwrap().fraction - EMBED_FRACTION_START).abs() < f32::EPSILON);
+        assert!(last.fraction <= EMBED_FRACTION_END + f32::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn embed_chunks_empty_emits_no_progress() {
+        use crate::providers::embedding::MockEmbeddingProvider;
+        use std::sync::Mutex;
+
+        let provider: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(8));
+        let updates = Arc::new(Mutex::new(Vec::<IngestionProgress>::new()));
+        let captured = updates.clone();
+        let on_progress = move |p: IngestionProgress| captured.lock().unwrap().push(p);
+
+        let indexed = embed_chunks(&provider, Vec::new(), "src1", "col1", &on_progress)
+            .await
+            .unwrap();
+
+        assert!(indexed.is_empty());
+        assert!(updates.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

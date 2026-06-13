@@ -22,6 +22,16 @@ pub async fn get_entities(
     entity_service::get_by_campaign(&state.db, &campaign_id, k).await
 }
 
+/// Per-kind entity counts for a campaign, keyed by table name (`npc`, …).
+/// Used by the rail navigation to label entity categories.
+#[tauri::command]
+pub async fn get_entity_counts(
+    state: State<'_, Arc<AppState>>,
+    campaign_id: String,
+) -> Result<std::collections::HashMap<String, u64>, EntityError> {
+    entity_service::count_by_campaign(&state.db, &campaign_id).await
+}
+
 #[tauri::command]
 pub async fn get_entity(
     state: State<'_, Arc<AppState>>,

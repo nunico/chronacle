@@ -251,6 +251,8 @@ pub async fn upload_source(
                     "status": "indexing",
                     "progress": p.fraction,
                     "step": p.step,
+                    "current": p.current,
+                    "total": p.total,
                 }),
             );
         },
@@ -514,7 +516,7 @@ pub async fn chat_send(
     let campaign_id = request.campaign_id;
 
     // Spawn so the command returns immediately — tokens come via events
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         // Run the RAG pipeline
         let mut rx = match crate::services::agent_service::stream_response(
             &state_ref,
@@ -578,6 +580,47 @@ pub async fn chat_send(
         );
     });
 
+    // Register the task so `chat_cancel` can abort it mid-stream.
+    *state.chat_task.lock().await = Some(task.abort_handle());
+
+    Ok(())
+}
+
+/// Abort the registered chat task, if any. Returns whether a task was found.
+///
+/// Aborting an already-finished task is harmless, so stale handles left in
+/// the slot after normal completion are fine — the extra `done` event the
+/// command emits is ignored by an idle frontend.
+pub(crate) async fn cancel_chat_task(
+    slot: &tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
+) -> bool {
+    match slot.lock().await.take() {
+        Some(handle) => {
+            handle.abort();
+            true
+        }
+        None => false,
+    }
+}
+
+/// Cancel the in-flight chat response, if any.
+///
+/// Emits a final `chat-token` with `done: true` so the frontend resolves its
+/// streaming state; the partial response is kept in the UI but not persisted.
+#[tauri::command]
+pub async fn chat_cancel(
+    app_handle: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    if cancel_chat_task(&state.chat_task).await {
+        let _ = app_handle.emit(
+            "chat-token",
+            ChatToken {
+                token: String::new(),
+                done: true,
+            },
+        );
+    }
     Ok(())
 }
 
@@ -1518,6 +1561,34 @@ mod tests {
         let json = r#"{"message":"hi"}"#;
         let req: ChatRequest = serde_json::from_str(json).expect("no campaign id is valid");
         assert!(req.campaign_id.is_none());
+    }
+
+    // ── Chat cancellation ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn cancel_chat_task_aborts_registered_task_and_empties_slot() {
+        let slot = tokio::sync::Mutex::new(None);
+        let task = tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        });
+        *slot.lock().await = Some(task.abort_handle());
+
+        assert!(
+            cancel_chat_task(&slot).await,
+            "should report a cancelled task"
+        );
+        let err = task.await.expect_err("task should have been aborted");
+        assert!(err.is_cancelled());
+        assert!(
+            !cancel_chat_task(&slot).await,
+            "slot should be empty after the first cancel"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_chat_task_is_a_noop_without_an_active_task() {
+        let slot = tokio::sync::Mutex::new(None);
+        assert!(!cancel_chat_task(&slot).await);
     }
 
     // ── CollectionResponse conversion ────────────────────────────────────────

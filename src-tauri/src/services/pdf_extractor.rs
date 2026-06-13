@@ -4,9 +4,16 @@
 //! extraction that handles multi-column TTRPG rulebooks correctly. The
 //! library is loaded at runtime from a bundled binary; see `build.rs`.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 
 use crate::services::chunker::{ExtractedDoc, PageContent};
+
+/// Callback invoked once per PDF page during extraction: `(page_num, total)`,
+/// 1-based page number and total page count. Held behind an `Arc` so it can be
+/// moved into the blocking extraction task (which requires `'static + Send`).
+pub type PageProgressFn = Arc<dyn Fn(usize, usize) + Send + Sync>;
 
 /// Errors raised by [`PdfExtractor`] implementations.
 #[derive(Debug, thiserror::Error)]
@@ -23,8 +30,24 @@ pub enum PdfExtractError {
 /// `Arc<dyn PdfExtractor>` in `AppState`.
 #[async_trait]
 pub trait PdfExtractor: Send + Sync {
-    /// Extract one [`PageContent`] per PDF page.
-    async fn extract(&self, data: &[u8]) -> Result<ExtractedDoc, PdfExtractError>;
+    /// Extract one [`PageContent`] per PDF page, reporting per-page progress.
+    ///
+    /// `on_page` is invoked after each page is processed with `(page_num, total)`.
+    /// This is the stage's only countable unit of work, so reporting it lets the
+    /// UI show steady activity through large rulebooks.
+    async fn extract_with_progress(
+        &self,
+        data: &[u8],
+        on_page: PageProgressFn,
+    ) -> Result<ExtractedDoc, PdfExtractError>;
+
+    /// Extract one [`PageContent`] per PDF page (no progress reporting).
+    ///
+    /// Convenience wrapper over [`extract_with_progress`](Self::extract_with_progress)
+    /// for callers that don't need per-page updates (tests, one-off extractions).
+    async fn extract(&self, data: &[u8]) -> Result<ExtractedDoc, PdfExtractError> {
+        self.extract_with_progress(data, Arc::new(|_, _| {})).await
+    }
 }
 
 /// Pdfium-backed implementation. Binds to the dylib at `library_path` on
@@ -41,10 +64,14 @@ impl PdfiumExtractor {
 
 #[async_trait]
 impl PdfExtractor for PdfiumExtractor {
-    async fn extract(&self, data: &[u8]) -> Result<ExtractedDoc, PdfExtractError> {
+    async fn extract_with_progress(
+        &self,
+        data: &[u8],
+        on_page: PageProgressFn,
+    ) -> Result<ExtractedDoc, PdfExtractError> {
         let data = data.to_vec();
         let lib_path = self.library_path.clone();
-        tokio::task::spawn_blocking(move || extract_blocking(&lib_path, &data))
+        tokio::task::spawn_blocking(move || extract_blocking(&lib_path, &data, on_page.as_ref()))
             .await
             .map_err(|e| PdfExtractError::Parse(format!("join error: {e}")))?
     }
@@ -53,6 +80,7 @@ impl PdfExtractor for PdfiumExtractor {
 fn extract_blocking(
     library_path: &std::path::Path,
     data: &[u8],
+    on_page: &(dyn Fn(usize, usize) + Send + Sync),
 ) -> Result<ExtractedDoc, PdfExtractError> {
     use pdfium_render::prelude::*;
 
@@ -64,6 +92,7 @@ fn extract_blocking(
         .load_pdf_from_byte_slice(data, None)
         .map_err(|e| PdfExtractError::Parse(e.to_string()))?;
 
+    let total = document.pages().len() as usize;
     let mut pages = Vec::new();
     let mut full = String::new();
     for (i, page) in document.pages().iter().enumerate() {
@@ -76,6 +105,7 @@ fn extract_blocking(
             page_num: i + 1,
             text,
         });
+        on_page(i + 1, total);
     }
 
     Ok(ExtractedDoc {
@@ -282,6 +312,94 @@ mod tests {
         let mut buf = Vec::new();
         doc.save_to(&mut buf).unwrap();
         buf
+    }
+
+    /// Build a PDF with one page per supplied text run.
+    fn make_pdf_with_pages(texts: &[&str]) -> Vec<u8> {
+        use lopdf::content::{Content, Operation};
+        use lopdf::dictionary;
+        use lopdf::{Document, Object, Stream};
+
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        });
+
+        let mut kids: Vec<Object> = Vec::new();
+        for text in texts {
+            let content = Content {
+                operations: vec![
+                    Operation::new("BT", vec![]),
+                    Operation::new("Tf", vec!["F1".into(), 24.into()]),
+                    Operation::new("Td", vec![100.into(), 600.into()]),
+                    Operation::new("Tj", vec![Object::string_literal(*text)]),
+                    Operation::new("ET", vec![]),
+                ],
+            };
+            let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+            let page_id = doc.add_object(dictionary! {
+                "Type" => "Page",
+                "Parent" => pages_id,
+                "Contents" => content_id,
+            });
+            kids.push(page_id.into());
+        }
+
+        let count = kids.len() as i64;
+        let pages = dictionary! {
+            "Type" => "Pages",
+            "Kids" => kids,
+            "Count" => count,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        };
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).unwrap();
+        buf
+    }
+
+    #[tokio::test]
+    async fn extract_with_progress_reports_each_page() {
+        use std::sync::Mutex;
+
+        let lib = pdfium_lib_path();
+        if !lib.exists() {
+            eprintln!("Skipping — pdfium binary not present at {lib:?}");
+            return;
+        }
+        let pdf = make_pdf_with_pages(&["Alpha page", "Beta page", "Gamma page"]);
+        let extractor = PdfiumExtractor::new(lib);
+
+        let calls = Arc::new(Mutex::new(Vec::<(usize, usize)>::new()));
+        let captured = calls.clone();
+        let on_page: PageProgressFn =
+            Arc::new(move |page, total| captured.lock().unwrap().push((page, total)));
+
+        let doc = extractor
+            .extract_with_progress(&pdf, on_page)
+            .await
+            .expect("extract");
+
+        assert_eq!(doc.page_count, 3);
+        let calls = calls.lock().unwrap();
+        assert_eq!(
+            calls.as_slice(),
+            &[(1, 3), (2, 3), (3, 3)],
+            "expected one progress callback per page with the full total"
+        );
     }
 
     #[tokio::test]
