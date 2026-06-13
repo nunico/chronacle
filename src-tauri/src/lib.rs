@@ -251,7 +251,9 @@ pub async fn run() {
             commands::update_session,
             commands::delete_session,
             commands::get_session_entities,
-            commands::extract_entities_from_collection,
+            commands::extract_entity_by_name,
+            commands::extract_all_from_campaign,
+            commands::cancel_extraction,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");

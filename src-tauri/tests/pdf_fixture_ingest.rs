@@ -82,6 +82,8 @@ async fn make_state(
         blob_store,
         embedding_provider: RwLock::new(embedding_provider.clone()),
         pdf_extractor,
+        chat_task: tokio::sync::Mutex::new(None),
+        extract_task: tokio::sync::Mutex::new(None),
     });
     (state, embedding_provider, vector_store)
 }

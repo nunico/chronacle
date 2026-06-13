@@ -120,6 +120,8 @@ async fn measure_recall_at_5() {
         blob_store: blob_store.clone(),
         embedding_provider: RwLock::new(embedding_provider.clone()),
         pdf_extractor,
+        chat_task: tokio::sync::Mutex::new(None),
+        extract_task: tokio::sync::Mutex::new(None),
     });
 
     let fixtures = [
