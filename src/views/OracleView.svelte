@@ -229,7 +229,7 @@
         status: wasEmpty ? 'empty' : 'done',
         title: wasEmpty ? 'Nothing found' : 'Extraction complete',
         detail: wasEmpty
-          ? extraction!.detail
+          ? (extraction?.detail ?? 'No passages found')
           : `Created ${summary.entities_created} entities, ${summary.relations_created} relations`,
         entitiesFound: summary.entities_created,
         relationsFound: summary.relations_created,
