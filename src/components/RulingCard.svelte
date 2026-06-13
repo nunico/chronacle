@@ -4,7 +4,11 @@
   import type { RulingData } from '../views/ruling-parse';
 
   let { data, defaultOpen = false }: { data: RulingData; defaultOpen?: boolean } = $props();
-  let open = $state(defaultOpen ? 0 : -1);
+  // Writable $derived: which citation is expanded. Seeds from defaultOpen and
+  // re-seeds if defaultOpen changes, while click handlers can still override it
+  // (the write persists until defaultOpen changes again). Depends only on
+  // defaultOpen — not data — so toggling survives parent re-renders.
+  let open = $derived(defaultOpen ? 0 : -1);
 </script>
 
 <div class="msg">
@@ -15,7 +19,8 @@
       <span class="tag">· ruling</span>
     </div>
     {#if data.verdict}
-      <p class="verdict">{data.verdict}</p>
+      <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+      <p class="verdict">{@html data.verdict}</p>
     {/if}
     {#if data.why}
       <!-- eslint-disable-next-line svelte/no-at-html-tags -->
