@@ -166,7 +166,7 @@ pub struct GraphNode {
 }
 
 /// Input for both create and update operations.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntityInput {
     pub name: String,
@@ -422,9 +422,12 @@ pub async fn get_by_id<C: surrealdb::Connection>(
         .ok_or_else(|| EntityError::NotFound { id: id.to_string() })
 }
 
-/// List all nodes of a kind for a campaign, ordered by name.
+/// List all nodes of a kind visible to a campaign, ordered by name.
 ///
-/// Queries via `in_campaign` edge traversal rather than a scalar `campaign` field.
+/// Returns both campaign-scoped entities (`in_campaign` edge) and entities
+/// belonging to any collection the campaign `subscribes_to` (`in_collection`
+/// edge). Extraction writes collection-scoped entities, so the campaign browser
+/// must include subscribed collections or extracted entities never surface.
 pub async fn get_by_campaign<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     campaign_id: &str,
@@ -435,6 +438,9 @@ pub async fn get_by_campaign<C: surrealdb::Connection>(
         "SELECT *, {SELECT_SCOPE_ALIASES} \
          FROM type::table($table) \
          WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $campaign_id)) \
+            OR id IN (SELECT VALUE out FROM in_collection \
+                      WHERE in IN (SELECT VALUE out FROM subscribes_to \
+                                   WHERE in = type::thing('campaign', $campaign_id))) \
          ORDER BY name ASC"
     );
     let mut response = db
@@ -452,6 +458,58 @@ pub async fn get_by_campaign<C: surrealdb::Connection>(
 }
 
 /// List all nodes of a kind for a collection, ordered by name.
+/// Count entities of every kind that belong to a campaign.
+///
+/// Returns a map keyed by table name (`npc`, `location`, …) with an entry for
+/// all eight kinds, zero included — the rail uses it to label its nav items.
+pub async fn count_by_campaign<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    campaign_id: &str,
+) -> Result<std::collections::HashMap<String, u64>, EntityError> {
+    #[derive(Deserialize)]
+    struct CountRow {
+        c: u64,
+    }
+
+    const ALL_KINDS: [EntityKind; 8] = [
+        EntityKind::Npc,
+        EntityKind::Location,
+        EntityKind::Faction,
+        EntityKind::Creature,
+        EntityKind::Item,
+        EntityKind::Event,
+        EntityKind::PlayerCharacter,
+        EntityKind::Misc,
+    ];
+
+    let mut counts = std::collections::HashMap::new();
+    for kind in ALL_KINDS {
+        let table = kind.table_name();
+        let row: Option<CountRow> = db
+            .query(
+                "SELECT count() AS c FROM type::table($table) \
+                 WHERE id IN (SELECT VALUE out FROM in_campaign \
+                              WHERE in = type::thing('campaign', $campaign_id)) \
+                    OR id IN (SELECT VALUE out FROM in_collection \
+                              WHERE in IN (SELECT VALUE out FROM subscribes_to \
+                                           WHERE in = type::thing('campaign', $campaign_id))) \
+                 GROUP ALL",
+            )
+            .bind(("table", table))
+            .bind(("campaign_id", campaign_id.to_owned()))
+            .await
+            .map_err(|e| EntityError::Database {
+                message: e.to_string(),
+            })?
+            .take(0)
+            .map_err(|e| EntityError::Database {
+                message: e.to_string(),
+            })?;
+        counts.insert(table.to_string(), row.map(|r| r.c).unwrap_or(0));
+    }
+    Ok(counts)
+}
+
 pub async fn get_by_collection<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     collection_id: &str,
@@ -706,6 +764,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn count_by_campaign_returns_per_kind_counts() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let input = |name: &str| EntityInput {
+            name: name.to_string(),
+            ..Default::default()
+        };
+        create(&db, Some("camp1"), None, EntityKind::Npc, input("Torvin"))
+            .await
+            .unwrap();
+        create(&db, Some("camp1"), None, EntityKind::Npc, input("Mira"))
+            .await
+            .unwrap();
+        create(
+            &db,
+            Some("camp1"),
+            None,
+            EntityKind::Location,
+            input("Docks"),
+        )
+        .await
+        .unwrap();
+
+        let counts = count_by_campaign(&db, "camp1").await.unwrap();
+        assert_eq!(counts.get("npc"), Some(&2));
+        assert_eq!(counts.get("location"), Some(&1));
+        assert_eq!(counts.get("faction"), Some(&0));
+        assert_eq!(counts.len(), 8, "every kind should be present");
+    }
+
+    #[tokio::test]
+    async fn count_by_campaign_does_not_count_other_campaigns() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        for c in ["camp1", "camp2"] {
+            db.query(format!(
+                "CREATE campaign SET id='{c}', name='Test', system='5e', \
+                 created_at=time::now(), updated_at=time::now()"
+            ))
+            .await
+            .unwrap();
+        }
+        create(
+            &db,
+            Some("camp2"),
+            None,
+            EntityKind::Npc,
+            EntityInput {
+                name: "Elsewhere".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let counts = count_by_campaign(&db, "camp1").await.unwrap();
+        assert_eq!(counts.get("npc"), Some(&0));
+    }
+
+    #[tokio::test]
     async fn create_with_campaign_id_populates_campaign_via_edge() {
         let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
             .await
@@ -851,6 +982,72 @@ mod tests {
             .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "Torvin");
+    }
+
+    /// Regression: entities extracted from a rulebook are collection-scoped
+    /// (`in_collection`). The campaign entity browser must surface them when the
+    /// campaign `subscribes_to` that collection — otherwise extraction output is
+    /// invisible in the UI even though the RAG agent can see it.
+    #[tokio::test]
+    async fn get_by_campaign_includes_subscribed_collection_entities() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='5e', \
+             created_at=time::now(), updated_at=time::now(); \
+             CREATE collection SET id='col1', name='PHB', description=NULL, \
+             created_at=time::now(), updated_at=time::now(); \
+             CREATE collection SET id='col2', name='DMG', description=NULL, \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        // camp1 subscribes to col1 only — col2 is an unrelated rulebook.
+        db.query(
+            "LET $in = type::thing('campaign','camp1'); \
+             LET $out1 = type::thing('collection','col1'); \
+             RELATE $in->subscribes_to->$out1 SET created_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let input = |name: &str| EntityInput {
+            name: name.to_string(),
+            summary: None,
+            notes: None,
+            date_start: None,
+            date_end: None,
+            is_ongoing: None,
+            sequence_index: None,
+            era: None,
+            duration_label: None,
+            session_id: None,
+            player_name: None,
+            character_class: None,
+            character_level: None,
+            status: None,
+        };
+
+        create(&db, Some("camp1"), None, EntityKind::Npc, input("Torvin"))
+            .await
+            .unwrap();
+        create(&db, None, Some("col1"), EntityKind::Npc, input("Goblin"))
+            .await
+            .unwrap();
+        // Subscribed-to a different collection — must NOT appear.
+        create(&db, None, Some("col2"), EntityKind::Npc, input("Lich"))
+            .await
+            .unwrap();
+
+        let results = get_by_campaign(&db, "camp1", EntityKind::Npc)
+            .await
+            .unwrap();
+        let names: Vec<_> = results.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, vec!["Goblin", "Torvin"], "ordered by name ASC");
     }
 
     #[tokio::test]

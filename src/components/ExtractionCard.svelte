@@ -14,7 +14,8 @@
     detail: string;
     entitiesFound: number;
     relationsFound: number;
-    onCancel: () => void;
+    // Only invoked from the live `running` card; historical cards omit it.
+    onCancel?: () => void;
   } = $props();
 </script>
 
@@ -25,7 +26,7 @@
     {/if}
     <span class="title">{title}</span>
     {#if status === 'running'}
-      <button class="btn-cancel" onclick={onCancel}>Cancel</button>
+      <button class="btn-cancel" onclick={() => onCancel?.()}>Cancel</button>
     {/if}
   </div>
 

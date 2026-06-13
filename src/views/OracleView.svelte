@@ -19,6 +19,7 @@
   import ExtractionCard from '../components/ExtractionCard.svelte';
   import { parseCommand } from '../lib/chat-commands';
   import { renderContent, parseRuling, splitHeading } from './ruling-parse';
+  import { parseExtractionMessage } from './extraction-message';
   import { isNearBottom } from '../lib/scroll';
   import { clampPopoverPosition } from './popover-position';
 
@@ -373,6 +374,17 @@
           <div class="bubble">{msg.content}</div>
           <div class="who-av">GM</div>
         </div>
+      {:else if msg.role === 'extraction'}
+        {@const card = parseExtractionMessage(msg.content)}
+        {#if card}
+          <ExtractionCard
+            status={card.status}
+            title={card.title}
+            detail={card.detail}
+            entitiesFound={card.entitiesFound}
+            relationsFound={card.relationsFound}
+          />
+        {/if}
       {:else if errorText(msg) !== null}
         <div class="msg">
           <div class="who-av eye-badge"><EyeMark size={28} /></div>
