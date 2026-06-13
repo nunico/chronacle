@@ -6,13 +6,35 @@ use crate::services::entity_service::GraphNode;
 use crate::services::session_service::{self, Session, SessionError, SessionInput};
 use crate::AppState;
 
+/// Embed a session's notes for semantic retrieval after a create/update.
+///
+/// Embedding failure is logged but never fails the save — the session is still
+/// persisted; it just won't surface in semantic search until the next edit.
+async fn embed_after_save(state: &AppState, session: &Session) {
+    let provider = match state.embedding_provider.read() {
+        Ok(guard) => guard.clone(),
+        Err(e) => {
+            eprintln!("session embed: provider lock poisoned: {e}");
+            return;
+        }
+    };
+    if let Err(e) = session_service::embed_session(&state.db, &provider, session).await {
+        eprintln!(
+            "session embed: failed to embed session {}; it will be missing from semantic search: {e}",
+            session.id
+        );
+    }
+}
+
 #[tauri::command]
 pub async fn create_session(
     state: State<'_, Arc<AppState>>,
     campaign_id: String,
     input: SessionInput,
 ) -> Result<Session, SessionError> {
-    session_service::create(&state.db, &campaign_id, input).await
+    let session = session_service::create(&state.db, &campaign_id, input).await?;
+    embed_after_save(&state, &session).await;
+    Ok(session)
 }
 
 #[tauri::command]
@@ -37,7 +59,9 @@ pub async fn update_session(
     id: String,
     input: SessionInput,
 ) -> Result<Session, SessionError> {
-    session_service::update(&state.db, &id, input).await
+    let session = session_service::update(&state.db, &id, input).await?;
+    embed_after_save(&state, &session).await;
+    Ok(session)
 }
 
 #[tauri::command]

@@ -1,6 +1,10 @@
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use surrealdb::sql::Thing;
 use thiserror::Error;
+
+use crate::providers::embedding::EmbeddingProvider;
 
 // ── Error type ──────────────────────────────────────────────────────────────
 
@@ -262,6 +266,44 @@ pub async fn update<C: surrealdb::Connection>(
     Ok(session)
 }
 
+/// Embed a session's text (title + notes) and persist the vector + model ID
+/// onto the record, so session notes participate in semantic retrieval.
+///
+/// A zero-length vector (e.g. a mock provider whose model isn't ready) is a
+/// no-op rather than an error — embedding must never block a session save.
+pub async fn embed_session<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    embed: &Arc<dyn EmbeddingProvider>,
+    session: &Session,
+) -> Result<(), SessionError> {
+    let mut text = session.title.trim().to_owned();
+    let notes = session.notes.trim();
+    if !notes.is_empty() {
+        text.push('\n');
+        text.push_str(notes);
+    }
+    let vecs = embed
+        .embed_documents(vec![text])
+        .await
+        .map_err(|e| SessionError::Database {
+            message: e.to_string(),
+        })?;
+    let vec = vecs.into_iter().next().unwrap_or_default();
+    if vec.is_empty() {
+        return Ok(());
+    }
+    let model = embed.model_name().to_owned();
+    db.query("UPDATE type::thing('session', $id) SET embedding = $vec, embed_model = $model")
+        .bind(("id", session.id.clone()))
+        .bind(("vec", vec))
+        .bind(("model", model))
+        .await
+        .map_err(|e| SessionError::Database {
+            message: e.to_string(),
+        })?;
+    Ok(())
+}
+
 /// Hard-delete a session by its raw ID.
 pub async fn delete<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
@@ -317,5 +359,52 @@ mod tests {
         assert_eq!(v["session_number"], 3);
         assert_eq!(v["title"], "The Heist");
         assert_eq!(v["date_played"], "2026-06-05");
+    }
+
+    #[tokio::test]
+    async fn embed_session_populates_embedding_and_model() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let session = create(
+            &db,
+            "camp1",
+            SessionInput {
+                session_number: 1,
+                title: "The Awakening".to_string(),
+                date_played: "2026-06-05".to_string(),
+                notes: "The party met in the tavern and took the job.".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let embed: Arc<dyn EmbeddingProvider> =
+            Arc::new(crate::providers::embedding::MockEmbeddingProvider::new(768));
+        embed_session(&db, &embed, &session).await.unwrap();
+
+        #[derive(Deserialize)]
+        struct Row {
+            embedding: Option<Vec<f32>>,
+            embed_model: Option<String>,
+        }
+        let mut resp = db
+            .query("SELECT embedding, embed_model FROM type::thing('session', $id)")
+            .bind(("id", session.id.clone()))
+            .await
+            .unwrap();
+        let rows: Vec<Row> = resp.take(0).unwrap();
+        let row = rows.into_iter().next().expect("session row");
+        assert_eq!(row.embedding.as_ref().map(|v| v.len()), Some(768));
+        assert_eq!(row.embed_model.as_deref(), Some("mock"));
     }
 }

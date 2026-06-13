@@ -12,6 +12,27 @@ fn parse_kind(kind: &str) -> Result<EntityKind, EntityError> {
     })
 }
 
+/// Embed an entity's notes for semantic retrieval after a manual create/update.
+///
+/// Embedding failure is logged but never fails the save — a missing vector only
+/// means the entity won't surface in semantic search until the next edit, which
+/// is far less bad than losing the user's note.
+async fn embed_after_save(state: &AppState, node: &GraphNode) {
+    let provider = match state.embedding_provider.read() {
+        Ok(guard) => guard.clone(),
+        Err(e) => {
+            eprintln!("entity embed: provider lock poisoned: {e}");
+            return;
+        }
+    };
+    if let Err(e) = entity_service::embed_node(&state.db, &provider, node).await {
+        eprintln!(
+            "entity embed: failed to embed {} ({}); it will be missing from semantic search: {e}",
+            node.name, node.kind
+        );
+    }
+}
+
 #[tauri::command]
 pub async fn get_entities(
     state: State<'_, Arc<AppState>>,
@@ -50,7 +71,9 @@ pub async fn create_entity(
     input: EntityInput,
 ) -> Result<GraphNode, EntityError> {
     let k = parse_kind(&kind)?;
-    entity_service::create(&state.db, Some(&campaign_id), None, k, input).await
+    let node = entity_service::create(&state.db, Some(&campaign_id), None, k, input).await?;
+    embed_after_save(&state, &node).await;
+    Ok(node)
 }
 
 #[tauri::command]
@@ -61,7 +84,9 @@ pub async fn update_entity(
     input: EntityInput,
 ) -> Result<GraphNode, EntityError> {
     let k = parse_kind(&kind)?;
-    entity_service::update(&state.db, &id, k, input).await
+    let node = entity_service::update(&state.db, &id, k, input).await?;
+    embed_after_save(&state, &node).await;
+    Ok(node)
 }
 
 #[tauri::command]

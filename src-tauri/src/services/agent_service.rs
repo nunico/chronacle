@@ -59,6 +59,29 @@ where
     Ok(rows.into_iter().map(|r| r.out.id.to_raw()).collect())
 }
 
+/// Max characters of an entity/session note included in the context block.
+/// Notes can be long; we include a leading excerpt so the LLM sees the GM's
+/// own prose without letting a single entity dominate the prompt budget.
+const NOTES_EXCERPT_LEN: usize = 280;
+
+/// Format a notes field as a single-line context excerpt, or `None` when empty.
+///
+/// Newlines are collapsed to spaces so each entity stays on its own line, and
+/// the text is truncated on a char boundary with an ellipsis when over budget.
+fn notes_excerpt(notes: Option<&str>) -> Option<String> {
+    let trimmed = notes?.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= NOTES_EXCERPT_LEN {
+        Some(collapsed)
+    } else {
+        let truncated: String = collapsed.chars().take(NOTES_EXCERPT_LEN).collect();
+        Some(format!("{truncated}…"))
+    }
+}
+
 /// Query entity tables for a campaign (and optionally subscribed collections)
 /// and format them as a context block.
 ///
@@ -77,12 +100,14 @@ pub async fn fetch_entity_context<C: Connection>(
     struct BasicRow {
         name: String,
         summary: Option<String>,
+        notes: Option<String>,
     }
 
     #[derive(serde::Deserialize)]
     struct PcRow {
         name: String,
         summary: Option<String>,
+        notes: Option<String>,
         player_name: Option<String>,
         character_class: Option<String>,
         character_level: Option<i64>,
@@ -93,20 +118,30 @@ pub async fn fetch_entity_context<C: Connection>(
     struct EventRow {
         name: String,
         summary: Option<String>,
+        notes: Option<String>,
         date_start: Option<String>,
         date_end: Option<String>,
     }
 
+    #[derive(serde::Deserialize)]
+    struct SessionRow {
+        title: String,
+        notes: Option<String>,
+        date_played: Option<String>,
+        session_number: Option<i64>,
+    }
+
     // ── Campaign entities (always full scan) ─────────────────────────────────
     let mut resp = db
-        .query("SELECT name, summary, player_name, character_class, character_level, status FROM player_character WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary FROM npc WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary FROM location WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary FROM faction WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary FROM creature WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary FROM item WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, date_start, date_end FROM event WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary FROM misc WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, player_name, character_class, character_level, status FROM player_character WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes FROM npc WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes FROM location WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes FROM faction WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes FROM creature WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes FROM item WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, date_start, date_end FROM event WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes FROM misc WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT title, notes, date_played, session_number FROM session WHERE campaign = type::thing('campaign', $cid) ORDER BY session_number ASC")
         .bind(("cid", campaign_id.to_owned()))
         .await
         .map_err(|e| AgentError::Db(e.to_string()))?;
@@ -119,6 +154,7 @@ pub async fn fetch_entity_context<C: Connection>(
     let items: Vec<BasicRow> = resp.take(5).map_err(|e| AgentError::Db(e.to_string()))?;
     let events: Vec<EventRow> = resp.take(6).map_err(|e| AgentError::Db(e.to_string()))?;
     let misc: Vec<BasicRow> = resp.take(7).map_err(|e| AgentError::Db(e.to_string()))?;
+    let sessions: Vec<SessionRow> = resp.take(8).map_err(|e| AgentError::Db(e.to_string()))?;
 
     // ── Collection entities (top-k per table via MTREE, full scan as fallback) ─
     // Retrieved as a flat Vec<BasicRow> across all tables for the context block.
@@ -155,13 +191,13 @@ pub async fn fetch_entity_context<C: Connection>(
                     .collect::<Vec<_>>()
                     .join(",");
                 format!(
-                    "SELECT name, summary FROM {table} \
+                    "SELECT name, summary, notes FROM {table} \
                      WHERE ({col_filter}) AND embedding IS NOT NONE \
                      ORDER BY embedding <|10|> [{vec_str}] LIMIT 10"
                 )
             } else {
                 // Full scan fallback (no embedding provider / test paths).
-                format!("SELECT name, summary FROM {table} WHERE {col_filter} LIMIT 50")
+                format!("SELECT name, summary, notes FROM {table} WHERE {col_filter} LIMIT 50")
             };
             let mut r = db
                 .query(sql)
@@ -182,6 +218,7 @@ pub async fn fetch_entity_context<C: Connection>(
         && items.is_empty()
         && events.is_empty()
         && misc.is_empty()
+        && sessions.is_empty()
         && col_entities.is_empty()
     {
         return Ok(String::new());
@@ -210,6 +247,9 @@ pub async fn fetch_entity_context<C: Connection>(
                     out.push_str(&format!(" · {s}"));
                 }
             }
+            if let Some(n) = notes_excerpt(r.notes.as_deref()) {
+                out.push_str(&format!(" · Notes: {n}"));
+            }
             out.push('\n');
         }
     }
@@ -229,6 +269,9 @@ pub async fn fetch_entity_context<C: Connection>(
                     if !s.trim().is_empty() {
                         out.push_str(&format!(" · {s}"));
                     }
+                }
+                if let Some(n) = notes_excerpt(r.notes.as_deref()) {
+                    out.push_str(&format!(" · Notes: {n}"));
                 }
                 out.push('\n');
             }
@@ -253,6 +296,9 @@ pub async fn fetch_entity_context<C: Connection>(
                     out.push_str(&format!(" · {s}"));
                 }
             }
+            if let Some(n) = notes_excerpt(r.notes.as_deref()) {
+                out.push_str(&format!(" · Notes: {n}"));
+            }
             out.push('\n');
         }
     }
@@ -265,6 +311,28 @@ pub async fn fetch_entity_context<C: Connection>(
                 if !s.trim().is_empty() {
                     out.push_str(&format!(" · {s}"));
                 }
+            }
+            if let Some(n) = notes_excerpt(r.notes.as_deref()) {
+                out.push_str(&format!(" · Notes: {n}"));
+            }
+            out.push('\n');
+        }
+    }
+
+    if !sessions.is_empty() {
+        out.push('\n');
+        for r in &sessions {
+            match r.session_number {
+                Some(num) => out.push_str(&format!("[session {num}] {}", r.title)),
+                None => out.push_str(&format!("[session] {}", r.title)),
+            }
+            if let Some(d) = &r.date_played {
+                if !d.trim().is_empty() {
+                    out.push_str(&format!(" · {d}"));
+                }
+            }
+            if let Some(n) = notes_excerpt(r.notes.as_deref()) {
+                out.push_str(&format!(" · Notes: {n}"));
             }
             out.push('\n');
         }
@@ -279,6 +347,9 @@ pub async fn fetch_entity_context<C: Connection>(
                 if !s.trim().is_empty() {
                     out.push_str(&format!(" · {s}"));
                 }
+            }
+            if let Some(n) = notes_excerpt(r.notes.as_deref()) {
+                out.push_str(&format!(" · Notes: {n}"));
             }
             out.push('\n');
         }
@@ -1227,6 +1298,84 @@ mod tests {
         assert!(
             result.contains("Year 312 → Year 313"),
             "missing dates: {result}"
+        );
+    }
+
+    #[test]
+    fn notes_excerpt_collapses_and_truncates() {
+        assert_eq!(notes_excerpt(None), None);
+        assert_eq!(notes_excerpt(Some("   ")), None);
+        assert_eq!(
+            notes_excerpt(Some("line one\n\nline  two")),
+            Some("line one line two".to_string())
+        );
+        let long = "x ".repeat(400); // 400 single-char words
+        let out = notes_excerpt(Some(&long)).unwrap();
+        assert!(out.ends_with('…'), "expected ellipsis: {out}");
+        assert_eq!(out.chars().count(), NOTES_EXCERPT_LEN + 1);
+    }
+
+    #[tokio::test]
+    async fn fetch_entity_context_includes_entity_notes() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        db.query(
+            "CREATE npc SET id='npc1', name='Seraphina', summary='archivist', \
+             notes='She secretly guards the Sunstone beneath the Iron Tower.', \
+             created_at=time::now(), updated_at=time::now(); \
+             LET $src = type::thing('campaign','camp1'); \
+             LET $dst = type::thing('npc','npc1'); \
+             RELATE $src->in_campaign->$dst SET created_at = time::now()",
+        )
+        .await
+        .unwrap();
+
+        let result = fetch_entity_context(&db, "camp1", &[], None).await.unwrap();
+        assert!(
+            result.contains("Notes: She secretly guards the Sunstone"),
+            "entity notes should appear in context: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_entity_context_includes_session_notes() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        db.query(
+            "CREATE session SET id='sess1', campaign=type::thing('campaign','camp1'), \
+             session_number=4, title='Shadows of the Keep', date_played='2026-06-05', \
+             notes='The party freed the prisoners and burned the granary.', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let result = fetch_entity_context(&db, "camp1", &[], None).await.unwrap();
+        assert!(
+            result.contains("[session 4] Shadows of the Keep"),
+            "session line should appear in context: {result}"
+        );
+        assert!(
+            result.contains("Notes: The party freed the prisoners"),
+            "session notes should appear in context: {result}"
         );
     }
 

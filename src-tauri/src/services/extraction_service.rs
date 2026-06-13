@@ -213,40 +213,18 @@ fn parse_kind(kind: &str) -> EntityKind {
 }
 
 /// Embed an entity and store the vector + model ID on the record.
+///
+/// Thin wrapper over [`entity_service::embed_node`] (the single source of truth
+/// for entity embedding, which embeds name + summary + notes), adapting its
+/// error into [`ExtractionError`].
 async fn embed_entity<C: Connection>(
     db: &surrealdb::Surreal<C>,
     embed: &Arc<dyn EmbeddingProvider>,
     node: &GraphNode,
 ) -> Result<(), ExtractionError> {
-    let text = format!(
-        "[{}] {}: {}",
-        node.kind,
-        node.name,
-        node.summary.as_deref().unwrap_or_default()
-    );
-    let vecs = embed
-        .embed_documents(vec![text])
+    entity_service::embed_node(db, embed, node)
         .await
-        .map_err(|e| ExtractionError::Embedding(e.to_string()))?;
-    let vec = vecs.into_iter().next().unwrap_or_default();
-    if vec.is_empty() {
-        return Ok(());
-    }
-    let model = embed.model_name().to_owned();
-    let table = &node.kind;
-    let id = &node.id;
-    // Use LET variables so type::thing() can be used in UPDATE position.
-    db.query(
-        "LET $rec = type::thing($table, $id); \
-         UPDATE $rec SET embedding = $vec, embed_model = $model",
-    )
-    .bind(("table", table.clone()))
-    .bind(("id", id.clone()))
-    .bind(("vec", vec))
-    .bind(("model", model))
-    .await
-    .map_err(|e| ExtractionError::Db(e.to_string()))?;
-    Ok(())
+        .map_err(|e| ExtractionError::Embedding(e.to_string()))
 }
 
 // ── Batch persistence helper ──────────────────────────────────────────────────

@@ -817,10 +817,20 @@ When implemented in Phase 2:
 
 ## Multi-Campaign Support
 
-- SurrealDB filters by campaign record links: `campaign = $active_campaign OR campaign IS NULL` (NULL = global).
-- Sources: `campaign = NULL` → global (rules PDFs reused across campaigns); otherwise campaign-scoped.
-- Retrieval searches: global chunks + campaign chunks + campaign note chunks.
-- Switching campaigns updates the active campaign pointer; queries use the new filter automatically.
+> **Updated (Phase 2):** Source sharing is modeled via **collections**, not a global
+> `campaign = NULL` scope. Sources attach to a collection; campaigns `subscribes_to`
+> one or more collections (migration `003_collections.surql`). A "shared rulebook" is
+> a collection multiple campaigns subscribe to. There is no global source scope.
+
+- Sources belong to a **collection**; a campaign sees a source's chunks when it
+  subscribes to that source's collection.
+- Entities/sessions are campaign-scoped via the `in_campaign` edge (migration
+  `006_collection_entities.surql`); entities may also be collection-scoped via
+  `in_collection`.
+- Retrieval searches: chunks from the active campaign's subscribed collections +
+  the campaign's own entity/session note embeddings.
+- Switching campaigns updates the active campaign pointer; queries use the new
+  subscription set automatically.
 
 ---
 
@@ -859,22 +869,28 @@ Milestone: "Ask the rulebook a question and get a cited answer." ✓
 
 ### Phase 2 — Campaign & Notes
 
+**Status:** In progress (~80%). Entity/campaign/session CRUD, all 8 entity types, the
+notes editor, and notes indexing/retrieval (entity + session) are complete and tested;
+source scoping resolved as collection-based. Remaining: `is_gm_only`, keyboard
+shortcuts, and the remaining Phase 2 test gaps (event ordering, backend E2E). See
+[`docs/superpowers/plans/2026-06-13-phase-2-finalization.md`](superpowers/plans/2026-06-13-phase-2-finalization.md).
+
 Goal: Multi-campaign support, hybrid notes, lore retrieval.
 
-- [ ] Campaign CRUD
-- [ ] Entity manager (NPC, location, faction, creature, item, misc)
-- [ ] `event` entity type + temporal fields UI (timeline view)
-- [ ] `player_character` entity type with player name / class / status
-- [ ] Entity notes editor (markdown)
-- [ ] **`is_gm_only` introduced:** add field to source, entity, session; propagate to chunks at index time; visual indicators in chat (shield icon / distinct border)
-- [ ] Notes indexing pipeline (entity + session notes → chunk → embed → SurrealDB)
-- [ ] Global vs campaign-scoped sources
-- [ ] Keyboard-first shortcuts (GM is at the table)
+- [x] Campaign CRUD — `campaign_service` + `CampaignView.svelte`; tested (`campaign_service_test.rs`, `CampaignView.test.ts`)
+- [x] Entity manager (NPC, location, faction, creature, item, misc) — `entity_service` + `EntityManager.svelte` / `EntityForm.svelte`; all 8 typed node tables (migration `004_graph_entities.surql`)
+- [x] `event` entity type + temporal fields UI — all fields (`date_start`/`date_end`/`is_ongoing`/`sequence_index`/`era`/`duration_label`/`session`) in form; *timeline visualisation moved to Phase 3*
+- [x] `player_character` entity type with player name / class / status — form fields + status enum; tested
+- [x] Entity notes editor (markdown) — `WikiLinkEditor.svelte` with `[[Entity]]` autocomplete + `WikiText` rendering
+- [ ] **`is_gm_only` introduced:** add field to source, entity, session; propagate to chunks at index time; visual indicators in chat (shield icon / distinct border) — *not started; `EyeMark.svelte` exists but unused*
+- [x] Notes indexing pipeline (entity + session notes → embed → SurrealDB) — `entity_service::embed_node` (name+summary+notes, single source of truth, called by manual create/update **and** extraction) + `session_service::embed_session` (migration `007_session_embedding.surql`); `agent_service::fetch_entity_context` now includes entity *and* session note excerpts in the LLM context
+- [x] Collection-scoped sources — sources attach to collections; campaigns `subscribes_to` collections (migration `003_collections.surql`). *Supersedes the original "global vs campaign-scoped (NULL)" design — there is no global source scope.*
+- [ ] Keyboard-first shortcuts (GM is at the table) — *partial: modal/autocomplete/chat keys exist; no global GM shortcut layer (quick-search, create-entity, navigation)*
 - **Tests shipped with Phase 2:**
-  - Unit: event ordering logic, entity CRUD service
-  - Integration: notes indexing → retrieval, is_gm_only propagation into vector index
-  - Backend E2E: create campaign → add NPC + event → query → assert both appear in response
-  - Component tests: entity form validation, GM-secret toggle
+  - [x] Unit: entity CRUD service (`entity_service_test.rs`) — *event `sequence_index` ordering test still missing*
+  - [~] Integration: notes indexing → retrieval (done — entity/session note embedding + context inclusion tested in `entity_service`/`session_service`/`agent_service`); is_gm_only propagation into vector index (pending item 2)
+  - [ ] Backend E2E: create campaign → add NPC + event → query → assert both appear in response
+  - [x] Component tests: entity form validation (`EntityForm.test.ts`) — *GM-secret toggle test pending `is_gm_only`*
 
 Milestone: "Run a full session, take notes on NPCs and events, ask a lore question and get cited answers from both the sourcebook and your own notes."
 

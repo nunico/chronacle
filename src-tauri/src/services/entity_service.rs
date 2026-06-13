@@ -1,6 +1,10 @@
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use surrealdb::sql::Thing;
 use thiserror::Error;
+
+use crate::providers::embedding::EmbeddingProvider;
 
 // ── Error type ──────────────────────────────────────────────────────────────
 
@@ -691,6 +695,66 @@ pub async fn delete<C: surrealdb::Connection>(
     Ok(())
 }
 
+/// Compose the document text used to embed an entity for semantic retrieval.
+///
+/// Includes name, summary, **and notes** so hand-written notes participate in
+/// retrieval — the whole point of notes indexing. Empty parts are skipped.
+pub(crate) fn embed_text(name: &str, summary: Option<&str>, notes: Option<&str>) -> String {
+    let mut text = name.trim().to_owned();
+    if let Some(s) = summary {
+        let s = s.trim();
+        if !s.is_empty() {
+            text.push_str(": ");
+            text.push_str(s);
+        }
+    }
+    if let Some(n) = notes {
+        let n = n.trim();
+        if !n.is_empty() {
+            text.push('\n');
+            text.push_str(n);
+        }
+    }
+    text
+}
+
+/// Embed an entity's text (name + summary + notes) and persist the vector and
+/// model ID onto the record.
+///
+/// This is the single source of truth for entity embedding. It is called both
+/// by manual create/update (so hand-edited notes become searchable) and by
+/// `extraction_service` (LLM-extracted entities). A zero-length vector — e.g.
+/// from a mock provider whose model isn't ready — is treated as a no-op rather
+/// than an error so callers never block a save on embedding.
+pub async fn embed_node<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    embed: &Arc<dyn EmbeddingProvider>,
+    node: &GraphNode,
+) -> Result<(), EntityError> {
+    let text = embed_text(&node.name, node.summary.as_deref(), node.notes.as_deref());
+    let vecs = embed
+        .embed_documents(vec![text])
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let vec = vecs.into_iter().next().unwrap_or_default();
+    if vec.is_empty() {
+        return Ok(());
+    }
+    let model = embed.model_name().to_owned();
+    db.query("UPDATE type::thing($table, $id) SET embedding = $vec, embed_model = $model")
+        .bind(("table", node.kind.clone()))
+        .bind(("id", node.id.clone()))
+        .bind(("vec", vec))
+        .bind(("model", model))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    Ok(())
+}
+
 /// Create a directed graph edge between two nodes.
 ///
 /// `from_kind` and `to_kind` are the table names of the source and target nodes.
@@ -761,6 +825,79 @@ mod tests {
     fn entity_kind_from_table_unknown_returns_invalid_kind() {
         let err = EntityKind::from_table("goblin").unwrap_err();
         assert!(matches!(err, EntityError::InvalidKind { kind } if kind == "goblin"));
+    }
+
+    #[test]
+    fn embed_text_includes_name_summary_and_notes() {
+        let text = embed_text(
+            "Seraphina",
+            Some("the archivist"),
+            Some("Guards the Sunstone."),
+        );
+        assert!(text.contains("Seraphina"), "name missing: {text}");
+        assert!(text.contains("the archivist"), "summary missing: {text}");
+        assert!(
+            text.contains("Guards the Sunstone."),
+            "notes missing: {text}"
+        );
+    }
+
+    #[test]
+    fn embed_text_skips_empty_parts() {
+        assert_eq!(embed_text("Bob", None, None), "Bob");
+        assert_eq!(embed_text("Bob", Some("  "), Some("")), "Bob");
+    }
+
+    #[tokio::test]
+    async fn embed_node_populates_embedding_and_model() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+
+        let node = create(
+            &db,
+            Some("camp1"),
+            None,
+            EntityKind::Npc,
+            EntityInput {
+                name: "Seraphina".to_string(),
+                notes: Some("Guards the Sunstone beneath the Iron Tower.".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let embed: Arc<dyn EmbeddingProvider> =
+            Arc::new(crate::providers::embedding::MockEmbeddingProvider::new(768));
+        embed_node(&db, &embed, &node).await.unwrap();
+
+        #[derive(Deserialize)]
+        struct Row {
+            embedding: Option<Vec<f32>>,
+            embed_model: Option<String>,
+        }
+        let mut resp = db
+            .query("SELECT embedding, embed_model FROM type::thing('npc', $id)")
+            .bind(("id", node.id.clone()))
+            .await
+            .unwrap();
+        let rows: Vec<Row> = resp.take(0).unwrap();
+        let row = rows.into_iter().next().expect("npc row");
+        assert_eq!(
+            row.embedding.as_ref().map(|v| v.len()),
+            Some(768),
+            "embedding vector should be stored with the provider's dimension"
+        );
+        assert_eq!(row.embed_model.as_deref(), Some("mock"));
     }
 
     #[tokio::test]
