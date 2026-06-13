@@ -21,6 +21,10 @@ pub struct AppState {
     pub blob_store: Arc<dyn providers::blob_store::BlobStore>,
     pub embedding_provider: RwLock<Arc<dyn providers::embedding::EmbeddingProvider>>,
     pub pdf_extractor: Arc<dyn services::pdf_extractor::PdfExtractor>,
+    /// Abort handle for the in-flight chat task, if any (see `chat_cancel`).
+    pub chat_task: tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
+    /// Abort handle for the in-flight extraction task, if any (see `cancel_extraction`).
+    pub extract_task: tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
 }
 
 /// Locate the bundled pdfium dynamic library.
@@ -149,6 +153,8 @@ pub async fn run() {
         blob_store,
         embedding_provider: RwLock::new(embedding_provider),
         pdf_extractor,
+        chat_task: tokio::sync::Mutex::new(None),
+        extract_task: tokio::sync::Mutex::new(None),
     });
 
     tauri::Builder::default()
@@ -204,6 +210,7 @@ pub async fn run() {
             commands::get_sources,
             commands::delete_source,
             commands::chat_send,
+            commands::chat_cancel,
             commands::get_chat_history,
             commands::reconfigure_llm_provider,
             commands::get_llm_provider_status,
@@ -232,6 +239,7 @@ pub async fn run() {
             commands::reindex_all_sources,
             commands::get_chunk_for_citation,
             commands::get_entities,
+            commands::get_entity_counts,
             commands::get_entity,
             commands::create_entity,
             commands::update_entity,
