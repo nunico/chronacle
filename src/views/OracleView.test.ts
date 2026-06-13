@@ -10,15 +10,30 @@ vi.mock('@tauri-apps/api/event', () => ({
 vi.mock('../lib/commands', () => ({
   getChatHistory: vi.fn().mockResolvedValue([]),
   chatSend: vi.fn().mockResolvedValue(undefined),
+  chatCancel: vi.fn().mockResolvedValue(undefined),
   getChunkForCitation: vi.fn().mockResolvedValue(null),
+  getSources: vi.fn().mockResolvedValue([]),
+  extractEntityByName: vi.fn().mockResolvedValue({ entities_created: 0, relations_created: 0 }),
+  extractAllFromCampaign: vi.fn().mockResolvedValue({ entities_created: 0, relations_created: 0 }),
+  cancelExtraction: vi.fn().mockResolvedValue(undefined),
 }));
 
 const m = vi.mocked(commands);
+
+const SAMPLE_SOURCE = {
+  id: 's1',
+  filename: 'srd.pdf',
+  display_name: 'SRD 5.2',
+  source_type: 'rules',
+  index_status: 'indexed',
+} as unknown as commands.Source;
 
 describe('OracleView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     m.getChatHistory.mockResolvedValue([]);
+    m.chatSend.mockResolvedValue(undefined);
+    m.getSources.mockResolvedValue([SAMPLE_SOURCE]);
   });
 
   it('shows suggestion chips when the thread is empty', async () => {
@@ -79,6 +94,82 @@ describe('OracleView', () => {
     expect(onOpenUpload).toHaveBeenCalled();
   });
 
+  it('uses a multiline textarea; Shift+Enter does not send', async () => {
+    render(OracleView, {
+      props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn() },
+    });
+    const input = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+    expect(input.tagName).toBe('TEXTAREA');
+    await fireEvent.input(input, { target: { value: 'line one' } });
+    await fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+    expect(m.chatSend).not.toHaveBeenCalled();
+  });
+
+  it('keeps the composer enabled and shows a stop button while a response streams', async () => {
+    // chatSend resolves but no done token arrives — the view stays loading.
+    render(OracleView, {
+      props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn() },
+    });
+    const input = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+    await fireEvent.input(input, { target: { value: 'How does cover work?' } });
+    await fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /stop generating/i })).toBeTruthy();
+    });
+    expect((input as HTMLTextAreaElement).disabled).toBe(false);
+    await fireEvent.click(screen.getByRole('button', { name: /stop generating/i }));
+    expect(m.chatCancel).toHaveBeenCalled();
+  });
+
+  it('shows an error bubble with a retry button when chatSend rejects', async () => {
+    m.chatSend.mockRejectedValueOnce(new Error('connection refused'));
+    render(OracleView, {
+      props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn() },
+    });
+    const input = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+    await fireEvent.input(input, { target: { value: 'How does cover work?' } });
+    await fireEvent.keyDown(input, { key: 'Enter' });
+    const retry = await screen.findByRole('button', { name: /retry/i });
+    expect(screen.getByText(/connection refused/)).toBeTruthy();
+    await fireEvent.click(retry);
+    await waitFor(() => {
+      expect(m.chatSend).toHaveBeenCalledTimes(2);
+      expect(m.chatSend).toHaveBeenLastCalledWith('How does cover work?', 'camp-1');
+    });
+  });
+
+  it('renders backend [Error: ...] messages as an error bubble with retry', async () => {
+    m.getChatHistory.mockResolvedValue([
+      { role: 'user', content: 'How does cover work?' },
+      { role: 'assistant', content: '[Error: LLM unreachable]' },
+    ]);
+    render(OracleView, {
+      props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn() },
+    });
+    expect(await screen.findByText(/LLM unreachable/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy();
+  });
+
+  it('nudges the user to upload a rulebook when no sources are indexed', async () => {
+    m.getSources.mockResolvedValue([]);
+    const onOpenUpload = vi.fn();
+    render(OracleView, {
+      props: { activeCampaignId: null, onOpenUpload },
+    });
+    const nudge = await screen.findByRole('button', { name: /upload a rulebook/i });
+    expect(screen.queryByRole('button', { name: /spell while grappled/i })).toBeNull();
+    await fireEvent.click(nudge);
+    expect(onOpenUpload).toHaveBeenCalled();
+  });
+
+  it('does not advertise dice rolling in the suggestion pills', async () => {
+    render(OracleView, {
+      props: { activeCampaignId: null, onOpenUpload: vi.fn() },
+    });
+    await screen.findByRole('button', { name: /spell while grappled/i });
+    expect(screen.queryByRole('button', { name: /roll initiative/i })).toBeNull();
+  });
+
   it('does not inject raw <script> when a citation source name is malicious', async () => {
     m.getChatHistory.mockResolvedValue([
       {
@@ -92,5 +183,31 @@ describe('OracleView', () => {
     await waitFor(() => {
       expect(container.querySelector('script')).toBeNull();
     });
+  });
+
+  it('routes /extract <name> to extractEntityByName, not chatSend', async () => {
+    render(OracleView, {
+      props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn() },
+    });
+    const input = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+    await fireEvent.input(input, { target: { value: '/extract Commander Varn' } });
+    await fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => {
+      expect(m.extractEntityByName).toHaveBeenCalledWith('camp-1', 'Commander Varn');
+    });
+    expect(m.chatSend).not.toHaveBeenCalled();
+  });
+
+  it('bare /extract shows a usage hint and starts no extraction', async () => {
+    render(OracleView, {
+      props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn() },
+    });
+    const input = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+    await fireEvent.input(input, { target: { value: '/extract' } });
+    await fireEvent.keyDown(input, { key: 'Enter' });
+    await screen.findByText(/Usage: \/extract/i);
+    expect(m.extractEntityByName).not.toHaveBeenCalled();
+    expect(m.extractAllFromCampaign).not.toHaveBeenCalled();
+    expect(m.chatSend).not.toHaveBeenCalled();
   });
 });
