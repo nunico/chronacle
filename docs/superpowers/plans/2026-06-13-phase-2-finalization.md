@@ -73,7 +73,27 @@ does for LLM-extracted entities.
 `src-tauri/src/services/agent_service.rs`, new migration `007_session_embedding.surql`,
 `src-tauri/src/commands/entity_commands.rs` / `session_commands.rs`.
 
-### 2. `is_gm_only` end-to-end
+### 2. `is_gm_only` end-to-end — DATA LAYER + FORMS DONE (2026-06-13)
+
+**Shipped:** migration `008_is_gm_only.surql` (field on source, chunk, session, 8 entity
+tables); chunk inheritance from source at index time (`SourceInfo` → `embed_chunks` →
+`IndexedChunk` → vector-store upsert); `SearchResult.is_gm_only` (retrieval tags, never
+filters); entity & session CRUD persist/return the flag; `upload_source` param;
+`EntityForm`/`SessionRow` toggles; TS types. A SurrealDB quirk (falsy bound bool dropped
+from a SET that also assigns fields undefined on the table) was fixed by writing
+`is_gm_only` in a dedicated UPDATE statement. Tests: vector-store propagation round-trip,
+entity/session persistence+toggle, EntityForm toggle component tests — all green.
+
+**Remaining (chat shield indicator):** citations are parsed from the LLM's text response
+(`parse_citations`) and persisted as `{source_name, page, text_excerpt}` — they do not
+carry `is_gm_only`. To flag an answer as drawing on GM-only material, thread the flag from
+the retrieved `SearchResult`s onto the persisted assistant `message` (new field on
+`message`, set when any contributing chunk/entity is GM-only), expose it on the chat
+message DTO, and render a shield/`EyeMark` indicator in `OracleView`. Source-upload toggle
+UI is also pending (backend already accepts the param). This is a separate vertical slice.
+
+Original detail follows:
+
 
 - **Migration:** new `.surql` adding `is_gm_only TYPE bool DEFAULT false` to `source`,
   `session`, the 8 entity tables, and `chunk`. Follow the additive pattern of existing
