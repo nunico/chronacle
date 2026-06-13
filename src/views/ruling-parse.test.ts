@@ -70,6 +70,64 @@ describe('renderContent', () => {
     expect(html).toContain('class="citation-badge"');
     expect(html).toContain('class="entity-badge"');
   });
+
+  // The LLM emits Markdown emphasis; without rendering it leaks as literal
+  // asterisks in the ruling card (the original field bug).
+  it('renders **bold** as <strong>', () => {
+    expect(renderContent('names **Mandragor Ho** here')).toContain(
+      '<strong>Mandragor Ho</strong>',
+    );
+  });
+
+  it('renders *italic* as <em>', () => {
+    expect(renderContent('working *for* the guild')).toContain('<em>for</em>');
+  });
+
+  it('does not leave a stray <em> when rendering bold', () => {
+    expect(renderContent('**Mandragor Ho**')).not.toContain('<em>');
+  });
+
+  it('renders `inline code` as <code>', () => {
+    expect(renderContent('roll `1d6` now')).toContain('<code>1d6</code>');
+  });
+
+  it('does not treat a lone asterisk as emphasis', () => {
+    const html = renderContent('a * b for 5 * 5');
+    expect(html).not.toContain('<em>');
+  });
+
+  it('HTML-escapes body text so raw markup cannot render', () => {
+    const html = renderContent('beware <script>alert(1)</script>');
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('renders emphasis alongside a citation marker', () => {
+    const html = renderContent('**Yes**. [Source: "X", p.1]');
+    expect(html).toContain('<strong>Yes</strong>');
+    expect(html).toContain('class="citation-badge"');
+  });
+
+  // Field regression: the LLM emitted plural `quotes:` with two excerpts joined
+  // by "and". The strict `quote:` + `]` anchor failed to match, so the raw
+  // marker leaked into the rendered answer instead of becoming a badge.
+  it('renders a marker that uses plural "quotes:" with multiple excerpts', () => {
+    const html = renderContent(
+      '[Source: "Coriolis EN.pdf", p.214-215, quotes: "Secure dangerous artifacts for... the Draconites" and "Prevent the spread of dangerous bionics for... the Draconites"]',
+    );
+    expect(html).toContain('class="citation-badge"');
+    expect(html).toContain('data-source="Coriolis EN.pdf"');
+    expect(html).toContain('data-page="214"');
+    expect(html).not.toContain('[Source:');
+    // The first excerpt becomes the supporting quote shown in the popover.
+    expect(html).toContain('data-quote="Secure dangerous artifacts for... the Draconites"');
+  });
+
+  it('tolerates trailing junk before the closing bracket of a marker', () => {
+    const html = renderContent('See [Source: "X", p.3, note: whatever extra here].');
+    expect(html).toContain('class="citation-badge"');
+    expect(html).not.toContain('[Source:');
+  });
 });
 
 describe('parseRuling', () => {
@@ -145,6 +203,28 @@ describe('parseRuling', () => {
   // If the entity name contains a period (e.g. "Dr. Aldric"), findVerdictBoundary
   // used to treat that period as the sentence boundary, splitting the marker
   // across verdict and whyText so the entity badge never rendered correctly.
+  it('renders bold emphasis in the verdict', () => {
+    const r = parseRuling('**Mandragor Ho** is the only member. [Source: "C", p.205]');
+    expect(r.verdict).toContain('<strong>Mandragor Ho</strong>');
+  });
+
+  it('captures a plural-"quotes:" marker instead of leaking it as raw text', () => {
+    const text =
+      'The reference names one member. No other individual is identified. [Source: "Coriolis EN.pdf", p.214-215, quotes: "Secure dangerous artifacts for... the Draconites" and "Prevent the spread of dangerous bionics for... the Draconites"]';
+    const r = parseRuling(text);
+    expect(r.why).not.toContain('[Source:');
+    expect(r.cites).toHaveLength(1);
+    expect(r.cites[0].label).toBe('Coriolis EN.pdf p.214');
+    expect(r.cites[0].quote).toBe('Secure dangerous artifacts for... the Draconites');
+  });
+
+  it('renders italic emphasis in the why body', () => {
+    const r = parseRuling(
+      'One member named. They work *for* the guild. [Source: "C", p.205]',
+    );
+    expect(r.why).toContain('<em>for</em>');
+  });
+
   it('entity name with period does not split the marker at the period', () => {
     const text =
       'Aldric is present [Entity: "Dr. Aldric", kind: "npc"]. More detail here [Entity: "Dr. Aldric", kind: "npc"].';
