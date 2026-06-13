@@ -31,7 +31,7 @@
     onOpenUpload: () => void;
   } = $props();
 
-  let messages = $state<Array<{ role: string; content: string }>>([]);
+  let messages = $state<Array<{ role: string; content: string; gmOnly?: boolean }>>([]);
   let input = $state('');
   let isLoading = $state(false);
   let currentResponse = $state('');
@@ -52,19 +52,16 @@
   } | null>(null);
   let unlistenExtract: UnlistenFn | null = null;
 
-  let citationPopover = $state<
-    | {
-        source: string;
-        page: number | null;
-        quote: string | null;
-        chunk: CitationChunk | null;
-        loading: boolean;
-        x: number;
-        y: number;
-        anchor: { top: number; bottom: number };
-      }
-    | null
-  >(null);
+  let citationPopover = $state<{
+    source: string;
+    page: number | null;
+    quote: string | null;
+    chunk: CitationChunk | null;
+    loading: boolean;
+    x: number;
+    y: number;
+    anchor: { top: number; bottom: number };
+  } | null>(null);
 
   const suggestions = [
     { icon: 'swords', text: 'Can I cast a spell while grappled?' },
@@ -76,7 +73,7 @@
   async function loadHistory(campaignId: string | null) {
     try {
       const history = await getChatHistory(campaignId);
-      messages = history;
+      messages = history.map((m) => ({ role: m.role, content: m.content, gmOnly: m.is_gm_only }));
     } catch (e) {
       console.error('Failed to load chat history:', e);
     }
@@ -129,21 +126,27 @@
       // If the check fails, keep the optimistic default and show suggestions.
       hasSources = true;
     }
-    unlistenListener = await listen<{ token: string; done: boolean }>('chat-token', (event) => {
-      // The backend emits the terminal error as `{ token: "[Error: ...]", done: true }`
-      // in a single event. Append the token BEFORE flushing so the error reaches
-      // the thread instead of being silently swallowed when no prior tokens streamed.
-      if (event.payload.token) {
-        currentResponse += event.payload.token;
-      }
-      if (event.payload.done) {
-        if (currentResponse) {
-          messages = [...messages, { role: 'assistant', content: currentResponse }];
+    unlistenListener = await listen<{ token: string; done: boolean; gm_only?: boolean }>(
+      'chat-token',
+      (event) => {
+        // The backend emits the terminal error as `{ token: "[Error: ...]", done: true }`
+        // in a single event. Append the token BEFORE flushing so the error reaches
+        // the thread instead of being silently swallowed when no prior tokens streamed.
+        if (event.payload.token) {
+          currentResponse += event.payload.token;
         }
-        currentResponse = '';
-        isLoading = false;
-      }
-    });
+        if (event.payload.done) {
+          if (currentResponse) {
+            messages = [
+              ...messages,
+              { role: 'assistant', content: currentResponse, gmOnly: event.payload.gm_only },
+            ];
+          }
+          currentResponse = '';
+          isLoading = false;
+        }
+      },
+    );
     unlistenExtract = await listen<ExtractionProgress>('extract-progress', (event) => {
       const p = event.payload;
       if (!extraction) return;
@@ -169,7 +172,10 @@
     const cmd = parseCommand(t);
     if (cmd.kind !== 'chat') {
       input = '';
-      if (inputEl) { inputEl.style.height = 'auto'; inputEl.focus(); }
+      if (inputEl) {
+        inputEl.style.height = 'auto';
+        inputEl.focus();
+      }
       handleCommand(cmd);
       return;
     }
@@ -194,22 +200,36 @@
   function handleCommand(cmd: ReturnType<typeof parseCommand>) {
     switch (cmd.kind) {
       case 'extract-usage':
-        messages = [...messages, {
-          role: 'system',
-          content: 'Usage: /extract <entity name>. To extract everything from all books, use /extract-all (this can take a while).',
-        }];
+        messages = [
+          ...messages,
+          {
+            role: 'system',
+            content:
+              'Usage: /extract <entity name>. To extract everything from all books, use /extract-all (this can take a while).',
+          },
+        ];
         return;
       case 'help':
-        messages = [...messages, {
-          role: 'system',
-          content: 'Commands: /extract <name> — build one entity; /extract-all — extract everything (slow); /help — this list.',
-        }];
+        messages = [
+          ...messages,
+          {
+            role: 'system',
+            content:
+              'Commands: /extract <name> — build one entity; /extract-all — extract everything (slow); /help — this list.',
+          },
+        ];
         return;
       case 'extract':
-        runExtraction(() => extractEntityByName(activeCampaignId ?? '', cmd.name), `Extracting "${cmd.name}"`);
+        runExtraction(
+          () => extractEntityByName(activeCampaignId ?? '', cmd.name),
+          `Extracting "${cmd.name}"`,
+        );
         return;
       case 'extract-all':
-        runExtraction(() => extractAllFromCampaign(activeCampaignId ?? ''), 'Extracting all entities');
+        runExtraction(
+          () => extractAllFromCampaign(activeCampaignId ?? ''),
+          'Extracting all entities',
+        );
         return;
     }
   }
@@ -222,7 +242,13 @@
       messages = [...messages, { role: 'error', content: 'Select a campaign first.' }];
       return;
     }
-    extraction = { status: 'running', title, detail: 'Starting…', entitiesFound: 0, relationsFound: 0 };
+    extraction = {
+      status: 'running',
+      title,
+      detail: 'Starting…',
+      entitiesFound: 0,
+      relationsFound: 0,
+    };
     try {
       const summary = await start();
       const wasEmpty = extraction?.status === 'empty';
@@ -398,6 +424,11 @@
           </div>
         </div>
       {:else if hasCitation(msg.content)}
+        {#if msg.gmOnly}
+          <div class="gm-badge" title="This answer drew on GM-secret material">
+            <Icon name="eye-off" size={12} /> GM only
+          </div>
+        {/if}
         <RulingCard data={parseRuling(msg.content)} />
       {:else if msg.role === 'system'}
         <div class="msg">
@@ -408,6 +439,11 @@
         <div class="msg">
           <div class="who-av eye-badge"><EyeMark size={28} /></div>
           <div class="plain">
+            {#if msg.gmOnly}
+              <div class="gm-badge" title="This answer drew on GM-secret material">
+                <Icon name="eye-off" size={12} /> GM only
+              </div>
+            {/if}
             <!-- eslint-disable-next-line svelte/no-at-html-tags -->
             {@html plainHtml(msg.content)}
           </div>
@@ -495,7 +531,8 @@
         type="button"
         class="popover-close"
         aria-label="Close"
-        onclick={() => (citationPopover = null)}>×</button>
+        onclick={() => (citationPopover = null)}>×</button
+      >
     </div>
     {#if citationPopover.quote}
       {@const split = splitHeading(citationPopover.quote)}
@@ -527,14 +564,24 @@
       rows="1"
       placeholder="Ask a rule, a name, a place…"
     ></textarea>
-    <button class="tool" onclick={onOpenUpload} title="Attach a rulebook" aria-label="Attach a rulebook">
+    <button
+      class="tool"
+      onclick={onOpenUpload}
+      title="Attach a rulebook"
+      aria-label="Attach a rulebook"
+    >
       <Icon name="paperclip" size={18} />
     </button>
     <button class="tool" title="Roll — coming soon" aria-label="Roll dice" disabled>
       <Icon name="dices" size={18} />
     </button>
     {#if isLoading}
-      <button class="send-btn" onclick={stopGeneration} aria-label="Stop generating" title="Stop generating">
+      <button
+        class="send-btn"
+        onclick={stopGeneration}
+        aria-label="Stop generating"
+        title="Stop generating"
+      >
         <Icon name="square" size={16} />
       </button>
     {:else}
@@ -650,8 +697,16 @@
     animation-delay: 0.3s;
   }
   @keyframes tdot {
-    0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
-    30% { opacity: 1; transform: translateY(-2px); }
+    0%,
+    60%,
+    100% {
+      opacity: 0.35;
+      transform: translateY(0);
+    }
+    30% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
   }
   .suggest {
     margin-top: 24px;
@@ -695,7 +750,27 @@
     border-color: var(--line-glow);
     font-style: normal;
   }
-  .system-note { color: var(--fg-3); font-size: 0.85rem; font-style: italic; margin: 0; }
+  .system-note {
+    color: var(--fg-3);
+    font-size: 0.85rem;
+    font-style: italic;
+    margin: 0;
+  }
+  .gm-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    width: fit-content;
+    margin-bottom: 6px;
+    padding: 2px 8px;
+    border: 1px solid var(--violet-300, #a78bfa);
+    border-radius: 999px;
+    color: var(--violet-300, #a78bfa);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
   .error-bubble {
     flex: 1;
     background: var(--danger-bg, rgba(242, 103, 75, 0.08));

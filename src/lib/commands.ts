@@ -52,10 +52,13 @@ export async function uploadSource(
  */
 export async function getChatHistory(
   campaignId: string | null,
-): Promise<Array<{ role: string; content: string }>> {
-  return invoke<Array<{ role: string; content: string }>>('get_chat_history', {
-    campaignId,
-  });
+): Promise<Array<{ role: string; content: string; is_gm_only?: boolean }>> {
+  return invoke<Array<{ role: string; content: string; is_gm_only?: boolean }>>(
+    'get_chat_history',
+    {
+      campaignId,
+    },
+  );
 }
 
 /**

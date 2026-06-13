@@ -54,6 +54,8 @@ struct SettingRow {
 pub struct ChatMessageRow {
     pub role: String,
     pub content: String,
+    #[serde(default)]
+    pub is_gm_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -93,10 +95,11 @@ pub async fn get_chat_history(
         Some(cid) => {
             let safe_id = cid.replace('`', "``");
             format!(
-                "SELECT role, content, created_at FROM message WHERE campaign = campaign:`{safe_id}` ORDER BY created_at ASC"
+                "SELECT role, content, is_gm_only, created_at FROM message WHERE campaign = campaign:`{safe_id}` ORDER BY created_at ASC"
             )
         }
-        None => "SELECT role, content, created_at FROM message ORDER BY created_at ASC".to_string(),
+        None => "SELECT role, content, is_gm_only, created_at FROM message ORDER BY created_at ASC"
+            .to_string(),
     };
 
     let mut response = state
@@ -498,6 +501,10 @@ pub struct ChatRequest {
 pub struct ChatToken {
     pub token: String,
     pub done: bool,
+    /// Set on the final (`done`) token when the answer drew on GM-secret
+    /// material, so the chat UI can flag the just-streamed message.
+    #[serde(default)]
+    pub gm_only: bool,
 }
 
 /// Sends a user message through the full RAG pipeline and emits streaming
@@ -523,25 +530,28 @@ pub async fn chat_send(
     // Spawn so the command returns immediately — tokens come via events
     let task = tokio::spawn(async move {
         // Run the RAG pipeline
-        let mut rx = match crate::services::agent_service::stream_response(
+        let handle = match crate::services::agent_service::stream_response(
             &state_ref,
             &message,
             campaign_id.as_deref(),
         )
         .await
         {
-            Ok(rx) => rx,
+            Ok(handle) => handle,
             Err(e) => {
                 let _ = app.emit(
                     "chat-token",
                     ChatToken {
                         token: format!("[Error: {e}]"),
                         done: true,
+                        gm_only: false,
                     },
                 );
                 return;
             }
         };
+        let drew_from_gm_only = handle.drew_from_gm_only;
+        let mut rx = handle.rx;
 
         // Stream tokens to the frontend while collecting the full response
         let mut full_response = String::new();
@@ -549,7 +559,14 @@ pub async fn chat_send(
             match token_result {
                 Ok(token) => {
                     full_response.push_str(&token);
-                    let _ = app.emit("chat-token", ChatToken { token, done: false });
+                    let _ = app.emit(
+                        "chat-token",
+                        ChatToken {
+                            token,
+                            done: false,
+                            gm_only: false,
+                        },
+                    );
                 }
                 Err(e) => {
                     let _ = app.emit(
@@ -557,6 +574,7 @@ pub async fn chat_send(
                         ChatToken {
                             token: format!("[Error: {e}]"),
                             done: true,
+                            gm_only: false,
                         },
                     );
                     return;
@@ -568,6 +586,7 @@ pub async fn chat_send(
         if let Err(e) = crate::services::agent_service::persist_assistant_message(
             &state_ref.db,
             &full_response,
+            drew_from_gm_only,
             campaign_id.as_deref(),
         )
         .await
@@ -575,12 +594,14 @@ pub async fn chat_send(
             eprintln!("Failed to persist assistant message: {e}");
         }
 
-        // Signal completion
+        // Signal completion — carry the GM-only flag so the UI can mark the
+        // just-streamed message without a reload.
         let _ = app.emit(
             "chat-token",
             ChatToken {
                 token: String::new(),
                 done: true,
+                gm_only: drew_from_gm_only,
             },
         );
     });
@@ -623,6 +644,7 @@ pub async fn chat_cancel(
             ChatToken {
                 token: String::new(),
                 done: true,
+                gm_only: false,
             },
         );
     }

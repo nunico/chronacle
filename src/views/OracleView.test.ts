@@ -72,6 +72,29 @@ describe('OracleView', () => {
     });
   });
 
+  it('shows a GM-only badge on an answer flagged is_gm_only', async () => {
+    m.getChatHistory.mockResolvedValue([
+      { role: 'assistant', content: 'The cult worships a hidden god.', is_gm_only: true },
+    ]);
+    render(OracleView, {
+      props: { activeCampaignId: null, onOpenUpload: vi.fn() },
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/GM only/i)).toBeTruthy();
+    });
+  });
+
+  it('does not show a GM-only badge on a normal answer', async () => {
+    m.getChatHistory.mockResolvedValue([
+      { role: 'assistant', content: 'A public answer.', is_gm_only: false },
+    ]);
+    render(OracleView, {
+      props: { activeCampaignId: null, onOpenUpload: vi.fn() },
+    });
+    await waitFor(() => expect(screen.getByText(/A public answer/i)).toBeTruthy());
+    expect(screen.queryByText(/GM only/i)).toBeNull();
+  });
+
   it('does not leak a card\'s expand state to a different message at the same index after reload', async () => {
     // Ruling A at index 0, with a collapsible citation.
     m.getChatHistory.mockResolvedValue([

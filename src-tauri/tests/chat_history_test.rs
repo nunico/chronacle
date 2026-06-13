@@ -42,7 +42,7 @@ async fn fetch_history(db: &Surreal<Db>, campaign_id: Option<&str>) -> Vec<(Stri
 async fn persisted_user_message_is_in_history() {
     let db = setup_db().await;
 
-    persist_message(&db, "user", "Hello...", None)
+    persist_message(&db, "user", "Hello...", false, None)
         .await
         .unwrap();
 
@@ -60,7 +60,7 @@ async fn global_message_excluded_from_campaign_history() {
     let db = setup_db().await;
 
     // Persist a global message (no campaign).
-    persist_message(&db, "user", "global message", None)
+    persist_message(&db, "user", "global message", false, None)
         .await
         .unwrap();
 
@@ -68,7 +68,7 @@ async fn global_message_excluded_from_campaign_history() {
     let campaign = campaign_service::create(&db, "My Campaign", "D&D 5e")
         .await
         .unwrap();
-    persist_message(&db, "user", "campaign message", Some(&campaign.id))
+    persist_message(&db, "user", "campaign message", false, Some(&campaign.id))
         .await
         .unwrap();
 
@@ -89,7 +89,7 @@ async fn campaign_messages_in_global_query() {
     let db = setup_db().await;
 
     // Persist a global message.
-    persist_message(&db, "user", "global message", None)
+    persist_message(&db, "user", "global message", false, None)
         .await
         .unwrap();
 
@@ -97,7 +97,7 @@ async fn campaign_messages_in_global_query() {
     let campaign = campaign_service::create(&db, "My Campaign", "D&D 5e")
         .await
         .unwrap();
-    persist_message(&db, "user", "campaign message", Some(&campaign.id))
+    persist_message(&db, "user", "campaign message", false, Some(&campaign.id))
         .await
         .unwrap();
 
@@ -117,7 +117,7 @@ async fn campaign_messages_in_global_query() {
 async fn persist_assistant_message_stores_content() {
     let db = setup_db().await;
 
-    persist_assistant_message(&db, "A paladin is a holy warrior.", None)
+    persist_assistant_message(&db, "A paladin is a holy warrior.", false, None)
         .await
         .unwrap();
 
@@ -138,13 +138,17 @@ async fn persist_assistant_message_stores_content() {
 async fn messages_ordered_by_creation_time() {
     let db = setup_db().await;
 
-    persist_message(&db, "user", "first", None).await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    persist_assistant_message(&db, "second", None)
+    persist_message(&db, "user", "first", false, None)
         .await
         .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    persist_message(&db, "user", "third", None).await.unwrap();
+    persist_assistant_message(&db, "second", false, None)
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    persist_message(&db, "user", "third", false, None)
+        .await
+        .unwrap();
 
     let history = fetch_history(&db, None).await;
 
@@ -152,4 +156,39 @@ async fn messages_ordered_by_creation_time() {
     assert_eq!(history[0].1, "first", "first message out of order");
     assert_eq!(history[1].1, "second", "second message out of order");
     assert_eq!(history[2].1, "third", "third message out of order");
+}
+
+// ── is_gm_only persistence ─────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn assistant_message_persists_is_gm_only_flag() {
+    let db = setup_db().await;
+
+    // A plain answer and a GM-secret-derived answer (with a citation so it goes
+    // through the citation-building branch of persist_assistant_message).
+    persist_assistant_message(&db, "public answer", false, None)
+        .await
+        .unwrap();
+    persist_assistant_message(&db, "secret [Source: \"GM Notes\", p.1].", true, None)
+        .await
+        .unwrap();
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        content: String,
+        is_gm_only: bool,
+    }
+    let mut resp = db
+        .query("SELECT content, is_gm_only, created_at FROM message ORDER BY created_at ASC")
+        .await
+        .unwrap();
+    let rows: Vec<Row> = resp.take(0).unwrap();
+    assert_eq!(rows.len(), 2);
+    let public = rows.iter().find(|r| r.content == "public answer").unwrap();
+    let secret = rows
+        .iter()
+        .find(|r| r.content.starts_with("secret"))
+        .unwrap();
+    assert!(!public.is_gm_only, "public answer must not be flagged");
+    assert!(secret.is_gm_only, "GM-derived answer must be flagged");
 }
