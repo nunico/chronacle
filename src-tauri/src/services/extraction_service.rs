@@ -12,6 +12,7 @@ use surrealdb::Connection;
 
 use crate::providers::embedding::EmbeddingProvider;
 use crate::providers::llm_provider::{ChatMessage, LlmProvider};
+use crate::providers::vector_store::VectorStore;
 use crate::services::entity_service::{self, EntityInput, EntityKind, GraphNode};
 
 // ── Error ─────────────────────────────────────────────────────────────────────
@@ -157,7 +158,6 @@ Source text:
 
 /// Build a seed-anchored extraction prompt: focus on `name` and the entities
 /// directly related to it, rather than extracting everything in the text.
-#[allow(dead_code)] // Used by tests; will be called by seed extraction task
 fn build_seed_prompt(name: &str, chunk_text: &str) -> String {
     format!(
         r#"You are an expert at extracting structured game entities from TTRPG source material.
@@ -377,6 +377,163 @@ async fn persist_batch<C: Connection>(
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+/// Number of semantic neighbours to fetch per collection for seed extraction.
+const SEED_SEARCH_K: u64 = 12;
+
+/// Seed-anchored extraction: build the entity named `name` plus its relation
+/// neighborhood from chunks across all collections linked to `campaign_id`.
+///
+/// For each linked collection it gathers candidate passages by the union of
+/// semantic search (`VectorStore`) and a lexical `CONTAINS` scan, then runs the
+/// seed-anchored prompt and persists collection-scoped (same dedup path as the
+/// full sweep). Passing a single collection id to `search` guarantees every
+/// semantic hit belongs to that collection, so scoping is unambiguous.
+pub async fn extract_seed_anchored<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    llm: &Arc<dyn LlmProvider>,
+    embed: &Arc<dyn EmbeddingProvider>,
+    vector_store: &Arc<dyn VectorStore>,
+    campaign_id: &str,
+    name: &str,
+    on_progress: impl Fn(ExtractionProgress),
+) -> Result<ExtractionResult, ExtractionError> {
+    on_progress(ExtractionProgress {
+        phase: ExtractionPhase::Resolving,
+        detail: format!("Resolving \"{name}\""),
+        entities_found: 0,
+        relations_found: 0,
+    });
+
+    let collection_ids = crate::services::agent_service::resolve_collection_ids(db, campaign_id)
+        .await
+        .map_err(|e| ExtractionError::Db(e.to_string()))?;
+
+    let query_vec = embed
+        .embed_documents(vec![name.to_string()])
+        .await
+        .map_err(|e| ExtractionError::Embedding(e.to_string()))?
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+
+    let needle = name.to_lowercase();
+    let mut entities_created = 0usize;
+    let mut relations_created = 0usize;
+    let mut all_nodes: Vec<GraphNode> = Vec::new();
+    let mut total_passages = 0usize;
+
+    for cid in &collection_ids {
+        // 1. Semantic hits (all belong to `cid` because we pass a single id).
+        let semantic = vector_store
+            .search(&query_vec, std::slice::from_ref(cid), SEED_SEARCH_K)
+            .await
+            .map_err(|e| ExtractionError::Db(e.to_string()))?;
+
+        // 2. Lexical hits within this collection.
+        #[derive(serde::Deserialize)]
+        struct Row {
+            id: surrealdb::sql::Thing,
+            text: String,
+        }
+        let mut resp = db
+            .query(
+                "SELECT id, text FROM chunk \
+                 WHERE collection = type::thing('collection', $cid) \
+                 AND string::contains(string::lowercase(text), $needle)",
+            )
+            .bind(("cid", cid.clone()))
+            .bind(("needle", needle.clone()))
+            .await
+            .map_err(|e| ExtractionError::Db(e.to_string()))?;
+        let lexical: Vec<Row> = resp
+            .take(0)
+            .map_err(|e| ExtractionError::Db(e.to_string()))?;
+
+        // 3. Union by chunk id, preserving text.
+        let mut seen = std::collections::HashSet::new();
+        let mut passages: Vec<String> = Vec::new();
+        for r in &semantic {
+            if seen.insert(r.chunk_id.clone()) {
+                passages.push(r.text.clone());
+            }
+        }
+        for r in lexical {
+            if seen.insert(r.id.id.to_raw()) {
+                passages.push(r.text);
+            }
+        }
+        if passages.is_empty() {
+            continue;
+        }
+        total_passages += passages.len();
+
+        on_progress(ExtractionProgress {
+            phase: ExtractionPhase::Searching,
+            detail: format!("Found {total_passages} passages"),
+            entities_found: entities_created,
+            relations_found: relations_created,
+        });
+
+        // 4. Batch passages by char budget and run the seed prompt per batch.
+        let mut batches: Vec<String> = Vec::new();
+        let mut current = String::new();
+        for p in passages {
+            if !current.is_empty() && current.len() + p.len() > BATCH_CHAR_BUDGET {
+                batches.push(std::mem::take(&mut current));
+            }
+            current.push_str(&p);
+            current.push('\n');
+        }
+        if !current.is_empty() {
+            batches.push(current);
+        }
+
+        let system_prompt =
+            "You are a structured data extraction assistant. Return ONLY valid JSON.";
+        for chunk_text in &batches {
+            let messages = vec![ChatMessage {
+                role: "user".to_string(),
+                content: build_seed_prompt(name, chunk_text),
+            }];
+            let raw = llm_complete(llm.as_ref(), system_prompt, &messages).await?;
+            let parsed = parse_extraction_response(&raw);
+
+            on_progress(ExtractionProgress {
+                phase: ExtractionPhase::Extracting,
+                detail: format!("Building \"{name}\""),
+                entities_found: entities_created,
+                relations_found: relations_created,
+            });
+
+            let (ec, rc) = persist_batch(db, embed, cid, &parsed, &mut all_nodes).await?;
+            entities_created += ec;
+            relations_created += rc;
+        }
+    }
+
+    if total_passages == 0 {
+        on_progress(ExtractionProgress {
+            phase: ExtractionPhase::Empty,
+            detail: format!("No passages found for \"{name}\""),
+            entities_found: 0,
+            relations_found: 0,
+        });
+    } else {
+        on_progress(ExtractionProgress {
+            phase: ExtractionPhase::Done,
+            detail: format!("Created {entities_created} entities, {relations_created} relations"),
+            entities_found: entities_created,
+            relations_found: relations_created,
+        });
+    }
+
+    Ok(ExtractionResult {
+        entities_created,
+        relations_created,
+        entities: all_nodes,
+    })
+}
+
 /// Run LLM extraction on all chunks of `collection_id`.
 ///
 /// - Reads ALL chunks (not vector search — full coverage is required).
@@ -476,6 +633,9 @@ pub async fn extract_from_collection<C: Connection>(
 mod tests {
     use super::*;
     use crate::providers::embedding::MockEmbeddingProvider;
+    use crate::providers::vector_store::{
+        IndexedChunk, SearchResult, VectorStore, VectorStoreError,
+    };
 
     // ── Unit: prompt building ────────────────────────────────────────────────
 
@@ -774,6 +934,108 @@ mod tests {
         assert_eq!(done.phase, ExtractionPhase::Done);
         assert_eq!(done.entities_found, 2);
         assert_eq!(done.relations_found, 1);
+    }
+
+    // ── MockVectorStore ──────────────────────────────────────────────────────
+
+    struct MockVectorStore {
+        results: Vec<SearchResult>,
+    }
+
+    #[async_trait::async_trait]
+    impl VectorStore for MockVectorStore {
+        async fn upsert(&self, _s: &str, _c: &[IndexedChunk]) -> Result<(), VectorStoreError> {
+            Ok(())
+        }
+        async fn search(
+            &self,
+            _q: &[f32],
+            _cids: &[String],
+            _limit: u64,
+        ) -> Result<Vec<SearchResult>, VectorStoreError> {
+            Ok(self.results.clone())
+        }
+        async fn delete_by_source(&self, _s: &str) -> Result<(), VectorStoreError> {
+            Ok(())
+        }
+    }
+
+    // ── Integration: seed-anchored extraction ────────────────────────────────
+
+    #[tokio::test]
+    async fn seed_anchored_builds_named_entity_and_relations_collection_scoped() {
+        let (db, col_id) = setup_db_with_collection().await;
+
+        db.query(
+            "CREATE campaign SET id='camp1', name='C', system='5e', created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        db.query(
+            "LET $in  = type::thing('campaign',   $campaign_id); \
+             LET $out = type::thing('collection', $collection_id); \
+             RELATE $in->subscribes_to->$out SET created_at=time::now()",
+        )
+        .bind(("campaign_id", "camp1"))
+        .bind(("collection_id", col_id.clone()))
+        .await
+        .unwrap();
+
+        let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+            response: r#"{"entities":[{"name":"Commander Varn","kind":"npc","summary":"Leader.","notes":null,"relations":[{"name":"The Iron Fist","kind":"faction","rel_type":"commands","summary":"Militia.","notes":null}]}]}"#.to_string(),
+        });
+        let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+        let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore { results: vec![] });
+
+        let result =
+            extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Commander Varn", |_| {})
+                .await
+                .unwrap();
+
+        assert_eq!(result.entities_created, 2);
+        assert_eq!(result.relations_created, 1);
+
+        let npcs = entity_service::get_by_collection(&db, &col_id, EntityKind::Npc)
+            .await
+            .unwrap();
+        assert!(npcs.iter().any(|n| n.name == "Commander Varn"));
+    }
+
+    #[tokio::test]
+    async fn seed_anchored_emits_empty_phase_when_no_passages() {
+        let (db, col_id) = setup_db_with_collection().await;
+        db.query(
+            "CREATE campaign SET id='camp1', name='C', system='5e', created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        db.query(
+            "LET $in  = type::thing('campaign',   $campaign_id); \
+             LET $out = type::thing('collection', $collection_id); \
+             RELATE $in->subscribes_to->$out SET created_at=time::now()",
+        )
+        .bind(("campaign_id", "camp1"))
+        .bind(("collection_id", col_id.clone()))
+        .await
+        .unwrap();
+
+        let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+            response: "{}".to_string(),
+        });
+        let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+        let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore { results: vec![] });
+
+        let phases = std::sync::Mutex::new(Vec::<ExtractionProgress>::new());
+        let result =
+            extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Nonexistent Entity", |p| {
+                phases.lock().unwrap().push(p);
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.entities_created, 0);
+        let phases = phases.into_inner().unwrap();
+        assert_eq!(phases.last().unwrap().phase, ExtractionPhase::Empty);
     }
 
     #[tokio::test]
