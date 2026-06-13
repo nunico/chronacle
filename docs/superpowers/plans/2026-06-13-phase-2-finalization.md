@@ -73,7 +73,18 @@ does for LLM-extracted entities.
 `src-tauri/src/services/agent_service.rs`, new migration `007_session_embedding.surql`,
 `src-tauri/src/commands/entity_commands.rs` / `session_commands.rs`.
 
-### 2. `is_gm_only` end-to-end — DATA LAYER + FORMS DONE (2026-06-13)
+### 2. `is_gm_only` end-to-end — DONE (2026-06-13)
+
+**Chat shield (final piece) shipped:** migration `009_message_gm_only.surql`;
+`stream_response` returns `StreamHandle { rx, drew_from_gm_only }` (true when any
+retrieved chunk is GM-only — retrieval still never filters); the flag is persisted on
+the assistant message and threaded to the frontend via both the `chat-token` done event
+and `get_chat_history`; `OracleView` renders a "GM only" badge on flagged answers.
+Tests: message flag round-trip (`chat_history_test`), badge shown/hidden
+(`OracleView.test.ts`). Source-upload toggle UI remains a small follow-up (backend
+`upload_source` already accepts the param).
+
+Earlier (data layer + forms) detail:
 
 **Shipped:** migration `008_is_gm_only.surql` (field on source, chunk, session, 8 entity
 tables); chunk inheritance from source at index time (`SourceInfo` → `embed_chunks` →

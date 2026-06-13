@@ -869,10 +869,11 @@ Milestone: "Ask the rulebook a question and get a cited answer." ✓
 
 ### Phase 2 — Campaign & Notes
 
-**Status:** In progress (~80%). Entity/campaign/session CRUD, all 8 entity types, the
-notes editor, and notes indexing/retrieval (entity + session) are complete and tested;
-source scoping resolved as collection-based. Remaining: `is_gm_only`, keyboard
-shortcuts, and the remaining Phase 2 test gaps (event ordering, backend E2E). See
+**Status:** In progress (~90%). Entity/campaign/session CRUD, all 8 entity types, the
+notes editor, notes indexing/retrieval (entity + session), and `is_gm_only` end-to-end
+(data model → propagation → form toggles → chat shield) are complete and tested; source
+scoping resolved as collection-based. Remaining: keyboard shortcuts, a source-upload
+GM-only toggle, and the remaining Phase 2 test gaps (event ordering, backend E2E). See
 [`docs/superpowers/plans/2026-06-13-phase-2-finalization.md`](superpowers/plans/2026-06-13-phase-2-finalization.md).
 
 Goal: Multi-campaign support, hybrid notes, lore retrieval.
@@ -882,15 +883,15 @@ Goal: Multi-campaign support, hybrid notes, lore retrieval.
 - [x] `event` entity type + temporal fields UI — all fields (`date_start`/`date_end`/`is_ongoing`/`sequence_index`/`era`/`duration_label`/`session`) in form; *timeline visualisation moved to Phase 3*
 - [x] `player_character` entity type with player name / class / status — form fields + status enum; tested
 - [x] Entity notes editor (markdown) — `WikiLinkEditor.svelte` with `[[Entity]]` autocomplete + `WikiText` rendering
-- [~] **`is_gm_only` introduced:** field added to source, session, all 8 entity tables, and chunk (migration `008_is_gm_only.surql`); chunks inherit it from their source at index time and `SearchResult` carries it (retrieval never filters — only tags); entity/session form toggles shipped. *Remaining: chat shield indicator — citations are parsed from LLM text and don't yet carry the flag, so surfacing "this answer used GM-only material" needs the flag threaded onto the persisted message.*
+- [x] **`is_gm_only` introduced:** field on source, session, all 8 entity tables, chunk, and message (migrations `008`/`009`); chunks inherit it from their source at index time and `SearchResult` carries it (retrieval never filters — only tags); entity/session form toggles; chat shield — `stream_response` flags answers drawing on GM-only chunks, persisted on the message and rendered as a "GM only" badge in `OracleView`. *(Source-upload toggle UI still pending — backend `upload_source` already accepts the param.)*
 - [x] Notes indexing pipeline (entity + session notes → embed → SurrealDB) — `entity_service::embed_node` (name+summary+notes, single source of truth, called by manual create/update **and** extraction) + `session_service::embed_session` (migration `007_session_embedding.surql`); `agent_service::fetch_entity_context` now includes entity *and* session note excerpts in the LLM context
 - [x] Collection-scoped sources — sources attach to collections; campaigns `subscribes_to` collections (migration `003_collections.surql`). *Supersedes the original "global vs campaign-scoped (NULL)" design — there is no global source scope.*
 - [ ] Keyboard-first shortcuts (GM is at the table) — *partial: modal/autocomplete/chat keys exist; no global GM shortcut layer (quick-search, create-entity, navigation)*
 - **Tests shipped with Phase 2:**
   - [x] Unit: entity CRUD service (`entity_service_test.rs`) — *event `sequence_index` ordering test still missing*
-  - [~] Integration: notes indexing → retrieval (done — entity/session note embedding + context inclusion tested in `entity_service`/`session_service`/`agent_service`); is_gm_only propagation into vector index (pending item 2)
+  - [x] Integration: notes indexing → retrieval (entity/session note embedding + context inclusion tested in `entity_service`/`session_service`/`agent_service`); is_gm_only propagation into vector index (`vector_store` upsert→search round-trip) + message flag round-trip (`chat_history_test`)
   - [ ] Backend E2E: create campaign → add NPC + event → query → assert both appear in response
-  - [x] Component tests: entity form validation (`EntityForm.test.ts`) — *GM-secret toggle test pending `is_gm_only`*
+  - [x] Component tests: entity form validation + GM-secret toggle (`EntityForm.test.ts`); chat GM-only badge (`OracleView.test.ts`)
 
 Milestone: "Run a full session, take notes on NPCs and events, ask a lore question and get cited answers from both the sourcebook and your own notes."
 
