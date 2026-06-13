@@ -10,20 +10,13 @@ const mockNode = (overrides: Partial<GraphNode> = {}): GraphNode => ({
   name: 'Torvin',
   summary: null,
   notes: null,
-  is_gm_only: false,
   created_at: null,
   updated_at: null,
-  date_start: null,
-  date_end: null,
-  is_ongoing: null,
-  sequence_index: null,
-  era: null,
-  duration_label: null,
+  date_start: null, date_end: null, is_ongoing: null,
+  sequence_index: null, era: null, duration_label: null,
   session_id: null,
-  player_name: null,
-  character_class: null,
-  character_level: null,
-  status: null,
+  player_name: null, character_class: null,
+  character_level: null, status: null,
   ...overrides,
 });
 
@@ -34,7 +27,6 @@ const mockSession = (overrides: Partial<Session> = {}): Session => ({
   title: 'The Beginning',
   date_played: '2024-01-01',
   notes: '',
-  is_gm_only: false,
   created_at: null,
   updated_at: null,
   ...overrides,
@@ -83,24 +75,6 @@ describe('EntityForm', () => {
     expect(onSave.mock.calls[0][0].playerName).toBeNull();
   });
 
-  it('includes the GM-only toggle in the saved input', async () => {
-    const onSave = vi.fn();
-    render(EntityForm, {
-      props: { kind: 'npc' as EntityKind, node: null, onsave: onSave },
-    });
-    await fireEvent.input(screen.getByLabelText(/name/i), { target: { value: 'Secret NPC' } });
-    await fireEvent.click(screen.getByLabelText(/gm only/i));
-    await fireEvent.submit(screen.getByRole('form'));
-    expect(onSave.mock.calls[0][0].isGmOnly).toBe(true);
-  });
-
-  it('seeds the GM-only toggle from the node', () => {
-    render(EntityForm, {
-      props: { kind: 'npc' as EntityKind, node: mockNode({ is_gm_only: true }) },
-    });
-    expect((screen.getByLabelText(/gm only/i) as HTMLInputElement).checked).toBe(true);
-  });
-
   it('shows prop-supplied field error for the name field', () => {
     render(EntityForm, {
       props: {
@@ -121,10 +95,7 @@ describe('EntityForm', () => {
   });
 
   it('shows session dropdown for event kind', () => {
-    const sessions = [
-      mockSession(),
-      mockSession({ id: 'sess2', session_number: 2, title: 'The Dungeon' }),
-    ];
+    const sessions = [mockSession(), mockSession({ id: 'sess2', session_number: 2, title: 'The Dungeon' })];
     render(EntityForm, { props: { kind: 'event' as EntityKind, node: null, sessions } });
     expect(screen.getByLabelText(/session/i)).toBeTruthy();
     expect(screen.getByText(/#1: The Beginning/i)).toBeTruthy();
@@ -140,9 +111,7 @@ describe('EntityForm', () => {
   it('includes sessionId in save payload for event kind', async () => {
     const onSave = vi.fn();
     const sessions = [mockSession()];
-    render(EntityForm, {
-      props: { kind: 'event' as EntityKind, node: null, sessions, onsave: onSave },
-    });
+    render(EntityForm, { props: { kind: 'event' as EntityKind, node: null, sessions, onsave: onSave } });
     await fireEvent.input(screen.getByLabelText(/name/i), { target: { value: 'Battle of Helm' } });
     const select = screen.getByLabelText(/session/i) as HTMLSelectElement;
     await fireEvent.change(select, { target: { value: 'sess1' } });

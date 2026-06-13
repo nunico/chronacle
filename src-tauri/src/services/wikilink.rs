@@ -349,7 +349,6 @@ mod tests {
             name: name.to_string(),
             summary: None,
             notes: None,
-            is_gm_only: None,
             date_start: None,
             date_end: None,
             is_ongoing: None,

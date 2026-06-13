@@ -98,7 +98,6 @@ pub(crate) struct GraphNodeRecord {
     pub name: String,
     pub summary: Option<String>,
     pub notes: Option<String>,
-    pub is_gm_only: Option<bool>,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
     // event fields
@@ -126,7 +125,6 @@ impl From<GraphNodeRecord> for GraphNode {
             name: r.name,
             summary: r.summary,
             notes: r.notes,
-            is_gm_only: r.is_gm_only.unwrap_or(false),
             created_at: r.created_at,
             updated_at: r.updated_at,
             date_start: r.date_start,
@@ -154,7 +152,6 @@ pub struct GraphNode {
     pub name: String,
     pub summary: Option<String>,
     pub notes: Option<String>,
-    pub is_gm_only: bool,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
     // event fields
@@ -179,7 +176,6 @@ pub struct EntityInput {
     pub name: String,
     pub summary: Option<String>,
     pub notes: Option<String>,
-    pub is_gm_only: Option<bool>,
     // event
     pub date_start: Option<String>,
     pub date_end: Option<String>,
@@ -227,7 +223,6 @@ pub async fn create<C: surrealdb::Connection>(
             name            = $name,
             summary         = $summary,
             notes           = $notes,
-            is_gm_only      = $gm_only,
             date_start      = $date_start,
             date_end        = $date_end,
             is_ongoing      = $is_ongoing,
@@ -247,7 +242,6 @@ pub async fn create<C: surrealdb::Connection>(
     .bind(("name", input.name.trim().to_owned()))
     .bind(("summary", input.summary))
     .bind(("notes", input.notes))
-    .bind(("gm_only", input.is_gm_only.unwrap_or(false)))
     .bind(("date_start", input.date_start))
     .bind(("date_end", input.date_end))
     .bind(("is_ongoing", input.is_ongoing))
@@ -320,8 +314,6 @@ pub async fn create<C: surrealdb::Connection>(
         #[serde(default)]
         notes: Option<String>,
         #[serde(default)]
-        is_gm_only: Option<bool>,
-        #[serde(default)]
         created_at: Option<String>,
         #[serde(default)]
         updated_at: Option<String>,
@@ -367,7 +359,6 @@ pub async fn create<C: surrealdb::Connection>(
         name: rec.name,
         summary: rec.summary,
         notes: rec.notes,
-        is_gm_only: rec.is_gm_only.unwrap_or(false),
         created_at: rec.created_at,
         updated_at: rec.updated_at,
         date_start: rec.date_start,
@@ -622,7 +613,8 @@ pub async fn update<C: surrealdb::Connection>(
     }
     let table = kind.table_name();
     let notes_for_wikilinks = input.notes.clone();
-    let update_sql = "UPDATE type::thing($table, $id) SET
+    let update_sql = format!(
+        "UPDATE type::thing($table, $id) SET
             name           = $name,
             summary        = $summary,
             notes          = $notes,
@@ -637,8 +629,11 @@ pub async fn update<C: surrealdb::Connection>(
             character_class = $character_class,
             character_level = $character_level,
             status         = $status,
-            updated_at     = time::now()";
-    db.query(update_sql)
+            updated_at     = time::now();
+         SELECT *, {SELECT_SCOPE_ALIASES} FROM type::thing($table, $id)"
+    );
+    let mut response = db
+        .query(update_sql)
         .bind(("table", table))
         .bind(("id", id.to_owned()))
         .bind(("name", input.name.trim().to_owned()))
@@ -659,33 +654,8 @@ pub async fn update<C: surrealdb::Connection>(
         .map_err(|e| EntityError::Database {
             message: e.to_string(),
         })?;
-
-    // Persist is_gm_only in its OWN statement. When folded into the SET above —
-    // which, being generic across all entity kinds, also assigns event/PC fields
-    // not defined on this table — SurrealDB drops a falsy bound bool (`false`)
-    // from the SET, so a GM-only toggle-off never persisted. A dedicated SET
-    // against only the defined `is_gm_only` field is reliable.
-    db.query("UPDATE type::thing($table, $id) SET is_gm_only = $gm_only")
-        .bind(("table", table))
-        .bind(("id", id.to_owned()))
-        .bind(("gm_only", input.is_gm_only.unwrap_or(false)))
-        .await
-        .map_err(|e| EntityError::Database {
-            message: e.to_string(),
-        })?;
-
-    // Re-fetch in a SEPARATE query so the scope-alias traversal sees the
-    // committed row.
-    let select_sql = format!("SELECT *, {SELECT_SCOPE_ALIASES} FROM type::thing($table, $id)");
-    let mut response = db
-        .query(select_sql)
-        .bind(("table", table))
-        .bind(("id", id.to_owned()))
-        .await
-        .map_err(|e| EntityError::Database {
-            message: e.to_string(),
-        })?;
-    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+    // The UPDATE is at index 0; the SELECT is at index 1.
+    let records: Vec<GraphNodeRecord> = response.take(1).map_err(|e| EntityError::Database {
         message: e.to_string(),
     })?;
     let node: GraphNode = records
@@ -883,81 +853,6 @@ mod tests {
         assert!(matches!(err, EntityError::InvalidKind { kind } if kind == "goblin"));
     }
 
-    #[tokio::test]
-    async fn create_and_update_persist_is_gm_only() {
-        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
-            .await
-            .unwrap();
-        db.use_ns("test").use_db("test").await.unwrap();
-        crate::schema::run_migrations(&db).await.unwrap();
-        db.query(
-            "CREATE campaign SET id='camp1', name='T', system='5e', \
-             created_at=time::now(), updated_at=time::now()",
-        )
-        .await
-        .unwrap();
-
-        // Defaults to false when not specified.
-        let plain = create(
-            &db,
-            Some("camp1"),
-            None,
-            EntityKind::Npc,
-            EntityInput {
-                name: "Bob".to_string(),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-        assert!(!plain.is_gm_only);
-
-        // Created GM-only.
-        let secret = create(
-            &db,
-            Some("camp1"),
-            None,
-            EntityKind::Npc,
-            EntityInput {
-                name: "Hidden Cult Leader".to_string(),
-                is_gm_only: Some(true),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-        assert!(secret.is_gm_only, "create should persist is_gm_only");
-        assert!(
-            get_by_id(&db, &secret.id, EntityKind::Npc)
-                .await
-                .unwrap()
-                .is_gm_only,
-            "get_by_id should read back is_gm_only"
-        );
-
-        // Toggle off via update.
-        let toggled = update(
-            &db,
-            &secret.id,
-            EntityKind::Npc,
-            EntityInput {
-                name: "Hidden Cult Leader".to_string(),
-                is_gm_only: Some(false),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-        assert!(!toggled.is_gm_only, "update should persist is_gm_only");
-        assert!(
-            !get_by_id(&db, &secret.id, EntityKind::Npc)
-                .await
-                .unwrap()
-                .is_gm_only,
-            "toggle-off must persist to the DB"
-        );
-    }
-
     #[test]
     fn order_events_for_timeline_sorts_by_sequence_then_name_nulls_last() {
         fn event(name: &str, seq: Option<i64>) -> GraphNode {
@@ -969,7 +864,6 @@ mod tests {
                 name: name.to_string(),
                 summary: None,
                 notes: None,
-                is_gm_only: false,
                 created_at: None,
                 updated_at: None,
                 date_start: None,
@@ -1181,7 +1075,6 @@ mod tests {
                 name: "Torvin".to_string(),
                 summary: None,
                 notes: None,
-                is_gm_only: None,
                 date_start: None,
                 date_end: None,
                 is_ongoing: None,
@@ -1238,7 +1131,6 @@ mod tests {
                 name: "Goblin".to_string(),
                 summary: None,
                 notes: None,
-                is_gm_only: None,
                 date_start: None,
                 date_end: None,
                 is_ongoing: None,
@@ -1280,7 +1172,6 @@ mod tests {
             name: name.to_string(),
             summary: None,
             notes: None,
-            is_gm_only: None,
             date_start: None,
             date_end: None,
             is_ongoing: None,
@@ -1343,7 +1234,6 @@ mod tests {
             name: name.to_string(),
             summary: None,
             notes: None,
-            is_gm_only: None,
             date_start: None,
             date_end: None,
             is_ongoing: None,
@@ -1396,7 +1286,6 @@ mod tests {
             name: name.to_string(),
             summary: None,
             notes: None,
-            is_gm_only: None,
             date_start: None,
             date_end: None,
             is_ongoing: None,
@@ -1443,7 +1332,6 @@ mod tests {
             name: name.to_string(),
             summary: None,
             notes: None,
-            is_gm_only: None,
             date_start: None,
             date_end: None,
             is_ongoing: None,

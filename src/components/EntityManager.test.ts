@@ -20,7 +20,6 @@ const mockNpc = (): GraphNode => ({
   name: 'Torvin',
   summary: 'Shady merchant',
   notes: null,
-  is_gm_only: false,
   created_at: null, updated_at: null,
   date_start: null, date_end: null, is_ongoing: null,
   sequence_index: null, era: null, duration_label: null,

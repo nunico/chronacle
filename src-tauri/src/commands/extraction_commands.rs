@@ -63,7 +63,6 @@ async fn persist_extraction_summary(
         db,
         "extraction",
         &content,
-        false,
         Some(campaign_id),
     )
     .await

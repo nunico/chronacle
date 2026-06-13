@@ -73,7 +73,18 @@ does for LLM-extracted entities.
 `src-tauri/src/services/agent_service.rs`, new migration `007_session_embedding.surql`,
 `src-tauri/src/commands/entity_commands.rs` / `session_commands.rs`.
 
-### 2. `is_gm_only` end-to-end — DONE (2026-06-13)
+### 2. `is_gm_only` — BUILT THEN REVERTED → deferred to Phase 3 (2026-06-13)
+
+**Reverted.** The end-to-end manual-flag implementation below was completed and then
+reverted (`git revert` of `6a1634b` + `01d63ac`). Reason: a per-source / per-entity
+boolean models the wrong granularity — GM-secret material is *passage-level* (boxed "For
+the GM" sidebars, secret lore, spoilers), and in a single-user app the flag only powers a
+cosmetic badge with no real consumer. It returns in Phase 3 as **AI-detected passage-level**
+secrecy (classify chunks at index time, keyword prefilter + LLM confirm, with an eval set)
+alongside player-safe export — see architecture.md "GM-Secret Handling" and the Phase 3
+list. The historical implementation notes are kept below for whoever picks up Phase 3.
+
+
 
 **Chat shield (final piece) shipped:** migration `009_message_gm_only.surql`;
 `stream_response` returns `StreamHandle { rx, drew_from_gm_only }` (true when any

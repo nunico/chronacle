@@ -18,7 +18,6 @@ const mockSession = (): Session => ({
   title: 'The Battle of Ashfields',
   date_played: '2026-06-05',
   notes: 'The party fought bravely.',
-  is_gm_only: false,
   created_at: null,
   updated_at: null,
 });

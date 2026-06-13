@@ -52,13 +52,10 @@ export async function uploadSource(
  */
 export async function getChatHistory(
   campaignId: string | null,
-): Promise<Array<{ role: string; content: string; is_gm_only?: boolean }>> {
-  return invoke<Array<{ role: string; content: string; is_gm_only?: boolean }>>(
-    'get_chat_history',
-    {
-      campaignId,
-    },
-  );
+): Promise<Array<{ role: string; content: string }>> {
+  return invoke<Array<{ role: string; content: string }>>('get_chat_history', {
+    campaignId,
+  });
 }
 
 /**
@@ -80,7 +77,10 @@ export async function deleteSource(id: string): Promise<void> {
  * Send a chat message to the AI agent (streaming response is delivered
  * via the `chat-token` event).
  */
-export async function chatSend(message: string, campaignId: string | null): Promise<void> {
+export async function chatSend(
+  message: string,
+  campaignId: string | null,
+): Promise<void> {
   return invoke('chat_send', {
     request: { message, campaignId },
   });
@@ -205,7 +205,10 @@ export async function getCollections(): Promise<Collection[]> {
   return invoke<Collection[]>('get_collections');
 }
 
-export async function createCollection(name: string, description?: string): Promise<Collection> {
+export async function createCollection(
+  name: string,
+  description?: string,
+): Promise<Collection> {
   return invoke<Collection>('create_collection', {
     name,
     description: description ?? null,
@@ -262,7 +265,11 @@ export async function getCampaign(id: string): Promise<Campaign> {
   return invoke<Campaign>('get_campaign', { id });
 }
 
-export async function updateCampaign(id: string, name: string, system: string): Promise<Campaign> {
+export async function updateCampaign(
+  id: string,
+  name: string,
+  system: string,
+): Promise<Campaign> {
   return invoke<Campaign>('update_campaign', { id, name, system });
 }
 
@@ -389,7 +396,6 @@ export interface GraphNode {
   name: string;
   summary: string | null;
   notes: string | null;
-  is_gm_only: boolean;
   created_at: string | null;
   updated_at: string | null;
   // event fields
@@ -411,7 +417,6 @@ export interface EntityInput {
   name: string;
   summary?: string | null;
   notes?: string | null;
-  isGmOnly?: boolean | null;
   // event
   dateStart?: string | null;
   dateEnd?: string | null;
@@ -486,7 +491,6 @@ export interface Session {
   title: string;
   date_played: string;
   notes: string;
-  is_gm_only: boolean;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -496,7 +500,6 @@ export interface SessionInput {
   title: string;
   datePlayed: string;
   notes: string;
-  isGmOnly?: boolean | null;
 }
 
 export async function createSession(campaignId: string, input: SessionInput): Promise<Session> {

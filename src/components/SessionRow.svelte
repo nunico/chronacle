@@ -1,11 +1,5 @@
 <script lang="ts">
-  import {
-    updateSession,
-    deleteSession,
-    getSessionEntities,
-    type Session,
-    type GraphNode,
-  } from '../lib/commands';
+  import { updateSession, deleteSession, getSessionEntities, type Session, type GraphNode } from '../lib/commands';
   import WikiText from './WikiText.svelte';
   import WikiLinkEditor from './WikiLinkEditor.svelte';
   import { formatDate } from '../lib/locale.svelte';
@@ -26,7 +20,6 @@
   let editTitle = $derived(session.title);
   let editDate = $derived(session.date_played);
   let editNotes = $derived(session.notes);
-  let editGmOnly = $derived(session.is_gm_only);
   let linkedEntities = $state<GraphNode[]>([]);
   let loadingEntities = $state(false);
   let entitiesLoaded = $state(false);
@@ -50,8 +43,7 @@
     if (
       editTitle === session.title &&
       editDate === session.date_played &&
-      editNotes === session.notes &&
-      editGmOnly === session.is_gm_only
+      editNotes === session.notes
     ) {
       return;
     }
@@ -61,7 +53,6 @@
         title: editTitle,
         datePlayed: editDate,
         notes: editNotes,
-        isGmOnly: editGmOnly,
       });
       onUpdate(updated);
     } catch (e) {
@@ -87,9 +78,7 @@
     <span class="session-title">{session.title}</span>
     <span class="session-date">{formatDate(session.date_played)}</span>
     {#if linkedEntities.length > 0}
-      <span class="session-events"
-        >{linkedEntities.length} event{linkedEntities.length === 1 ? '' : 's'}</span
-      >
+      <span class="session-events">{linkedEntities.length} event{linkedEntities.length === 1 ? '' : 's'}</span>
     {/if}
     <span class="chevron" class:rotated={expanded}>›</span>
   </button>
@@ -133,13 +122,6 @@
             <WikiText text={editNotes} entities={entityMap} />
           </div>
         {/if}
-      </div>
-
-      <div class="field-row">
-        <label class="gm-toggle">
-          <input type="checkbox" bind:checked={editGmOnly} onchange={saveField} />
-          GM only (secret)
-        </label>
       </div>
 
       {#if loadingEntities}
@@ -256,15 +238,6 @@
     color: var(--fg-3);
     min-width: 80px;
     flex-shrink: 0;
-  }
-
-  .gm-toggle {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12.5px;
-    color: var(--fg-3);
-    cursor: pointer;
   }
 
   .field-input {

@@ -48,7 +48,7 @@ This project is licensed under **AGPL-3.0 with a Branding Exception**.
 - **Traits for all external deps.** Never call SurrealDB, filesystem, or LLM APIs directly — always through `Arc<dyn LlmProvider>`, `Arc<dyn VectorStore>`, `Arc<dyn BlobStore>`. Tests inject `Mock*` variants.
 - **SurrealQL for all queries.** No SQL. Schema is defined via `DEFINE` statements in `.surql` migration files. No compile-time query validation — all queries are tested at runtime.
 - **Embedding model identity.** Store model ID in `source.embed_model` and `chunk.embed_model` at index time; detect mismatch at startup. Silently switching models corrupts retrieval (ADR-003).
-- **`is_gm_only` deferred to Phase 2.** In Phase 1, everything is GM-visible. No `is_gm_only` field in the data model until Phase 2.
+- **`is_gm_only` deferred to Phase 3.** Everything is GM-visible (single-user app); no `is_gm_only` field in the data model. A Phase 2 manual-flag attempt was reverted — GM-secret content is passage-level, so it returns in Phase 3 as an AI-detected per-chunk flag alongside player-safe export. See architecture.md "GM-Secret Handling".
 - **Approved crates only.** No new `Cargo.toml` entries outside the "Crate & Tool Summary" table in the architecture doc without an ADR.
 
 ## Testing

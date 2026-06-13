@@ -653,7 +653,7 @@ DEFINE FIELD page_start ON chunk TYPE int;
 DEFINE FIELD page_end ON chunk TYPE int;
 DEFINE FIELD section_heading ON chunk TYPE string;
 DEFINE FIELD source_type ON chunk TYPE string;
-DEFINE FIELD is_gm_only ON chunk TYPE bool;
+-- is_gm_only: Phase 3 (AI-detected passage-level flag) — not in the current schema
 DEFINE FIELD embedding ON chunk TYPE array<float>;
 DEFINE FIELD embed_model ON chunk TYPE string;
 
@@ -744,7 +744,8 @@ Identify headings via font-size heuristics / regex
   ▼ Chunker
 Sliding window: ~400 tokens, 80-token overlap
 Each chunk tagged: source, campaign, page_start, page_end,
-                   section_heading, source_type, is_gm_only, embed_model
+                   section_heading, source_type, embed_model
+                   (is_gm_only: Phase 3 — AI-detected, see GM-Secret Handling)
   │
   ▼ fastembed (nomic-embed-text-v1.5, 768-dim)
 Batch embed (async, ~500/s on CPU)
@@ -760,7 +761,7 @@ Streamed progress events → Tauri events → frontend progress bar
 
 ### Notes Indexing
 
-Entity notes and session notes → chunked → embedded → `chunk` table (tagged with source reference). Re-indexed on save (debounced 2 s). In Phase 1, `is_gm_only` is always `false` (deferred to Phase 2).
+Entity notes and session notes → embedded → searchable (see [Notes indexing in Phase 2](#phase-2--campaign--notes)). `is_gm_only` is not yet modelled — it is deferred to Phase 3 as an AI-detected passage-level flag (see [GM-Secret Handling](#gm-secret-handling)).
 
 ### Query & Retrieval
 
@@ -804,14 +805,28 @@ INSTRUCTIONS:
 
 ## GM-Secret Handling
 
-**Deferred to Phase 2.** In Phase 1, everything is GM-visible (single-user app). The data model has no `is_gm_only` field until Phase 2, when player-facing features (export, player-safe view) require it.
+**Deferred to Phase 3** (a Phase 2 attempt was built then reverted — see below). In
+Phase 1–2 everything is GM-visible (single-user app), so the flag has no functional
+consumer yet; its real payoff is a player-safe view/export that actually strips secrets.
 
-When implemented in Phase 2:
-- `is_gm_only` flag on: entities, sessions, sources, player_character backstory notes.
-- SurrealDB chunks from GM-secret sources inherit `is_gm_only = TRUE` at index time.
-- Retrieval never filters out GM-secret chunks (single-user GM app).
-- Responses that drew from GM-secret chunks are visually flagged in the UI (shield icon / distinct border).
-- The LLM is instructed to mark GM-secret-derived content so future player-safe export can strip it.
+**Why the manual flag was the wrong model.** GM-secret content is rarely a whole book — it
+is *passage-level*: the boxed "For the GM" sidebars, secret lore, adventure spoilers,
+read-aloud vs behind-the-screen text. A manual per-source / per-entity boolean models a
+granularity that mostly doesn't exist. A Phase 2 implementation (per-source/entity/session
+toggles + chunk inheritance + a chat "GM only" badge) was built and then reverted for this
+reason.
+
+When implemented in Phase 3, alongside player-safe export:
+- **AI-detected at index time.** Classify each chunk as GM-secret vs player-safe by
+  inspecting its text, rather than asking the GM to flag whole sources. A cheap keyword
+  prefilter (headings / first lines hitting "For the GM", "Secret", "Behind the Screen",
+  "Development", spoiler-y cues) narrows the LLM pass to candidate chunks to bound cost.
+  - *Known limitation:* GM-secret cues are often **visual** (shaded boxes, sidebars, icons)
+    and `pdfium` text extraction drops them, so detection leans on explicit textual labels;
+    needs a small eval set to tune precision/recall (false negatives leak secrets).
+- `is_gm_only` then lives on `chunk` (and entity/session notes) as a *derived* flag.
+- Retrieval never filters GM-secret chunks (single-user GM app); the flag drives a
+  player-safe export/view that strips them and a "spoiler" indicator in chat.
 
 ---
 
@@ -869,13 +884,13 @@ Milestone: "Ask the rulebook a question and get a cited answer." ✓
 
 ### Phase 2 — Campaign & Notes
 
-**Status:** Effectively complete (~98%). Entity/campaign/session CRUD, all 8 entity
-types, the notes editor, notes indexing/retrieval (entity + session), `is_gm_only`
-end-to-end (data model → propagation → form toggles → chat shield), keyboard-first
-g-chord navigation, and the Phase 2 test suite (event timeline ordering, notes→retrieval,
-is_gm_only propagation, campaign→NPC+event backend E2E) are all complete; source scoping
-resolved as collection-based. Only nice-to-have left: a source-upload GM-only toggle in
-the UI (backend already supports it). See
+**Status:** Complete. Entity/campaign/session CRUD, all 8 entity types, the notes editor,
+notes indexing/retrieval (entity + session), keyboard-first g-chord navigation, and the
+Phase 2 test suite (event timeline ordering, notes→retrieval, campaign→NPC+event backend
+E2E) are all done; source scoping resolved as collection-based. **`is_gm_only` was pulled**
+— a manual whole-source/entity flag is the wrong granularity (GM-secret content is
+passage-level) and has no real consumer in a single-user app, so it moves to Phase 3 as
+AI-detected passage-level secrecy + player-safe export. See
 [`docs/superpowers/plans/2026-06-13-phase-2-finalization.md`](superpowers/plans/2026-06-13-phase-2-finalization.md).
 
 Goal: Multi-campaign support, hybrid notes, lore retrieval.
@@ -885,15 +900,15 @@ Goal: Multi-campaign support, hybrid notes, lore retrieval.
 - [x] `event` entity type + temporal fields UI — all fields (`date_start`/`date_end`/`is_ongoing`/`sequence_index`/`era`/`duration_label`/`session`) in form; *timeline visualisation moved to Phase 3*
 - [x] `player_character` entity type with player name / class / status — form fields + status enum; tested
 - [x] Entity notes editor (markdown) — `WikiLinkEditor.svelte` with `[[Entity]]` autocomplete + `WikiText` rendering
-- [x] **`is_gm_only` introduced:** field on source, session, all 8 entity tables, chunk, and message (migrations `008`/`009`); chunks inherit it from their source at index time and `SearchResult` carries it (retrieval never filters — only tags); entity/session form toggles; chat shield — `stream_response` flags answers drawing on GM-only chunks, persisted on the message and rendered as a "GM only" badge in `OracleView`. *(Source-upload toggle UI still pending — backend `upload_source` already accepts the param.)*
+- [~] **`is_gm_only` — deferred to Phase 3.** Built then reverted (commits `6a1634b`/`01d63ac` reverted): a manual whole-source/entity boolean models a granularity that rarely exists — GM-secret material is passage-level (boxed "For the GM" sidebars, secret lore, spoilers) — and in a single-user app the flag only powers a cosmetic badge. The real payoff (player-safe view/export) is Phase 3, where it returns as **AI-detected passage-level** secrecy (classify chunks at index time) rather than a manual toggle. See Phase 3.
 - [x] Notes indexing pipeline (entity + session notes → embed → SurrealDB) — `entity_service::embed_node` (name+summary+notes, single source of truth, called by manual create/update **and** extraction) + `session_service::embed_session` (migration `007_session_embedding.surql`); `agent_service::fetch_entity_context` now includes entity *and* session note excerpts in the LLM context
 - [x] Collection-scoped sources — sources attach to collections; campaigns `subscribes_to` collections (migration `003_collections.surql`). *Supersedes the original "global vs campaign-scoped (NULL)" design — there is no global source scope.*
 - [x] Keyboard-first shortcuts (GM is at the table) — Vim-style g-chords for navigation (`g o/p/n/l/f/c/i/e/s/m/,`), `c` new entity, `/` focus chat, `?` help overlay, Esc close; suppressed while typing (`lib/shortcuts.ts` + `Shell.svelte`); unit + Shell integration tests
 - **Tests shipped with Phase 2:**
   - [x] Unit: entity CRUD service (`entity_service_test.rs`); event `sequence_index` timeline ordering (`order_events_for_timeline` unit + `get_events_timeline` integration)
-  - [x] Integration: notes indexing → retrieval (entity/session note embedding + context inclusion tested in `entity_service`/`session_service`/`agent_service`); is_gm_only propagation into vector index (`vector_store` upsert→search round-trip) + message flag round-trip (`chat_history_test`)
+  - [x] Integration: notes indexing → retrieval (entity/session note embedding + context inclusion tested in `entity_service`/`session_service`/`agent_service`)
   - [x] Backend E2E: create campaign → add NPC + event → query → assert both appear in response (`tests/e2e_campaign_notes_query.rs`)
-  - [x] Component tests: entity form validation + GM-secret toggle (`EntityForm.test.ts`); chat GM-only badge (`OracleView.test.ts`)
+  - [x] Component tests: entity form validation (`EntityForm.test.ts`)
 
 Milestone: "Run a full session, take notes on NPCs and events, ask a lore question and get cited answers from both the sourcebook and your own notes."
 
@@ -907,6 +922,10 @@ Goal: Production quality, power-user features.
 - [ ] Searchable chat history (full-text search on `message.content`)
 - [ ] Export: session summary → markdown / PDF
 - [ ] Markdown vault sync (ADR-008): bidirectional `.md` sync with a user-configured folder (Obsidian-compatible); inbound file-watch via `notify`; conflict detection with `.conflict.<ts>.md` preservation; soft-delete on vault file removal; `vault_include_gm_only` toggle; startup reconcile pass
+- [ ] **GM-secret + player-safe export (was a reverted Phase 2 attempt).** AI-detected
+  *passage-level* `is_gm_only` (classify chunks at index time, keyword prefilter + LLM
+  confirm; needs an eval set) → a player-safe view/export that strips secrets, plus a
+  "spoiler" indicator in chat. See [GM-Secret Handling](#gm-secret-handling).
 - [ ] **Cross-encoder reranking:** only if Phase 1 retrieval recall@5 measured below 70%. If above 85%, skip.
 - [ ] Campaign rename UI (update slug, vault folder name)
 

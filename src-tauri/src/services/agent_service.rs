@@ -358,26 +358,17 @@ pub async fn fetch_entity_context<C: Connection>(
     Ok(out)
 }
 
-/// Result of starting the streaming RAG pipeline: the token channel plus
-/// whether the answer drew on any GM-secret retrieved material, so the caller
-/// can flag the persisted assistant message and the chat UI can show a shield.
-pub struct StreamHandle {
-    pub rx: mpsc::Receiver<Result<String, LlmError>>,
-    pub drew_from_gm_only: bool,
-}
-
 /// Run the full streaming RAG pipeline.
 ///
-/// Returns a [`StreamHandle`]. Once its `rx` channel is exhausted, call
-/// `persist_assistant_message` with the accumulated response, passing
-/// `drew_from_gm_only` so the message is flagged.
+/// Returns a channel of streaming tokens. Once the channel is exhausted,
+/// call `persist_assistant_message` with the accumulated response.
 pub async fn stream_response(
     state: &Arc<AppState>,
     message: &str,
     campaign_id: Option<&str>,
-) -> Result<StreamHandle, AgentError> {
+) -> Result<mpsc::Receiver<Result<String, LlmError>>, AgentError> {
     // 1. Persist the user message
-    persist_message(&state.db, "user", message, false, campaign_id).await?;
+    persist_message(&state.db, "user", message, campaign_id).await?;
 
     // 2. Embed the query
     let embed_provider = state
@@ -420,9 +411,6 @@ pub async fn stream_response(
         .await
         .map_err(|e| AgentError::Retrieval(e.to_string()))?;
 
-    // Flag the answer as GM-secret-derived if any retrieved chunk is GM-only.
-    let drew_from_gm_only = results.iter().any(|r| r.is_gm_only);
-
     // Diagnostic: dump the retrieved chunks so quality issues are visible in
     // the dev console. Gate behind CHRONACLE_RAG_DEBUG=1 to keep prod quiet.
     if std::env::var("CHRONACLE_RAG_DEBUG").is_ok() {
@@ -460,15 +448,9 @@ pub async fn stream_response(
         .map_err(|e| AgentError::Llm(format!("Lock error: {e}")))?
         .clone();
 
-    let rx = llm
-        .chat_stream(&system_prompt, &chat_messages)
+    llm.chat_stream(&system_prompt, &chat_messages)
         .await
-        .map_err(|e| AgentError::Llm(e.to_string()))?;
-
-    Ok(StreamHandle {
-        rx,
-        drew_from_gm_only,
-    })
+        .map_err(|e| AgentError::Llm(e.to_string()))
 }
 
 /// Dump retrieval diagnostics to stderr (gated by CHRONACLE_RAG_DEBUG=1).
@@ -624,7 +606,6 @@ pub async fn persist_message<C>(
     db: &surrealdb::Surreal<C>,
     role: &str,
     content: &str,
-    is_gm_only: bool,
     campaign_id: Option<&str>,
 ) -> Result<(), AgentError>
 where
@@ -636,7 +617,6 @@ where
                 role = $role,
                 content = $content,
                 citations = [],
-                is_gm_only = $gm_only,
                 campaign = type::thing('campaign', $cid),
                 created_at = time::now()"
         }
@@ -645,7 +625,6 @@ where
                 role = $role,
                 content = $content,
                 citations = [],
-                is_gm_only = $gm_only,
                 created_at = time::now()"
         }
     };
@@ -653,8 +632,7 @@ where
     let mut q = db
         .query(sql)
         .bind(("role", role.to_owned()))
-        .bind(("content", content.to_owned()))
-        .bind(("gm_only", is_gm_only));
+        .bind(("content", content.to_owned()));
     if let Some(cid) = campaign_id {
         q = q.bind(("cid", cid.to_owned()));
     }
@@ -667,7 +645,6 @@ where
 pub async fn persist_assistant_message<C>(
     db: &surrealdb::Surreal<C>,
     content: &str,
-    is_gm_only: bool,
     campaign_id: Option<&str>,
 ) -> Result<(), AgentError>
 where
@@ -676,7 +653,7 @@ where
     let citations = parse_citations(content);
 
     if citations.is_empty() {
-        return persist_message(db, "assistant", content, is_gm_only, campaign_id).await;
+        return persist_message(db, "assistant", content, campaign_id).await;
     }
 
     // Build citations as SurrealQL inline objects (bind params lose field names
@@ -706,16 +683,12 @@ where
         "CREATE message SET \
          role = 'assistant', \
          content = $content, \
-         citations = [{cit_surql}], \
-         is_gm_only = $gm_only\
+         citations = [{cit_surql}]\
          {campaign_assign}, \
          created_at = time::now()"
     );
 
-    let mut q = db
-        .query(sql)
-        .bind(("content", content.to_owned()))
-        .bind(("gm_only", is_gm_only));
+    let mut q = db.query(sql).bind(("content", content.to_owned()));
     if let Some(cid) = campaign_id {
         q = q.bind(("cid", cid.to_owned()));
     }
@@ -802,7 +775,6 @@ mod tests {
             page_end: 72,
             section_heading: "Fighter Class Features".into(),
             source_type: "rules".into(),
-            is_gm_only: false,
             distance: 0.15,
         }];
 
@@ -985,10 +957,10 @@ mod tests {
         .await
         .unwrap();
 
-        persist_message(&db, "user", "question", false, None)
+        persist_message(&db, "user", "question", None)
             .await
             .unwrap();
-        persist_assistant_message(&db, "response with [Source: \"PHB\", p.72].", false, None)
+        persist_assistant_message(&db, "response with [Source: \"PHB\", p.72].", None)
             .await
             .unwrap();
 
@@ -1107,14 +1079,14 @@ mod tests {
         .await
         .unwrap();
 
-        persist_message(&db, "user", "scoped to camp1", false, Some("camp1"))
+        persist_message(&db, "user", "scoped to camp1", Some("camp1"))
             .await
             .unwrap();
-        persist_assistant_message(&db, "reply [Source: \"PHB\", p.72].", false, Some("camp1"))
+        persist_assistant_message(&db, "reply [Source: \"PHB\", p.72].", Some("camp1"))
             .await
             .unwrap();
         // A separate "global" message that must not leak into the camp1 filter.
-        persist_message(&db, "user", "unscoped", false, None)
+        persist_message(&db, "user", "unscoped", None)
             .await
             .unwrap();
 
@@ -1160,10 +1132,10 @@ mod tests {
         .await
         .unwrap();
 
-        persist_message(&db, "user", "first", false, Some(cid))
+        persist_message(&db, "user", "first", Some(cid))
             .await
             .unwrap();
-        persist_assistant_message(&db, "reply", false, Some(cid))
+        persist_assistant_message(&db, "reply", Some(cid))
             .await
             .unwrap();
 
