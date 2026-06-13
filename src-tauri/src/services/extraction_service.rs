@@ -298,7 +298,12 @@ async fn persist_batch<C: Connection>(
             )
             .await
             .map_err(|e| ExtractionError::Db(e.to_string()))?;
-            let _ = embed_entity(db, embed, &node).await;
+            if let Err(e) = embed_entity(db, embed, &node).await {
+                eprintln!(
+                    "extraction: failed to embed entity {} ({}); it will be missing from semantic search: {e}",
+                    node.name, node.kind
+                );
+            }
             entities_created += 1;
             all_nodes.push(node.clone());
             node
@@ -342,7 +347,12 @@ async fn persist_batch<C: Connection>(
                 )
                 .await
                 .map_err(|e| ExtractionError::Db(e.to_string()))?;
-                let _ = embed_entity(db, embed, &node).await;
+                if let Err(e) = embed_entity(db, embed, &node).await {
+                    eprintln!(
+                    "extraction: failed to embed entity {} ({}); it will be missing from semantic search: {e}",
+                    node.name, node.kind
+                );
+                }
                 entities_created += 1;
                 all_nodes.push(node.clone());
                 node
