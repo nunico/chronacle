@@ -58,10 +58,10 @@
 
   let pendingOpen = $state<{ id: string; kind: EntityKind } | null>(null);
 
-  function openEntity(id: string, kind: string) {
-    const cat = KIND_TO_CATEGORY[kind as EntityKind];
+  function openEntity(id: string, kind: EntityKind) {
+    const cat = KIND_TO_CATEGORY[kind];
     if (!cat) return;
-    pendingOpen = { id, kind: kind as EntityKind };
+    pendingOpen = { id, kind };
     view = { kind: 'notebook', category: cat };
   }
 
@@ -604,6 +604,7 @@
         kind={ENTITY_KIND_MAP[view.category] as EntityKind}
         createNonce={entityCreateNonce}
         openId={pendingOpen && pendingOpen.kind === ENTITY_KIND_MAP[view.category] ? pendingOpen.id : null}
+        onOpenIdConsumed={() => (pendingOpen = null)}
       />
     {:else if ENTITY_KIND_MAP[view.category]}
       <div class="no-campaign-msg">

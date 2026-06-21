@@ -137,6 +137,62 @@ describe('EntityManager', () => {
     });
   });
 
+  it('calls onOpenIdConsumed exactly once when the deep-link form opens', async () => {
+    // Regression guard for Fix 1: the deep-link $effect must invoke
+    // onOpenIdConsumed immediately so the caller (Shell) can clear pendingOpen
+    // before any entity-list mutation (save/delete) re-triggers the effect.
+    // Asserting the callback fires exactly once — and only after the form is
+    // open — proves the consume-once contract is in place.
+    vi.mocked(commands.getEntities).mockResolvedValue([mockNpc()]);
+    const onOpenIdConsumed = vi.fn();
+
+    render(EntityManager, {
+      props: { campaignId: 'camp1', kind: 'npc', openId: 'npc1', onOpenIdConsumed },
+    });
+
+    // Callback must not fire before entities load.
+    expect(onOpenIdConsumed).not.toHaveBeenCalled();
+
+    // Once entities load and the form opens, the callback fires exactly once.
+    await waitFor(() => {
+      expect(screen.queryByLabelText(/^name$/i)).toBeTruthy();
+    });
+    expect(onOpenIdConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it('form closes after save and onOpenIdConsumed is not called again', async () => {
+    // Second half of the Fix 1 regression guard: after the caller clears
+    // openId (simulated by passing null on rerender), a save that mutates the
+    // entity list must NOT re-open the form.
+    const updated: GraphNode = { ...mockNpc(), name: 'Torvin Updated' };
+    vi.mocked(commands.getEntities).mockResolvedValue([mockNpc()]);
+    vi.mocked(commands.updateEntity).mockResolvedValue(updated);
+
+    const onOpenIdConsumed = vi.fn();
+    // Render without openId so the form is opened manually (not via deep-link),
+    // simulating the state after Shell clears pendingOpen.
+    render(EntityManager, {
+      props: { campaignId: 'camp1', kind: 'npc', openId: null, onOpenIdConsumed },
+    });
+
+    // Wait for the entity list to load, then open the edit form manually.
+    await waitFor(() => expect(screen.getByText('Torvin')).toBeTruthy());
+    await fireEvent.click(screen.getByText('Torvin'));
+    expect(screen.queryByLabelText(/^name$/i)).toBeTruthy();
+
+    // Save — mutates `entities` internally via reassignment.
+    const nameInput = screen.getByLabelText(/^name$/i);
+    await fireEvent.input(nameInput, { target: { value: 'Torvin Updated' } });
+    await fireEvent.submit(screen.getByRole('form'));
+
+    // Form closes after a successful save.
+    await waitFor(() => {
+      expect(screen.queryByLabelText(/^name$/i)).toBeNull();
+    });
+    // openId was null the whole time, so the consumed callback must never fire.
+    expect(onOpenIdConsumed).not.toHaveBeenCalled();
+  });
+
   it('Escape closes the delete confirmation without deleting', async () => {
     vi.mocked(commands.getEntities).mockResolvedValue([mockNpc()]);
     render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });

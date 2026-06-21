@@ -49,6 +49,7 @@ export function isEditableTarget(target: EventTarget | null): boolean {
 /// Rows for the `?` help overlay — single source of truth for documentation.
 export const SHORTCUT_HELP: ReadonlyArray<{ keys: string; label: string }> = [
   { keys: 'g o', label: 'Oracle (chat)' },
+  { keys: 'g t', label: 'Timeline' },
   { keys: 'g p', label: 'Player Characters' },
   { keys: 'g n', label: 'NPCs' },
   { keys: 'g l', label: 'Locations' },
@@ -57,7 +58,6 @@ export const SHORTCUT_HELP: ReadonlyArray<{ keys: string; label: string }> = [
   { keys: 'g i', label: 'Items' },
   { keys: 'g e', label: 'Events' },
   { keys: 'g s', label: 'Sessions' },
-  { keys: 'g t', label: 'Timeline' },
   { keys: 'g m', label: 'Misc' },
   { keys: 'g ,', label: 'Settings' },
   { keys: 'c', label: 'New entity (in a notebook)' },

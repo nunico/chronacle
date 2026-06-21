@@ -23,9 +23,12 @@
     createNonce?: number;
     /// Set to an entity id to open its edit form once entities are loaded (deep-link).
     openId?: string | null;
+    /// Called immediately after the deep-link edit form is opened so the caller
+    /// can clear openId and prevent the effect from re-firing on entity list mutations.
+    onOpenIdConsumed?: () => void;
   }
 
-  let { campaignId, kind, createNonce = 0, openId = null }: Props = $props();
+  let { campaignId, kind, createNonce = 0, openId = null, onOpenIdConsumed }: Props = $props();
 
   const KIND_LABEL: Record<EntityKind, string> = {
     npc: 'NPC',
@@ -103,11 +106,16 @@
   });
 
   // Deep-link: when asked to open a specific entity, open its edit form once
-  // it's present in the loaded list.
+  // it's present in the loaded list. Immediately invokes onOpenIdConsumed so
+  // the caller can clear openId — preventing the effect from re-firing when the
+  // entities array is mutated by a subsequent save or delete.
   $effect(() => {
     if (!openId) return;
     const node = entities.find((n) => n.id === openId);
-    if (node) openEdit(node);
+    if (node) {
+      openEdit(node);
+      onOpenIdConsumed?.();
+    }
   });
 
   function openEdit(node: GraphNode) {
