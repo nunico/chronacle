@@ -922,10 +922,7 @@ Goal: Production quality, power-user features.
 - [ ] Searchable chat history (full-text search on `message.content`)
 - [ ] Export: session summary → markdown / PDF
 - [ ] Markdown vault sync (ADR-008): bidirectional `.md` sync with a user-configured folder (Obsidian-compatible); inbound file-watch via `notify`; conflict detection with `.conflict.<ts>.md` preservation; soft-delete on vault file removal; `vault_include_gm_only` toggle; startup reconcile pass
-- [ ] **GM-secret + player-safe export (was a reverted Phase 2 attempt).** AI-detected
-  *passage-level* `is_gm_only` (classify chunks at index time, keyword prefilter + LLM
-  confirm; needs an eval set) → a player-safe view/export that strips secrets, plus a
-  "spoiler" indicator in chat. See [GM-Secret Handling](#gm-secret-handling).
+- [ ] **`/extract-all` rework:** replace the brute-force full-sweep extraction placeholder with a smarter, incremental approach (scope/cost-aware; avoid re-extracting unchanged sources).
 - [ ] **Cross-encoder reranking:** only if Phase 1 retrieval recall@5 measured below 70%. If above 85%, skip.
 - [ ] Campaign rename UI (update slug, vault folder name)
 
