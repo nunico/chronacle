@@ -43,6 +43,15 @@ pub async fn get_entities(
     entity_service::get_by_campaign(&state.db, &campaign_id, k).await
 }
 
+/// Campaign events in canonical timeline order (`sequence_index`, nulls last).
+#[tauri::command]
+pub async fn get_events_timeline(
+    state: State<'_, Arc<AppState>>,
+    campaign_id: String,
+) -> Result<Vec<GraphNode>, EntityError> {
+    entity_service::get_events_timeline(&state.db, &campaign_id).await
+}
+
 /// Per-kind entity counts for a campaign, keyed by table name (`npc`, …).
 /// Used by the rail navigation to label entity categories.
 #[tauri::command]

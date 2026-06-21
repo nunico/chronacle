@@ -442,6 +442,11 @@ export async function getEntities(campaignId: string, kind: EntityKind): Promise
   return invoke<GraphNode[]>('get_entities', { campaignId, kind });
 }
 
+/** Campaign events in canonical timeline order (sequence_index, nulls last). */
+export async function getEventsTimeline(campaignId: string): Promise<GraphNode[]> {
+  return invoke<GraphNode[]>('get_events_timeline', { campaignId });
+}
+
 export async function getEntity(id: string, kind: EntityKind): Promise<GraphNode> {
   return invoke<GraphNode>('get_entity', { id, kind });
 }

@@ -245,6 +245,7 @@ pub async fn run() {
             commands::update_entity,
             commands::delete_entity,
             commands::relate_entities,
+            commands::get_events_timeline,
             commands::create_session,
             commands::get_sessions,
             commands::get_session,
