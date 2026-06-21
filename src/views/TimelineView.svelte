@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getEventsTimeline, type GraphNode } from '../lib/commands';
+  import { getEventsTimeline, getSessions, type GraphNode, type Session } from '../lib/commands';
   import { groupByEra, type EraGroup } from '../lib/timeline-groups';
+  import { groupBySession, type SessionLane } from '../lib/timeline-sessions';
 
   interface Props {
     campaignId: string;
@@ -11,10 +12,12 @@
 
   let mode = $state<'chronicle' | 'sessions'>('chronicle');
   let events = $state<GraphNode[]>([]);
+  let sessions = $state<Session[]>([]);
   let loading = $state(true);
   let error = $state('');
 
   const eraGroups = $derived<EraGroup[]>(groupByEra(events));
+  const sessionLanes = $derived<SessionLane[]>(groupBySession(sessions, events));
 
   onMount(load);
 
@@ -22,7 +25,10 @@
     loading = true;
     error = '';
     try {
-      events = await getEventsTimeline(campaignId);
+      [events, sessions] = await Promise.all([
+        getEventsTimeline(campaignId),
+        getSessions(campaignId),
+      ]);
     } catch (e) {
       console.error('Failed to load timeline:', e);
       error = 'Failed to load timeline';
@@ -73,6 +79,19 @@
         </li>
       {/each}
     </ol>
+  {:else}
+    <ol class="lanes">
+      {#each sessionLanes as lane (lane.session?.id ?? '__none__')}
+        <li class="lane">
+          <h3 class="lane-head">{lane.session?.title ?? 'Unscheduled'}</h3>
+          <ol class="events">
+            {#each lane.events as e (e.id)}
+              <li class="event"><button class="name" onclick={() => onOpenEntity?.(e)}>{e.name}</button></li>
+            {/each}
+          </ol>
+        </li>
+      {/each}
+    </ol>
   {/if}
 </div>
 
@@ -89,6 +108,8 @@
   .event .name:hover { color: var(--violet-400); }
   .event .when { color: var(--fg-3); font-size: 12px; }
   .event .ongoing { color: var(--violet-400); font-size: 11px; text-transform: uppercase; }
+  .lanes { list-style: none; margin: 0; padding: 0; }
+  .lane-head { font-family: var(--font-display); color: var(--violet-400); margin: 18px 0 8px; }
   .muted { color: var(--fg-3); }
   .error {
     padding: 8px 12px;
