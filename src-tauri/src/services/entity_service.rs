@@ -819,6 +819,17 @@ pub async fn embed_node<C: surrealdb::Connection>(
     Ok(())
 }
 
+/// True when `id` is a safe SurrealDB record-id fragment (alphanumeric plus
+/// `_`/`-`). Record ids are interpolated into query strings in a few places
+/// because `type::thing()` is unreliable on edge endpoints in this SurrealDB
+/// version, so any id that reaches those `format!` sites must be validated first.
+fn is_safe_record_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+}
+
 /// Create a directed graph edge between two nodes.
 ///
 /// `from_kind` and `to_kind` are the table names of the source and target nodes.
@@ -831,6 +842,18 @@ pub async fn relate<C: surrealdb::Connection>(
     rel_type: &str,
     notes: Option<String>,
 ) -> Result<(), EntityError> {
+    if !is_safe_record_id(from_id) {
+        return Err(EntityError::Validation {
+            field: "from_id".to_string(),
+            message: "Invalid entity id".to_string(),
+        });
+    }
+    if !is_safe_record_id(to_id) {
+        return Err(EntityError::Validation {
+            field: "to_id".to_string(),
+            message: "Invalid entity id".to_string(),
+        });
+    }
     // Build record IDs directly in the query string because some SurrealDB versions
     // do not allow type::thing() on the left/right side of RELATE arrows.
     let query = format!(
@@ -848,14 +871,22 @@ pub async fn relate<C: surrealdb::Connection>(
 }
 
 /// Fetch the ego graph around an entity: the center, its `relates_to` neighbors
-/// (one hop), and the edges among them. `depth` is currently always treated as
-/// one hop; deeper walks are produced client-side by re-calling on a neighbor.
+/// (one hop), and the edges among them. `_depth` is reserved for future use;
+/// the graph is currently always one hop, with deeper walks produced client-side
+/// by re-calling on a neighbor.
 pub async fn get_entity_graph<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     id: &str,
     kind: &str,
     _depth: u32,
 ) -> Result<EntityGraph, EntityError> {
+    if !is_safe_record_id(id) {
+        return Err(EntityError::Validation {
+            field: "id".to_string(),
+            message: "Invalid entity id".to_string(),
+        });
+    }
+
     #[derive(Deserialize)]
     struct EdgeRow {
         #[serde(rename = "in")]

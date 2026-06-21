@@ -850,3 +850,79 @@ async fn get_entity_graph_isolated_entity_returns_just_itself() {
     assert_eq!(graph.nodes[0].name, "Hermit");
     assert!(graph.edges.is_empty());
 }
+
+#[tokio::test]
+async fn get_entity_graph_dedupes_node_with_multiple_edges_to_same_neighbor() {
+    let db = setup_db().await;
+
+    // Center NPC
+    let center = create(
+        &db,
+        Some("c1"),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Serafine".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // One neighbor location
+    let tower = create(
+        &db,
+        Some("c1"),
+        None,
+        EntityKind::Location,
+        EntityInput {
+            name: "The Iron Tower".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // Two edges from center to the same neighbor, with different rel_types.
+    relate(
+        &db,
+        &center.id,
+        "npc",
+        &tower.id,
+        "location",
+        "resides_in",
+        None,
+    )
+    .await
+    .unwrap();
+    relate(
+        &db, &center.id, "npc", &tower.id, "location", "guards", None,
+    )
+    .await
+    .unwrap();
+
+    let graph = get_entity_graph(&db, &center.id, "npc", 1).await.unwrap();
+
+    // The neighbor must appear as exactly ONE node (deduped), despite two edges.
+    let neighbor_count = graph.nodes.iter().filter(|n| n.id == tower.id).count();
+    assert_eq!(
+        neighbor_count, 1,
+        "neighbor location should appear exactly once in nodes even with two edges"
+    );
+
+    // Both edges must be present.
+    assert_eq!(graph.edges.len(), 2, "both edges should be returned");
+}
+
+#[tokio::test]
+async fn get_entity_graph_rejects_unsafe_id() {
+    let db = setup_db().await;
+
+    let err = get_entity_graph(&db, "bad id; DROP", "npc", 1)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, EntityError::Validation { ref field, .. } if field == "id"),
+        "expected Validation error on field 'id', got: {err:?}"
+    );
+}
