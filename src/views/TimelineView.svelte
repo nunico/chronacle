@@ -33,6 +33,7 @@
       console.error('Failed to load timeline:', e);
       error = 'Failed to load timeline';
       events = [];
+      sessions = [];
     } finally {
       loading = false;
     }
@@ -59,39 +60,45 @@
 
   {#if loading}
     <p class="muted">Loading…</p>
-  {:else if !error && events.length === 0}
-    <p class="muted">No events yet. Add events in the Events notebook to build your timeline.</p>
   {:else if mode === 'chronicle'}
-    <ol class="spine">
-      {#each eraGroups as group (group.era ?? '__none__')}
-        <li class="era">
-          <h3 class="era-head">{group.era ?? 'Unordered'}</h3>
-          <ol class="events">
-            {#each group.events as e (e.id)}
-              {@const when = dateLabel(e)}
-              <li class="event">
-                <button class="name" onclick={() => onOpenEntity?.(e)}>{e.name}</button>
-                {#if when}<span class="when">{when}</span>{/if}
-                {#if e.is_ongoing}<span class="ongoing">ongoing</span>{/if}
-              </li>
-            {/each}
-          </ol>
-        </li>
-      {/each}
-    </ol>
+    {#if eraGroups.length === 0 && !error}
+      <p class="muted">No events yet. Add events in the Events notebook to build your timeline.</p>
+    {:else}
+      <ol class="spine">
+        {#each eraGroups as group (group.era ?? '__none__')}
+          <li class="era">
+            <h3 class="era-head">{group.era ?? 'Unordered'}</h3>
+            <ol class="events">
+              {#each group.events as e (e.id)}
+                {@const when = dateLabel(e)}
+                <li class="event">
+                  <button class="name" onclick={() => onOpenEntity?.(e)}>{e.name}</button>
+                  {#if when}<span class="when">{when}</span>{/if}
+                  {#if e.is_ongoing}<span class="ongoing">ongoing</span>{/if}
+                </li>
+              {/each}
+            </ol>
+          </li>
+        {/each}
+      </ol>
+    {/if}
   {:else}
-    <ol class="lanes">
-      {#each sessionLanes as lane (lane.session?.id ?? '__none__')}
-        <li class="lane">
-          <h3 class="lane-head">{lane.session?.title ?? 'Unscheduled'}</h3>
-          <ol class="events">
-            {#each lane.events as e (e.id)}
-              <li class="event"><button class="name" onclick={() => onOpenEntity?.(e)}>{e.name}</button></li>
-            {/each}
-          </ol>
-        </li>
-      {/each}
-    </ol>
+    {#if sessions.length === 0 && events.length === 0 && !error}
+      <p class="muted">No sessions or events yet.</p>
+    {:else}
+      <ol class="lanes">
+        {#each sessionLanes as lane (lane.session?.id ?? '__none__')}
+          <li class="lane">
+            <h3 class="lane-head">{lane.session?.title ?? 'Unscheduled'}</h3>
+            <ol class="events">
+              {#each lane.events as e (e.id)}
+                <li class="event"><button class="name" onclick={() => onOpenEntity?.(e)}>{e.name}</button></li>
+              {/each}
+            </ol>
+          </li>
+        {/each}
+      </ol>
+    {/if}
   {/if}
 </div>
 
@@ -109,6 +116,7 @@
   .event .when { color: var(--fg-3); font-size: 12px; }
   .event .ongoing { color: var(--violet-400); font-size: 11px; text-transform: uppercase; }
   .lanes { list-style: none; margin: 0; padding: 0; }
+  .lane { padding-bottom: 12px; }
   .lane-head { font-family: var(--font-display); color: var(--violet-400); margin: 18px 0 8px; }
   .muted { color: var(--fg-3); }
   .error {

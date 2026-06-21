@@ -86,6 +86,21 @@ describe('TimelineView — sessions mode', () => {
     expect(screen.getByText('Lost Soul')).toBeTruthy();
   });
 
+  it('renders session lane headers even when there are zero events', async () => {
+    m.getEventsTimeline.mockResolvedValueOnce([]);
+    m.getSessions.mockResolvedValueOnce([
+      sess('s1', 'Session 1'),
+      sess('s2', 'Session 2'),
+    ]);
+    render(TimelineView, { campaignId: 'c1' });
+    await fireEvent.click(screen.getByRole('tab', { name: 'Sessions' }));
+    // Wait for sessions to load and render lane headers
+    expect(await screen.findByText('Session 1')).toBeTruthy();
+    expect(screen.getByText('Session 2')).toBeTruthy();
+    // Must not show the events-empty message when sessions are present
+    expect(screen.queryByText(/No sessions or events yet/)).toBeFalsy();
+  });
+
   it('omits the Unscheduled lane when all events belong to a session', async () => {
     m.getEventsTimeline.mockResolvedValueOnce([
       ev('First Light', 1, null, 's1'),
