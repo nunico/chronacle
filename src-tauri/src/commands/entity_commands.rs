@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tauri::State;
 
-use crate::services::entity_service::{self, EntityError, EntityInput, EntityKind, GraphNode};
+use crate::services::entity_service::{self, EntityError, EntityGraph, EntityInput, EntityKind, GraphNode};
 use crate::AppState;
 
 fn parse_kind(kind: &str) -> Result<EntityKind, EntityError> {
@@ -50,6 +50,18 @@ pub async fn get_events_timeline(
     campaign_id: String,
 ) -> Result<Vec<GraphNode>, EntityError> {
     entity_service::get_events_timeline(&state.db, &campaign_id).await
+}
+
+/// Ego graph (one hop) around an entity: center, neighbors, and edges.
+#[tauri::command]
+pub async fn get_entity_graph(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    kind: String,
+    depth: u32,
+) -> Result<EntityGraph, EntityError> {
+    let k = parse_kind(&kind)?;
+    entity_service::get_entity_graph(&state.db, &id, k.table_name(), depth).await
 }
 
 /// Per-kind entity counts for a campaign, keyed by table name (`npc`, …).

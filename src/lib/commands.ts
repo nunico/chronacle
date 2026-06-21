@@ -413,6 +413,26 @@ export interface GraphNode {
   status: 'active' | 'retired' | 'deceased' | 'missing' | 'on_hiatus' | null;
 }
 
+export interface GraphNodeRef {
+  id: string;
+  kind: string;
+  name: string;
+}
+
+export interface GraphEdge {
+  from_id: string;
+  from_kind: string;
+  to_id: string;
+  to_kind: string;
+  rel_type: string;
+  notes: string | null;
+}
+
+export interface EntityGraph {
+  nodes: GraphNodeRef[];
+  edges: GraphEdge[];
+}
+
 export interface EntityInput {
   name: string;
   summary?: string | null;
@@ -445,6 +465,15 @@ export async function getEntities(campaignId: string, kind: EntityKind): Promise
 /** Campaign events in canonical timeline order (sequence_index, nulls last). */
 export async function getEventsTimeline(campaignId: string): Promise<GraphNode[]> {
   return invoke<GraphNode[]>('get_events_timeline', { campaignId });
+}
+
+/** Ego graph (one hop) around an entity. Re-call on a neighbor to expand. */
+export async function getEntityGraph(
+  id: string,
+  kind: EntityKind,
+  depth = 1,
+): Promise<EntityGraph> {
+  return invoke<EntityGraph>('get_entity_graph', { id, kind, depth });
 }
 
 export async function getEntity(id: string, kind: EntityKind): Promise<GraphNode> {
