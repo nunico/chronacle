@@ -7,11 +7,12 @@
 import type { NoteCategoryId } from '../shell/note-categories';
 
 /// A resolved navigation destination from a `g`-chord.
-export type NavTarget = 'oracle' | 'settings' | { category: NoteCategoryId };
+export type NavTarget = 'oracle' | 'settings' | 'timeline' | { category: NoteCategoryId };
 
 /// Second key of a `g`-chord → destination. `g o` → Oracle, `g n` → NPCs, …
 const NAV_CHORDS: Record<string, NavTarget> = {
   o: 'oracle',
+  t: 'timeline',
   p: { category: 'player_characters' },
   n: { category: 'npcs' },
   l: { category: 'locations' },
@@ -56,6 +57,7 @@ export const SHORTCUT_HELP: ReadonlyArray<{ keys: string; label: string }> = [
   { keys: 'g i', label: 'Items' },
   { keys: 'g e', label: 'Events' },
   { keys: 'g s', label: 'Sessions' },
+  { keys: 'g t', label: 'Timeline' },
   { keys: 'g m', label: 'Misc' },
   { keys: 'g ,', label: 'Settings' },
   { keys: 'c', label: 'New entity (in a notebook)' },

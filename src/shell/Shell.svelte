@@ -31,6 +31,7 @@
   import UploadProgress from '../UploadProgress.svelte';
   import EntityManager from '../components/EntityManager.svelte';
   import SessionLogView from '../views/SessionLogView.svelte';
+  import TimelineView from '../views/TimelineView.svelte';
   import { findCategory, type NoteCategoryId } from './note-categories';
   import type { EntityKind } from '../lib/commands';
   import {
@@ -50,6 +51,19 @@
     player_characters: 'player_character',
     misc: 'misc',
   };
+
+  const KIND_TO_CATEGORY = Object.fromEntries(
+    Object.entries(ENTITY_KIND_MAP).map(([cat, kind]) => [kind, cat]),
+  ) as Record<EntityKind, NoteCategoryId>;
+
+  let pendingOpen = $state<{ id: string; kind: EntityKind } | null>(null);
+
+  function openEntity(id: string, kind: string) {
+    const cat = KIND_TO_CATEGORY[kind as EntityKind];
+    if (!cat) return;
+    pendingOpen = { id, kind: kind as EntityKind };
+    view = { kind: 'notebook', category: cat };
+  }
 
   const ACTIVE_KEY = 'chronacle_active_campaign_id';
 
@@ -106,7 +120,7 @@
   }
 
   function navTo(target: NavTarget) {
-    if (target === 'oracle' || target === 'settings') view = target;
+    if (target === 'oracle' || target === 'settings' || target === 'timeline') view = target;
     else view = { kind: 'notebook', category: target.category };
   }
 
@@ -312,6 +326,8 @@
     if (view === 'campaign')
       return { title: 'Campaign', sub: 'Manage details & subscribed source collections' };
     if (view === 'settings') return { title: 'Settings', sub: 'Provider, models, and re-indexing' };
+    if (view === 'timeline')
+      return { title: 'Timeline', sub: 'Your campaign in chronological and session order' };
     const cat = findCategory(view.category);
     return { title: cat.label, sub: cat.sub };
   });
@@ -570,6 +586,12 @@
       />
     {:else if view === 'settings'}
       <SettingsView />
+    {:else if view === 'timeline' && activeCampaignId}
+      <TimelineView campaignId={activeCampaignId} onOpenEntity={(e) => openEntity(e.id, e.kind)} />
+    {:else if view === 'timeline'}
+      <div class="no-campaign-msg">
+        <p>Create or select a campaign to see its timeline.</p>
+      </div>
     {:else if typeof view === 'object' && view.category === 'sessions' && activeCampaignId}
       <SessionLogView campaignId={activeCampaignId} />
     {:else if typeof view === 'object' && view.category === 'sessions'}
@@ -581,6 +603,7 @@
         campaignId={activeCampaignId}
         kind={ENTITY_KIND_MAP[view.category] as EntityKind}
         createNonce={entityCreateNonce}
+        openId={pendingOpen && pendingOpen.kind === ENTITY_KIND_MAP[view.category] ? pendingOpen.id : null}
       />
     {:else if ENTITY_KIND_MAP[view.category]}
       <div class="no-campaign-msg">

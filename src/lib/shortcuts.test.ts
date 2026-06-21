@@ -18,6 +18,10 @@ describe('resolveNavChord', () => {
     expect(resolveNavChord('z')).toBeNull();
     expect(resolveNavChord('1')).toBeNull();
   });
+
+  it('maps t to the timeline', () => {
+    expect(resolveNavChord('t')).toBe('timeline');
+  });
 });
 
 describe('isEditableTarget', () => {

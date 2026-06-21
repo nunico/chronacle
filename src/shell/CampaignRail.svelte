@@ -8,6 +8,7 @@
     | 'oracle'
     | 'campaign'
     | 'settings'
+    | 'timeline'
     | { kind: 'notebook'; category: NoteCategoryId };
 
   let {
@@ -60,6 +61,14 @@
     >
       <Icon name="sparkles" size={18} className="ic" />
       Oracle
+    </button>
+    <button
+      class="nav-item"
+      class:active={view === 'timeline'}
+      onclick={() => setView('timeline')}
+    >
+      <Icon name="milestone" size={18} className="ic" />
+      Timeline
     </button>
   </nav>
 

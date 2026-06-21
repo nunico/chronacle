@@ -21,9 +21,11 @@
     kind: EntityKind;
     /// Bumped by the `c` shortcut to start creating a new entity.
     createNonce?: number;
+    /// Set to an entity id to open its edit form once entities are loaded (deep-link).
+    openId?: string | null;
   }
 
-  let { campaignId, kind, createNonce = 0 }: Props = $props();
+  let { campaignId, kind, createNonce = 0, openId = null }: Props = $props();
 
   const KIND_LABEL: Record<EntityKind, string> = {
     npc: 'NPC',
@@ -98,6 +100,14 @@
   // The `c` shortcut bumps createNonce; open the create form.
   $effect(() => {
     if (createNonce > 0) openCreate();
+  });
+
+  // Deep-link: when asked to open a specific entity, open its edit form once
+  // it's present in the loaded list.
+  $effect(() => {
+    if (!openId) return;
+    const node = entities.find((n) => n.id === openId);
+    if (node) openEdit(node);
   });
 
   function openEdit(node: GraphNode) {

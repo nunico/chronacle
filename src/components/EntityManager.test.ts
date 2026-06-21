@@ -126,6 +126,17 @@ describe('EntityManager', () => {
     expect((screen.getByLabelText(/^summary$/i) as HTMLInputElement).value).toBe('Orc chieftain');
   });
 
+  it('opens the edit form for the entity matching openId once entities are loaded', async () => {
+    vi.mocked(commands.getEntities).mockResolvedValue([mockNpc()]);
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc', openId: 'npc1' } });
+    // The edit form should open with Torvin's name populated
+    await waitFor(() => {
+      const input = screen.queryByLabelText(/^name$/i) as HTMLInputElement | null;
+      expect(input).toBeTruthy();
+      expect(input?.value).toBe('Torvin');
+    });
+  });
+
   it('Escape closes the delete confirmation without deleting', async () => {
     vi.mocked(commands.getEntities).mockResolvedValue([mockNpc()]);
     render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
