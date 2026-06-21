@@ -1,6 +1,6 @@
 use chronacle_lib::services::entity_service::{
-    create, delete, get_by_campaign, get_by_id, get_events_timeline, relate, update, EntityError,
-    EntityInput, EntityKind,
+    create, delete, get_by_campaign, get_by_id, get_entity_graph, get_events_timeline, relate,
+    update, EntityError, EntityInput, EntityKind,
 };
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
@@ -741,4 +741,112 @@ async fn get_events_timeline_orders_by_sequence_index_nulls_last() {
             "A Forgotten Skirmish", // unsequenced — last
         ]
     );
+}
+
+#[tokio::test]
+async fn get_entity_graph_returns_center_neighbors_and_edges() {
+    let db = setup_db().await;
+
+    // Center NPC + two neighbors across different tables.
+    let varin = create(
+        &db,
+        Some("c1"),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Varin".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let keep = create(
+        &db,
+        Some("c1"),
+        None,
+        EntityKind::Location,
+        EntityInput {
+            name: "The Keep".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let pact = create(
+        &db,
+        Some("c1"),
+        None,
+        EntityKind::Faction,
+        EntityInput {
+            name: "The Pact".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // outbound: Varin -> Keep ; inbound: Pact -> Varin
+    relate(
+        &db,
+        &varin.id,
+        "npc",
+        &keep.id,
+        "location",
+        "resides_in",
+        None,
+    )
+    .await
+    .unwrap();
+    relate(&db, &pact.id, "faction", &varin.id, "npc", "controls", None)
+        .await
+        .unwrap();
+
+    let graph = get_entity_graph(&db, &varin.id, "npc", 1).await.unwrap();
+
+    // nodes: center + 2 neighbors, deduped — 3 total
+    let mut names: Vec<&str> = graph.nodes.iter().map(|n| n.name.as_str()).collect();
+    names.sort();
+    assert_eq!(names, vec!["The Keep", "The Pact", "Varin"]);
+
+    // edges: both directions present
+    assert_eq!(graph.edges.len(), 2);
+    assert!(
+        graph
+            .edges
+            .iter()
+            .any(|e| e.from_id == varin.id && e.to_id == keep.id && e.rel_type == "resides_in"),
+        "outbound edge Varin->Keep missing"
+    );
+    assert!(
+        graph
+            .edges
+            .iter()
+            .any(|e| e.from_id == pact.id && e.to_id == varin.id && e.rel_type == "controls"),
+        "inbound edge Pact->Varin missing"
+    );
+}
+
+#[tokio::test]
+async fn get_entity_graph_isolated_entity_returns_just_itself() {
+    let db = setup_db().await;
+
+    let lonely = create(
+        &db,
+        Some("c1"),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Hermit".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let graph = get_entity_graph(&db, &lonely.id, "npc", 1).await.unwrap();
+    assert_eq!(graph.nodes.len(), 1);
+    assert_eq!(graph.nodes[0].name, "Hermit");
+    assert!(graph.edges.is_empty());
 }

@@ -169,6 +169,32 @@ pub struct GraphNode {
     pub status: Option<String>,
 }
 
+/// A node as it appears in a relationship graph — identity + display only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GraphNodeRef {
+    pub id: String,
+    pub kind: String, // table name: npc, location, …
+    pub name: String,
+}
+
+/// A directed `relates_to` edge between two nodes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GraphEdge {
+    pub from_id: String,
+    pub from_kind: String,
+    pub to_id: String,
+    pub to_kind: String,
+    pub rel_type: String,
+    pub notes: Option<String>,
+}
+
+/// An ego graph: the center entity, its neighbors, and the edges among them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EntityGraph {
+    pub nodes: Vec<GraphNodeRef>,
+    pub edges: Vec<GraphEdge>,
+}
+
 /// Input for both create and update operations.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -819,6 +845,105 @@ pub async fn relate<C: surrealdb::Connection>(
             message: e.to_string(),
         })?;
     Ok(())
+}
+
+/// Fetch the ego graph around an entity: the center, its `relates_to` neighbors
+/// (one hop), and the edges among them. `depth` is currently always treated as
+/// one hop; deeper walks are produced client-side by re-calling on a neighbor.
+pub async fn get_entity_graph<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    id: &str,
+    kind: &str,
+    _depth: u32,
+) -> Result<EntityGraph, EntityError> {
+    #[derive(Deserialize)]
+    struct EdgeRow {
+        #[serde(rename = "in")]
+        in_: Thing,
+        out: Thing,
+        rel_type: String,
+        notes: Option<String>,
+    }
+
+    // 1. Edges touching the center in both directions. Build the center Thing
+    //    directly in the query string — type::thing() in WHERE on edge endpoints
+    //    is unreliable on some SurrealDB versions.
+    let edge_sql = format!(
+        "SELECT in, out, rel_type, notes FROM relates_to \
+         WHERE in = {kind}:{id} OR out = {kind}:{id}"
+    );
+    let mut resp = db
+        .query(edge_sql)
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let rows: Vec<EdgeRow> = resp.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
+
+    let edges: Vec<GraphEdge> = rows
+        .iter()
+        .map(|r| GraphEdge {
+            from_id: r.in_.id.to_raw(),
+            from_kind: r.in_.tb.clone(),
+            to_id: r.out.id.to_raw(),
+            to_kind: r.out.tb.clone(),
+            rel_type: r.rel_type.clone(),
+            notes: r.notes.clone(),
+        })
+        .collect();
+
+    // 2. Collect distinct (kind, id) node keys: the center plus every endpoint.
+    let mut keys: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
+    keys.insert((kind.to_string(), id.to_string()));
+    for r in &rows {
+        keys.insert((r.in_.tb.clone(), r.in_.id.to_raw()));
+        keys.insert((r.out.tb.clone(), r.out.id.to_raw()));
+    }
+
+    // 3. Resolve names. Group ids by table and query each table once.
+    #[derive(Deserialize)]
+    struct NameRow {
+        id: Thing,
+        name: String,
+    }
+
+    let mut by_table: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for (k, i) in &keys {
+        by_table.entry(k.clone()).or_default().push(i.clone());
+    }
+
+    let mut nodes: Vec<GraphNodeRef> = Vec::new();
+    for (table, ids) in by_table {
+        // Build the id list as `Thing`s in Rust and bind as an array — robust
+        // across SurrealDB versions, unlike type::thing() inside the query.
+        let things: Vec<Thing> = ids
+            .iter()
+            .map(|i| Thing::from((table.as_str(), i.as_str())))
+            .collect();
+        let mut r = db
+            .query("SELECT id, name FROM type::table($table) WHERE id IN $ids")
+            .bind(("table", table.clone()))
+            .bind(("ids", things))
+            .await
+            .map_err(|e| EntityError::Database {
+                message: e.to_string(),
+            })?;
+        let found: Vec<NameRow> = r.take(0).map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+        for nr in found {
+            nodes.push(GraphNodeRef {
+                id: nr.id.id.to_raw(),
+                kind: nr.id.tb.clone(),
+                name: nr.name,
+            });
+        }
+    }
+
+    Ok(EntityGraph { nodes, edges })
 }
 
 #[cfg(test)]
