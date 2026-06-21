@@ -12,6 +12,7 @@
   let mode = $state<'chronicle' | 'sessions'>('chronicle');
   let events = $state<GraphNode[]>([]);
   let loading = $state(true);
+  let error = $state('');
 
   const eraGroups = $derived<EraGroup[]>(groupByEra(events));
 
@@ -19,10 +20,12 @@
 
   async function load() {
     loading = true;
+    error = '';
     try {
       events = await getEventsTimeline(campaignId);
     } catch (e) {
       console.error('Failed to load timeline:', e);
+      error = 'Failed to load timeline';
       events = [];
     } finally {
       loading = false;
@@ -44,9 +47,13 @@
       onclick={() => (mode = 'sessions')}>Sessions</button>
   </div>
 
+  {#if error}
+    <div class="error">{error}</div>
+  {/if}
+
   {#if loading}
     <p class="muted">Loading…</p>
-  {:else if events.length === 0}
+  {:else if !error && events.length === 0}
     <p class="muted">No events yet. Add events in the Events notebook to build your timeline.</p>
   {:else if mode === 'chronicle'}
     <ol class="spine">
@@ -55,9 +62,10 @@
           <h3 class="era-head">{group.era ?? 'Unordered'}</h3>
           <ol class="events">
             {#each group.events as e (e.id)}
+              {@const when = dateLabel(e)}
               <li class="event">
                 <button class="name" onclick={() => onOpenEntity?.(e)}>{e.name}</button>
-                {#if dateLabel(e)}<span class="when">{dateLabel(e)}</span>{/if}
+                {#if when}<span class="when">{when}</span>{/if}
                 {#if e.is_ongoing}<span class="ongoing">ongoing</span>{/if}
               </li>
             {/each}
@@ -82,4 +90,13 @@
   .event .when { color: var(--fg-3); font-size: 12px; }
   .event .ongoing { color: var(--violet-400); font-size: 11px; text-transform: uppercase; }
   .muted { color: var(--fg-3); }
+  .error {
+    padding: 8px 12px;
+    background: var(--danger-bg);
+    color: var(--danger);
+    border: 1px solid rgba(242, 103, 75, 0.4);
+    border-radius: var(--r-md);
+    margin-bottom: 14px;
+    font-size: 13px;
+  }
 </style>

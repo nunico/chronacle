@@ -31,6 +31,7 @@ describe('TimelineView — chronicle mode', () => {
     ]);
     render(TimelineView, { campaignId: 'c1' });
     expect(await screen.findByText('Siege')).toBeTruthy();
+    expect(screen.getByText('Pact')).toBeTruthy();
     expect(screen.getByText('Dawn')).toBeTruthy();
     expect(screen.getByText('Unordered')).toBeTruthy();
     expect(screen.getByText('Lost')).toBeTruthy();
@@ -40,5 +41,12 @@ describe('TimelineView — chronicle mode', () => {
     m.getEventsTimeline.mockResolvedValueOnce([]);
     render(TimelineView, { campaignId: 'c1' });
     expect(await screen.findByText(/No events yet/)).toBeTruthy();
+  });
+
+  it('shows an error banner and suppresses the empty state on fetch failure', async () => {
+    m.getEventsTimeline.mockRejectedValueOnce(new Error('IPC error'));
+    render(TimelineView, { campaignId: 'c1' });
+    expect(await screen.findByText('Failed to load timeline')).toBeTruthy();
+    expect(screen.queryByText(/No events yet/)).toBeFalsy();
   });
 });
