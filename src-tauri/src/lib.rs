@@ -247,6 +247,7 @@ pub async fn run() {
             commands::relate_entities,
             commands::get_events_timeline,
             commands::get_entity_graph,
+            commands::get_entity_relations,
             commands::create_session,
             commands::get_sessions,
             commands::get_session,

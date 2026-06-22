@@ -516,6 +516,24 @@ export async function relateEntities(
   return invoke<never>('relate_entities', { fromId, fromKind, toId, toKind, relType, notes });
 }
 
+/** A related entity as returned by the flat relationships list. */
+export interface RelatedEntity {
+  id: string;
+  kind: string;
+  name: string;
+  rel_type: string;
+  /** `"outbound"` when center→other, `"inbound"` when other→center. */
+  direction: 'outbound' | 'inbound';
+}
+
+/**
+ * Fetch all entities related to the given entity as a flat list.
+ * Includes both inbound and outbound edges. Sorted by name.
+ */
+export async function getEntityRelations(id: string, kind: EntityKind): Promise<RelatedEntity[]> {
+  return invoke<RelatedEntity[]>('get_entity_relations', { id, kind });
+}
+
 // ── Session Types & Commands ────────────────────────────────────────────
 
 export interface Session {

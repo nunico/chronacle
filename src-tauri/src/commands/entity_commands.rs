@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use tauri::State;
 
-use crate::services::entity_service::{self, EntityError, EntityGraph, EntityInput, EntityKind, GraphNode};
+use crate::services::entity_service::{
+    self, EntityError, EntityGraph, EntityInput, EntityKind, GraphNode, RelatedEntity,
+};
 use crate::AppState;
 
 fn parse_kind(kind: &str) -> Result<EntityKind, EntityError> {
@@ -142,6 +144,18 @@ pub async fn relate_entities(
         notes,
     )
     .await
+}
+
+/// Flat relationships list for an entity: both inbound and outbound edges
+/// resolved to named related entities.
+#[tauri::command]
+pub async fn get_entity_relations(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    kind: String,
+) -> Result<Vec<RelatedEntity>, EntityError> {
+    let k = parse_kind(&kind)?;
+    entity_service::get_entity_relations(&state.db, &id, k.table_name()).await
 }
 
 #[cfg(test)]
