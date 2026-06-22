@@ -877,6 +877,19 @@ pub async fn relate<C: surrealdb::Connection>(
             message: "Invalid entity id".to_string(),
         });
     }
+    // Delete any pre-existing edge for this (from, to, rel_type) triple so that
+    // RELATE does not create a duplicate on repeated calls. Mirrors the
+    // delete-then-relate pattern in `wikilink::upsert_mentioned_edges`.
+    let delete_query = format!(
+        "DELETE relates_to WHERE in = {from_kind}:{from_id} AND out = {to_kind}:{to_id} AND rel_type = $rel_type"
+    );
+    db.query(delete_query)
+        .bind(("rel_type", rel_type.to_owned()))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+
     // Build record IDs directly in the query string because some SurrealDB versions
     // do not allow type::thing() on the left/right side of RELATE arrows.
     let query = format!(
@@ -1161,6 +1174,98 @@ pub async fn get_entity_relations<C: surrealdb::Connection>(
     related.sort_by(|a, b| a.name.cmp(&b.name));
 
     Ok(related)
+}
+
+// ── Wikilink backfill ─────────────────────────────────────────────────────────
+
+/// Entity row returned when scanning for wikilink backfill. Scope aliases give
+/// the campaign and collection the entity belongs to.
+#[derive(Deserialize)]
+struct WikilinkScanRow {
+    id: Thing,
+    notes: Option<String>,
+    campaign: Option<Thing>,
+    collection: Option<Thing>,
+}
+
+/// Re-run wikilink resolution over EVERY existing entity, resolving each in its
+/// own scope (campaign or collection). Forward references that never resolved at
+/// creation time become edges now that all entities exist. Returns the number of
+/// entities processed. Per-entity failures are logged and skipped (never abort).
+pub async fn resync_all_wikilinks<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+) -> Result<usize, EntityError> {
+    // All 8 entity tables — must stay in sync with wikilink::ENTITY_TABLES.
+    const TABLES: &[&str] = &[
+        "npc",
+        "location",
+        "faction",
+        "creature",
+        "item",
+        "event",
+        "player_character",
+        "misc",
+    ];
+
+    let mut processed = 0usize;
+
+    for table in TABLES {
+        let query = format!("SELECT id, notes, {SELECT_SCOPE_ALIASES} FROM {table}");
+        let mut resp = db.query(query).await.map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+        let rows: Vec<WikilinkScanRow> = resp.take(0).map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+
+        for row in rows {
+            // Only entities with non-empty notes can have wikilinks.
+            let notes = match row.notes {
+                Some(ref n) if !n.is_empty() => n.clone(),
+                _ => continue,
+            };
+
+            // Build owned scope-id strings first so we can borrow them when
+            // constructing the WikilinkScope (which carries `&str`).
+            let entity_id = row.id.id.to_raw();
+            let scope_collection: Option<String> = row.collection.map(|t| t.id.to_raw());
+            let scope_campaign: Option<String> = row.campaign.map(|t| t.id.to_raw());
+
+            let result = if let Some(ref col_id) = scope_collection {
+                crate::services::wikilink::parse_and_sync_wikilinks(
+                    db,
+                    table,
+                    &entity_id,
+                    &notes,
+                    crate::services::wikilink::WikilinkScope::Collection {
+                        collection_id: col_id,
+                    },
+                )
+                .await
+            } else if let Some(ref camp_id) = scope_campaign {
+                crate::services::wikilink::parse_and_sync_wikilinks(
+                    db,
+                    table,
+                    &entity_id,
+                    &notes,
+                    crate::services::wikilink::WikilinkScope::Campaign {
+                        campaign_id: camp_id,
+                    },
+                )
+                .await
+            } else {
+                // Global entity with no scope — cannot resolve wikilinks.
+                continue;
+            };
+
+            match result {
+                Ok(_) => processed += 1,
+                Err(e) => eprintln!("resync_wikilinks: failed to sync {table}:{entity_id}: {e}"),
+            }
+        }
+    }
+
+    Ok(processed)
 }
 
 #[cfg(test)]

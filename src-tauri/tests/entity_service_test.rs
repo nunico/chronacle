@@ -1,6 +1,7 @@
 use chronacle_lib::services::entity_service::{
     create, delete, get_by_campaign, get_by_id, get_entity_graph, get_entity_relations,
-    get_events_timeline, relate, update, EntityError, EntityInput, EntityKind,
+    get_events_timeline, relate, resync_all_wikilinks, update, EntityError, EntityInput,
+    EntityKind,
 };
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
@@ -1150,5 +1151,164 @@ async fn get_entity_relations_returns_both_directions_with_correct_fields() {
     assert!(
         !relations.iter().any(|r| r.id == center.id),
         "center must not appear in its own relations list"
+    );
+}
+
+// ── Fix 1: idempotent relate() ────────────────────────────────────────────────
+
+/// Calling relate() twice with the same (from, to, rel_type) must produce
+/// exactly ONE edge — not two. This is the regression guard for the idempotency fix.
+#[tokio::test]
+async fn relate_twice_same_triple_produces_exactly_one_edge() {
+    let db = setup_db().await;
+    let campaign_id = create_campaign(&db).await;
+
+    let npc = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Npc,
+        npc_input("Aldric"),
+    )
+    .await
+    .unwrap();
+
+    let loc = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Location,
+        EntityInput {
+            name: "Blackstone Keep".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // First call
+    relate(&db, &npc.id, "npc", &loc.id, "location", "guards", None)
+        .await
+        .unwrap();
+    // Second call — must be idempotent
+    relate(&db, &npc.id, "npc", &loc.id, "location", "guards", None)
+        .await
+        .unwrap();
+
+    #[derive(serde::Deserialize)]
+    struct CountRow {
+        count: i64,
+    }
+    let npc_record = format!("npc:{}", npc.id);
+    let loc_record = format!("location:{}", loc.id);
+    let mut resp = db
+        .query(format!(
+            "SELECT count() FROM relates_to \
+             WHERE in = {npc_record} AND out = {loc_record} AND rel_type = 'guards' \
+             GROUP ALL"
+        ))
+        .await
+        .unwrap();
+    let rows: Vec<CountRow> = resp.take(0).unwrap();
+    let n = rows.first().map(|r| r.count).unwrap_or(0);
+    assert_eq!(
+        n, 1,
+        "relate() called twice with the same triple must yield exactly 1 edge, got {n}"
+    );
+}
+
+// ── Fix 3: resync_all_wikilinks backfill ─────────────────────────────────────
+
+/// Prove the backfill: create entity A with notes mentioning Bram, create Bram
+/// (which produces an edge via reconciliation), DELETE all relates_to edges
+/// directly, assert zero edges, call resync_all_wikilinks, assert the A→Bram
+/// mentioned edge is recreated, and that get_entity_graph sees Bram as a neighbor.
+#[tokio::test]
+async fn resync_all_wikilinks_regenerates_edges_from_existing_notes() {
+    let db = setup_db().await;
+    let campaign_id = create_campaign(&db).await;
+
+    // Create Bram first so the wikilink resolves on entity_a's creation.
+    let bram = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Bram".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let entity_a = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Sven".into(),
+            notes: Some("Always travels with [[Bram]].".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // At this point there should already be an edge from the create path.
+    // Nuke ALL relates_to edges to simulate "edges missing" (pre-backfill state).
+    db.query("DELETE relates_to").await.unwrap();
+
+    // Confirm zero edges after the DELETE.
+    let mut resp = db
+        .query("SELECT count() FROM relates_to GROUP ALL")
+        .await
+        .unwrap();
+    let after_delete: Vec<serde_json::Value> = resp.take(0).unwrap();
+    let count_zero = after_delete
+        .first()
+        .and_then(|v| v.get("count").and_then(|c| c.as_i64()))
+        .unwrap_or(0);
+    assert_eq!(
+        count_zero, 0,
+        "all edges should be gone after DELETE relates_to"
+    );
+
+    // Run the backfill.
+    let processed = resync_all_wikilinks(&db).await.unwrap();
+    assert!(
+        processed >= 1,
+        "at least entity_a (with non-empty notes) should have been processed; got {processed}"
+    );
+
+    // The A→Bram mentioned edge must be recreated.
+    let a_record = format!("npc:{}", entity_a.id);
+    let bram_record = format!("npc:{}", bram.id);
+    let mut resp2 = db
+        .query(format!(
+            "SELECT count() FROM relates_to \
+             WHERE in = {a_record} AND out = {bram_record} AND rel_type = 'mentioned' \
+             GROUP ALL"
+        ))
+        .await
+        .unwrap();
+    let edge_rows: Vec<serde_json::Value> = resp2.take(0).unwrap();
+    let edge_count = edge_rows
+        .first()
+        .and_then(|v| v.get("count").and_then(|c| c.as_i64()))
+        .unwrap_or(0);
+    assert_eq!(
+        edge_count, 1,
+        "resync must recreate exactly one A→Bram mentioned edge, got {edge_count}"
+    );
+
+    // get_entity_graph must now see Bram as a neighbor of entity_a.
+    let graph = get_entity_graph(&db, &entity_a.id, "npc", 1).await.unwrap();
+    assert!(
+        graph.nodes.iter().any(|n| n.id == bram.id),
+        "Bram should appear as a neighbor in entity_a's ego graph after backfill; \
+         nodes: {:#?}",
+        graph.nodes
     );
 }

@@ -415,8 +415,12 @@ async fn persist_batch<C: Connection>(
                 None,
             )
             .await;
-            if result.is_ok() {
-                relations_created += 1;
+            match result {
+                Ok(_) => relations_created += 1,
+                Err(e) => eprintln!(
+                    "extraction: failed to relate {} -> {} ({}): {e}",
+                    origin_node.name, rel_node.name, rel.rel_type
+                ),
             }
         }
     }
