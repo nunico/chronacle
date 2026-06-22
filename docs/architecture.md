@@ -989,3 +989,4 @@ Goal: Deploy backend as a server; access from mobile.
 | Linting | ESLint + `@typescript-eslint` + `eslint-plugin-svelte` |
 | Formatting | Prettier + `prettier-plugin-svelte` |
 | Pre-commit hooks | lefthook |
+| Graph layout | `d3-force` (entity relationship graph, Phase 3) |
