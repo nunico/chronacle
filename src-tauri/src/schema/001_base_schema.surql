@@ -58,7 +58,8 @@ DEFINE INDEX chunk_embedding_idx ON chunk FIELDS embedding MTREE DIMENSION 768 D
 -- ── Sessions ─────────────────────────────────────────────────────────────────
 
 DEFINE TABLE session SCHEMAFULL;
-DEFINE FIELD campaign       ON session TYPE record<campaign> | NULL DEFAULT NULL;
+-- A session always belongs to a campaign — required, non-nullable.
+DEFINE FIELD campaign       ON session TYPE record<campaign>;
 DEFINE FIELD session_number ON session TYPE int;
 DEFINE FIELD title          ON session TYPE string;
 DEFINE FIELD date_played    ON session TYPE string;
