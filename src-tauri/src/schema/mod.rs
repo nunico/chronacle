@@ -1,19 +1,14 @@
-/// Schema migration runner.
+/// Schema runner.
 ///
-/// Reads `.surql` migration files from the `schema/` directory, sorts them
-/// by filename, and executes each against the database. Migrations are
-/// idempotent — each file uses `DEFINE … IF NOT EXISTS` or plain `DEFINE`
-/// statements that are safe to run multiple times.
+/// Reads `.surql` files from the `schema/` directory, sorts them by filename,
+/// and executes each against the database. All `DEFINE` statements are
+/// idempotent on re-run; the `relates_to` edge table uses `DEFINE … OVERWRITE`
+/// to re-assert its definition without dropping existing edges.
 ///
-/// # Migration files
+/// # Schema file
 ///
-/// Files use a zero-prefixed numeric naming convention so they sort in
-/// dependency order:
-/// - `001_initial.surql` — Phase 1 tables, fields, indexes
-/// - `002_embedding_index.surql` — (reserved; not yet created)
-/// - `003_collections.surql` — collection table, subscribes_to relation, collection fields on source/chunk
-/// - `004_graph_entities.surql` — 8 typed graph node tables (npc, location, faction, creature, item, event, player_character, misc); relates_to updated to FROM ANY TO ANY
-/// - `005_session_update.surql` — adds `updated_at` field and `idx_session_campaign` index to `session`
+/// - `001_base_schema.surql` — complete consolidated schema (squashed from
+///   Phases 1-3 individual migrations; safe to re-run on every app startup)
 use std::path::Path;
 
 /// Run all pending schema migrations against the given database.
@@ -84,14 +79,14 @@ mod tests {
             .await
             .expect("Query after migration should work");
 
-        // Verify the new collection table from migration 003 exists.
+        // Verify the collection table exists (defined in base schema).
         db.query("SELECT count() FROM collection GROUP ALL")
             .await
-            .expect("collection table should exist after migration 003");
+            .expect("collection table should exist after schema setup");
     }
 
     #[tokio::test]
-    async fn test_migration_004_graph_node_tables_exist() {
+    async fn graph_node_tables_exist_after_schema_setup() {
         let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
             .await
             .expect("in-memory db");
@@ -121,13 +116,13 @@ mod tests {
         ] {
             assert!(
                 info.tables.contains_key(*table),
-                "expected table '{table}' to exist after migration 004"
+                "expected table '{table}' to exist after schema setup"
             );
         }
 
         assert!(
             !info.tables.contains_key("entity"),
-            "entity table should have been removed by migration 004"
+            "Phase-1 entity stub table must not exist in squashed schema"
         );
     }
 
@@ -200,7 +195,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_migration_005_session_updated_at_and_campaign_index() {
+    async fn session_table_has_updated_at_and_campaign_index() {
         let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
             .await
             .expect("in-memory db");
@@ -219,7 +214,7 @@ mod tests {
              updated_at = time::now()",
         )
         .await
-        .expect("INSERT session with updated_at should succeed after migration 005");
+        .expect("INSERT session with updated_at should succeed");
 
         // Verify idx_session_campaign and updated_at appear in the session table info.
         #[derive(serde::Deserialize)]
@@ -238,11 +233,11 @@ mod tests {
 
         assert!(
             info.fields.contains_key("updated_at"),
-            "updated_at field should exist on session table after migration 005"
+            "updated_at field should exist on session table"
         );
         assert!(
             info.indexes.contains_key("idx_session_campaign"),
-            "idx_session_campaign index should exist on session table after migration 005"
+            "idx_session_campaign index should exist on session table"
         );
     }
 }
