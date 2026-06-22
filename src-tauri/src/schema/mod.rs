@@ -131,6 +131,74 @@ mod tests {
         );
     }
 
+    /// Regression test: running migrations a second time (simulating an app restart)
+    /// must NOT destroy existing `relates_to` edges. Before the fix, migration 004
+    /// contained `REMOVE TABLE IF EXISTS relates_to` which wiped all edges on every boot.
+    #[tokio::test]
+    async fn migrations_are_data_preserving_on_rerun() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .expect("in-memory db");
+        db.use_ns("test").use_db("test").await.unwrap();
+
+        // First run — schema setup.
+        run_migrations(&db).await.expect("first migration");
+
+        // Seed two entity nodes and a relates_to edge between them.
+        db.query("CREATE npc:a SET name = 'A', created_at = time::now(), updated_at = time::now()")
+            .await
+            .expect("CREATE npc:a")
+            .check()
+            .expect("CREATE npc:a response");
+        db.query(
+            "CREATE location:b SET name = 'B', created_at = time::now(), updated_at = time::now()",
+        )
+        .await
+        .expect("CREATE location:b")
+        .check()
+        .expect("CREATE location:b response");
+        // Omit `notes` so the SCHEMAFULL DEFAULT NULL kicks in; inline `NULL` literal
+        // triggers a SurrealDB field-check error against `string | NULL` in v2.
+        db.query("RELATE npc:a->relates_to->location:b SET rel_type = 'mentioned'")
+            .await
+            .expect("RELATE npc:a->relates_to->location:b")
+            .check()
+            .expect("RELATE npc:a->relates_to->location:b response");
+
+        // Sanity: edge exists before second run.
+        let mut resp = db
+            .query("SELECT count() FROM relates_to GROUP ALL")
+            .await
+            .expect("count before rerun");
+        let before: Option<serde_json::Value> = resp.take(0).expect("take before");
+        let n_before = before
+            .and_then(|v| v.get("count").and_then(|c| c.as_i64()))
+            .unwrap_or(0);
+        assert_eq!(
+            n_before, 1,
+            "sanity: edge must exist before second migration run"
+        );
+
+        // Simulate an app RESTART by re-running migrations against the live database.
+        run_migrations(&db)
+            .await
+            .expect("second migration (restart simulation)");
+
+        // The edge MUST survive the re-run.
+        let mut resp2 = db
+            .query("SELECT count() FROM relates_to GROUP ALL")
+            .await
+            .expect("count after rerun");
+        let after: Option<serde_json::Value> = resp2.take(0).expect("take after");
+        let n_after = after
+            .and_then(|v| v.get("count").and_then(|c| c.as_i64()))
+            .unwrap_or(0);
+        assert_eq!(
+            n_after, 1,
+            "relates_to edge must survive a migration re-run (app restart) — REMOVE TABLE wipes edges"
+        );
+    }
+
     #[tokio::test]
     async fn test_migration_005_session_updated_at_and_campaign_index() {
         let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())

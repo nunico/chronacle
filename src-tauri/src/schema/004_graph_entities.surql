@@ -3,19 +3,27 @@
 -- Each entity type is its own SurrealDB table (graph node), allowing
 -- type-safe fields and natural graph traversal via relates_to edges.
 
--- Drop stub table and old relation from Phase 1
+-- Drop stub table and old relation from Phase 1.
+-- REMOVE TABLE IF EXISTS entity is kept: it cleans up the Phase-1 stub (empty
+-- by the time this migration runs) and is safe to re-run (IF NOT EXISTS).
+-- REMOVE TABLE IF EXISTS relates_to has been removed — it wiped all edges on
+-- every app restart. Use DEFINE TABLE OVERWRITE instead (SurrealDB v2) so the
+-- table definition is re-asserted without dropping existing records.
 REMOVE TABLE IF EXISTS entity;
-REMOVE TABLE IF EXISTS relates_to;
 
--- Generic graph edge (connects any two node types.
+-- Generic graph edge (connects any two node types).
 -- FROM/TO lists all entity tables explicitly because SurrealDB v2's record<ANY>
 -- type check does not work correctly for heterogeneous RELATE in v2.6.x.
-DEFINE TABLE relates_to SCHEMAFULL TYPE RELATION
+-- OVERWRITE: re-asserts the definition (and handles any FROM/TO list changes from
+-- prior migrations) without dropping existing relates_to edges. Safe to re-run.
+DEFINE TABLE OVERWRITE relates_to SCHEMAFULL TYPE RELATION
     FROM npc | location | faction | creature | item | event | player_character | misc
     TO   npc | location | faction | creature | item | event | player_character | misc;
-DEFINE FIELD rel_type   ON relates_to TYPE string;
-DEFINE FIELD notes      ON relates_to TYPE string | NULL DEFAULT NULL;
-DEFINE FIELD created_at ON relates_to TYPE datetime DEFAULT time::now();
+-- OVERWRITE on fields ensures they are re-asserted cleanly on each migration run,
+-- consistent with the OVERWRITE on the table above.
+DEFINE FIELD OVERWRITE rel_type   ON relates_to TYPE string;
+DEFINE FIELD OVERWRITE notes      ON relates_to TYPE string | NULL DEFAULT NULL;
+DEFINE FIELD OVERWRITE created_at ON relates_to TYPE datetime DEFAULT time::now();
 
 -- Shared fields (manually repeated for each node table below):
 -- Each table gets: campaign, name, summary, notes, created_at, updated_at
