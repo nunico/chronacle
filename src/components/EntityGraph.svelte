@@ -11,12 +11,10 @@
   interface Props {
     entityId: string;
     entityKind: string;
-    width?: number;
-    height?: number;
     onClose?: () => void;
     onOpenEntity?: (node: GraphNodeRef) => void; // click-through: open in the manager
   }
-  const { entityId, entityKind, width = 720, height = 520, onClose, onOpenEntity }: Props = $props();
+  const { entityId, entityKind, onClose, onOpenEntity }: Props = $props();
 
   type SimNode = GraphNodeRef & SimulationNodeDatum;
   // d3-force mutates source/target from string ids to node objects after simulation starts.
@@ -32,6 +30,13 @@
 
   // SVG element reference — captured via bind:this to avoid document.querySelector in the hot path.
   let svgEl: SVGSVGElement | undefined = $state();
+
+  // Responsive container measurement via Svelte bind:clientWidth/bind:clientHeight.
+  // Fallback dims are used until the first measurement arrives; the simulation is
+  // rebuilt once real dims are known (see $effect below).
+  let containerWidth = $state(720);
+  let containerHeight = $state(520);
+  let dimsReady = $state(false);
 
   // Pan/zoom state
   let pan = $state({ x: 0, y: 0 });
@@ -65,6 +70,15 @@
     removeWindowListeners();
   });
 
+  // When container dims become available for the first time, rebuild the sim so
+  // forceCenter uses the actual panel size rather than the 720×520 fallback.
+  $effect(() => {
+    if (dimsReady && sim) {
+      sim.force('center', forceCenter(containerWidth / 2, containerHeight / 2));
+      sim.alpha(0.3).restart();
+    }
+  });
+
   async function recenter(id: string, kind: string) {
     loading = true;
     centerId = id;
@@ -83,9 +97,12 @@
     sim?.stop();
     nodes = g.nodes.map((n) => ({ ...n }));
     links = g.edges.map((e) => ({ source: e.from_id, target: e.to_id, rel_type: e.rel_type }));
+    // Use measured dims if already available, otherwise fall back to defaults.
+    const cx = dimsReady ? containerWidth / 2 : 360;
+    const cy = dimsReady ? containerHeight / 2 : 260;
     sim = forceSimulation<SimNode, SimLink>(nodes)
       .force('charge', forceManyBody().strength(-280))
-      .force('center', forceCenter(width / 2, height / 2))
+      .force('center', forceCenter(cx, cy))
       .force('collide', forceCollide(28))
       .force('link', forceLink<SimNode, SimLink>(links)
         .id((d) => d.id).distance(110))
@@ -163,7 +180,11 @@
       const dx = event.clientX - dragStartX;
       const dy = event.clientY - dragStartY;
       if (Math.abs(dx) > 5 || Math.abs(dy) > 5) wasDrag = true;
-      // Map screen coords to SVG coords accounting for pan/zoom.
+      // Map screen coords to graph coords: graph = (screen - pan) / zoom.
+      // Under semantic zoom the SVG transform is translate-only; all layout
+      // coordinates are stored in graph space and rendered as graphCoord * zoom.
+      // This inverse mapping remains correct: the node renders at fx*zoom + pan
+      // which equals the cursor's screen position.
       // Uses the bound svgEl reference instead of document.querySelector to avoid
       // a costly DOM traversal on every pointermove (60+ Hz).
       if (svgEl) {
@@ -223,6 +244,9 @@
     const oldZoom = zoom;
     const newZoom = Math.min(2.5, Math.max(0.4, oldZoom * delta));
     // Keep the graph-space point under the cursor fixed.
+    // Under semantic zoom: screen = graphCoord * zoom + pan.
+    // To keep screen position cx,cy fixed: cx = g*newZoom + newPan
+    // where g = (cx - pan.x) / oldZoom. Solving: newPan = cx - (cx - pan.x)*(newZoom/oldZoom).
     pan = {
       x: cx - (cx - pan.x) * (newZoom / oldZoom),
       y: cy - (cy - pan.y) * (newZoom / oldZoom),
@@ -242,9 +266,27 @@
     const n = liveNode(id);
     if (n) void recenter(n.id, n.kind);
   }
+
+  // Called by Svelte when container dimensions change (bind:clientWidth/clientHeight).
+  function onDimsChange() {
+    if (containerWidth > 0 && containerHeight > 0) {
+      dimsReady = true;
+    }
+  }
 </script>
 
-<div class="graph-wrap" data-testid="entity-graph">
+<!--
+  Outer div measures the available space via bind:clientWidth/bind:clientHeight.
+  The SVG fills this space (width/height set to measured values) so the graph
+  uses the full panel instead of a fixed 720×520 viewport.
+-->
+<div
+  class="graph-wrap"
+  data-testid="entity-graph"
+  bind:clientWidth={containerWidth}
+  bind:clientHeight={containerHeight}
+  onresize={onDimsChange}
+>
   {#if onClose}
     <button class="close-btn" onclick={onClose} aria-label="Close graph" data-autofocus>✕</button>
   {/if}
@@ -260,22 +302,40 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <svg
     bind:this={svgEl}
-    {width}
-    {height}
+    width={containerWidth}
+    height={containerHeight}
     role="application"
     aria-label="Entity relationship graph"
     onpointerdown={onCanvasPointerDown}
     onwheel={onWheel}
     style="cursor: grab; display: block;"
   >
-    <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+    <!--
+      Semantic zoom: only pan is applied in the SVG transform. Zoom changes the
+      DISTANCE between nodes by multiplying all graph coordinates by `zoom` at
+      render time (graphCoord * zoom). Node circles and text remain constant
+      pixel size and stay legible at all zoom levels.
+
+      Coordinate mapping: screen = graphCoord * zoom + pan
+      Inverse (used in drag): graphCoord = (screen - pan) / zoom
+    -->
+    <g transform={`translate(${pan.x},${pan.y})`}>
       {#each links as l (`${linkEndId(l.source)}->${linkEndId(l.target)}`)}
         {@const a = nodeById(linkEndId(l.source))}
         {@const b = nodeById(linkEndId(l.target))}
         {#if a && b}
-          <line x1={a.x ?? 0} y1={a.y ?? 0} x2={b.x ?? 0} y2={b.y ?? 0} class="edge" />
-          <text x={((a.x ?? 0) + (b.x ?? 0)) / 2} y={((a.y ?? 0) + (b.y ?? 0)) / 2}
-            class="edge-label">{l.rel_type}</text>
+          <line
+            x1={(a.x ?? 0) * zoom}
+            y1={(a.y ?? 0) * zoom}
+            x2={(b.x ?? 0) * zoom}
+            y2={(b.y ?? 0) * zoom}
+            class="edge"
+          />
+          <text
+            x={((a.x ?? 0) + (b.x ?? 0)) / 2 * zoom}
+            y={((a.y ?? 0) + (b.y ?? 0)) / 2 * zoom}
+            class="edge-label"
+          >{l.rel_type}</text>
         {/if}
       {/each}
       {#each positionedNodes as n (n.id)}
@@ -289,27 +349,27 @@
           onpointerdown={(e) => onNodePointerDown(e, n.id)}
           onclick={(e) => onNodeClick(e, n.id)}
         >
-          <!-- Node circle: center node gets accent ring + larger radius -->
+          <!-- Node circle: constant radius regardless of zoom — only position scales. -->
           <circle
-            cx={n.x}
-            cy={n.y}
+            cx={n.x * zoom}
+            cy={n.y * zoom}
             r={n.id === centerId ? 16 : 10}
             class={n.id === centerId ? 'node-circle node-circle--center' : 'node-circle'}
             fill={kindColor(n.kind)}
           />
-          <!-- Name label: clicking opens the entity, does NOT re-center -->
+          <!-- Name label: clicking opens the entity, does NOT re-center.
+               Label offset (24/30 px) is a constant screen distance below the node. -->
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <text
-            x={n.x}
-            y={n.y + (n.id === centerId ? 30 : 24)}
+            x={n.x * zoom}
+            y={n.y * zoom + (n.id === centerId ? 30 : 24)}
             class="node-label"
             text-anchor="middle"
             onpointerdown={(e) => e.stopPropagation()}
             onclick={(e) => { e.stopPropagation(); onOpenEntity?.(n); }}
             style="cursor: pointer;"
           >{n.name}</text>
-          <!-- Expand affordance: proper circular button — larger hit target, branded styling.
-               Only rendered on non-center nodes (expanding center re-fetches the same graph). -->
+          <!-- Expand affordance: constant-size button offset in screen px from the node center. -->
           {#if n.id !== centerId}
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -322,14 +382,14 @@
             >
               <title>Expand neighbours</title>
               <circle
-                cx={n.x + 14}
-                cy={n.y - 14}
+                cx={n.x * zoom + 14}
+                cy={n.y * zoom - 14}
                 r={9}
                 class="expand-circle"
               />
               <text
-                x={n.x + 14}
-                y={n.y - 14}
+                x={n.x * zoom + 14}
+                y={n.y * zoom - 14}
                 class="expand-glyph"
                 text-anchor="middle"
                 dominant-baseline="central"
@@ -343,7 +403,15 @@
 </div>
 
 <style>
-  .graph-wrap { position: relative; }
+  .graph-wrap {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    /* Ensure the wrapper fills its parent so bind:clientWidth/clientHeight
+       capture the full panel dimensions. */
+    display: flex;
+    flex-direction: column;
+  }
 
   /* ── Close button ──────────────────────────────────────────────────────────── */
   .close-btn {

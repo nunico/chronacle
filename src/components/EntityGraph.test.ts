@@ -7,6 +7,16 @@ vi.mock('../lib/commands', () => ({
   getEntityGraph: vi.fn(),
 }));
 
+// jsdom does not implement ResizeObserver, which Svelte uses internally for
+// bind:clientWidth / bind:clientHeight. Stub it so the component mounts cleanly.
+// The disconnect/observe/unobserve stubs are no-ops; component rendering
+// and interaction tests do not depend on actual dimension measurements.
+vi.stubGlobal('ResizeObserver', class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+});
+
 const m = vi.mocked(commands);
 
 beforeEach(() => {

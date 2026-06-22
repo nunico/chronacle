@@ -1000,5 +1000,10 @@
     position: relative;
     /* Prevent the backdrop click handler from firing when clicking the panel */
     cursor: default;
+    /* Large responsive viewport: EntityGraph fills the panel via width/height 100%. */
+    width: min(1100px, 92vw);
+    height: min(820px, 88vh);
+    display: flex;
+    flex-direction: column;
   }
 </style>
