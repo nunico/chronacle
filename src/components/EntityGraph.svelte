@@ -30,6 +30,9 @@
   let sim: Simulation<SimNode, SimLink> | null = null;
   let tick = $state(0); // bumped each simulation tick to drive reactive re-render
 
+  // SVG element reference — captured via bind:this to avoid document.querySelector in the hot path.
+  let svgEl: SVGSVGElement | undefined = $state();
+
   // Pan/zoom state
   let pan = $state({ x: 0, y: 0 });
   let zoom = $state(1);
@@ -106,7 +109,15 @@
         nodes: nodes.map((n) => ({ id: n.id, kind: n.kind, name: n.name })),
         edges: currentEdges,
       };
-      buildSimulation(mergeGraph(currentGraph, g));
+      const merged = mergeGraph(currentGraph, g);
+      // Warm-start: copy current x/y/fx/fy into merged nodes so already-positioned
+      // nodes don't jump and re-settle. Newly-added neighbors (no posMap entry) start fresh.
+      const posMap = new Map(nodes.map((n) => [n.id, { x: n.x, y: n.y, fx: n.fx, fy: n.fy }]));
+      for (const mn of merged.nodes) {
+        const pos = posMap.get(mn.id);
+        if (pos) Object.assign(mn, pos);
+      }
+      buildSimulation(merged);
     } catch (e) {
       console.error('expand failed', e);
     }
@@ -133,6 +144,7 @@
 
   function onNodePointerDown(event: PointerEvent, id: string) {
     event.stopPropagation(); // prevent canvas-pan handler from firing
+    if (dragNode || panDragging) return; // re-entry guard: ignore second pointerdown mid-drag
     const n = liveNode(id);
     if (!n) return;
     dragNode = n;
@@ -152,7 +164,8 @@
       const dy = event.clientY - dragStartY;
       if (Math.abs(dx) > 5 || Math.abs(dy) > 5) wasDrag = true;
       // Map screen coords to SVG coords accounting for pan/zoom.
-      const svgEl = document.querySelector('[data-testid="entity-graph"] svg') as SVGSVGElement | null;
+      // Uses the bound svgEl reference instead of document.querySelector to avoid
+      // a costly DOM traversal on every pointermove (60+ Hz).
       if (svgEl) {
         const rect = svgEl.getBoundingClientRect();
         dragNode.fx = (event.clientX - rect.left - pan.x) / zoom;
@@ -188,6 +201,7 @@
   function onCanvasPointerDown(event: PointerEvent) {
     // Only initiate canvas pan when clicking on the SVG background itself,
     // not on a node (node handlers call stopPropagation).
+    if (panDragging || dragNode) return; // re-entry guard: ignore second pointerdown mid-pan
     panDragging = true;
     panStartX = event.clientX;
     panStartY = event.clientY;
@@ -234,6 +248,7 @@
   -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <svg
+    bind:this={svgEl}
     {width}
     {height}
     role="application"
@@ -271,6 +286,7 @@
             y={n.y + 26}
             class="node-label"
             text-anchor="middle"
+            onpointerdown={(e) => e.stopPropagation()}
             onclick={(e) => { e.stopPropagation(); onOpenEntity?.(n); }}
             style="cursor: pointer;"
           >{n.name}</text>
@@ -280,6 +296,7 @@
             x={n.x + (n.id === centerId ? 18 : 12)}
             y={n.y - (n.id === centerId ? 14 : 8)}
             class="expand-btn"
+            onpointerdown={(e) => e.stopPropagation()}
             onclick={(e) => { e.stopPropagation(); void expand(n.id, n.kind); }}
             style="cursor: pointer;"
           >＋</text>

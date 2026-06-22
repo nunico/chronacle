@@ -36,6 +36,33 @@ describe('EntityGraph', () => {
     expect(await screen.findByTestId('graph-empty')).toBeTruthy();
   });
 
+  it('drag suppresses re-center: pointerdown+move(>5px)+pointerup+click does not call getEntityGraph again', async () => {
+    // jsdom does not implement getBoundingClientRect on SVG elements (returns all zeros),
+    // but the drag-suppress logic (wasDrag flag) is purely coordinate-delta-based and does
+    // not need a real SVG rect. We dispatch pointermove on window directly per the spec.
+    m.getEntityGraph.mockResolvedValueOnce(graph);
+    const { container } = render(EntityGraph, { entityId: 'varin', entityKind: 'npc' });
+    await screen.findByText('The Keep');
+
+    const nodeGroup = container.querySelector('[data-id="keep"]') as Element;
+    expect(nodeGroup).toBeTruthy();
+
+    // Simulate pointerdown on node
+    fireEvent.pointerDown(nodeGroup, { clientX: 100, clientY: 100, bubbles: true });
+
+    // Simulate pointermove on window exceeding the 5px threshold
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 110, clientY: 110, bubbles: true }));
+
+    // Simulate pointerup on window
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+
+    // Now fire a click — it should be suppressed because wasDrag was set
+    await fireEvent.click(nodeGroup);
+
+    // getEntityGraph was called exactly once (initial load); the drag-click did NOT trigger recenter
+    expect(m.getEntityGraph).toHaveBeenCalledTimes(1);
+  });
+
   it('re-centers when a neighbor node group is clicked', async () => {
     const keepGraph = {
       nodes: [

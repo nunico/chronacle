@@ -1,5 +1,7 @@
 import type { EntityGraph } from './commands';
 
+// Edge dedup key is direction-sensitive: "A->B:knows" ≠ "B->A:knows".
+// This matches the directed edges the backend returns (from_id is always the subject).
 const edgeKey = (e: EntityGraph['edges'][number]) =>
   `${e.from_id}->${e.to_id}:${e.rel_type}`;
 
