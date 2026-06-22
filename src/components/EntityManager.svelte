@@ -28,9 +28,11 @@
     onOpenIdConsumed?: () => void;
     /// Called when the user clicks the "Graph" button on an entity row.
     onViewGraph?: (node: GraphNode) => void;
+    /// Called when the user clicks a related entity in the Relationships section.
+    onOpenEntity?: (id: string, kind: string) => void;
   }
 
-  let { campaignId, kind, createNonce = 0, openId = null, onOpenIdConsumed, onViewGraph }: Props = $props();
+  let { campaignId, kind, createNonce = 0, openId = null, onOpenIdConsumed, onViewGraph, onOpenEntity }: Props = $props();
 
   const KIND_LABEL: Record<EntityKind, string> = {
     npc: 'NPC',
@@ -238,6 +240,7 @@
             showForm = false;
             formNode = null;
           }}
+          {onOpenEntity}
         />
       </div>
     {/if}

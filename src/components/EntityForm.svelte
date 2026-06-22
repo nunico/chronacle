@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { EntityKind, GraphNode, EntityInput, Session } from '../lib/commands';
+  import { getEntityRelations, type EntityKind, type GraphNode, type EntityInput, type Session, type RelatedEntity } from '../lib/commands';
   import WikiLinkEditor from './WikiLinkEditor.svelte';
 
   interface Props {
@@ -10,9 +10,10 @@
     oncancel?: () => void;
     sessions?: Session[]; // list of campaign sessions for event dropdown
     entityMap?: Map<string, { id: string; kind: string }>; // for wikilink autocomplete
+    onOpenEntity?: (id: string, kind: string) => void;
   }
 
-  let { kind, node = null, error = null, onsave, oncancel, sessions = [], entityMap = new Map() }: Props = $props();
+  let { kind, node = null, error = null, onsave, oncancel, sessions = [], entityMap = new Map(), onOpenEntity }: Props = $props();
 
   // Writable $derived: each field seeds from `node` and recomputes when a
   // different entity is selected, while remaining editable via bind:value
@@ -36,6 +37,37 @@
   let status = $derived(node?.status ?? '');
 
   let nameError = $state('');
+
+  // Relationships section — only fetched for existing (saved) entities.
+  let relations = $state<RelatedEntity[]>([]);
+
+  $effect(() => {
+    const currentId = node?.id;
+    const currentKind = kind;
+    if (!currentId) {
+      relations = [];
+      return;
+    }
+    getEntityRelations(currentId, currentKind).then(
+      (result) => { relations = result; },
+      (err) => {
+        // Log and degrade gracefully — never block the form
+        console.error('Failed to fetch entity relations:', err);
+        relations = [];
+      },
+    );
+  });
+
+  const KIND_LABEL: Record<string, string> = {
+    npc: 'NPC',
+    location: 'Location',
+    faction: 'Faction',
+    creature: 'Creature',
+    item: 'Item',
+    event: 'Event',
+    player_character: 'PC',
+    misc: 'Misc',
+  };
 
   function handleSubmit() {
     nameError = '';
@@ -159,6 +191,42 @@
     <button type="submit" class="btn-primary">{node ? 'Save' : 'Create'}</button>
     <button type="button" class="btn-ghost" onclick={() => oncancel?.()}>Cancel</button>
   </div>
+
+  {#if node?.id}
+    <div class="relationships-section">
+      <h3 class="relationships-heading">Relationships</h3>
+      {#if relations.length === 0}
+        <p class="relationships-empty">No relationships yet.</p>
+      {:else}
+        <ul class="relationships-list">
+          {#each relations as rel (rel.id + rel.direction + rel.rel_type)}
+            <li class="rel-row">
+              {#if onOpenEntity}
+                <button
+                  type="button"
+                  class="rel-row-btn"
+                  onclick={() => onOpenEntity(rel.id, rel.kind)}
+                  aria-label="Open {rel.name}"
+                >
+                  <span class="rel-direction">{rel.direction === 'outbound' ? '→' : '←'}</span>
+                  <span class="rel-name">{rel.name}</span>
+                  <span class="rel-kind">{KIND_LABEL[rel.kind] ?? rel.kind}</span>
+                  <span class="rel-type">{rel.rel_type}</span>
+                </button>
+              {:else}
+                <span class="rel-row-inner">
+                  <span class="rel-direction">{rel.direction === 'outbound' ? '→' : '←'}</span>
+                  <span class="rel-name">{rel.name}</span>
+                  <span class="rel-kind">{KIND_LABEL[rel.kind] ?? rel.kind}</span>
+                  <span class="rel-type">{rel.rel_type}</span>
+                </span>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+  {/if}
 </form>
 
 <style>
@@ -191,5 +259,98 @@
     border-radius: 6px;
     padding: 6px 16px;
     cursor: pointer;
+  }
+
+  /* ── Relationships section ─────────────────────────────────────────── */
+  .relationships-section {
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+    margin-top: 4px;
+  }
+  .relationships-heading {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--fg-3);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 8px;
+  }
+  .relationships-empty {
+    font-size: 0.85rem;
+    color: var(--fg-4, var(--fg-3));
+    margin: 0;
+    font-style: italic;
+  }
+  .relationships-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .rel-row {
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: var(--bg-panel-2);
+    overflow: hidden;
+  }
+  /* Shared inner layout for both interactive (button) and static (span) rows */
+  .rel-row-btn,
+  .rel-row-inner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    font-size: 0.85rem;
+    width: 100%;
+    text-align: left;
+  }
+  .rel-row-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: inherit;
+    font-family: inherit;
+  }
+  .rel-row-btn:hover {
+    background: var(--bg-inset, var(--bg-panel-2));
+  }
+  .rel-direction {
+    flex: 0 0 16px;
+    text-align: center;
+    color: var(--fg-3);
+    font-size: 0.9rem;
+  }
+  .rel-name {
+    flex: 1;
+    color: var(--fg-1);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rel-kind {
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    color: var(--fg-3);
+    background: var(--bg-panel, var(--bg-panel-2));
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .rel-type {
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    color: var(--violet-300, #a78bfa);
+    background: rgba(124, 92, 255, 0.1);
+    border-radius: 4px;
+    padding: 1px 6px;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

@@ -9,6 +9,7 @@ vi.mock('../lib/commands', () => ({
   updateEntity: vi.fn(),
   deleteEntity: vi.fn(),
   getSessions: vi.fn().mockResolvedValue([]),
+  getEntityRelations: vi.fn().mockResolvedValue([]),
 }));
 
 import * as commands from '../lib/commands';

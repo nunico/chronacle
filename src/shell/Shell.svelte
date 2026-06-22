@@ -608,6 +608,7 @@
         openId={pendingOpen && pendingOpen.kind === ENTITY_KIND_MAP[view.category] ? pendingOpen.id : null}
         onOpenIdConsumed={() => (pendingOpen = null)}
         onViewGraph={(n) => (graphFor = { id: n.id, kind: n.kind })}
+        onOpenEntity={(id, kind) => openEntity(id, kind as EntityKind)}
       />
     {:else if ENTITY_KIND_MAP[view.category]}
       <div class="no-campaign-msg">

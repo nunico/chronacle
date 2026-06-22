@@ -1,7 +1,15 @@
-import { render, screen, fireEvent } from '@testing-library/svelte';
-import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import EntityForm from './EntityForm.svelte';
-import type { EntityKind, GraphNode, Session } from '../lib/commands';
+import type { EntityKind, GraphNode, Session, RelatedEntity } from '../lib/commands';
+
+// Module-level mock: getEntityRelations defaults to [] so existing tests are
+// unaffected; individual tests override it as needed.
+vi.mock('../lib/commands', () => ({
+  getEntityRelations: vi.fn().mockResolvedValue([]),
+}));
+
+import * as commands from '../lib/commands';
 
 const mockNode = (overrides: Partial<GraphNode> = {}): GraphNode => ({
   id: 'abc',
@@ -33,6 +41,11 @@ const mockSession = (overrides: Partial<Session> = {}): Session => ({
 });
 
 describe('EntityForm', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(commands.getEntityRelations).mockResolvedValue([]);
+  });
+
   it('renders name field for any entity kind', () => {
     render(EntityForm, { props: { kind: 'npc' as EntityKind, node: null } });
     expect(screen.getByLabelText(/name/i)).toBeTruthy();
@@ -127,5 +140,81 @@ describe('EntityForm', () => {
     await fireEvent.submit(screen.getByRole('form'));
     expect(onSave).toHaveBeenCalledOnce();
     expect(onSave.mock.calls[0][0].sessionId).toBeNull();
+  });
+
+  // ── Relationships section ──────────────────────────────────────────────────
+
+  it('does not show the Relationships section when no node is set (create form)', () => {
+    render(EntityForm, { props: { kind: 'npc' as EntityKind, node: null } });
+    expect(screen.queryByText(/relationships/i)).toBeNull();
+    expect(commands.getEntityRelations).not.toHaveBeenCalled();
+  });
+
+  it('renders both outbound and inbound relations with names and rel_type visible', async () => {
+    const relations: RelatedEntity[] = [
+      { id: 'loc1', kind: 'location', name: 'Shadowhaven', rel_type: 'lives_in', direction: 'outbound' },
+      { id: 'fac1', kind: 'faction', name: 'Shadow Guild', rel_type: 'member_of', direction: 'inbound' },
+    ];
+    vi.mocked(commands.getEntityRelations).mockResolvedValue(relations);
+    const node = mockNode();
+    render(EntityForm, { props: { kind: 'npc' as EntityKind, node } });
+
+    await waitFor(() => {
+      expect(screen.getByText('Shadowhaven')).toBeTruthy();
+    });
+    expect(screen.getByText('Shadow Guild')).toBeTruthy();
+    expect(screen.getByText('lives_in')).toBeTruthy();
+    expect(screen.getByText('member_of')).toBeTruthy();
+    // Direction distinguishable: outbound → and inbound ←
+    const arrows = screen.getAllByText(/^[→←]$/);
+    expect(arrows.length).toBe(2);
+    const directions = arrows.map((el) => el.textContent);
+    expect(directions).toContain('→');
+    expect(directions).toContain('←');
+  });
+
+  it('shows the empty state when getEntityRelations returns []', async () => {
+    vi.mocked(commands.getEntityRelations).mockResolvedValue([]);
+    const node = mockNode();
+    render(EntityForm, { props: { kind: 'npc' as EntityKind, node } });
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /relationships/i })).toBeTruthy();
+    });
+    expect(screen.getByText(/no relationships yet/i)).toBeTruthy();
+  });
+
+  it('calls onOpenEntity with the related entity id and kind when a row is clicked', async () => {
+    const relations: RelatedEntity[] = [
+      { id: 'loc1', kind: 'location', name: 'Shadowhaven', rel_type: 'lives_in', direction: 'outbound' },
+    ];
+    vi.mocked(commands.getEntityRelations).mockResolvedValue(relations);
+    const onOpenEntity = vi.fn();
+    const node = mockNode();
+    render(EntityForm, { props: { kind: 'npc' as EntityKind, node, onOpenEntity } });
+
+    await waitFor(() => {
+      expect(screen.getByText('Shadowhaven')).toBeTruthy();
+    });
+    // When onOpenEntity is provided, a button wraps each row
+    const btn = screen.getByRole('button', { name: /open shadowhaven/i });
+    await fireEvent.click(btn);
+    expect(onOpenEntity).toHaveBeenCalledOnce();
+    expect(onOpenEntity).toHaveBeenCalledWith('loc1', 'location');
+  });
+
+  it('rows are non-interactive (no button) when onOpenEntity is not provided', async () => {
+    const relations: RelatedEntity[] = [
+      { id: 'loc1', kind: 'location', name: 'Shadowhaven', rel_type: 'lives_in', direction: 'outbound' },
+    ];
+    vi.mocked(commands.getEntityRelations).mockResolvedValue(relations);
+    const node = mockNode();
+    render(EntityForm, { props: { kind: 'npc' as EntityKind, node } });
+
+    await waitFor(() => {
+      expect(screen.getByText('Shadowhaven')).toBeTruthy();
+    });
+    // Without onOpenEntity, no button wraps the row content
+    expect(screen.queryByRole('button', { name: /open shadowhaven/i })).toBeNull();
   });
 });

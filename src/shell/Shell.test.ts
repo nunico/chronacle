@@ -52,6 +52,7 @@ vi.mock('../lib/commands', () => ({
   createEntity: vi.fn(),
   updateEntity: vi.fn(),
   deleteEntity: vi.fn(),
+  getEntityRelations: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('../lib/events', () => ({
