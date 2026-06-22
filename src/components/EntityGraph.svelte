@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import {
     forceSimulation, forceManyBody, forceLink, forceCenter, forceCollide,
-    type Simulation, type SimulationNodeDatum,
+    type Simulation, type SimulationNodeDatum, type SimulationLinkDatum,
   } from 'd3-force';
   import { getEntityGraph, type EntityGraph, type GraphNodeRef, type EntityKind } from '../lib/commands';
   import { kindColor } from '../lib/graph-colors';
@@ -23,16 +23,25 @@
 
   type SimNode = GraphNodeRef & SimulationNodeDatum;
   // d3-force mutates source/target from string ids to node objects after simulation starts.
-  interface SimLink { source: string | SimNode; target: string | SimNode; rel_type: string; }
+  interface SimLink extends SimulationLinkDatum<SimNode> { source: string | SimNode; target: string | SimNode; rel_type: string; }
 
-  let centerId = $state('');
+  // Initialized from entityId prop so the center node is sized correctly on first render.
+  let centerId = $state(entityId);
   // centerKind stored for future Task 9 re-center use; kept to avoid prop contract churn
   let centerKind = $state(''); // eslint-disable-line @typescript-eslint/no-unused-vars
   let nodes = $state<SimNode[]>([]);
   let links = $state<SimLink[]>([]);
   let loading = $state(true);
-  let sim: Simulation<SimNode, undefined> | null = null;
+  let sim: Simulation<SimNode, SimLink> | null = null;
   let tick = $state(0); // bumped each simulation tick to drive reactive re-render
+
+  // Re-derive node positions on every simulation tick so the SVG circles/labels
+  // follow the layout (d3-force mutates node objects in place, which Svelte's
+  // fine-grained reactivity does not observe — the `tick` counter is the signal).
+  const positionedNodes = $derived.by(() => {
+    void tick;
+    return nodes.map((n) => ({ ...n, x: n.x ?? 0, y: n.y ?? 0 }));
+  });
 
   onMount(() => void recenter(entityId, entityKind));
   onDestroy(() => sim?.stop());
@@ -56,7 +65,7 @@
     sim?.stop();
     nodes = g.nodes.map((n) => ({ ...n }));
     links = g.edges.map((e) => ({ source: e.from_id, target: e.to_id, rel_type: e.rel_type }));
-    sim = forceSimulation<SimNode>(nodes)
+    sim = forceSimulation<SimNode, SimLink>(nodes)
       .force('charge', forceManyBody().strength(-280))
       .force('center', forceCenter(width / 2, height / 2))
       .force('collide', forceCollide(28))
@@ -96,10 +105,10 @@
           class="edge-label">{l.rel_type}</text>
       {/if}
     {/each}
-    {#each nodes as n (n.id)}
+    {#each positionedNodes as n (n.id)}
       <g class="node" data-id={n.id} data-name={n.name}>
-        <circle cx={n.x ?? 0} cy={n.y ?? 0} r={n.id === centerId ? 16 : 10} fill={kindColor(n.kind)} />
-        <text x={n.x ?? 0} y={(n.y ?? 0) + 26} class="node-label" text-anchor="middle">{n.name}</text>
+        <circle cx={n.x} cy={n.y} r={n.id === centerId ? 16 : 10} fill={kindColor(n.kind)} />
+        <text x={n.x} y={n.y + 26} class="node-label" text-anchor="middle">{n.name}</text>
       </g>
     {/each}
   </svg>
