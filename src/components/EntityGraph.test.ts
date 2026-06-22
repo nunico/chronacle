@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, fireEvent } from '@testing-library/svelte';
 import EntityGraph from './EntityGraph.svelte';
 import * as commands from '../lib/commands';
 
@@ -34,5 +34,32 @@ describe('EntityGraph', () => {
     m.getEntityGraph.mockResolvedValueOnce({ nodes: [{ id: 'h', kind: 'npc', name: 'Hermit' }], edges: [] });
     render(EntityGraph, { entityId: 'h', entityKind: 'npc' });
     expect(await screen.findByTestId('graph-empty')).toBeTruthy();
+  });
+
+  it('re-centers when a neighbor node group is clicked', async () => {
+    const keepGraph = {
+      nodes: [
+        { id: 'keep', kind: 'location', name: 'The Keep' },
+        { id: 'town', kind: 'location', name: 'Town' },
+      ],
+      edges: [{ from_id: 'keep', from_kind: 'location', to_id: 'town', to_kind: 'location', rel_type: 'near', notes: null }],
+    };
+    m.getEntityGraph
+      .mockResolvedValueOnce(graph)        // initial: varin-centered
+      .mockResolvedValueOnce(keepGraph);   // after clicking The Keep node group
+
+    const { container } = render(EntityGraph, { entityId: 'varin', entityKind: 'npc' });
+
+    // Wait for initial render
+    await screen.findByText('The Keep');
+
+    // Click the node <g> element for "keep" (not the label, which would open entity)
+    const nodeGroup = container.querySelector('[data-id="keep"]') as Element;
+    expect(nodeGroup).toBeTruthy();
+    await fireEvent.click(nodeGroup);
+
+    // After re-center, Town should appear
+    expect(await screen.findByText('Town')).toBeTruthy();
+    expect(m.getEntityGraph).toHaveBeenCalledWith('keep', 'location', 1);
   });
 });
