@@ -181,10 +181,10 @@
       const dy = event.clientY - dragStartY;
       if (Math.abs(dx) > 5 || Math.abs(dy) > 5) wasDrag = true;
       // Map screen coords to graph coords: graph = (screen - pan) / zoom.
-      // Under semantic zoom the SVG transform is translate-only; all layout
-      // coordinates are stored in graph space and rendered as graphCoord * zoom.
-      // This inverse mapping remains correct: the node renders at fx*zoom + pan
-      // which equals the cursor's screen position.
+      // The SVG transform is translate(pan) scale(zoom); node groups are placed
+      // at graph coords and counter-scaled by 1/zoom for constant screen size.
+      // This inverse mapping stays correct: the node origin renders at fx*zoom + pan
+      // (graph coord scaled by parent zoom + pan offset) = cursor screen position.
       // Uses the bound svgEl reference instead of document.querySelector to avoid
       // a costly DOM traversal on every pointermove (60+ Hz).
       if (svgEl) {
@@ -311,65 +311,81 @@
     style="cursor: grab; display: block;"
   >
     <!--
-      Semantic zoom: only pan is applied in the SVG transform. Zoom changes the
-      DISTANCE between nodes by multiplying all graph coordinates by `zoom` at
-      render time (graphCoord * zoom). Node circles and text remain constant
-      pixel size and stay legible at all zoom levels.
+      Composited zoom transform: both pan and zoom live in the SVG transform so
+      the GPU composites the entire layer rather than repainting individual SVG
+      attributes. This eliminates the WebKit paint-invalidation race that caused
+      node circles and labels to appear at different positions within a single
+      frame (ghosting / flickering).
+
+      All children use RAW GRAPH coordinates — no `* zoom` anywhere in the markup.
 
       Coordinate mapping: screen = graphCoord * zoom + pan
       Inverse (used in drag): graphCoord = (screen - pan) / zoom
+
+      Node size is kept constant by counter-scaling each node group by 1/zoom:
+        net scale on node contents = zoom (parent) * (1/zoom) (node) = 1
+      while the node's POSITION scales with `zoom` so nodes spread apart on zoom-in.
+
+      Edges use vector-effect="non-scaling-stroke" to keep stroke width constant.
+      Edge labels are also wrapped in a 1/zoom counter-scale group at the midpoint.
     -->
-    <g transform={`translate(${pan.x},${pan.y})`}>
+    <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
       {#each links as l (`${linkEndId(l.source)}->${linkEndId(l.target)}`)}
         {@const a = nodeById(linkEndId(l.source))}
         {@const b = nodeById(linkEndId(l.target))}
         {#if a && b}
           <line
-            x1={(a.x ?? 0) * zoom}
-            y1={(a.y ?? 0) * zoom}
-            x2={(b.x ?? 0) * zoom}
-            y2={(b.y ?? 0) * zoom}
+            x1={a.x ?? 0}
+            y1={a.y ?? 0}
+            x2={b.x ?? 0}
+            y2={b.y ?? 0}
             class="edge"
+            vector-effect="non-scaling-stroke"
           />
-          <text
-            x={((a.x ?? 0) + (b.x ?? 0)) / 2 * zoom}
-            y={((a.y ?? 0) + (b.y ?? 0)) / 2 * zoom}
-            class="edge-label"
-          >{l.rel_type}</text>
+          <!-- Counter-scale the label at the midpoint so it stays constant screen size. -->
+          <g transform={`translate(${((a.x ?? 0) + (b.x ?? 0)) / 2},${((a.y ?? 0) + (b.y ?? 0)) / 2}) scale(${1 / zoom})`}>
+            <text x={0} y={0} class="edge-label">{l.rel_type}</text>
+          </g>
         {/if}
       {/each}
       {#each positionedNodes as n (n.id)}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!--
+          Node group is translated to graph coords; its contents are counter-scaled
+          so they appear at constant screen size. The group origin (0,0 in local
+          space) is the node center — circle is at cx=0,cy=0; offsets for label and
+          expand button are constant local pixels (not scaled by zoom).
+        -->
         <g
           class="node"
           data-id={n.id}
           data-name={n.name}
+          transform={`translate(${n.x},${n.y}) scale(${1 / zoom})`}
           style="cursor: pointer;"
           onpointerdown={(e) => onNodePointerDown(e, n.id)}
           onclick={(e) => onNodeClick(e, n.id)}
         >
-          <!-- Node circle: constant radius regardless of zoom — only position scales. -->
+          <!-- Node circle: cx/cy at local origin (the node center). -->
           <circle
-            cx={n.x * zoom}
-            cy={n.y * zoom}
+            cx={0}
+            cy={0}
             r={n.id === centerId ? 16 : 10}
             class={n.id === centerId ? 'node-circle node-circle--center' : 'node-circle'}
             fill={kindColor(n.kind)}
           />
-          <!-- Name label: clicking opens the entity, does NOT re-center.
-               Label offset (24/30 px) is a constant screen distance below the node. -->
+          <!-- Name label: offset below the node center in constant local px. -->
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <text
-            x={n.x * zoom}
-            y={n.y * zoom + (n.id === centerId ? 30 : 24)}
+            x={0}
+            y={n.id === centerId ? 30 : 24}
             class="node-label"
             text-anchor="middle"
             onpointerdown={(e) => e.stopPropagation()}
             onclick={(e) => { e.stopPropagation(); onOpenEntity?.(n); }}
             style="cursor: pointer;"
           >{n.name}</text>
-          <!-- Expand affordance: constant-size button offset in screen px from the node center. -->
+          <!-- Expand affordance: constant-size button at fixed local offset from node center. -->
           {#if n.id !== centerId}
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -382,14 +398,14 @@
             >
               <title>Expand neighbours</title>
               <circle
-                cx={n.x * zoom + 14}
-                cy={n.y * zoom - 14}
+                cx={14}
+                cy={-14}
                 r={9}
                 class="expand-circle"
               />
               <text
-                x={n.x * zoom + 14}
-                y={n.y * zoom - 14}
+                x={14}
+                y={-14}
                 class="expand-glyph"
                 text-anchor="middle"
                 dominant-baseline="central"
