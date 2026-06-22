@@ -235,7 +235,7 @@
 
 <div class="graph-wrap" data-testid="entity-graph">
   {#if onClose}
-    <button class="close" onclick={onClose} aria-label="Close graph">✕</button>
+    <button class="close" onclick={onClose} aria-label="Close graph" data-autofocus>✕</button>
   {/if}
   {#if loading}
     <p class="muted">Loading graph…</p>

@@ -32,4 +32,16 @@ describe('groupByEra', () => {
   it('returns an empty array for no events', () => {
     expect(groupByEra([])).toEqual([]);
   });
+
+  it('interleaved eras form separate groups to preserve sequence_index order', () => {
+    // A:Dawn, B:Dusk, C:Dawn — same era but non-consecutive → THREE groups,
+    // not two. This documents the intentional run-based (not merge-based) behavior:
+    // we never reorder events just to collapse era labels.
+    const ordered = [ev('A', 1, 'Dawn'), ev('B', 2, 'Dusk'), ev('C', 3, 'Dawn')];
+    const groups = groupByEra(ordered);
+    expect(groups.map((g) => g.era)).toEqual(['Dawn', 'Dusk', 'Dawn']);
+    expect(groups[0].events.map((e) => e.name)).toEqual(['A']);
+    expect(groups[1].events.map((e) => e.name)).toEqual(['B']);
+    expect(groups[2].events.map((e) => e.name)).toEqual(['C']);
+  });
 });

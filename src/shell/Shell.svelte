@@ -138,7 +138,7 @@
     // Don't fire while the GM is typing in a field.
     if (isEditableTarget(e.target)) return;
     // While a modal/picker owns the screen, let it have the keyboard.
-    if (switcherOpen || showPicker) return;
+    if (switcherOpen || showPicker || graphFor) return;
     // With the help overlay open, only `?` (toggle off) is live; Esc handled above.
     if (showHelp) {
       if (e.key === '?') {
@@ -629,7 +629,7 @@
   <Toast />
 
   {#if graphFor}
-    <div class="graph-overlay" role="dialog" aria-label="Entity relationships">
+    <div class="graph-overlay" role="dialog" aria-modal="true" aria-label="Entity relationships">
       <div class="graph-panel" use:modalBehavior={{ onClose: () => (graphFor = null) }}>
         <EntityGraph
           entityId={graphFor.id}

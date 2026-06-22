@@ -10,6 +10,12 @@ export interface EraGroup {
  * Events keep the order the backend returned (sequence_index, nulls last); this
  * only buckets consecutive same-era events. Events with `era == null` form a
  * trailing `era: null` group.
+ *
+ * IMPORTANT — run-based, not merge-based: two events sharing the same era label
+ * but separated by an event with a different era intentionally produce TWO
+ * separate groups for that era (e.g. [A:Dawn, B:Dusk, C:Dawn] → three groups).
+ * This preserves the canonical `sequence_index` ordering: we never reorder
+ * events just to merge era labels.
  */
 export function groupByEra(ordered: GraphNode[]): EraGroup[] {
   const groups: EraGroup[] = [];
