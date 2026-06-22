@@ -629,7 +629,15 @@
   <Toast />
 
   {#if graphFor}
-    <div class="graph-overlay" role="dialog" aria-modal="true" aria-label="Entity relationships">
+    <div
+      class="graph-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Entity relationships"
+      tabindex="-1"
+      onclick={(e) => { if (e.target === e.currentTarget) graphFor = null; }}
+      onkeydown={() => { /* Esc is handled by modalBehavior on the inner panel */ }}
+    >
       <div class="graph-panel" use:modalBehavior={{ onClose: () => (graphFor = null) }}>
         <EntityGraph
           entityId={graphFor.id}
@@ -977,13 +985,19 @@
     align-items: center;
     justify-content: center;
     z-index: 200;
+    cursor: default;
   }
   .graph-panel {
     background: var(--bg-panel);
     border: 1px solid var(--line-strong);
     border-radius: var(--r-lg);
-    box-shadow: var(--shadow-3);
+    box-shadow:
+      var(--shadow-3),
+      0 0 0 1px var(--line-faint) inset,
+      var(--glow-violet);
     padding: 12px;
     position: relative;
+    /* Prevent the backdrop click handler from firing when clicking the panel */
+    cursor: default;
   }
 </style>

@@ -211,12 +211,23 @@
     window.addEventListener('pointerup', onWindowPointerUp);
   }
 
-  // ── Wheel zoom ──────────────────────────────────────────────────────────────
+  // ── Wheel zoom (zoom-to-cursor) ─────────────────────────────────────────────
 
   function onWheel(event: WheelEvent) {
     event.preventDefault();
+    if (!svgEl) return;
+    const rect = svgEl.getBoundingClientRect();
+    const cx = event.clientX - rect.left;   // cursor in SVG pixel space
+    const cy = event.clientY - rect.top;
     const delta = event.deltaY > 0 ? 0.9 : 1.1;
-    zoom = Math.min(2.5, Math.max(0.4, zoom * delta));
+    const oldZoom = zoom;
+    const newZoom = Math.min(2.5, Math.max(0.4, oldZoom * delta));
+    // Keep the graph-space point under the cursor fixed.
+    pan = {
+      x: cx - (cx - pan.x) * (newZoom / oldZoom),
+      y: cy - (cy - pan.y) * (newZoom / oldZoom),
+    };
+    zoom = newZoom;
   }
 
   // ── Node click (re-center) — fires if it wasn't a drag ─────────────────────
@@ -235,7 +246,7 @@
 
 <div class="graph-wrap" data-testid="entity-graph">
   {#if onClose}
-    <button class="close" onclick={onClose} aria-label="Close graph" data-autofocus>✕</button>
+    <button class="close-btn" onclick={onClose} aria-label="Close graph" data-autofocus>✕</button>
   {/if}
   {#if loading}
     <p class="muted">Loading graph…</p>
@@ -278,28 +289,53 @@
           onpointerdown={(e) => onNodePointerDown(e, n.id)}
           onclick={(e) => onNodeClick(e, n.id)}
         >
-          <circle cx={n.x} cy={n.y} r={n.id === centerId ? 16 : 10} fill={kindColor(n.kind)} />
+          <!-- Node circle: center node gets accent ring + larger radius -->
+          <circle
+            cx={n.x}
+            cy={n.y}
+            r={n.id === centerId ? 16 : 10}
+            class={n.id === centerId ? 'node-circle node-circle--center' : 'node-circle'}
+            fill={kindColor(n.kind)}
+          />
           <!-- Name label: clicking opens the entity, does NOT re-center -->
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <text
             x={n.x}
-            y={n.y + 26}
+            y={n.y + (n.id === centerId ? 30 : 24)}
             class="node-label"
             text-anchor="middle"
             onpointerdown={(e) => e.stopPropagation()}
             onclick={(e) => { e.stopPropagation(); onOpenEntity?.(n); }}
             style="cursor: pointer;"
           >{n.name}</text>
-          <!-- Expand affordance: fetches neighbor graph and merges it in -->
-          <!-- svelte-ignore a11y_click_events_have_key_events -->
-          <text
-            x={n.x + (n.id === centerId ? 18 : 12)}
-            y={n.y - (n.id === centerId ? 14 : 8)}
-            class="expand-btn"
-            onpointerdown={(e) => e.stopPropagation()}
-            onclick={(e) => { e.stopPropagation(); void expand(n.id, n.kind); }}
-            style="cursor: pointer;"
-          >＋</text>
+          <!-- Expand affordance: proper circular button — larger hit target, branded styling.
+               Only rendered on non-center nodes (expanding center re-fetches the same graph). -->
+          {#if n.id !== centerId}
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <g
+              class="expand-btn"
+              aria-label="Expand neighbours"
+              onpointerdown={(e) => e.stopPropagation()}
+              onclick={(e) => { e.stopPropagation(); void expand(n.id, n.kind); }}
+              style="cursor: pointer;"
+            >
+              <title>Expand neighbours</title>
+              <circle
+                cx={n.x + 14}
+                cy={n.y - 14}
+                r={9}
+                class="expand-circle"
+              />
+              <text
+                x={n.x + 14}
+                y={n.y - 14}
+                class="expand-glyph"
+                text-anchor="middle"
+                dominant-baseline="central"
+              >＋</text>
+            </g>
+          {/if}
         </g>
       {/each}
     </g>
@@ -308,12 +344,109 @@
 
 <style>
   .graph-wrap { position: relative; }
-  .close { position: absolute; top: 8px; right: 8px; }
-  .edge { stroke: var(--line); stroke-width: 1.5; }
-  .edge-label { fill: var(--fg-3); font-size: 10px; text-anchor: middle; pointer-events: none; }
-  .node-label { fill: var(--fg-2); font-size: 11px; }
-  .node-label:hover { fill: var(--violet-400, #a78bfa); }
-  .expand-btn { fill: var(--fg-3); font-size: 13px; user-select: none; }
-  .expand-btn:hover { fill: var(--violet-400, #a78bfa); }
-  .muted { color: var(--fg-3); }
+
+  /* ── Close button ──────────────────────────────────────────────────────────── */
+  .close-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    background: var(--bg-panel-2);
+    color: var(--fg-3);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+    z-index: 1;
+  }
+  .close-btn:hover {
+    background: var(--bg-inset);
+    border-color: var(--line-glow);
+    color: var(--fg-1);
+  }
+  .close-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--glow-focus);
+  }
+
+  /* ── Edges ─────────────────────────────────────────────────────────────────── */
+  .edge {
+    stroke: var(--line-strong);
+    stroke-width: 1.5;
+  }
+  .edge-label {
+    fill: var(--fg-3);
+    font-size: 9px;
+    font-family: var(--font-mono);
+    text-anchor: middle;
+    pointer-events: none;
+    letter-spacing: 0.02em;
+  }
+
+  /* ── Node circles ──────────────────────────────────────────────────────────── */
+  .node-circle {
+    stroke: rgba(124, 148, 255, 0.35);
+    stroke-width: 1.5;
+    filter: drop-shadow(0 0 4px rgba(91, 120, 255, 0.25));
+  }
+  .node-circle--center {
+    stroke: var(--violet-400);
+    stroke-width: 2.5;
+    filter: drop-shadow(0 0 8px rgba(123, 92, 255, 0.55));
+  }
+
+  /* ── Node labels ───────────────────────────────────────────────────────────── */
+  .node-label {
+    fill: var(--fg-2);
+    font-size: 11px;
+    font-family: var(--font-sans);
+    font-weight: 500;
+    pointer-events: all;
+    /* Subtle halo for readability over edges */
+    paint-order: stroke fill;
+    stroke: var(--bg-panel);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+  }
+  .node-label:hover {
+    fill: var(--violet-400);
+  }
+
+  /* ── Expand button (circular affordance) ───────────────────────────────────── */
+  .expand-btn {
+    opacity: 0.5;
+    transition: opacity 0.15s;
+  }
+  .expand-btn:hover {
+    opacity: 1;
+  }
+  .expand-circle {
+    fill: var(--bg-panel-2);
+    stroke: var(--violet-400);
+    stroke-width: 1.5;
+  }
+  .expand-btn:hover .expand-circle {
+    fill: var(--violet-500);
+    stroke: var(--violet-300);
+    filter: drop-shadow(0 0 4px rgba(123, 92, 255, 0.6));
+  }
+  .expand-glyph {
+    fill: var(--fg-2);
+    font-size: 12px;
+    font-family: var(--font-sans);
+    pointer-events: none;
+    user-select: none;
+  }
+  .expand-btn:hover .expand-glyph {
+    fill: var(--fg-on-accent);
+  }
+
+  .muted { color: var(--fg-3); font-family: var(--font-sans); }
 </style>
