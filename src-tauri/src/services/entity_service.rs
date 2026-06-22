@@ -1086,10 +1086,13 @@ pub async fn get_entity_relations<C: surrealdb::Connection>(
                 direction: "outbound".to_string(),
             });
         } else {
-            // Center is `out` → inbound edge, other end is `in`.
-            if in_id == id && in_tb == kind {
-                continue; // self-loop (already handled above, but be safe)
-            }
+            // Center is `out` → inbound edge, other end is `in`. A true
+            // self-loop (in == out == center) is impossible here — it is caught
+            // by the first branch, since `in == kind:id` would be true.
+            debug_assert!(
+                !(in_id == id && in_tb == kind),
+                "self-loop should have been handled by the outbound branch"
+            );
             endpoints.push(OtherEndpoint {
                 table: in_tb,
                 other_id: in_id,

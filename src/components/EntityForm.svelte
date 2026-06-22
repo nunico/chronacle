@@ -48,14 +48,20 @@
       relations = [];
       return;
     }
+    // Guard against a stale in-flight fetch overwriting a newer entity's
+    // relations if the user switches entities mid-request.
+    let cancelled = false;
     getEntityRelations(currentId, currentKind).then(
-      (result) => { relations = result; },
+      (result) => { if (!cancelled) relations = result; },
       (err) => {
         // Log and degrade gracefully — never block the form
-        console.error('Failed to fetch entity relations:', err);
-        relations = [];
+        if (!cancelled) {
+          console.error('Failed to fetch entity relations:', err);
+          relations = [];
+        }
       },
     );
+    return () => { cancelled = true; };
   });
 
   const KIND_LABEL: Record<string, string> = {
