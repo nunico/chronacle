@@ -193,6 +193,16 @@ describe('EntityManager', () => {
     expect(onOpenIdConsumed).not.toHaveBeenCalled();
   });
 
+  it('calls onViewGraph with the entity when the Graph button is clicked', async () => {
+    vi.mocked(commands.getEntities).mockResolvedValue([mockNpc()]);
+    const onViewGraph = vi.fn();
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc', onViewGraph } });
+    await waitFor(() => screen.getByText('Torvin'));
+    const btn = screen.getByTitle('View relationships');
+    await fireEvent.click(btn);
+    expect(onViewGraph).toHaveBeenCalledWith(expect.objectContaining({ id: 'npc1' }));
+  });
+
   it('Escape closes the delete confirmation without deleting', async () => {
     vi.mocked(commands.getEntities).mockResolvedValue([mockNpc()]);
     render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });

@@ -30,6 +30,7 @@
   import SettingsView from '../views/SettingsView.svelte';
   import UploadProgress from '../UploadProgress.svelte';
   import EntityManager from '../components/EntityManager.svelte';
+  import EntityGraph from '../components/EntityGraph.svelte';
   import SessionLogView from '../views/SessionLogView.svelte';
   import TimelineView from '../views/TimelineView.svelte';
   import { findCategory, type NoteCategoryId } from './note-categories';
@@ -57,6 +58,7 @@
   ) as Record<EntityKind, NoteCategoryId>;
 
   let pendingOpen = $state<{ id: string; kind: EntityKind } | null>(null);
+  let graphFor = $state<{ id: string; kind: string } | null>(null);
 
   function openEntity(id: string, kind: EntityKind) {
     const cat = KIND_TO_CATEGORY[kind];
@@ -605,6 +607,7 @@
         createNonce={entityCreateNonce}
         openId={pendingOpen && pendingOpen.kind === ENTITY_KIND_MAP[view.category] ? pendingOpen.id : null}
         onOpenIdConsumed={() => (pendingOpen = null)}
+        onViewGraph={(n) => (graphFor = { id: n.id, kind: n.kind })}
       />
     {:else if ENTITY_KIND_MAP[view.category]}
       <div class="no-campaign-msg">
@@ -624,6 +627,22 @@
   </main>
 
   <Toast />
+
+  {#if graphFor}
+    <div class="graph-overlay" role="dialog" aria-label="Entity relationships">
+      <div class="graph-panel" use:modalBehavior={{ onClose: () => (graphFor = null) }}>
+        <EntityGraph
+          entityId={graphFor.id}
+          entityKind={graphFor.kind}
+          onClose={() => (graphFor = null)}
+          onOpenEntity={(n) => {
+            graphFor = null;
+            openEntity(n.id, n.kind as EntityKind);
+          }}
+        />
+      </div>
+    </div>
+  {/if}
 
   {#if showPicker}
     <div class="picker-overlay">
@@ -948,5 +967,23 @@
     color: var(--fg-3);
     font-family: var(--font-sans);
     font-size: 14px;
+  }
+  /* ── Entity relationship graph overlay ───────────────────────────────── */
+  .graph-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-scrim);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+  }
+  .graph-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-3);
+    padding: 12px;
+    position: relative;
   }
 </style>

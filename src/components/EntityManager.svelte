@@ -26,9 +26,11 @@
     /// Called immediately after the deep-link edit form is opened so the caller
     /// can clear openId and prevent the effect from re-firing on entity list mutations.
     onOpenIdConsumed?: () => void;
+    /// Called when the user clicks the "Graph" button on an entity row.
+    onViewGraph?: (node: GraphNode) => void;
   }
 
-  let { campaignId, kind, createNonce = 0, openId = null, onOpenIdConsumed }: Props = $props();
+  let { campaignId, kind, createNonce = 0, openId = null, onOpenIdConsumed, onViewGraph }: Props = $props();
 
   const KIND_LABEL: Record<EntityKind, string> = {
     npc: 'NPC',
@@ -197,6 +199,13 @@
           {#each entities as node (node.id)}
             <li class="entity-row" class:selected={formNode?.id === node.id}>
               <button class="entity-name" onclick={() => openEdit(node)}>{node.name}</button>
+              {#if onViewGraph}
+                <button
+                  class="btn-icon entity-graph-btn"
+                  title="View relationships"
+                  onclick={() => onViewGraph(node)}>Graph</button
+                >
+              {/if}
               <button
                 class="btn-icon delete"
                 aria-label="Delete {node.name}"
