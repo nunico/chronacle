@@ -18,6 +18,7 @@ vi.mock('../lib/commands', () => ({
   addProviderModel: vi.fn().mockResolvedValue(undefined),
   removeProviderModel: vi.fn().mockResolvedValue(undefined),
   reindexAllSources: vi.fn().mockResolvedValue(0),
+  resyncWikilinks: vi.fn().mockResolvedValue(0),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -114,5 +115,38 @@ describe('SettingsView', () => {
       expect(commands.updateSetting).toHaveBeenCalledTimes(4);
     });
     expect(commands.updateSetting).toHaveBeenCalledWith('llm_provider', expect.any(String));
+  });
+
+  it('renders the Rebuild relationship links button', async () => {
+    render(SettingsView);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /rebuild relationship links/i })).toBeTruthy();
+    });
+  });
+
+  it('calls resyncWikilinks and shows success feedback with the entity count', async () => {
+    vi.mocked(commands.resyncWikilinks).mockResolvedValue(42);
+    render(SettingsView);
+    const button = await screen.findByRole('button', { name: /rebuild relationship links/i });
+    await fireEvent.click(button);
+    await waitFor(() => {
+      expect(commands.resyncWikilinks).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/rebuilt links across 42 entities/i)).toBeTruthy();
+    });
+  });
+
+  it('shows an error message when resyncWikilinks rejects', async () => {
+    vi.mocked(commands.resyncWikilinks).mockRejectedValue(new Error('graph error'));
+    render(SettingsView);
+    const button = await screen.findByRole('button', { name: /rebuild relationship links/i });
+    await fireEvent.click(button);
+    await waitFor(() => {
+      expect(screen.getByText(/rebuild failed/i)).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/graph error/i)).toBeTruthy();
+    });
   });
 });

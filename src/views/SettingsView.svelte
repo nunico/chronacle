@@ -9,6 +9,7 @@
     addProviderModel,
     removeProviderModel,
     reindexAllSources,
+    resyncWikilinks,
     type CustomProvider,
     type CustomProviderModel,
     type ReindexProgress,
@@ -49,6 +50,11 @@
   let reindexError = $state<string | null>(null);
   let reindexedCount = $state<number | null>(null);
 
+  // Resync wikilinks state
+  let resyncing = $state(false);
+  let resyncError = $state<string | null>(null);
+  let resyncedCount = $state<number | null>(null);
+
   async function onReindexAll() {
     reindexing = true;
     reindexError = null;
@@ -66,6 +72,20 @@
       reindexing = false;
       reindexProgress = null;
       unlisten();
+    }
+  }
+
+  async function onResyncWikilinks() {
+    resyncing = true;
+    resyncError = null;
+    resyncedCount = null;
+    try {
+      const count = await resyncWikilinks();
+      resyncedCount = count;
+    } catch (e) {
+      resyncError = String(e);
+    } finally {
+      resyncing = false;
     }
   }
 
@@ -509,6 +529,23 @@
     {/if}
     {#if reindexedCount !== null && !reindexing}
       <div class="reindex-success">Re-indexed {reindexedCount} source(s).</div>
+    {/if}
+  </section>
+
+  <section class="config-section">
+    <h3>Relationship Graph</h3>
+    <p class="muted">
+      Re-scan every note's [[links]] and rebuild the relationship graph. Useful
+      after importing notes or for entities created before linking existed.
+    </p>
+    <button class="small-btn primary" disabled={resyncing} onclick={onResyncWikilinks}>
+      {resyncing ? 'Rebuilding…' : 'Rebuild relationship links'}
+    </button>
+    {#if resyncError}
+      <div class="reindex-error">Rebuild failed: {resyncError}</div>
+    {/if}
+    {#if resyncedCount !== null && !resyncing}
+      <div class="reindex-success">Rebuilt links across {resyncedCount} entities.</div>
     {/if}
   </section>
 
