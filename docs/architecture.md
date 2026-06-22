@@ -916,8 +916,8 @@ Milestone: "Run a full session, take notes on NPCs and events, ask a lore questi
 
 Goal: Production quality, power-user features.
 
-- [ ] Session log timeline view
-- [ ] Entity relationship graph (SurrealDB `relates_to` graph edges → visualisation)
+- [x] Session log timeline view
+- [x] Entity relationship graph (SurrealDB `relates_to` graph edges → visualisation)
 - [ ] Source enable/disable toggle per query
 - [ ] Searchable chat history (full-text search on `message.content`)
 - [ ] Export: session summary → markdown / PDF
