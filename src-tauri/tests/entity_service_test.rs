@@ -1,6 +1,6 @@
 use chronacle_lib::services::entity_service::{
-    create, delete, get_by_campaign, get_by_id, get_entity_graph, get_events_timeline, relate,
-    update, EntityError, EntityInput, EntityKind,
+    create, delete, get_by_campaign, get_by_id, get_entity_graph, get_entity_relations,
+    get_events_timeline, relate, update, EntityError, EntityInput, EntityKind,
 };
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
@@ -924,5 +924,231 @@ async fn get_entity_graph_rejects_unsafe_id() {
     assert!(
         matches!(err, EntityError::Validation { ref field, .. } if field == "id"),
         "expected Validation error on field 'id', got: {err:?}"
+    );
+}
+
+// ── Part A: forward-reference wikilink reconciliation ─────────────────────────
+
+/// When entity A already mentions [[Brother Bram]] in notes, and then "Brother
+/// Bram" is created AFTER, creating Bram must form an inbound edge A→Bram so
+/// the graph shows the relationship without requiring a manual re-save of A.
+#[tokio::test]
+async fn forward_reference_wikilink_reconciled_on_new_entity_create() {
+    let db = setup_db().await;
+    let campaign_id = create_campaign(&db).await;
+
+    // Step 1: create entity A with a forward reference to "Brother Bram"
+    let entity_a = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Sven".into(),
+            notes: Some("Will ally with [[Brother Bram]].".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // At this point "Brother Bram" doesn't exist, so no edge should be formed yet.
+    let graph_before = get_entity_graph(&db, &entity_a.id, "npc", 1).await.unwrap();
+    assert_eq!(
+        graph_before.edges.len(),
+        0,
+        "no edge expected before Bram is created"
+    );
+
+    // Step 2: NOW create "Brother Bram" in the same campaign
+    let bram = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Brother Bram".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // Step 3: the graph around A must now contain Bram as a neighbor with an edge
+    let graph = get_entity_graph(&db, &entity_a.id, "npc", 1).await.unwrap();
+
+    let bram_node = graph.nodes.iter().find(|n| n.name == "Brother Bram");
+    assert!(
+        bram_node.is_some(),
+        "Brother Bram should appear as a neighbor node in Sven's graph after being created"
+    );
+
+    let edge = graph
+        .edges
+        .iter()
+        .find(|e| e.from_id == entity_a.id && e.to_id == bram.id && e.rel_type == "mentioned");
+    assert!(
+        edge.is_some(),
+        "expected a 'mentioned' edge from Sven to Brother Bram, got edges: {:?}",
+        graph.edges
+    );
+}
+
+/// An entity whose notes do NOT mention the newly created entity must NOT get
+/// a spurious edge (no false positives from the inbound reconciliation).
+#[tokio::test]
+async fn forward_reference_reconciliation_no_false_positive() {
+    let db = setup_db().await;
+    let campaign_id = create_campaign(&db).await;
+
+    // Entity A has notes that do NOT mention "Ghost"
+    let entity_a = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Sven".into(),
+            notes: Some("Wanders the forest alone.".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // Create a new entity — must NOT trigger an edge from A to Ghost
+    let ghost = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Ghost".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let graph = get_entity_graph(&db, &entity_a.id, "npc", 1).await.unwrap();
+
+    assert!(
+        graph.edges.is_empty(),
+        "no edge should be created when notes do not mention the new entity; \
+         got edges: {:?}",
+        graph.edges
+    );
+    assert!(
+        !graph.nodes.iter().any(|n| n.id == ghost.id),
+        "Ghost should not appear as a neighbor of Sven"
+    );
+}
+
+// ── Part B: get_entity_relations ──────────────────────────────────────────────
+
+/// Center has one outbound edge (center→X, rel_type 'mentioned') and one
+/// inbound (Y→center, rel_type 'commands').  get_entity_relations must return
+/// both with correct direction, rel_type, and names, and must not include a
+/// self-loop.
+#[tokio::test]
+async fn get_entity_relations_returns_both_directions_with_correct_fields() {
+    let db = setup_db().await;
+    let campaign_id = create_campaign(&db).await;
+
+    let center = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Center".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let target_x = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Location,
+        EntityInput {
+            name: "The Vault".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let source_y = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Faction,
+        EntityInput {
+            name: "Iron Legion".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // center→target_x  (outbound from center)
+    relate(
+        &db,
+        &center.id,
+        "npc",
+        &target_x.id,
+        "location",
+        "mentioned",
+        None,
+    )
+    .await
+    .unwrap();
+
+    // source_y→center  (inbound to center)
+    relate(
+        &db,
+        &source_y.id,
+        "faction",
+        &center.id,
+        "npc",
+        "commands",
+        None,
+    )
+    .await
+    .unwrap();
+
+    let relations = get_entity_relations(&db, &center.id, "npc").await.unwrap();
+
+    assert_eq!(
+        relations.len(),
+        2,
+        "expected exactly 2 related entities, got: {relations:#?}"
+    );
+
+    // Find the outbound relation: center→The Vault
+    let outbound = relations
+        .iter()
+        .find(|r| r.name == "The Vault")
+        .expect("should have The Vault as related entity");
+    assert_eq!(outbound.direction, "outbound", "center→X must be outbound");
+    assert_eq!(outbound.rel_type, "mentioned");
+    assert_eq!(outbound.kind, "location");
+
+    // Find the inbound relation: Iron Legion→center
+    let inbound = relations
+        .iter()
+        .find(|r| r.name == "Iron Legion")
+        .expect("should have Iron Legion as related entity");
+    assert_eq!(inbound.direction, "inbound", "Y→center must be inbound");
+    assert_eq!(inbound.rel_type, "commands");
+    assert_eq!(inbound.kind, "faction");
+
+    // Self-loop sanity: center must not appear in its own relations list
+    assert!(
+        !relations.iter().any(|r| r.id == center.id),
+        "center must not appear in its own relations list"
     );
 }

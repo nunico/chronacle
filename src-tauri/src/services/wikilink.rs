@@ -57,6 +57,13 @@ struct EntityNameRow {
     name: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct EntityNotesRow {
+    id: Thing,
+    name: String,
+    notes: Option<String>,
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Parse `[[name]]` wikilinks from `notes`, resolve them against all entity
@@ -119,6 +126,92 @@ pub async fn parse_and_sync_wikilinks<C: surrealdb::Connection>(
     }
 
     Ok(matched_ids)
+}
+
+/// When a NEW entity is created, scan every existing in-scope entity whose
+/// `notes` already contains a `[[wikilink]]` matching `new_name` and create
+/// an inbound `relates_to` edge from that entity to the new one.
+///
+/// This reconciles "forward references" — notes written before the target
+/// entity existed — without requiring the author to re-save the source entity.
+///
+/// Scope rules mirror [`parse_and_sync_wikilinks`]:
+/// - Campaign scope: all entities in the campaign OR in subscribed collections.
+/// - Collection scope: all entities in the same collection only.
+///
+/// Self-links (where the source entity IS the new entity) are skipped.
+/// Duplicate edges are prevented via the same delete-then-relate pattern used
+/// in [`upsert_mentioned_edges`].
+pub async fn sync_inbound_wikilinks_for_new_entity<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    new_table: &str,
+    new_id: &str,
+    new_name: &str,
+    scope: WikilinkScope<'_>,
+) -> Result<(), WikilinkError> {
+    // Guard against injection through new entity identifiers.
+    validate_identifier(new_table)?;
+    validate_identifier(new_id)?;
+
+    // Fetch all in-scope entities with their notes.
+    let all_with_notes = query_all_entity_notes(db, &scope).await?;
+
+    let new_name_lower = new_name.trim().to_lowercase();
+    let new_full_id = format!("{new_table}:{new_id}");
+
+    for (source_full_id, _source_name, notes) in all_with_notes {
+        // Skip entities without notes or with empty notes.
+        let Some(notes_text) = notes else { continue };
+        if notes_text.is_empty() {
+            continue;
+        }
+
+        // Skip the new entity itself to avoid self-links.
+        if source_full_id == new_full_id {
+            continue;
+        }
+
+        // Check whether any [[wikilink]] in this entity's notes matches the new name.
+        let mentions_new = WIKILINK_RE
+            .captures_iter(&notes_text)
+            .any(|cap| cap[1].trim().to_lowercase() == new_name_lower);
+
+        if !mentions_new {
+            continue;
+        }
+
+        // There is a match: create an edge from this source entity to the new one.
+        let (src_table, src_id) = split_record_id(&source_full_id)?;
+
+        // Validate before interpolation into the query string.
+        validate_identifier(src_table)?;
+        validate_identifier(src_id)?;
+
+        // Delete any pre-existing edge to prevent duplicate edges.
+        let delete_query = format!(
+            "DELETE relates_to \
+             WHERE in = {src_table}:{src_id} \
+             AND out = {new_table}:{new_id} \
+             AND rel_type = 'mentioned'"
+        );
+        db.query(delete_query)
+            .await
+            .map_err(|e| WikilinkError::Database {
+                message: e.to_string(),
+            })?;
+
+        let relate_query = format!(
+            "RELATE {src_table}:{src_id}->relates_to->{new_table}:{new_id} \
+             SET rel_type = 'mentioned', notes = NULL, created_at = time::now()"
+        );
+        db.query(relate_query)
+            .await
+            .map_err(|e| WikilinkError::Database {
+                message: e.to_string(),
+            })?;
+    }
+
+    Ok(())
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
@@ -220,6 +313,80 @@ async fn query_all_entity_names<C: surrealdb::Connection>(
                 for row in rows {
                     let record_id = format!("{}:{}", row.id.tb, row.id.id.to_raw());
                     results.push((record_id, row.name));
+                }
+            }
+            Ok(results)
+        }
+    }
+}
+
+/// Query `id`, `name`, and `notes` from all 8 entity tables within the given scope.
+///
+/// Returns a `Vec` of `(full_record_id, name, notes)` triples.
+/// Uses the same scope WHERE clauses as [`query_all_entity_names`].
+async fn query_all_entity_notes<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    scope: &WikilinkScope<'_>,
+) -> Result<Vec<(String, String, Option<String>)>, WikilinkError> {
+    let mut query = String::new();
+
+    match scope {
+        WikilinkScope::Campaign { campaign_id } => {
+            for table in ENTITY_TABLES {
+                query.push_str(&format!(
+                    "SELECT id, name, notes FROM {table} \
+                     WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $campaign_id)) \
+                        OR id IN (SELECT VALUE out FROM in_collection \
+                                  WHERE in IN (SELECT VALUE out FROM subscribes_to \
+                                               WHERE in = type::thing('campaign', $campaign_id)));"
+                ));
+            }
+            let mut response = db
+                .query(query)
+                .bind(("campaign_id", (*campaign_id).to_owned()))
+                .await
+                .map_err(|e| WikilinkError::Database {
+                    message: e.to_string(),
+                })?;
+
+            let mut results: Vec<(String, String, Option<String>)> = Vec::new();
+            for i in 0..ENTITY_TABLES.len() {
+                let rows: Vec<EntityNotesRow> =
+                    response.take(i).map_err(|e| WikilinkError::Database {
+                        message: e.to_string(),
+                    })?;
+                for row in rows {
+                    let record_id = format!("{}:{}", row.id.tb, row.id.id.to_raw());
+                    results.push((record_id, row.name, row.notes));
+                }
+            }
+            Ok(results)
+        }
+
+        WikilinkScope::Collection { collection_id } => {
+            for table in ENTITY_TABLES {
+                query.push_str(&format!(
+                    "SELECT id, name, notes FROM {table} \
+                     WHERE id IN (SELECT VALUE out FROM in_collection WHERE in = type::thing('collection', $collection_id));"
+                ));
+            }
+            let mut response = db
+                .query(query)
+                .bind(("collection_id", (*collection_id).to_owned()))
+                .await
+                .map_err(|e| WikilinkError::Database {
+                    message: e.to_string(),
+                })?;
+
+            let mut results: Vec<(String, String, Option<String>)> = Vec::new();
+            for i in 0..ENTITY_TABLES.len() {
+                let rows: Vec<EntityNotesRow> =
+                    response.take(i).map_err(|e| WikilinkError::Database {
+                        message: e.to_string(),
+                    })?;
+                for row in rows {
+                    let record_id = format!("{}:{}", row.id.tb, row.id.id.to_raw());
+                    results.push((record_id, row.name, row.notes));
                 }
             }
             Ok(results)
