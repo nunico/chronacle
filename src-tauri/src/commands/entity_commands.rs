@@ -146,6 +146,14 @@ pub async fn relate_entities(
     .await
 }
 
+/// Re-run wikilink resolution over every existing entity in the database,
+/// turning stale forward-references into live `mentioned` edges now that all
+/// entities exist.  Returns the number of entities whose notes were processed.
+#[tauri::command]
+pub async fn resync_wikilinks(state: State<'_, Arc<AppState>>) -> Result<usize, EntityError> {
+    entity_service::resync_all_wikilinks(&state.db).await
+}
+
 /// Flat relationships list for an entity: both inbound and outbound edges
 /// resolved to named related entities.
 #[tauri::command]

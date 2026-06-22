@@ -622,3 +622,12 @@ export async function extractAllFromCampaign(campaignId: string): Promise<Extrac
 export async function cancelExtraction(): Promise<void> {
   return invoke('cancel_extraction');
 }
+
+/**
+ * Re-run wikilink resolution over every existing entity in the database.
+ * Forward references that never resolved at creation time become edges now that
+ * all entities exist. Returns the number of entities whose notes were processed.
+ */
+export async function resyncWikilinks(): Promise<number> {
+  return invoke<number>('resync_wikilinks');
+}

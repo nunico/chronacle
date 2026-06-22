@@ -257,6 +257,7 @@ pub async fn run() {
             commands::extract_entity_by_name,
             commands::extract_all_from_campaign,
             commands::cancel_extraction,
+            commands::resync_wikilinks,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");
