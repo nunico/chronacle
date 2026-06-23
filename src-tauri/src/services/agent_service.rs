@@ -166,9 +166,15 @@ pub async fn fetch_entity_context<C: Connection>(
         let col_filter: String = collection_ids
             .iter()
             .map(|cid| {
-                // Subquery form: find entity IDs via in_collection edges from the collection.
+                // Graph-traversal form: from the entity, walk back along the
+                // in_collection edge to its collection(s) and test membership.
+                // NOTE: a `id IN (SELECT ...)` subquery does NOT compose with the
+                // MTREE KNN operator (`embedding <|K|> $vec`) — the combination
+                // silently returns zero rows. The traversal form composes; the
+                // explicit-array form would too. See the regression test
+                // `fetch_entity_context_knn_over_collection_executes`.
                 let safe = cid.replace('\'', "\\'");
-                format!("id IN (SELECT VALUE out FROM in_collection WHERE in = type::thing('collection', '{safe}'))")
+                format!("<-in_collection<-collection CONTAINS type::thing('collection', '{safe}')")
             })
             .collect::<Vec<_>>()
             .join(" OR ");
@@ -190,10 +196,16 @@ pub async fn fetch_entity_context<C: Connection>(
                     .map(|f| f.to_string())
                     .collect::<Vec<_>>()
                     .join(",");
+                // KNN pattern (see providers/vector_store.rs): the `<|K|>`
+                // operator must live in WHERE to activate the index; ordering is
+                // by the computed distance. Putting `embedding <|K|> $vec` in
+                // ORDER BY is rejected by SurrealDB ("missing order idiom
+                // `embedding` in statement selection").
                 format!(
-                    "SELECT name, summary, notes FROM {table} \
-                     WHERE ({col_filter}) AND embedding IS NOT NONE \
-                     ORDER BY embedding <|10|> [{vec_str}] LIMIT 10"
+                    "SELECT name, summary, notes, vector::distance::knn() AS distance \
+                     FROM {table} \
+                     WHERE embedding <|10|> [{vec_str}] AND ({col_filter}) \
+                     ORDER BY distance ASC LIMIT 10"
                 )
             } else {
                 // Full scan fallback (no embedding provider / test paths).
@@ -1515,6 +1527,61 @@ mod tests {
         assert!(
             !result.contains("→"),
             "unexpected arrow when date_end is empty: {result}"
+        );
+    }
+
+    /// Regression test for the entity-context KNN query bug: the collection
+    /// branch built `ORDER BY embedding <|10|> $vec`, which SurrealDB rejects
+    /// with "Missing order idiom `embedding` in statement selection" because the
+    /// order idiom isn't in the projection. The KNN operator must live in WHERE
+    /// (to activate the MTREE index) and ordering must be by
+    /// `vector::distance::knn()`. Every other test passes `None` for the query
+    /// embedding, so none of them ever reached this branch.
+    #[tokio::test]
+    async fn fetch_entity_context_knn_over_collection_executes() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(&db).await.unwrap();
+
+        // 768-dim embeddings (matches the MTREE index dimension in the schema).
+        let embedding: Vec<f32> = (0..768).map(|i| (i as f32) * 0.001).collect();
+        let vec_str = embedding
+            .iter()
+            .map(|f| f.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+             created_at=time::now(), updated_at=time::now(); \
+             CREATE collection SET id='col1', name='Lore', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        // NPC linked to the collection (not the campaign) with an embedding so
+        // the KNN branch has a row to rank.
+        db.query(format!(
+            "CREATE npc SET id='npc1', name='Seraphine', summary='oracle', notes=NULL, \
+             embedding=[{vec_str}], embed_model='test', \
+             created_at=time::now(), updated_at=time::now(); \
+             LET $src = type::thing('collection','col1'); \
+             LET $dst = type::thing('npc','npc1'); \
+             RELATE $src->in_collection->$dst SET created_at = time::now()"
+        ))
+        .await
+        .unwrap();
+
+        // The buggy query failed to even parse; the assertion is that this
+        // returns Ok and surfaces the collection entity.
+        let result = fetch_entity_context(&db, "camp1", &["col1".to_string()], Some(&embedding))
+            .await
+            .expect("entity-context KNN query must be valid SurrealQL");
+        assert!(
+            result.contains("[npc] Seraphine"),
+            "collection entity missing from KNN result: {result}"
         );
     }
 }

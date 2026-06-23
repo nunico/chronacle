@@ -772,9 +772,10 @@ User query
 Query vector
   │
   ▼ SurrealDB vector search
-SELECT * FROM chunk
-  WHERE campaign = $active_campaign OR campaign IS NULL
-  ORDER BY embedding <|1|> $query_vector
+SELECT *, vector::distance::knn() AS distance FROM chunk
+  WHERE embedding <|20|> $query_vector
+    AND (campaign = $active_campaign OR campaign IS NULL)
+  ORDER BY distance ASC
   LIMIT 20
   │
   ▼ Top-8 chunks selected (ANN only — no cross-encoder until Phase 3)
@@ -784,6 +785,14 @@ Each carries: text, source name, page range, section heading
 ```
 
 **Note:** Cross-encoder reranking is deferred. Top-k ANN is evaluated against a test set of 50 real TTRPG queries in Phase 1. If retrieval recall@5 is below 70%, cross-encoder is added in Phase 3. If above 85%, it ships as-is.
+
+#### SurrealQL KNN pitfalls
+
+The MTREE KNN operator has two non-obvious constraints. Both are caught only at runtime (no compile-time query validation — see ADR-002):
+
+1. **KNN goes in `WHERE`, not `ORDER BY`.** `embedding <|K|> $vec` must live in the `WHERE` clause to activate the MTREE index; ordering is by the computed distance, selected as `vector::distance::knn() AS distance` and used as `ORDER BY distance ASC`. Writing `ORDER BY embedding <|K|> $vec` is rejected: *"Missing order idiom `embedding` in statement selection."*
+
+2. **KNN does not compose with an `id IN (subquery)` filter.** AND-ing `embedding <|K|> $vec` with `id IN (SELECT VALUE out FROM …)` **silently returns zero rows**. A field comparison (`collection IN [...]`), a graph-traversal predicate (`<-in_collection<-collection CONTAINS type::thing('collection','id')`), or an explicit-id array (`id IN [type::thing(...)]`) all compose correctly. Collection-scoped entity retrieval in `agent_service::fetch_entity_context` uses the graph-traversal form for this reason; regression test: `fetch_entity_context_knn_over_collection_executes`.
 
 ### System Prompt
 
