@@ -71,6 +71,118 @@ impl EntityKind {
     }
 }
 
+// ── Relationship type ──────────────────────────────────────────────────────────
+
+/// Canonical, finite vocabulary for `relates_to.rel_type`.
+///
+/// Both directions of each directional relationship are first-class variants so
+/// the LLM always has a fitting type for the direction the source text describes
+/// (no dropout). Inverse members normalize to their canonical counterpart via
+/// [`RelType::canonical`], which also reports whether the edge must be flipped.
+/// `Other` carries any unrecognised value verbatim — "unknown" is derived, not
+/// stored, so no migration is needed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelType {
+    // Directional — canonical direction.
+    Leads,
+    MemberOf,
+    LocatedIn,
+    Owns,
+    Serves,
+    Created,
+    ParentOf,
+    // Directional — inverse direction (normalize via `canonical()`).
+    LedBy,
+    HasMember,
+    Contains,
+    OwnedBy,
+    ServedBy,
+    CreatedBy,
+    ChildOf,
+    // Symmetric — direction irrelevant, self-inverse.
+    AlliedWith,
+    EnemyOf,
+    RelatedTo,
+    Knows,
+    // Catch-all for unrecognised LLM output (stored verbatim).
+    Other(String),
+}
+
+impl RelType {
+    /// Parse a raw `rel_type` string from the LLM. Infallible: unknown values
+    /// become `Other(raw)`. (Named `from_llm`, not `from_str`, to avoid clippy's
+    /// `should_implement_trait` lint on an infallible parser.)
+    pub fn from_llm(raw: &str) -> Self {
+        match raw {
+            "leads" => Self::Leads,
+            "member_of" => Self::MemberOf,
+            "located_in" => Self::LocatedIn,
+            "owns" => Self::Owns,
+            "serves" => Self::Serves,
+            "created" => Self::Created,
+            "parent_of" => Self::ParentOf,
+            "led_by" => Self::LedBy,
+            "has_member" => Self::HasMember,
+            "contains" => Self::Contains,
+            "owned_by" => Self::OwnedBy,
+            "served_by" => Self::ServedBy,
+            "created_by" => Self::CreatedBy,
+            "child_of" => Self::ChildOf,
+            "allied_with" => Self::AlliedWith,
+            "enemy_of" => Self::EnemyOf,
+            "related_to" => Self::RelatedTo,
+            "knows" => Self::Knows,
+            other => Self::Other(other.to_string()),
+        }
+    }
+
+    /// Stable snake_case key for known variants; the raw string for `Other`.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Leads => "leads",
+            Self::MemberOf => "member_of",
+            Self::LocatedIn => "located_in",
+            Self::Owns => "owns",
+            Self::Serves => "serves",
+            Self::Created => "created",
+            Self::ParentOf => "parent_of",
+            Self::LedBy => "led_by",
+            Self::HasMember => "has_member",
+            Self::Contains => "contains",
+            Self::OwnedBy => "owned_by",
+            Self::ServedBy => "served_by",
+            Self::CreatedBy => "created_by",
+            Self::ChildOf => "child_of",
+            Self::AlliedWith => "allied_with",
+            Self::EnemyOf => "enemy_of",
+            Self::RelatedTo => "related_to",
+            Self::Knows => "knows",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+
+    /// True for any known variant; false only for `Other`.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Other(_))
+    }
+
+    /// Normalize to canonical direction. Returns `(canonical_variant, flip)`:
+    /// when `flip` is true the caller must swap the edge's `in`/`out` endpoints.
+    /// Canonical and symmetric variants (and `Other`) return `(self, false)`.
+    pub fn canonical(&self) -> (RelType, bool) {
+        match self {
+            Self::LedBy => (Self::Leads, true),
+            Self::HasMember => (Self::MemberOf, true),
+            Self::Contains => (Self::LocatedIn, true),
+            Self::OwnedBy => (Self::Owns, true),
+            Self::ServedBy => (Self::Serves, true),
+            Self::CreatedBy => (Self::Created, true),
+            Self::ChildOf => (Self::ParentOf, true),
+            other => (other.clone(), false),
+        }
+    }
+}
+
 // ── SELECT alias clause ───────────────────────────────────────────────────────
 
 /// Appended to every SELECT that needs to populate `campaign` and `collection`
@@ -1310,6 +1422,82 @@ mod tests {
     fn entity_kind_from_table_unknown_returns_invalid_kind() {
         let err = EntityKind::from_table("goblin").unwrap_err();
         assert!(matches!(err, EntityError::InvalidKind { kind } if kind == "goblin"));
+    }
+
+    #[test]
+    fn rel_type_known_variants_roundtrip() {
+        for key in [
+            "leads",
+            "member_of",
+            "located_in",
+            "owns",
+            "serves",
+            "created",
+            "parent_of",
+            "led_by",
+            "has_member",
+            "contains",
+            "owned_by",
+            "served_by",
+            "created_by",
+            "child_of",
+            "allied_with",
+            "enemy_of",
+            "related_to",
+            "knows",
+        ] {
+            let rt = RelType::from_llm(key);
+            assert_eq!(rt.as_str(), key, "{key} must round-trip");
+            assert!(rt.is_known(), "{key} must be known");
+        }
+    }
+
+    #[test]
+    fn rel_type_unknown_becomes_other_and_is_preserved() {
+        let rt = RelType::from_llm("secretly_betrays");
+        assert_eq!(rt, RelType::Other("secretly_betrays".to_string()));
+        assert_eq!(rt.as_str(), "secretly_betrays");
+        assert!(!rt.is_known());
+        let (canon, flip) = rt.canonical();
+        assert_eq!(canon, RelType::Other("secretly_betrays".to_string()));
+        assert!(!flip);
+        // Empty rel_type is a plausible degenerate LLM output: it must fall to
+        // Other(""), never be treated as a known sentinel.
+        assert_eq!(RelType::from_llm(""), RelType::Other(String::new()));
+    }
+
+    #[test]
+    fn rel_type_inverse_normalizes_to_canonical_with_flip() {
+        let cases = [
+            ("led_by", "leads"),
+            ("has_member", "member_of"),
+            ("contains", "located_in"),
+            ("owned_by", "owns"),
+            ("served_by", "serves"),
+            ("created_by", "created"),
+            ("child_of", "parent_of"),
+        ];
+        for (inverse, canonical) in cases {
+            let (canon, flip) = RelType::from_llm(inverse).canonical();
+            assert_eq!(canon.as_str(), canonical, "{inverse} -> {canonical}");
+            assert!(flip, "{inverse} must flip");
+        }
+    }
+
+    #[test]
+    fn rel_type_canonical_and_symmetric_do_not_flip() {
+        for key in [
+            "leads",
+            "member_of",
+            "allied_with",
+            "enemy_of",
+            "related_to",
+            "knows",
+        ] {
+            let (canon, flip) = RelType::from_llm(key).canonical();
+            assert_eq!(canon.as_str(), key);
+            assert!(!flip, "{key} must not flip");
+        }
     }
 
     #[test]
