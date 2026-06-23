@@ -13,7 +13,7 @@ use surrealdb::Connection;
 use crate::providers::embedding::EmbeddingProvider;
 use crate::providers::llm_provider::{ChatMessage, LlmProvider};
 use crate::providers::vector_store::VectorStore;
-use crate::services::entity_service::{self, EntityInput, EntityKind, GraphNode};
+use crate::services::entity_service::{self, EntityInput, EntityKind, GraphNode, RelType};
 
 // ── Error ─────────────────────────────────────────────────────────────────────
 
@@ -405,13 +405,32 @@ async fn persist_batch<C: Connection>(
                 continue;
             }
 
+            // Normalize to canonical direction: inverse rel_types (e.g. "led_by")
+            // flip the edge so storage holds only canonical keys; "Other" values
+            // are stored verbatim, unflipped.
+            let (canonical, flip) = RelType::from_llm(&rel.rel_type).canonical();
+            let (from_id, from_kind, to_id, to_kind) = if flip {
+                (
+                    &rel_node.id,
+                    &rel_node.kind,
+                    &origin_node.id,
+                    &origin_node.kind,
+                )
+            } else {
+                (
+                    &origin_node.id,
+                    &origin_node.kind,
+                    &rel_node.id,
+                    &rel_node.kind,
+                )
+            };
             let result = entity_service::relate(
                 db,
-                &origin_node.id,
-                &origin_node.kind,
-                &rel_node.id,
-                &rel_node.kind,
-                &rel.rel_type,
+                from_id,
+                from_kind,
+                to_id,
+                to_kind,
+                canonical.as_str(),
                 None,
             )
             .await;
@@ -419,7 +438,7 @@ async fn persist_batch<C: Connection>(
                 Ok(_) => relations_created += 1,
                 Err(e) => eprintln!(
                     "extraction: failed to relate {} -> {} ({}): {e}",
-                    origin_node.name, rel_node.name, rel.rel_type
+                    origin_node.name, rel_node.name, canonical.as_str()
                 ),
             }
         }
@@ -1062,6 +1081,72 @@ mod tests {
         }
         let counts: Vec<C> = resp.take(0).unwrap();
         assert_eq!(counts.first().map(|c| c.count).unwrap_or(0), 2);
+    }
+
+    #[tokio::test]
+    async fn extract_normalizes_inverse_rel_type_and_preserves_unknown() {
+        let (db, col_id) = setup_db_with_collection().await;
+
+        // Varn (npc) "led_by" Iron Fist (faction)  -> canonical: Iron Fist leads Varn (flipped)
+        // Varn (npc) "betrays" Dark Pact (faction)  -> not in vocab: Other, stored verbatim, not flipped
+        let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+            response: r#"{
+            "entities": [{
+                "name": "Commander Varn",
+                "kind": "npc",
+                "summary": "Leader.",
+                "notes": null,
+                "relations": [
+                    {"name": "The Iron Fist", "kind": "faction", "rel_type": "led_by", "summary": "Militia.", "notes": null},
+                    {"name": "The Dark Pact", "kind": "faction", "rel_type": "betrays", "summary": "A pact.", "notes": null}
+                ]
+            }]
+        }"#
+            .to_string(),
+        });
+        let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+
+        extract_from_collection(&db, &llm, &embed, &col_id, |_| {})
+            .await
+            .unwrap();
+
+        #[derive(serde::Deserialize)]
+        struct Edge {
+            #[serde(rename = "in")]
+            in_thing: surrealdb::sql::Thing,
+            #[serde(rename = "out")]
+            out_thing: surrealdb::sql::Thing,
+            rel_type: String,
+        }
+        let mut resp = db
+            .query("SELECT in, out, rel_type FROM relates_to")
+            .await
+            .unwrap();
+        let edges: Vec<Edge> = resp.take(0).unwrap();
+        assert_eq!(edges.len(), 2, "exactly the two relations should be persisted");
+
+        let leads = edges
+            .iter()
+            .find(|e| e.rel_type == "leads")
+            .expect("inverse 'led_by' must normalize to canonical 'leads'");
+        assert_eq!(
+            leads.in_thing.tb, "faction",
+            "edge must be flipped: faction is 'in'"
+        );
+        assert_eq!(
+            leads.out_thing.tb, "npc",
+            "edge must be flipped: npc is 'out'"
+        );
+
+        let betrays = edges
+            .iter()
+            .find(|e| e.rel_type == "betrays")
+            .expect("unknown 'betrays' must be stored verbatim");
+        assert_eq!(
+            betrays.in_thing.tb, "npc",
+            "unknown edge keeps original direction"
+        );
+        assert_eq!(betrays.out_thing.tb, "faction");
     }
 
     #[tokio::test]
