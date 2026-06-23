@@ -14,9 +14,14 @@ const DRIVER_URL = `http://127.0.0.1:${DRIVER_PORT}/`;
 
 /** Absolute path to the built release binary the driver should launch. */
 export function appBinary() {
-  const bin = fileURLToPath(
-    new URL('../../../src-tauri/target/release/chronacle', import.meta.url),
-  );
+  // `src-tauri` is a workspace member, so the build output lands in the
+  // workspace-root `target/`, not `src-tauri/target/`. Honor CARGO_TARGET_DIR
+  // when set, otherwise default to the repo-root target dir.
+  const repoRoot = new URL('../../../', import.meta.url);
+  const targetDir = process.env.CARGO_TARGET_DIR
+    ? new URL('release/chronacle', `file://${process.env.CARGO_TARGET_DIR}/`)
+    : new URL('target/release/chronacle', repoRoot);
+  const bin = fileURLToPath(targetDir);
   if (!existsSync(bin)) {
     throw new Error(
       `Built app not found at ${bin}. Run \`pnpm tauri build --debug\` (or a ` +
