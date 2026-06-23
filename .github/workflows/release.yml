@@ -47,7 +47,7 @@ jobs:
           node-version: 'lts/*'
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Install frontend deps
         run: pnpm install --config.minimum-release-age=0
@@ -112,7 +112,7 @@ jobs:
           node-version: 'lts/*'
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Install frontend deps
         run: pnpm install --config.minimum-release-age=0
