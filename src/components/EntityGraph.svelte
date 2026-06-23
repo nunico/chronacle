@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import {
     forceSimulation, forceManyBody, forceLink, forceCenter, forceCollide,
     type Simulation, type SimulationNodeDatum, type SimulationLinkDatum,
@@ -20,8 +20,10 @@
   // d3-force mutates source/target from string ids to node objects after simulation starts.
   interface SimLink extends SimulationLinkDatum<SimNode> { source: string | SimNode; target: string | SimNode; rel_type: string; }
 
-  // Initialized from entityId prop so the center node is sized correctly on first render.
-  let centerId = $state(entityId);
+  // Seeded once from the entityId prop so the center node is sized correctly on first
+  // render; thereafter centerId diverges as the user re-centers the graph. untrack makes
+  // the one-time capture explicit (silences Svelte's state_referenced_locally warning).
+  let centerId = $state(untrack(() => entityId));
   let nodes = $state<SimNode[]>([]);
   let links = $state<SimLink[]>([]);
   let loading = $state(true);
