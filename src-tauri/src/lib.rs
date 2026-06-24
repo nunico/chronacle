@@ -116,24 +116,38 @@ pub async fn run() {
     let blob_store: Arc<dyn providers::blob_store::BlobStore> =
         Arc::new(providers::blob_store::LocalFileStore::new(pdfs_dir));
 
-    // Try to initialize fastembed; fall back to mock if model not cached yet.
+    // Initialise fastembed only when the model is ALREADY cached. fastembed's
+    // `try_new` downloads the model synchronously on a cache miss, which would
+    // block the main thread — and therefore the Tauri window — for the entire
+    // (hundreds-of-MB) download. When uncached, start with the mock placeholder
+    // and let the UI's download screen drive `download_embedding_model`, which
+    // hot-swaps the real provider in when it completes.
+    let embedding_cache_dir = providers::embedding::FastEmbedProvider::cache_dir(&data_dir);
     let embedding_provider: Arc<dyn providers::embedding::EmbeddingProvider> =
-        match providers::embedding::FastEmbedProvider::try_new(None) {
-            Ok(p) => {
-                eprintln!(
-                    "Embedding model '{}' ready ({} dim)",
-                    p.model_name(),
-                    p.dimension()
-                );
-                Arc::new(p)
+        if providers::embedding::FastEmbedProvider::is_cached(&embedding_cache_dir) {
+            match providers::embedding::FastEmbedProvider::try_new(Some(&embedding_cache_dir)) {
+                Ok(p) => {
+                    eprintln!(
+                        "Embedding model '{}' ready ({} dim)",
+                        p.model_name(),
+                        p.dimension()
+                    );
+                    Arc::new(p)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "Embedding model cached but failed to load ({e}) — \
+                         starting with mock placeholder."
+                    );
+                    Arc::new(providers::embedding::MockEmbeddingProvider::new(768))
+                }
             }
-            Err(e) => {
-                eprintln!(
-                    "Embedding model not cached — starting with mock placeholder ({e}). \
-                     Use the download screen to download the model."
-                );
-                Arc::new(providers::embedding::MockEmbeddingProvider::new(768))
-            }
+        } else {
+            eprintln!(
+                "Embedding model not cached — starting with mock placeholder. \
+                 Use the download screen to download the model."
+            );
+            Arc::new(providers::embedding::MockEmbeddingProvider::new(768))
         };
 
     // Construct the LLM provider from persisted settings, falling back to
