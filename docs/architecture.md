@@ -101,6 +101,20 @@ enforced inside `FastEmbedProvider::embed_documents()` and
 prefixes silently degrade retrieval recall (the failure mode that motivated this
 change — see `docs/superpowers/plans/2026-05-31-rag-quality-improvements.md`).
 
+**ONNX Runtime provisioning.** `fastembed` is built with the `ort-load-dynamic`
+feature, so ONNX Runtime is loaded from a dynamic library at runtime rather than
+linked. `build.rs` downloads the matching ONNX Runtime binary (pinned to the
+version `ort-sys` expects — currently **1.24.2**) for the build target into
+`src-tauri/resources/onnxruntime/`, mirroring the pdfium provisioning. Tauri
+bundles it via `bundle.resources`; `embedding.rs::ensure_ort_dylib_path()`
+resolves the bundled library and sets `ORT_DYLIB_PATH` before the first session
+is created (dev resolves via `CARGO_MANIFEST_DIR`, bundled via the executable's
+resource dir). **Without this, every `FastEmbedProvider::try_new` fails at ONNX
+session creation and the app silently falls back to the mock provider.** Supported
+targets: macOS arm64, Linux x86_64/aarch64, Windows x86_64/aarch64. Microsoft
+publishes no macOS x86_64 build for 1.24, so local embeddings are unavailable on
+Intel Macs (the cloud embedding override remains).
+
 ---
 
 ## ADR-004: LLM Abstraction — Unified Provider Interface
@@ -974,7 +988,8 @@ Goal: Deploy backend as a server; access from mobile.
 | Desktop app framework | `tauri` 2.x |
 | Unified store (relational + vector + graph) | `surrealdb` (embedded, `kv-rocksdb` feature) |
 | PDF text extraction | `pdfium-render` |
-| Local embeddings | `fastembed` |
+| Local embeddings | `fastembed` (ONNX Runtime via `ort-load-dynamic`) |
+| Native-lib fetch at build time (pdfium, ONNX Runtime) | `reqwest` (blocking) + `flate2` + `tar` + `zip` (build-deps) |
 | OpenAI LLM | `async-openai` |
 | HTTP client (Anthropic, Ollama) | `reqwest` |
 | Async runtime | `tokio` |

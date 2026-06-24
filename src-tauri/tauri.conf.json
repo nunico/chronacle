@@ -36,7 +36,8 @@
 			"icons/icon.ico"
 		],
 		"resources": [
-			"resources/pdfium/**/*"
+			"resources/pdfium/**/*",
+			"resources/onnxruntime/**/*"
 		]
 	}
 }

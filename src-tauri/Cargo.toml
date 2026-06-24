@@ -39,6 +39,8 @@ tauri-build = { version = "2", features = [] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 flate2 = "1"
 tar = "0.4"
+# Windows ONNX Runtime is distributed as a .zip; macOS/Linux use .tar.gz.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 mockall = "0.13"

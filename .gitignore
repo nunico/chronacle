@@ -39,6 +39,10 @@ src-tauri/.fastembed_cache/
 src-tauri/resources/pdfium/*
 !src-tauri/resources/pdfium/.gitkeep
 
+# ── ONNX Runtime binaries (downloaded by build.rs) ───────────────────
+src-tauri/resources/onnxruntime/*
+!src-tauri/resources/onnxruntime/.gitkeep
+
 /.crew/
 /.crew
 !.crew/artifacts/

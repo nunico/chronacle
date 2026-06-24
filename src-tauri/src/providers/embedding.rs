@@ -27,6 +27,69 @@ pub const MODEL_FILES: &[(&str, &str)] = &[
 /// Subdirectory of the cache dir where hf-hub stores the model data.
 const HF_HUB_MODEL_DIR: &str = "models--nomic-ai--nomic-embed-text-v1.5";
 
+/// Platform-specific filename of the bundled ONNX Runtime dynamic library.
+///
+/// `build.rs` downloads the correct binary for the target into
+/// `resources/onnxruntime/<this name>` and Tauri bundles it as a resource.
+const ORT_DYLIB_NAME: &str = if cfg!(target_os = "macos") {
+    "libonnxruntime.dylib"
+} else if cfg!(target_os = "windows") {
+    "onnxruntime.dll"
+} else {
+    "libonnxruntime.so"
+};
+
+/// Locate the bundled ONNX Runtime dynamic library.
+///
+/// `fastembed` is built with the `ort-load-dynamic` feature, so ONNX Runtime is
+/// loaded at runtime rather than linked. Mirrors `pdfium_library_path()` in
+/// `lib.rs`: resolve via `CARGO_MANIFEST_DIR` in dev, and via the executable's
+/// resource directory in a bundled app.
+fn onnxruntime_library_path() -> Option<std::path::PathBuf> {
+    // Dev: <manifest>/resources/onnxruntime/<lib>
+    let dev = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources/onnxruntime")
+        .join(ORT_DYLIB_NAME);
+    if dev.exists() {
+        return Some(dev);
+    }
+    // Bundled app: <exe>/../Resources/resources/onnxruntime/<lib> on macOS,
+    // <exe>/resources/onnxruntime/<lib> elsewhere.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let mac = exe_dir
+                .join("../Resources/resources/onnxruntime")
+                .join(ORT_DYLIB_NAME);
+            if mac.exists() {
+                return Some(mac);
+            }
+            let other = exe_dir.join("resources/onnxruntime").join(ORT_DYLIB_NAME);
+            if other.exists() {
+                return Some(other);
+            }
+        }
+    }
+    None
+}
+
+/// Point `ort` at the bundled ONNX Runtime library before any session is built.
+///
+/// `ort` reads `ORT_DYLIB_PATH` once, lazily, when the first inference session is
+/// created. We set it from the bundled resource unless the caller already
+/// provided one (e.g. a developer override). Without this, `ort` cannot find a
+/// dynamic library and every `try_new` fails at session creation. Safe to call
+/// repeatedly — it is a no-op once the variable is set.
+fn ensure_ort_dylib_path() {
+    if std::env::var_os("ORT_DYLIB_PATH").is_some() {
+        return;
+    }
+    if let Some(path) = onnxruntime_library_path() {
+        // Edition 2021: `set_var` is safe. Called at startup before worker
+        // threads touch the environment.
+        std::env::set_var("ORT_DYLIB_PATH", path);
+    }
+}
+
 // ── Errors ───────────────────────────────────────────────────────────
 
 /// Errors from the embedding provider.
@@ -88,6 +151,7 @@ impl FastEmbedProvider {
     /// (expected structure: `{cache_dir}/models--nomic-ai--nomic-embed-text-v1.5/...`).
     /// When `None`, the default hf-hub cache is used (`~/.cache/huggingface/`).
     pub fn try_new(cache_dir: Option<&std::path::Path>) -> Result<Self, EmbeddingError> {
+        ensure_ort_dylib_path();
         let model_kind = EmbeddingModel::NomicEmbedTextV15;
         let dim = Self::model_dimension(&model_kind);
         let name = Self::model_to_name(&model_kind);
@@ -109,6 +173,7 @@ impl FastEmbedProvider {
 
     /// Try to create from the small test model (all-MiniLM-L6-v2, ~80 MB).
     pub fn try_new_small() -> Result<Self, EmbeddingError> {
+        ensure_ort_dylib_path();
         let model_kind = EmbeddingModel::AllMiniLML6V2;
         let dim = Self::model_dimension(&model_kind);
         let name = Self::model_to_name(&model_kind);
@@ -323,6 +388,17 @@ pub async fn check_embedding_model_consistency<C: surrealdb::Connection>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ort_dylib_name_matches_target_platform() {
+        if cfg!(target_os = "macos") {
+            assert!(ORT_DYLIB_NAME.ends_with(".dylib"));
+        } else if cfg!(target_os = "windows") {
+            assert!(ORT_DYLIB_NAME.ends_with(".dll"));
+        } else {
+            assert!(ORT_DYLIB_NAME.ends_with(".so"));
+        }
+    }
 
     #[tokio::test]
     async fn test_mock_embed_query_returns_correct_dims() {
