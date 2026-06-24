@@ -13,6 +13,16 @@
   let totalBytes = $state(0);
   let error = $state('');
 
+  // Guards against firing onModelReady twice (once from the terminal
+  // progress event, once from the command's promise resolving).
+  let finished = false;
+
+  function finish() {
+    if (finished) return;
+    finished = true;
+    onModelReady();
+  }
+
   // Delay before auto-check (model might already be cached)
   let checking = $state(true);
 
@@ -72,7 +82,7 @@
         case 'done':
           statusMessage = 'Model ready!';
           progress = 100;
-          setTimeout(() => onModelReady(), 500);
+          setTimeout(finish, 500);
           break;
         case 'error':
           error = p as unknown as string;
@@ -83,7 +93,14 @@
     });
 
     try {
+      // The command resolves only after the backend has cached the model and
+      // swapped in the real embedding provider, so a successful return is the
+      // authoritative completion signal — don't rely solely on the terminal
+      // progress event, which can be missed.
       await downloadEmbeddingModel();
+      statusMessage = 'Model ready!';
+      progress = 100;
+      finish();
     } catch (e) {
       error = String(e);
       statusMessage = 'Download failed';
