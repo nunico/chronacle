@@ -112,8 +112,19 @@ is created (dev resolves via `CARGO_MANIFEST_DIR`, bundled via the executable's
 resource dir). **Without this, every `FastEmbedProvider::try_new` fails at ONNX
 session creation and the app silently falls back to the mock provider.** Supported
 targets: macOS arm64, Linux x86_64/aarch64, Windows x86_64/aarch64. Microsoft
-publishes no macOS x86_64 build for 1.24, so local embeddings are unavailable on
-Intel Macs.
+publishes no macOS x86_64 build for 1.24, so no binary is bundled there.
+
+When no bundled binary exists, `ensure_ort_dylib_path()` falls back to a
+**system/Homebrew install** — it probes `/opt/homebrew/lib`, `/usr/local/lib`,
+Linuxbrew, and the conventional system lib dirs for `libonnxruntime.{dylib,so}`.
+So an Intel-Mac user who runs `brew install onnxruntime` (currently 1.27, which is
+ABI forward-compatible — `GetApi(N)` succeeds on any runtime ≥ N) gets real local
+embeddings, same nomic model and 768-dim, with no re-indexing. This library is
+**unpinned** (we don't control its version), so the bundled path remains the
+version-controlled default; the system fallback is best-effort. `ort` would also
+discover such a library on its own via the dynamic-loader search path, but probing
+explicitly lets `local_embeddings_available()` report it so the UI picks `local`
+rather than steering to the cloud.
 
 **Cloud embedding backend.** The `embedding_backend` setting selects `local`
 (fastembed) or `openai` (any OpenAI-compatible `/embeddings` endpoint, configured

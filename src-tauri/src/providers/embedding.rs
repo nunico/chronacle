@@ -72,18 +72,51 @@ fn onnxruntime_library_path() -> Option<std::path::PathBuf> {
     None
 }
 
-/// Point `ort` at the bundled ONNX Runtime library before any session is built.
+/// Locate a system- or Homebrew-installed ONNX Runtime library.
+///
+/// Fallback for targets with no bundled binary (notably macOS x86_64, which
+/// Microsoft no longer ships): a user who runs `brew install onnxruntime` gets
+/// real local embeddings with no extra configuration. Also picks up an
+/// Apple-Silicon Homebrew install on dev machines.
+///
+/// The library is **unpinned** — we do not control its version — so this relies
+/// on ONNX Runtime's ABI forward-compatibility (`GetApi(N)` succeeds on any
+/// runtime ≥ N). The bundled path remains the version-controlled default.
+fn system_onnxruntime_library_path() -> Option<std::path::PathBuf> {
+    // Homebrew prefixes (Apple-Silicon `/opt/homebrew`, Intel `/usr/local`,
+    // Linuxbrew) plus conventional system library directories.
+    const SEARCH_DIRS: &[&str] = &[
+        "/opt/homebrew/lib",
+        "/usr/local/lib",
+        "/home/linuxbrew/.linuxbrew/lib",
+        "/usr/lib",
+        "/usr/lib/x86_64-linux-gnu",
+        "/usr/lib/aarch64-linux-gnu",
+    ];
+    SEARCH_DIRS
+        .iter()
+        .map(|dir| std::path::Path::new(dir).join(ORT_DYLIB_NAME))
+        .find(|p| p.exists())
+}
+
+/// Resolve an ONNX Runtime library: bundled resource first (version-controlled),
+/// then a system/Homebrew install.
+fn resolve_onnxruntime_library_path() -> Option<std::path::PathBuf> {
+    onnxruntime_library_path().or_else(system_onnxruntime_library_path)
+}
+
+/// Point `ort` at an ONNX Runtime library before any session is built.
 ///
 /// `ort` reads `ORT_DYLIB_PATH` once, lazily, when the first inference session is
-/// created. We set it from the bundled resource unless the caller already
-/// provided one (e.g. a developer override). Without this, `ort` cannot find a
-/// dynamic library and every `try_new` fails at session creation. Safe to call
-/// repeatedly — it is a no-op once the variable is set.
+/// created. We set it from the bundled resource (or a system/Homebrew install)
+/// unless the caller already provided one (e.g. a developer override). Without
+/// this, `ort` cannot find a dynamic library and every `try_new` fails at session
+/// creation. Safe to call repeatedly — it is a no-op once the variable is set.
 fn ensure_ort_dylib_path() {
     if std::env::var_os("ORT_DYLIB_PATH").is_some() {
         return;
     }
-    if let Some(path) = onnxruntime_library_path() {
+    if let Some(path) = resolve_onnxruntime_library_path() {
         // Edition 2021: `set_var` is safe. Called at startup before worker
         // threads touch the environment.
         std::env::set_var("ORT_DYLIB_PATH", path);
@@ -307,12 +340,14 @@ impl EmbeddingProvider for MockEmbeddingProvider {
 
 // ── OpenAI cloud implementation ──────────────────────────────────────
 
-/// Whether a bundled ONNX Runtime library exists for this platform — i.e.
-/// whether local `fastembed` embeddings can run at all. Returns `false` on
-/// targets with no ONNX Runtime binary (notably macOS x86_64, which Microsoft
-/// no longer ships). The UI uses this to steer such users to a cloud backend.
+/// Whether an ONNX Runtime library is available for this platform — i.e. whether
+/// local `fastembed` embeddings can run at all. Checks the bundled binary first,
+/// then a system/Homebrew install (`brew install onnxruntime`). Returns `false`
+/// on targets with neither (notably a stock macOS x86_64, which Microsoft no
+/// longer ships a binary for); the UI uses this to steer such users to a cloud
+/// backend.
 pub fn local_embeddings_available() -> bool {
-    onnxruntime_library_path().is_some()
+    resolve_onnxruntime_library_path().is_some()
 }
 
 /// Embedding output dimension for cloud providers.

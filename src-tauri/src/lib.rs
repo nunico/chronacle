@@ -85,7 +85,10 @@ fn app_data_dir() -> std::path::PathBuf {
 /// Returns the canonical app data directory and the database handle. Callers
 /// may use the returned `(data_dir, db)` tuple directly without recomputing
 /// paths.
-async fn init_database() -> (std::path::PathBuf, surrealdb::Surreal<surrealdb::engine::local::Db>) {
+async fn init_database() -> (
+    std::path::PathBuf,
+    surrealdb::Surreal<surrealdb::engine::local::Db>,
+) {
     let data_dir = app_data_dir();
     let db_path = data_dir.join("chronacle.db");
 
