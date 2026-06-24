@@ -113,7 +113,19 @@ resource dir). **Without this, every `FastEmbedProvider::try_new` fails at ONNX
 session creation and the app silently falls back to the mock provider.** Supported
 targets: macOS arm64, Linux x86_64/aarch64, Windows x86_64/aarch64. Microsoft
 publishes no macOS x86_64 build for 1.24, so local embeddings are unavailable on
-Intel Macs (the cloud embedding override remains).
+Intel Macs.
+
+**Cloud embedding backend.** The `embedding_backend` setting selects `local`
+(fastembed) or `openai` (any OpenAI-compatible `/embeddings` endpoint, configured
+via `embedding_model` / `embedding_api_key` / `embedding_base_url`). The cloud
+provider requests `dimensions: 768` (OpenAI v3 Matryoshka) so its output matches
+the `MTREE DIMENSION 768` indexes with **no schema migration** — switching
+backends only requires re-indexing, handled by the existing `embed_model`
+mismatch detection + `reindex_all_sources`. When `embedding_backend` is unset the
+default is `local` where ONNX Runtime is bundled and `openai` where it is not, so
+Intel Macs (and anyone who would rather not download the local model) steer to the
+cloud automatically. `OpenAiEmbeddingProvider` is symmetric — no nomic
+document/query prefixes — and is hot-swappable via `reconfigure_embedding_provider`.
 
 ---
 

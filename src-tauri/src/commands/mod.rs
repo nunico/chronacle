@@ -679,6 +679,97 @@ pub async fn reconfigure_llm_provider(state: State<'_, Arc<AppState>>) -> Result
     Ok(provider_type.to_string())
 }
 
+// ── Embedding Provider Commands ───────────────────────────────────────
+
+/// Status of the active embedding backend, for the settings UI.
+#[derive(Debug, Clone, Serialize)]
+pub struct EmbeddingProviderStatus {
+    /// `"local"` (fastembed) or `"openai"` (cloud).
+    pub backend: String,
+    /// Active model identity (the value stored in `embed_model`).
+    pub model: String,
+    /// Output vector dimension.
+    pub dimension: usize,
+    /// Whether a cloud `embedding_api_key` is configured.
+    pub api_key_configured: bool,
+    /// Whether ONNX Runtime is bundled for this platform (local embeddings can
+    /// run). `false` on e.g. macOS x86_64.
+    pub local_available: bool,
+    /// Whether the local `nomic-embed-text-v1.5` model is already downloaded.
+    pub local_cached: bool,
+}
+
+/// Returns the current embedding-provider configuration status.
+#[tauri::command]
+pub async fn get_embedding_provider_status(
+    state: State<'_, Arc<AppState>>,
+) -> Result<EmbeddingProviderStatus, String> {
+    use crate::providers::embedding::{local_embeddings_available, FastEmbedProvider};
+
+    let settings = get_all_settings(&state.db).await?;
+    let map: std::collections::HashMap<String, String> = settings
+        .into_iter()
+        .map(|r| (r.id.id.to_raw(), r.value))
+        .collect();
+
+    let local_available = local_embeddings_available();
+    let default_backend = if local_available { "local" } else { "openai" };
+    let backend = map
+        .get("embedding_backend")
+        .cloned()
+        .unwrap_or_else(|| default_backend.to_string());
+
+    let data_dir = crate::app_data_dir();
+    let local_cached = FastEmbedProvider::is_cached(&FastEmbedProvider::cache_dir(&data_dir));
+
+    let (model, dimension) = {
+        let provider = state
+            .embedding_provider
+            .read()
+            .map_err(|e| format!("Failed to read embedding provider: {e}"))?;
+        (provider.model_name().to_string(), provider.dimension())
+    };
+
+    let api_key_configured = map
+        .get("embedding_api_key")
+        .map(|k| !k.is_empty())
+        .unwrap_or(false);
+
+    Ok(EmbeddingProviderStatus {
+        backend,
+        model,
+        dimension,
+        api_key_configured,
+        local_available,
+        local_cached,
+    })
+}
+
+/// Re-read settings and reconstruct the embedding provider at runtime. Returns
+/// the active model identity. The caller should follow up with a model-mismatch
+/// check / re-index if the identity changed.
+#[tauri::command]
+pub async fn reconfigure_embedding_provider(
+    state: State<'_, Arc<AppState>>,
+) -> Result<String, String> {
+    let settings = get_all_settings(&state.db).await?;
+    let map: std::collections::HashMap<String, String> = settings
+        .into_iter()
+        .map(|r| (r.id.id.to_raw(), r.value))
+        .collect();
+
+    let data_dir = crate::app_data_dir();
+    let new_provider = crate::build_embedding_provider_from_map(&map, &data_dir).await;
+    let model = new_provider.model_name().to_string();
+
+    *state
+        .embedding_provider
+        .write()
+        .map_err(|e| format!("Failed to acquire write lock: {e}"))? = new_provider;
+
+    Ok(model)
+}
+
 // ── Custom Provider Commands ──────────────────────────────────────────
 
 #[tauri::command]

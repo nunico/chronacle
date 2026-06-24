@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { checkEmbeddingModel, downloadEmbeddingModel } from './lib/commands';
+  import {
+    downloadEmbeddingModel,
+    getEmbeddingProviderStatus,
+  } from './lib/commands';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
   let { onModelReady }: { onModelReady: () => void } = $props();
@@ -29,11 +32,17 @@
   let unlisten: UnlistenFn | null = null;
 
   onMount(async () => {
-    // Check if model is already cached
-    const ready = await checkEmbeddingModel();
-    if (ready) {
-      onModelReady();
-      return;
+    // Only the local backend needs an up-front model download. Cloud users, and
+    // platforms without a local ONNX Runtime (e.g. Intel Macs), go straight into
+    // the app and configure/use embeddings from there.
+    try {
+      const status = await getEmbeddingProviderStatus();
+      if (status.backend !== 'local' || !status.local_available || status.local_cached) {
+        onModelReady();
+        return;
+      }
+    } catch {
+      // If status can't be read, fall through to the download screen.
     }
     checking = false;
   });

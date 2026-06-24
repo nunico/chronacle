@@ -14,7 +14,7 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
 
-const checkEmbeddingModel = vi.fn();
+const getEmbeddingProviderStatus = vi.fn();
 const downloadEmbeddingModel = vi.fn();
 const getCampaigns = vi.fn();
 const getCollections = vi.fn();
@@ -26,7 +26,7 @@ const getEmbeddingModelMismatch = vi.fn();
 const reindexAllSources = vi.fn();
 
 vi.mock('./lib/commands', () => ({
-  checkEmbeddingModel: (...a: unknown[]) => checkEmbeddingModel(...a),
+  getEmbeddingProviderStatus: (...a: unknown[]) => getEmbeddingProviderStatus(...a),
   downloadEmbeddingModel: (...a: unknown[]) => downloadEmbeddingModel(...a),
   getCampaigns: (...a: unknown[]) => getCampaigns(...a),
   getCollections: (...a: unknown[]) => getCollections(...a),
@@ -48,7 +48,15 @@ vi.mock('./lib/events', () => ({
 describe('App — model-download gate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    checkEmbeddingModel.mockResolvedValue(false);
+    // Local backend, runtime available, model not yet downloaded → download gate.
+    getEmbeddingProviderStatus.mockResolvedValue({
+      backend: 'local',
+      model: 'nomic-embed-text-v1.5',
+      dimension: 768,
+      api_key_configured: false,
+      local_available: true,
+      local_cached: false,
+    });
     downloadEmbeddingModel.mockResolvedValue(undefined);
     getCampaigns.mockResolvedValue([]);
     getCollections.mockResolvedValue([]);
@@ -74,7 +82,14 @@ describe('App — model-download gate', () => {
   });
 
   it('renders the Shell once the model is ready', async () => {
-    checkEmbeddingModel.mockResolvedValue(true);
+    getEmbeddingProviderStatus.mockResolvedValue({
+      backend: 'local',
+      model: 'nomic-embed-text-v1.5',
+      dimension: 768,
+      api_key_configured: false,
+      local_available: true,
+      local_cached: true,
+    });
     render(App);
     await waitFor(() => {
       expect(screen.getByLabelText('Campaign rail')).toBeTruthy();

@@ -118,6 +118,33 @@ export async function reconfigureLlmProvider(): Promise<string> {
   return invoke<string>('reconfigure_llm_provider');
 }
 
+/**
+ * Current embedding-provider status returned from the backend.
+ */
+export interface EmbeddingProviderStatus {
+  backend: string; // "local" | "openai"
+  model: string;
+  dimension: number;
+  api_key_configured: boolean;
+  local_available: boolean; // ONNX Runtime bundled for this platform
+  local_cached: boolean; // local nomic model downloaded
+}
+
+/**
+ * Get the current embedding-provider configuration status.
+ */
+export async function getEmbeddingProviderStatus(): Promise<EmbeddingProviderStatus> {
+  return invoke<EmbeddingProviderStatus>('get_embedding_provider_status');
+}
+
+/**
+ * Re-read settings and reconstruct the embedding provider at runtime. Returns
+ * the active model identity (the value stored in `embed_model`).
+ */
+export async function reconfigureEmbeddingProvider(): Promise<string> {
+  return invoke<string>('reconfigure_embedding_provider');
+}
+
 // ── Custom Provider Types ──────────────────────────────────────────────
 
 export interface CustomProvider {

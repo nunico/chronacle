@@ -79,14 +79,13 @@ fn app_data_dir() -> std::path::PathBuf {
     dir
 }
 
-/// Entry point that wires up all dependencies and starts the Tauri application.
+/// Initialise the embedded SurrealDB (RocksDB), select namespace/database,
+/// and run schema migrations.
 ///
-/// 1. Initialises an embedded SurrealDB (RocksDB) in the app data directory.
-/// 2. Runs schema migrations from the `.surql` files.
-/// 3. Constructs the service layer with trait-object dependencies.
-/// 4. Registers IPC command handlers and starts the Tauri event loop.
-#[tokio::main]
-pub async fn run() {
+/// Returns the canonical app data directory and the database handle. Callers
+/// may use the returned `(data_dir, db)` tuple directly without recomputing
+/// paths.
+async fn init_database() -> (std::path::PathBuf, surrealdb::Surreal<surrealdb::engine::local::Db>) {
     let data_dir = app_data_dir();
     let db_path = data_dir.join("chronacle.db");
 
@@ -99,10 +98,22 @@ pub async fn run() {
         .await
         .expect("Failed to select namespace / database");
 
-    // Run schema migrations
     schema::run_migrations(&db)
         .await
         .expect("Failed to run schema migrations");
+
+    (data_dir, db)
+}
+
+/// Entry point that wires up all dependencies and starts the Tauri application.
+///
+/// 1. Initialises an embedded SurrealDB (RocksDB) in the app data directory.
+/// 2. Runs schema migrations from the `.surql` files.
+/// 3. Constructs the service layer with trait-object dependencies.
+/// 4. Registers IPC command handlers and starts the Tauri event loop.
+#[tokio::main]
+pub async fn run() {
+    let (data_dir, db) = init_database().await;
 
     // ── Build service dependencies ──────────────────────────────────
     let vector_store: Arc<dyn providers::vector_store::VectorStore> =
@@ -116,39 +127,9 @@ pub async fn run() {
     let blob_store: Arc<dyn providers::blob_store::BlobStore> =
         Arc::new(providers::blob_store::LocalFileStore::new(pdfs_dir));
 
-    // Initialise fastembed only when the model is ALREADY cached. fastembed's
-    // `try_new` downloads the model synchronously on a cache miss, which would
-    // block the main thread — and therefore the Tauri window — for the entire
-    // (hundreds-of-MB) download. When uncached, start with the mock placeholder
-    // and let the UI's download screen drive `download_embedding_model`, which
-    // hot-swaps the real provider in when it completes.
-    let embedding_cache_dir = providers::embedding::FastEmbedProvider::cache_dir(&data_dir);
-    let embedding_provider: Arc<dyn providers::embedding::EmbeddingProvider> =
-        if providers::embedding::FastEmbedProvider::is_cached(&embedding_cache_dir) {
-            match providers::embedding::FastEmbedProvider::try_new(Some(&embedding_cache_dir)) {
-                Ok(p) => {
-                    eprintln!(
-                        "Embedding model '{}' ready ({} dim)",
-                        p.model_name(),
-                        p.dimension()
-                    );
-                    Arc::new(p)
-                }
-                Err(e) => {
-                    eprintln!(
-                        "Embedding model cached but failed to load ({e}) — \
-                         starting with mock placeholder."
-                    );
-                    Arc::new(providers::embedding::MockEmbeddingProvider::new(768))
-                }
-            }
-        } else {
-            eprintln!(
-                "Embedding model not cached — starting with mock placeholder. \
-                 Use the download screen to download the model."
-            );
-            Arc::new(providers::embedding::MockEmbeddingProvider::new(768))
-        };
+    // Select the embedding backend from settings (local fastembed vs OpenAI
+    // cloud). See `build_embedding_provider_from_map`.
+    let embedding_provider = build_embedding_provider_from_db(&db, &data_dir).await;
 
     // Construct the LLM provider from persisted settings, falling back to
     // OpenAI (no-op if no API key is configured).
@@ -228,6 +209,8 @@ pub async fn run() {
             commands::get_chat_history,
             commands::reconfigure_llm_provider,
             commands::get_llm_provider_status,
+            commands::get_embedding_provider_status,
+            commands::reconfigure_embedding_provider,
             commands::get_custom_providers,
             commands::create_custom_provider,
             commands::update_custom_provider,
@@ -277,19 +260,112 @@ pub async fn run() {
         .expect("Error while running Tauri application");
 }
 
+/// Read all settings from the database into a flat map (empty on error).
+pub(crate) async fn read_settings_map(
+    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+) -> HashMap<String, String> {
+    match services::settings_service::get_all(db).await {
+        Ok(s) => s.into_iter().map(|s| (s.key, s.value)).collect(),
+        Err(_) => HashMap::new(),
+    }
+}
+
 /// Read LLM settings from the database and construct the correct provider.
 async fn build_llm_provider_from_db(
     db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
 ) -> Arc<dyn LlmProvider> {
-    let settings = match services::settings_service::get_all(db).await {
-        Ok(s) => s
-            .into_iter()
-            .map(|s| (s.key, s.value))
-            .collect::<HashMap<_, _>>(),
-        Err(_) => HashMap::new(),
+    let settings = read_settings_map(db).await;
+    build_llm_provider_from_map(&settings, Some(db)).await
+}
+
+/// Read settings from the database and construct the embedding provider.
+pub(crate) async fn build_embedding_provider_from_db(
+    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+    data_dir: &std::path::Path,
+) -> Arc<dyn providers::embedding::EmbeddingProvider> {
+    let settings = read_settings_map(db).await;
+    build_embedding_provider_from_map(&settings, data_dir).await
+}
+
+/// Construct the embedding provider from settings.
+///
+/// `embedding_backend` selects between `local` (bundled fastembed /
+/// `nomic-embed-text-v1.5`) and `openai`/`cloud` (an OpenAI-compatible
+/// `/embeddings` endpoint at 768 dims). When the setting is absent, the default
+/// is `local` where ONNX Runtime is bundled, and `openai` where it is not
+/// (notably macOS x86_64) — so Intel Macs steer to the cloud automatically.
+///
+/// The local path mirrors the startup constraint: only construct fastembed when
+/// the model is already cached; otherwise return the mock placeholder and let
+/// the download screen provision it. fastembed's `try_new` would otherwise block
+/// on a multi-hundred-MB download.
+pub(crate) async fn build_embedding_provider_from_map(
+    settings: &HashMap<String, String>,
+    data_dir: &std::path::Path,
+) -> Arc<dyn providers::embedding::EmbeddingProvider> {
+    use providers::embedding::{
+        local_embeddings_available, FastEmbedProvider, MockEmbeddingProvider,
+        OpenAiEmbeddingProvider,
     };
 
-    build_llm_provider_from_map(&settings, Some(db)).await
+    let default_backend = if local_embeddings_available() {
+        "local"
+    } else {
+        "openai"
+    };
+    let backend = settings
+        .get("embedding_backend")
+        .map(|s| s.as_str())
+        .unwrap_or(default_backend);
+
+    match backend {
+        "openai" | "cloud" => {
+            let api_key = settings
+                .get("embedding_api_key")
+                .cloned()
+                .unwrap_or_default();
+            let model = settings.get("embedding_model").cloned().unwrap_or_default();
+            let base_url = settings
+                .get("embedding_base_url")
+                .cloned()
+                .unwrap_or_default();
+            let provider = OpenAiEmbeddingProvider::new(api_key, model, base_url);
+            eprintln!(
+                "Embedding backend: OpenAI cloud ('{}', {} dim)",
+                provider.model_name(),
+                provider.dimension()
+            );
+            Arc::new(provider)
+        }
+        _ => {
+            let cache_dir = FastEmbedProvider::cache_dir(data_dir);
+            if FastEmbedProvider::is_cached(&cache_dir) {
+                match FastEmbedProvider::try_new(Some(&cache_dir)) {
+                    Ok(p) => {
+                        eprintln!(
+                            "Embedding model '{}' ready ({} dim)",
+                            p.model_name(),
+                            p.dimension()
+                        );
+                        Arc::new(p)
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Embedding model cached but failed to load ({e}) — \
+                             using mock placeholder."
+                        );
+                        Arc::new(MockEmbeddingProvider::new(768))
+                    }
+                }
+            } else {
+                eprintln!(
+                    "Embedding model not cached — starting with mock placeholder. \
+                     Use the download screen to download the model."
+                );
+                Arc::new(MockEmbeddingProvider::new(768))
+            }
+        }
+    }
 }
 
 pub(crate) async fn build_llm_provider_from_map(

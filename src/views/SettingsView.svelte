@@ -2,6 +2,9 @@
   import { onMount } from 'svelte';
   import { getSettings, updateSetting, getLlmProviderStatus, reconfigureLlmProvider } from '../lib/commands';
   import {
+    getEmbeddingProviderStatus,
+    reconfigureEmbeddingProvider,
+    type EmbeddingProviderStatus,
     getCustomProviders,
     createCustomProvider,
     deleteCustomProvider,
@@ -31,6 +34,14 @@
   let currentProviderType = $state('—');
   let currentModel = $state('—');
   let apiKeyConfigured = $state(false);
+
+  // Embedding provider state
+  let embeddingBackend = $state('local'); // 'local' | 'openai'
+  let embeddingModel = $state('');
+  let embeddingApiKey = $state('');
+  let embeddingBaseUrl = $state('');
+  let embeddingStatus = $state<EmbeddingProviderStatus | null>(null);
+  let isSavingEmbedding = $state(false);
 
   // Custom providers state
   let customProviders = $state<CustomProvider[]>([]);
@@ -92,6 +103,7 @@
   onMount(async () => {
     await loadSettings();
     await loadStatus();
+    await loadEmbeddingStatus();
     await loadCustomProviders();
   });
 
@@ -105,6 +117,12 @@
       model = settings['llm_model'] ?? '';
       baseUrl = settings['llm_base_url'] ?? '';
       enrichNeighbors = settings['extraction_enrich_neighbors'] === 'true';
+      embeddingModel = settings['embedding_model'] ?? '';
+      embeddingApiKey = settings['embedding_api_key'] ?? '';
+      embeddingBaseUrl = settings['embedding_base_url'] ?? '';
+      // Default backend follows platform capability when unset (resolved by the
+      // backend); seed the control from the live status in loadEmbeddingStatus.
+      embeddingBackend = settings['embedding_backend'] ?? embeddingBackend;
     } catch (e) {
       showError(`Failed to load settings: ${e}`);
     }
@@ -118,6 +136,42 @@
       apiKeyConfigured = status.api_key_configured;
     } catch {
       // Status is unavailable on first load; that's fine
+    }
+  }
+
+  async function loadEmbeddingStatus() {
+    try {
+      const status = await getEmbeddingProviderStatus();
+      embeddingStatus = status;
+      // If the user has never explicitly chosen a backend, reflect the active one.
+      const settings = await getSettings();
+      if (settings['embedding_backend'] === undefined) {
+        embeddingBackend = status.backend;
+      }
+    } catch {
+      // Status unavailable on first load; that's fine.
+    }
+  }
+
+  async function saveEmbeddingSettings() {
+    isSavingEmbedding = true;
+    statusMessage = '';
+    try {
+      await Promise.all([
+        updateSetting('embedding_backend', embeddingBackend),
+        updateSetting('embedding_model', embeddingModel),
+        updateSetting('embedding_api_key', embeddingApiKey),
+        updateSetting('embedding_base_url', embeddingBaseUrl),
+      ]);
+      const activeModel = await reconfigureEmbeddingProvider();
+      await loadEmbeddingStatus();
+      showSuccess(
+        `Embedding provider set to ${activeModel}. Re-index existing sources below to apply it.`,
+      );
+    } catch (e) {
+      showError(`Failed to save embedding settings: ${e}`);
+    } finally {
+      isSavingEmbedding = false;
     }
   }
 
@@ -509,11 +563,81 @@
   </section>
 
   <section class="config-section">
-    <h3>Embedding model</h3>
+    <h3>Embedding Provider</h3>
+    <p class="muted">
+      How document and query text is turned into vectors for search. The local
+      model runs offline; the cloud option uses an OpenAI-compatible API at 768
+      dimensions (matching the local index, so switching only requires re-indexing).
+    </p>
+
+    {#if embeddingStatus}
+      <div class="status-grid">
+        <span class="label">Active</span>
+        <span class="value">{embeddingStatus.backend === 'openai' ? 'Cloud (OpenAI)' : 'Local (fastembed)'}</span>
+        <span class="label">Model</span>
+        <span class="value">{embeddingStatus.model}</span>
+        <span class="label">Dimension</span>
+        <span class="value">{embeddingStatus.dimension}</span>
+      </div>
+    {/if}
+
+    {#if embeddingStatus && !embeddingStatus.local_available}
+      <p class="muted warn">
+        The local embedding model is not available on this computer (no ONNX
+        Runtime build is published for Intel Macs). Configure a cloud embedding
+        provider below to enable search.
+      </p>
+    {/if}
+
+    <label for="embed-backend">Backend</label>
+    <select id="embed-backend" bind:value={embeddingBackend}>
+      <option value="local" disabled={embeddingStatus ? !embeddingStatus.local_available : false}>
+        Local — nomic-embed-text-v1.5 (offline)
+      </option>
+      <option value="openai">Cloud — OpenAI-compatible API</option>
+    </select>
+
+    {#if embeddingBackend === 'openai'}
+      <label for="embed-model">Model</label>
+      <input
+        id="embed-model"
+        type="text"
+        bind:value={embeddingModel}
+        placeholder="text-embedding-3-small"
+      />
+
+      <label for="embed-api-key">API Key</label>
+      <input
+        id="embed-api-key"
+        type="password"
+        bind:value={embeddingApiKey}
+        placeholder="sk-..."
+        autocomplete="off"
+      />
+
+      <label for="embed-base-url">Base URL <span class="muted">(optional)</span></label>
+      <input
+        id="embed-base-url"
+        type="text"
+        bind:value={embeddingBaseUrl}
+        placeholder="https://api.openai.com/v1"
+      />
+    {/if}
+
+    <div class="actions">
+      <button class="primary" onclick={saveEmbeddingSettings} disabled={isSavingEmbedding}>
+        {isSavingEmbedding ? 'Saving…' : 'Save Embedding Provider'}
+      </button>
+    </div>
+  </section>
+
+  <section class="config-section">
+    <h3>Re-index sources</h3>
     <p class="muted">
       Re-index every PDF source to apply recent improvements to text extraction,
-      chunking, and embedding quality. Existing sources stay searchable during
-      re-indexing; only their chunks get replaced.
+      chunking, and embedding quality — or after changing the embedding provider
+      above. Existing sources stay searchable during re-indexing; only their
+      chunks get replaced.
     </p>
     <button class="small-btn primary" disabled={reindexing} onclick={onReindexAll}>
       {reindexing ? 'Re-indexing…' : 'Re-index all sources'}
@@ -700,6 +824,9 @@ input:focus {
   font-size: 13px;
   color: var(--fg-3);
   margin: 0 0 10px;
+}
+.muted.warn {
+  color: #c2410c;
 }
 .toggle-row {
   display: flex;

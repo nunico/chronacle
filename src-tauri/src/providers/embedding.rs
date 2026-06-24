@@ -305,6 +305,162 @@ impl EmbeddingProvider for MockEmbeddingProvider {
     }
 }
 
+// ── OpenAI cloud implementation ──────────────────────────────────────
+
+/// Whether a bundled ONNX Runtime library exists for this platform — i.e.
+/// whether local `fastembed` embeddings can run at all. Returns `false` on
+/// targets with no ONNX Runtime binary (notably macOS x86_64, which Microsoft
+/// no longer ships). The UI uses this to steer such users to a cloud backend.
+pub fn local_embeddings_available() -> bool {
+    onnxruntime_library_path().is_some()
+}
+
+/// Embedding output dimension for cloud providers.
+///
+/// Pinned to 768 to match the SurrealDB `MTREE DIMENSION 768` indexes, so cloud
+/// vectors drop into the existing schema with no migration. OpenAI v3 models
+/// honour the `dimensions` request parameter (Matryoshka), producing native
+/// 768-dim output rather than a naive truncation.
+pub const CLOUD_EMBED_DIM: usize = 768;
+
+/// Default OpenAI embedding model.
+pub const OPENAI_DEFAULT_EMBED_MODEL: &str = "text-embedding-3-small";
+
+/// Embedding provider backed by an OpenAI-compatible `/embeddings` endpoint.
+///
+/// Works with OpenAI directly and any compatible gateway (Azure OpenAI, proxies)
+/// via `base_url`. Requests `dimensions: 768` so output matches the local
+/// `nomic-embed-text-v1.5` index width. OpenAI embeddings are symmetric, so no
+/// document/query prefixes are applied (unlike [`FastEmbedProvider`]).
+pub struct OpenAiEmbeddingProvider {
+    client: reqwest::Client,
+    api_key: String,
+    model: String,
+    base_url: String,
+    /// Stable identity persisted to `embed_model`, e.g.
+    /// `openai:text-embedding-3-small:768`. A change here is detected by
+    /// [`check_embedding_model_consistency`] and triggers re-indexing.
+    name: String,
+}
+
+impl OpenAiEmbeddingProvider {
+    /// Construct a provider. Empty `model`/`base_url` fall back to the OpenAI
+    /// defaults. An empty `api_key` is allowed at construction; calls then fail
+    /// with a clear configuration error.
+    pub fn new(api_key: String, model: String, base_url: String) -> Self {
+        let model = if model.trim().is_empty() {
+            OPENAI_DEFAULT_EMBED_MODEL.to_string()
+        } else {
+            model.trim().to_string()
+        };
+        let base_url = normalize_openai_base_url(&base_url);
+        let name = format!("openai:{model}:{CLOUD_EMBED_DIM}");
+        Self {
+            client: reqwest::Client::new(),
+            api_key,
+            model,
+            base_url,
+            name,
+        }
+    }
+
+    async fn embed(&self, inputs: Vec<String>) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        if self.api_key.trim().is_empty() {
+            return Err(EmbeddingError::Init(
+                "OpenAI embedding API key is not configured".to_string(),
+            ));
+        }
+        let url = format!("{}/embeddings", self.base_url);
+        let body = serde_json::json!({
+            "model": self.model,
+            "input": inputs,
+            "dimensions": CLOUD_EMBED_DIM,
+            "encoding_format": "float",
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| EmbeddingError::Embed(format!("embeddings request failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let detail = resp.text().await.unwrap_or_default();
+            return Err(EmbeddingError::Embed(format!(
+                "OpenAI embeddings HTTP {status}: {detail}"
+            )));
+        }
+
+        #[derive(serde::Deserialize)]
+        struct Item {
+            embedding: Vec<f32>,
+            index: usize,
+        }
+        #[derive(serde::Deserialize)]
+        struct Body {
+            data: Vec<Item>,
+        }
+
+        let mut parsed: Body = resp
+            .json()
+            .await
+            .map_err(|e| EmbeddingError::Embed(format!("failed to parse embeddings: {e}")))?;
+        // The API does not guarantee order; sort by the echoed input index.
+        parsed.data.sort_by_key(|d| d.index);
+
+        if let Some(first) = parsed.data.first() {
+            if first.embedding.len() != CLOUD_EMBED_DIM {
+                return Err(EmbeddingError::Embed(format!(
+                    "expected {CLOUD_EMBED_DIM}-dim vectors, got {}",
+                    first.embedding.len()
+                )));
+            }
+        }
+        Ok(parsed.data.into_iter().map(|d| d.embedding).collect())
+    }
+}
+
+/// Normalise an OpenAI-compatible base URL to the API root (no trailing slash,
+/// no `/embeddings` suffix). Empty input yields the public OpenAI endpoint.
+fn normalize_openai_base_url(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return "https://api.openai.com/v1".to_string();
+    }
+    trimmed
+        .trim_end_matches("/embeddings")
+        .trim_end_matches('/')
+        .to_string()
+}
+
+#[async_trait]
+impl EmbeddingProvider for OpenAiEmbeddingProvider {
+    async fn embed_documents(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.embed(texts).await
+    }
+
+    async fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
+        let mut vecs = self.embed(vec![text.to_string()]).await?;
+        vecs.pop()
+            .ok_or_else(|| EmbeddingError::Embed("empty embeddings response".to_string()))
+    }
+
+    fn dimension(&self) -> usize {
+        CLOUD_EMBED_DIM
+    }
+
+    fn model_name(&self) -> &str {
+        &self.name
+    }
+}
+
 // ── Model identity check ─────────────────────────────────────────────
 
 /// Report of sources indexed with a different embedding model than the active one.
@@ -398,6 +554,102 @@ mod tests {
         } else {
             assert!(ORT_DYLIB_NAME.ends_with(".so"));
         }
+    }
+
+    #[test]
+    fn openai_base_url_normalization() {
+        assert_eq!(normalize_openai_base_url(""), "https://api.openai.com/v1");
+        assert_eq!(
+            normalize_openai_base_url("   "),
+            "https://api.openai.com/v1"
+        );
+        assert_eq!(
+            normalize_openai_base_url("https://api.openai.com/v1/"),
+            "https://api.openai.com/v1"
+        );
+        assert_eq!(
+            normalize_openai_base_url("https://proxy.local/v1/embeddings"),
+            "https://proxy.local/v1"
+        );
+        assert_eq!(
+            normalize_openai_base_url("https://azure.example/openai"),
+            "https://azure.example/openai"
+        );
+    }
+
+    #[test]
+    fn openai_model_identity_and_defaults() {
+        let p = OpenAiEmbeddingProvider::new(String::new(), String::new(), String::new());
+        // Empty model falls back to the default; identity encodes model + dim.
+        assert_eq!(p.model_name(), "openai:text-embedding-3-small:768");
+        assert_eq!(p.dimension(), CLOUD_EMBED_DIM);
+
+        let p2 = OpenAiEmbeddingProvider::new(
+            "k".into(),
+            "text-embedding-3-large".into(),
+            String::new(),
+        );
+        assert_eq!(p2.model_name(), "openai:text-embedding-3-large:768");
+    }
+
+    #[tokio::test]
+    async fn openai_empty_key_is_a_configuration_error() {
+        let p = OpenAiEmbeddingProvider::new(String::new(), String::new(), String::new());
+        let err = p.embed_query("hello").await.unwrap_err();
+        assert!(matches!(err, EmbeddingError::Init(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn openai_embed_orders_by_index_and_checks_dim() {
+        use std::io::{Read, Write};
+
+        // Minimal one-shot HTTP stub returning two embeddings out of order.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut scratch = [0u8; 8192];
+            let _ = stream.read(&mut scratch); // drain request; body is tiny
+            let v0: Vec<f32> = vec![0.1; CLOUD_EMBED_DIM];
+            let v1: Vec<f32> = vec![0.2; CLOUD_EMBED_DIM];
+            let json = serde_json::json!({
+                "data": [
+                    { "index": 1, "embedding": v1 },
+                    { "index": 0, "embedding": v0 },
+                ]
+            })
+            .to_string();
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                json.len(),
+                json
+            );
+            stream.write_all(resp.as_bytes()).unwrap();
+            stream.flush().unwrap();
+        });
+
+        let provider = OpenAiEmbeddingProvider::new(
+            "test-key".into(),
+            "text-embedding-3-small".into(),
+            format!("http://{addr}"),
+        );
+        let out = provider
+            .embed_documents(vec!["a".into(), "b".into()])
+            .await
+            .unwrap();
+        server.join().unwrap();
+
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].len(), CLOUD_EMBED_DIM);
+        // Sorted by index: 0 -> 0.1, 1 -> 0.2.
+        assert!((out[0][0] - 0.1).abs() < 1e-6);
+        assert!((out[1][0] - 0.2).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn openai_embed_documents_empty_is_noop() {
+        let p = OpenAiEmbeddingProvider::new("k".into(), String::new(), String::new());
+        assert!(p.embed_documents(vec![]).await.unwrap().is_empty());
     }
 
     #[tokio::test]
