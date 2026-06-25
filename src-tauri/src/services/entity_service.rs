@@ -1018,6 +1018,63 @@ pub async fn relate<C: surrealdb::Connection>(
     Ok(())
 }
 
+/// Specificity tier of a relationship type, used to collapse redundant parallel
+/// edges between the same pair of entities. Higher = more informative.
+///
+/// Two extraction sources stack weak edges on top of real relationships:
+/// - `mentioned` (tier 0) comes from wikilink resolution — entity B's name
+///   merely appeared in entity A's notes. It carries no meaning beyond
+///   co-occurrence.
+/// - `related_to` / `knows` (tier 1) are the catch-all associations the LLM
+///   emits when it cannot commit to a specific relationship.
+/// - everything else (tier 2) is a specific, usually directional relationship
+///   (`member_of`, `located_in`, `owns`, `leads`, …) or a custom verb.
+///
+/// When a higher tier exists between a pair, the lower tiers are dropped: a
+/// `member_of` edge makes a parallel `mentioned` edge redundant noise.
+fn rel_specificity(rel_type: &str) -> u8 {
+    match rel_type {
+        "mentioned" => 0,
+        "related_to" | "knows" => 1,
+        _ => 2,
+    }
+}
+
+/// Collapse parallel relationships: among all `items` sharing a `group_key`,
+/// keep only those whose `rel_type` is at the highest specificity tier present
+/// in that group, and drop exact duplicates (same `identity`). Order-preserving.
+///
+/// Shared by the graph (grouping by unordered entity pair) and the flat
+/// relations list (grouping by the other endpoint).
+fn keep_most_specific<T, K, I>(
+    items: Vec<T>,
+    group_key: impl Fn(&T) -> K,
+    identity: impl Fn(&T) -> I,
+    rel_type: impl Fn(&T) -> &str,
+) -> Vec<T>
+where
+    K: std::hash::Hash + Eq,
+    I: std::hash::Hash + Eq,
+{
+    use std::collections::{HashMap, HashSet};
+
+    let mut max_tier: HashMap<K, u8> = HashMap::new();
+    for it in &items {
+        let tier = rel_specificity(rel_type(it));
+        let entry = max_tier.entry(group_key(it)).or_insert(0);
+        if tier > *entry {
+            *entry = tier;
+        }
+    }
+
+    let mut seen: HashSet<I> = HashSet::new();
+    items
+        .into_iter()
+        .filter(|it| rel_specificity(rel_type(it)) == max_tier[&group_key(it)])
+        .filter(|it| seen.insert(identity(it)))
+        .collect()
+}
+
 /// Fetch the ego graph around an entity: the center, its `relates_to` neighbors
 /// (one hop), and the edges among them. `_depth` is reserved for future use;
 /// the graph is currently always one hop, with deeper walks produced client-side
@@ -1073,12 +1130,40 @@ pub async fn get_entity_graph<C: surrealdb::Connection>(
         })
         .collect();
 
-    // 2. Collect distinct (kind, id) node keys: the center plus every endpoint.
+    // Collapse parallel edges between the same pair, keeping only the most
+    // specific relationship(s). Drops redundant `mentioned`/`related_to` edges
+    // when a specific relationship exists for that pair.
+    let edges = keep_most_specific(
+        edges,
+        |e| {
+            // Unordered pair key: sort the two endpoints so A→B and B→A group together.
+            let a = format!("{}:{}", e.from_kind, e.from_id);
+            let b = format!("{}:{}", e.to_kind, e.to_id);
+            if a <= b {
+                (a, b)
+            } else {
+                (b, a)
+            }
+        },
+        |e| {
+            (
+                e.from_kind.clone(),
+                e.from_id.clone(),
+                e.to_kind.clone(),
+                e.to_id.clone(),
+                e.rel_type.clone(),
+            )
+        },
+        |e| e.rel_type.as_str(),
+    );
+
+    // 2. Collect distinct (kind, id) node keys: the center plus every endpoint
+    //    of the surviving (collapsed) edges.
     let mut keys: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
     keys.insert((kind.to_string(), id.to_string()));
-    for r in &rows {
-        keys.insert((r.in_.tb.clone(), r.in_.id.to_raw()));
-        keys.insert((r.out.tb.clone(), r.out.id.to_raw()));
+    for e in &edges {
+        keys.insert((e.from_kind.clone(), e.from_id.clone()));
+        keys.insert((e.to_kind.clone(), e.to_id.clone()));
     }
 
     // 3. Resolve names. Group ids by table and query each table once.
@@ -1226,6 +1311,23 @@ pub async fn get_entity_relations<C: surrealdb::Connection>(
             });
         }
     }
+
+    // Collapse parallel relationships to the same entity: keep only the most
+    // specific rel_type(s), dropping redundant `mentioned`/`related_to` when a
+    // specific relationship to that same entity exists (mirrors get_entity_graph).
+    let endpoints = keep_most_specific(
+        endpoints,
+        |ep| (ep.table.clone(), ep.other_id.clone()),
+        |ep| {
+            (
+                ep.table.clone(),
+                ep.other_id.clone(),
+                ep.rel_type.clone(),
+                ep.direction.clone(),
+            )
+        },
+        |ep| ep.rel_type.as_str(),
+    );
 
     // Resolve names by grouping ids per table (mirrors get_entity_graph).
     #[derive(Deserialize)]
@@ -1394,6 +1496,114 @@ mod tests {
         assert_eq!(EntityKind::Event.table_name(), "event");
         assert_eq!(EntityKind::PlayerCharacter.table_name(), "player_character");
         assert_eq!(EntityKind::Misc.table_name(), "misc");
+    }
+
+    #[test]
+    fn rel_specificity_tiers_match_vocab() {
+        assert_eq!(rel_specificity("mentioned"), 0);
+        assert_eq!(rel_specificity("related_to"), 1);
+        assert_eq!(rel_specificity("knows"), 1);
+        // Specific directional types and unknown custom verbs are all tier 2.
+        assert_eq!(rel_specificity("member_of"), 2);
+        assert_eq!(rel_specificity("located_in"), 2);
+        assert_eq!(rel_specificity("enemy_of"), 2);
+        assert_eq!(rel_specificity("betrays"), 2);
+    }
+
+    fn edge(from: &str, to: &str, rel: &str) -> GraphEdge {
+        let (ft, fi) = from.split_once(':').unwrap();
+        let (tt, ti) = to.split_once(':').unwrap();
+        GraphEdge {
+            from_id: fi.to_string(),
+            from_kind: ft.to_string(),
+            to_id: ti.to_string(),
+            to_kind: tt.to_string(),
+            rel_type: rel.to_string(),
+            notes: None,
+        }
+    }
+
+    fn pair_key(e: &GraphEdge) -> (String, String) {
+        let a = format!("{}:{}", e.from_kind, e.from_id);
+        let b = format!("{}:{}", e.to_kind, e.to_id);
+        if a <= b {
+            (a, b)
+        } else {
+            (b, a)
+        }
+    }
+
+    fn identity(e: &GraphEdge) -> (String, String, String, String, String) {
+        (
+            e.from_kind.clone(),
+            e.from_id.clone(),
+            e.to_kind.clone(),
+            e.to_id.clone(),
+            e.rel_type.clone(),
+        )
+    }
+
+    fn collapse(edges: Vec<GraphEdge>) -> Vec<GraphEdge> {
+        keep_most_specific(edges, pair_key, identity, |e| e.rel_type.as_str())
+    }
+
+    #[test]
+    fn collapse_drops_generic_when_specific_exists_for_pair() {
+        // Hegemony located_in Spire AND related_to Spire → keep only located_in.
+        let kept = collapse(vec![
+            edge("faction:heg", "location:spire", "located_in"),
+            edge("faction:heg", "location:spire", "related_to"),
+        ]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].rel_type, "located_in");
+    }
+
+    #[test]
+    fn collapse_drops_mentioned_against_specific_regardless_of_direction() {
+        // member_of one way, mentioned the other way, same pair → keep member_of.
+        let kept = collapse(vec![
+            edge("faction:heg", "faction:other", "member_of"),
+            edge("faction:other", "faction:heg", "mentioned"),
+        ]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].rel_type, "member_of");
+    }
+
+    #[test]
+    fn collapse_keeps_mentioned_when_it_is_the_only_edge() {
+        let kept = collapse(vec![edge("faction:heg", "npc:bob", "mentioned")]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].rel_type, "mentioned");
+    }
+
+    #[test]
+    fn collapse_keeps_distinct_specific_types_for_same_pair() {
+        // Two contradictory-but-specific edges both survive (same tier).
+        let kept = collapse(vec![
+            edge("faction:a", "faction:b", "allied_with"),
+            edge("faction:a", "faction:b", "enemy_of"),
+        ]);
+        assert_eq!(kept.len(), 2);
+    }
+
+    #[test]
+    fn collapse_dedupes_identical_edges() {
+        let kept = collapse(vec![
+            edge("faction:a", "faction:b", "member_of"),
+            edge("faction:a", "faction:b", "member_of"),
+        ]);
+        assert_eq!(kept.len(), 1);
+    }
+
+    #[test]
+    fn collapse_does_not_mix_unrelated_pairs() {
+        // related_to to one entity stays when there is no specific edge to it,
+        // even though a specific edge exists to a different entity.
+        let kept = collapse(vec![
+            edge("faction:heg", "location:spire", "located_in"),
+            edge("faction:heg", "npc:bob", "related_to"),
+        ]);
+        assert_eq!(kept.len(), 2);
     }
 
     #[test]
