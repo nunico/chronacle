@@ -200,6 +200,12 @@ pub async fn sync_inbound_wikilinks_for_new_entity<C: surrealdb::Connection>(
                 message: e.to_string(),
             })?;
 
+        // Skip the `mentioned` edge when a real relationship already connects
+        // this pair (in either direction) — see has_higher_tier_edge.
+        if has_higher_tier_edge(db, src_table, src_id, new_table, new_id).await? {
+            continue;
+        }
+
         let relate_query = format!(
             "RELATE {src_table}:{src_id}->relates_to->{new_table}:{new_id} \
              SET rel_type = 'mentioned', notes = NULL, created_at = time::now()"
@@ -428,6 +434,12 @@ async fn upsert_mentioned_edges<C: surrealdb::Connection>(
                 message: e.to_string(),
             })?;
 
+        // Skip the `mentioned` edge entirely when a real relationship already
+        // connects this pair — the wikilink co-occurrence adds no information.
+        if has_higher_tier_edge(db, source_table, source_id, to_table, to_id).await? {
+            continue;
+        }
+
         // Use format! for the record ID syntax on both sides of the arrow,
         // matching the pattern in entity_service::relate.
         let relate_query = format!(
@@ -441,6 +453,34 @@ async fn upsert_mentioned_edges<C: surrealdb::Connection>(
             })?;
     }
     Ok(())
+}
+
+/// Returns `true` when a non-`mentioned` `relates_to` edge already connects this
+/// pair of entities in either direction. Such an edge is a real (tier ≥ 1)
+/// relationship, which makes a `mentioned` co-occurrence edge redundant noise.
+///
+/// Callers must validate all four identifier components before calling, since
+/// they are interpolated into the query string.
+async fn has_higher_tier_edge<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    a_table: &str,
+    a_id: &str,
+    b_table: &str,
+    b_id: &str,
+) -> Result<bool, WikilinkError> {
+    let query = format!(
+        "SELECT VALUE id FROM relates_to WHERE \
+         ((in = {a_table}:{a_id} AND out = {b_table}:{b_id}) OR \
+          (in = {b_table}:{b_id} AND out = {a_table}:{a_id})) \
+         AND rel_type != 'mentioned' LIMIT 1"
+    );
+    let mut resp = db.query(query).await.map_err(|e| WikilinkError::Database {
+        message: e.to_string(),
+    })?;
+    let ids: Vec<surrealdb::sql::Thing> = resp.take(0).map_err(|e| WikilinkError::Database {
+        message: e.to_string(),
+    })?;
+    Ok(!ids.is_empty())
 }
 
 /// Delete stale `relates_to` edges where the source is this record,
@@ -498,7 +538,7 @@ fn split_record_id(full_id: &str) -> Result<(&str, &str), WikilinkError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::entity_service::{create, EntityInput, EntityKind};
+    use crate::services::entity_service::{create, relate, EntityInput, EntityKind};
     use surrealdb::engine::local::Db;
     use surrealdb::Surreal;
 
@@ -741,6 +781,65 @@ mod tests {
         assert_eq!(n2, 0, "stale edge should be deleted after second call");
 
         let _ = torvin;
+    }
+
+    // ── Tier guard: no `mentioned` edge when a real relationship exists ───────
+
+    #[tokio::test]
+    async fn mentioned_edge_skipped_when_higher_tier_edge_exists() {
+        let db = setup_db().await;
+        let campaign_id = create_campaign(&db).await;
+
+        let torvin = create(
+            &db,
+            Some(&campaign_id),
+            None,
+            EntityKind::Npc,
+            make_npc("Torvin"),
+        )
+        .await
+        .unwrap();
+        let source_npc = create(
+            &db,
+            Some(&campaign_id),
+            None,
+            EntityKind::Npc,
+            make_npc("SourceNPC"),
+        )
+        .await
+        .unwrap();
+
+        // A real (tier-2) relationship already connects the two — created the
+        // OPPOSITE direction to prove the guard checks the unordered pair.
+        relate(&db, &torvin.id, "npc", &source_npc.id, "npc", "leads", None)
+            .await
+            .unwrap();
+
+        // SourceNPC's notes mention Torvin. The wikilink must NOT add a
+        // `mentioned` edge on top of the existing `leads` relationship.
+        let result = parse_and_sync_wikilinks(
+            &db,
+            "npc",
+            &source_npc.id,
+            "We met [[Torvin]] at the inn.",
+            WikilinkScope::Campaign {
+                campaign_id: &campaign_id,
+            },
+        )
+        .await
+        .unwrap();
+        // The name still resolves (returned for backfill bookkeeping)…
+        assert_eq!(result, vec![format!("npc:{}", torvin.id)]);
+
+        // …but no `mentioned` edge was created: only the original `leads` remains.
+        #[derive(serde::Deserialize)]
+        struct Row {
+            rel_type: String,
+        }
+        let mut resp = db.query("SELECT rel_type FROM relates_to").await.unwrap();
+        let rows: Vec<Row> = resp.take(0).unwrap();
+        let types: Vec<String> = rows.into_iter().map(|r| r.rel_type).collect();
+        assert_eq!(types, vec!["leads"], "no mentioned edge should be added");
     }
 
     // ── Test 5: multiple matches ─────────────────────────────────────────────

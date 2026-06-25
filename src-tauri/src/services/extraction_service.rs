@@ -459,7 +459,12 @@ async fn persist_batch<C: Connection>(
                     &rel_node.kind,
                 )
             };
-            let result = entity_service::relate(
+            // relate_collapsing enforces the tier rule: a specific relationship
+            // drops any pre-existing generic (`related_to`/`knows`) or noise
+            // (`mentioned`, e.g. from this entity's own wikilinks created moments
+            // earlier) edges for the pair, and a generic edge is skipped entirely
+            // when a specific one already exists.
+            let result = entity_service::relate_collapsing(
                 db,
                 from_id,
                 from_kind,
@@ -470,7 +475,8 @@ async fn persist_batch<C: Connection>(
             )
             .await;
             match result {
-                Ok(_) => relations_created += 1,
+                Ok(true) => relations_created += 1,
+                Ok(false) => {} // redundant edge collapsed away — not counted
                 Err(e) => eprintln!(
                     "extraction: failed to relate {} -> {} ({}): {e}",
                     origin_node.name,

@@ -1018,6 +1018,97 @@ pub async fn relate<C: surrealdb::Connection>(
     Ok(())
 }
 
+/// Create a `relates_to` edge while enforcing the relationship-tier rule, so
+/// only the most specific relationship(s) survive between any unordered pair of
+/// entities (see [`rel_specificity`]).
+///
+/// - If a strictly higher-tier edge already exists between the pair, the new
+///   edge is redundant and is skipped — returns `Ok(false)`.
+/// - Otherwise any existing strictly-lower-tier edges between the pair (in
+///   either direction) are deleted, the edge is created, and it returns
+///   `Ok(true)`.
+/// - Same-tier edges coexist (e.g. `allied_with` + `enemy_of`); an exact
+///   duplicate is replaced in place by the underlying [`relate`].
+///
+/// This is how `mentioned` (tier 0, from wikilinks) and `related_to`/`knows`
+/// (tier 1, the LLM's catch-alls) are prevented from piling up on top of a
+/// specific relationship at write time, rather than being filtered at read time.
+pub async fn relate_collapsing<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    from_id: &str,
+    from_kind: &str,
+    to_id: &str,
+    to_kind: &str,
+    rel_type: &str,
+    notes: Option<String>,
+) -> Result<bool, EntityError> {
+    if !is_safe_record_id(from_id) {
+        return Err(EntityError::Validation {
+            field: "from_id".to_string(),
+            message: "Invalid entity id".to_string(),
+        });
+    }
+    if !is_safe_record_id(to_id) {
+        return Err(EntityError::Validation {
+            field: "to_id".to_string(),
+            message: "Invalid entity id".to_string(),
+        });
+    }
+
+    let new_tier = rel_specificity(rel_type);
+
+    // Existing edge rel_types between the unordered pair (both directions).
+    #[derive(Deserialize)]
+    struct RelRow {
+        rel_type: String,
+    }
+    let pair_filter = format!(
+        "(in = {from_kind}:{from_id} AND out = {to_kind}:{to_id}) OR \
+         (in = {to_kind}:{to_id} AND out = {from_kind}:{from_id})"
+    );
+    let mut resp = db
+        .query(format!(
+            "SELECT rel_type FROM relates_to WHERE {pair_filter}"
+        ))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let rows: Vec<RelRow> = resp.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
+    let max_existing = rows
+        .iter()
+        .map(|r| rel_specificity(&r.rel_type))
+        .max()
+        .unwrap_or(0);
+
+    // A more specific relationship already describes this pair — skip the weaker edge.
+    if new_tier < max_existing {
+        return Ok(false);
+    }
+
+    // Drop now-redundant lower-tier edges for this pair (both directions).
+    let lower_types: Vec<String> = ["mentioned", "related_to", "knows"]
+        .into_iter()
+        .filter(|t| rel_specificity(t) < new_tier)
+        .map(String::from)
+        .collect();
+    if !lower_types.is_empty() {
+        db.query(format!(
+            "DELETE relates_to WHERE ({pair_filter}) AND rel_type IN $lower"
+        ))
+        .bind(("lower", lower_types))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    }
+
+    relate(db, from_id, from_kind, to_id, to_kind, rel_type, notes).await?;
+    Ok(true)
+}
+
 /// Specificity tier of a relationship type, used to collapse redundant parallel
 /// edges between the same pair of entities. Higher = more informative.
 ///
@@ -1833,6 +1924,141 @@ mod tests {
             "embedding vector should be stored with the provider's dimension"
         );
         assert_eq!(row.embed_model.as_deref(), Some("mock"));
+    }
+
+    /// Create a campaign + two factions and return their ids.
+    async fn setup_pair<C: surrealdb::Connection>(db: &surrealdb::Surreal<C>) -> (String, String) {
+        db.use_ns("test").use_db("test").await.unwrap();
+        crate::schema::run_migrations(db).await.unwrap();
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        let a = create(
+            db,
+            Some("camp1"),
+            None,
+            EntityKind::Faction,
+            EntityInput {
+                name: "Hegemony".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let b = create(
+            db,
+            Some("camp1"),
+            None,
+            EntityKind::Faction,
+            EntityInput {
+                name: "Syndicate".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        (a.id, b.id)
+    }
+
+    /// Return the rel_types of every `relates_to` edge between the two factions
+    /// (either direction), sorted.
+    async fn rel_types_between<C: surrealdb::Connection>(
+        db: &surrealdb::Surreal<C>,
+        a: &str,
+        b: &str,
+    ) -> Vec<String> {
+        #[derive(Deserialize)]
+        struct Row {
+            rel_type: String,
+        }
+        let sql = format!(
+            "SELECT rel_type FROM relates_to WHERE \
+             (in = faction:{a} AND out = faction:{b}) OR \
+             (in = faction:{b} AND out = faction:{a})"
+        );
+        let mut resp = db.query(sql).await.unwrap();
+        let rows: Vec<Row> = resp.take(0).unwrap();
+        let mut types: Vec<String> = rows.into_iter().map(|r| r.rel_type).collect();
+        types.sort();
+        types
+    }
+
+    #[tokio::test]
+    async fn relate_collapsing_specific_removes_existing_mentioned() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        let (a, b) = setup_pair(&db).await;
+        // A pre-existing `mentioned` edge (as a wikilink would create).
+        relate(&db, &a, "faction", &b, "faction", "mentioned", None)
+            .await
+            .unwrap();
+        // A specific relationship supersedes it.
+        let created = relate_collapsing(&db, &a, "faction", &b, "faction", "member_of", None)
+            .await
+            .unwrap();
+        assert!(created, "specific edge should be created");
+        assert_eq!(rel_types_between(&db, &a, &b).await, vec!["member_of"]);
+    }
+
+    #[tokio::test]
+    async fn relate_collapsing_generic_skipped_when_specific_exists() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        let (a, b) = setup_pair(&db).await;
+        relate_collapsing(&db, &a, "faction", &b, "faction", "member_of", None)
+            .await
+            .unwrap();
+        // related_to is generic (tier 1) and must not be added over member_of (tier 2).
+        let created = relate_collapsing(&db, &a, "faction", &b, "faction", "related_to", None)
+            .await
+            .unwrap();
+        assert!(!created, "generic edge should be skipped");
+        assert_eq!(rel_types_between(&db, &a, &b).await, vec!["member_of"]);
+    }
+
+    #[tokio::test]
+    async fn relate_collapsing_drops_lower_tier_even_in_opposite_direction() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        let (a, b) = setup_pair(&db).await;
+        // mentioned B→A, then specific A→B: the unordered pair collapses to the specific.
+        relate(&db, &b, "faction", &a, "faction", "mentioned", None)
+            .await
+            .unwrap();
+        relate_collapsing(&db, &a, "faction", &b, "faction", "enemy_of", None)
+            .await
+            .unwrap();
+        assert_eq!(rel_types_between(&db, &a, &b).await, vec!["enemy_of"]);
+    }
+
+    #[tokio::test]
+    async fn relate_collapsing_keeps_lone_mentioned_and_coexisting_specifics() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        let (a, b) = setup_pair(&db).await;
+        // A lone mentioned survives (it is the only connection).
+        let created = relate_collapsing(&db, &a, "faction", &b, "faction", "mentioned", None)
+            .await
+            .unwrap();
+        assert!(created);
+        // Two same-tier specifics coexist; the mentioned is dropped.
+        relate_collapsing(&db, &a, "faction", &b, "faction", "allied_with", None)
+            .await
+            .unwrap();
+        relate_collapsing(&db, &a, "faction", &b, "faction", "enemy_of", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            rel_types_between(&db, &a, &b).await,
+            vec!["allied_with", "enemy_of"]
+        );
     }
 
     #[tokio::test]
