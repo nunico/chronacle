@@ -1,4 +1,4 @@
-use super::{validate_identifier, validate_record_id, split_record_id, WikilinkError};
+use super::{split_record_id, validate_identifier, validate_record_id, WikilinkError};
 
 /// Upsert `relates_to` edges from `source_table:source_id` to each of
 /// `matched_ids` with `rel_type = "mentioned"`.
@@ -24,7 +24,9 @@ pub(super) async fn upsert_mentioned_edges<C: surrealdb::Connection>(
         );
         db.query(delete_query)
             .await
-            .map_err(|e| WikilinkError::Database { message: e.to_string() })?;
+            .map_err(|e| WikilinkError::Database {
+                message: e.to_string(),
+            })?;
 
         if has_higher_tier_edge(db, source_table, source_id, to_table, to_id).await? {
             continue;
@@ -36,7 +38,9 @@ pub(super) async fn upsert_mentioned_edges<C: surrealdb::Connection>(
         );
         db.query(relate_query)
             .await
-            .map_err(|e| WikilinkError::Database { message: e.to_string() })?;
+            .map_err(|e| WikilinkError::Database {
+                message: e.to_string(),
+            })?;
     }
     Ok(())
 }

@@ -1,5 +1,5 @@
-use super::*;
 use super::local;
+use super::*;
 use fastembed::EmbeddingModel;
 
 #[test]

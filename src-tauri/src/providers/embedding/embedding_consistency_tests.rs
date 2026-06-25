@@ -1,8 +1,6 @@
 use super::*;
 
-async fn seed_db_with_sources(
-    models: &[&str],
-) -> surrealdb::Surreal<surrealdb::engine::local::Db> {
+async fn seed_db_with_sources(models: &[&str]) -> surrealdb::Surreal<surrealdb::engine::local::Db> {
     let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
         .await
         .unwrap();

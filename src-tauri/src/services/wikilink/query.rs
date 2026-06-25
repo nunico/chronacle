@@ -28,12 +28,16 @@ pub(super) async fn query_all_entity_names<C: surrealdb::Connection>(
                 .query(query)
                 .bind(("campaign_id", (*campaign_id).to_owned()))
                 .await
-                .map_err(|e| WikilinkError::Database { message: e.to_string() })?;
+                .map_err(|e| WikilinkError::Database {
+                    message: e.to_string(),
+                })?;
 
             let mut results: Vec<(String, String)> = Vec::new();
             for i in 0..ENTITY_TABLES.len() {
                 let rows: Vec<EntityNameRow> =
-                    response.take(i).map_err(|e| WikilinkError::Database { message: e.to_string() })?;
+                    response.take(i).map_err(|e| WikilinkError::Database {
+                        message: e.to_string(),
+                    })?;
                 for row in rows {
                     results.push((format!("{}:{}", row.id.tb, row.id.id.to_raw()), row.name));
                 }
@@ -52,12 +56,16 @@ pub(super) async fn query_all_entity_names<C: surrealdb::Connection>(
                 .query(query)
                 .bind(("collection_id", (*collection_id).to_owned()))
                 .await
-                .map_err(|e| WikilinkError::Database { message: e.to_string() })?;
+                .map_err(|e| WikilinkError::Database {
+                    message: e.to_string(),
+                })?;
 
             let mut results: Vec<(String, String)> = Vec::new();
             for i in 0..ENTITY_TABLES.len() {
                 let rows: Vec<EntityNameRow> =
-                    response.take(i).map_err(|e| WikilinkError::Database { message: e.to_string() })?;
+                    response.take(i).map_err(|e| WikilinkError::Database {
+                        message: e.to_string(),
+                    })?;
                 for row in rows {
                     results.push((format!("{}:{}", row.id.tb, row.id.id.to_raw()), row.name));
                 }
@@ -92,14 +100,22 @@ pub(super) async fn query_all_entity_notes<C: surrealdb::Connection>(
                 .query(query)
                 .bind(("campaign_id", (*campaign_id).to_owned()))
                 .await
-                .map_err(|e| WikilinkError::Database { message: e.to_string() })?;
+                .map_err(|e| WikilinkError::Database {
+                    message: e.to_string(),
+                })?;
 
             let mut results: Vec<(String, String, Option<String>)> = Vec::new();
             for i in 0..ENTITY_TABLES.len() {
                 let rows: Vec<EntityNotesRow> =
-                    response.take(i).map_err(|e| WikilinkError::Database { message: e.to_string() })?;
+                    response.take(i).map_err(|e| WikilinkError::Database {
+                        message: e.to_string(),
+                    })?;
                 for row in rows {
-                    results.push((format!("{}:{}", row.id.tb, row.id.id.to_raw()), row.name, row.notes));
+                    results.push((
+                        format!("{}:{}", row.id.tb, row.id.id.to_raw()),
+                        row.name,
+                        row.notes,
+                    ));
                 }
             }
             Ok(results)
@@ -116,14 +132,22 @@ pub(super) async fn query_all_entity_notes<C: surrealdb::Connection>(
                 .query(query)
                 .bind(("collection_id", (*collection_id).to_owned()))
                 .await
-                .map_err(|e| WikilinkError::Database { message: e.to_string() })?;
+                .map_err(|e| WikilinkError::Database {
+                    message: e.to_string(),
+                })?;
 
             let mut results: Vec<(String, String, Option<String>)> = Vec::new();
             for i in 0..ENTITY_TABLES.len() {
                 let rows: Vec<EntityNotesRow> =
-                    response.take(i).map_err(|e| WikilinkError::Database { message: e.to_string() })?;
+                    response.take(i).map_err(|e| WikilinkError::Database {
+                        message: e.to_string(),
+                    })?;
                 for row in rows {
-                    results.push((format!("{}:{}", row.id.tb, row.id.id.to_raw()), row.name, row.notes));
+                    results.push((
+                        format!("{}:{}", row.id.tb, row.id.id.to_raw()),
+                        row.name,
+                        row.notes,
+                    ));
                 }
             }
             Ok(results)

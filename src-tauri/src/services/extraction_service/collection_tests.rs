@@ -83,18 +83,31 @@ async fn extract_normalizes_inverse_rel_type_and_preserves_unknown() {
         .await
         .unwrap();
     let edges: Vec<Edge> = resp.take(0).unwrap();
-    assert_eq!(edges.len(), 2, "exactly the two relations should be persisted");
+    assert_eq!(
+        edges.len(),
+        2,
+        "exactly the two relations should be persisted"
+    );
     let leads = edges
         .iter()
         .find(|e| e.rel_type == "leads")
         .expect("inverse 'led_by' must normalize to canonical 'leads'");
-    assert_eq!(leads.in_thing.tb, "faction", "edge must be flipped: faction is 'in'");
-    assert_eq!(leads.out_thing.tb, "npc", "edge must be flipped: npc is 'out'");
+    assert_eq!(
+        leads.in_thing.tb, "faction",
+        "edge must be flipped: faction is 'in'"
+    );
+    assert_eq!(
+        leads.out_thing.tb, "npc",
+        "edge must be flipped: npc is 'out'"
+    );
     let betrays = edges
         .iter()
         .find(|e| e.rel_type == "betrays")
         .expect("unknown 'betrays' must be stored verbatim");
-    assert_eq!(betrays.in_thing.tb, "npc", "unknown edge keeps original direction");
+    assert_eq!(
+        betrays.in_thing.tb, "npc",
+        "unknown edge keeps original direction"
+    );
     assert_eq!(betrays.out_thing.tb, "faction");
 }
 
@@ -105,7 +118,9 @@ async fn extract_deduplicates_on_second_run() {
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
     let r1 = extract_from_collection(
         &db,
-        &(Arc::new(MockLlm { response: fixed_json.clone() }) as Arc<dyn LlmProvider>),
+        &(Arc::new(MockLlm {
+            response: fixed_json.clone(),
+        }) as Arc<dyn LlmProvider>),
         &embed,
         &col_id,
         |_| {},
@@ -115,14 +130,19 @@ async fn extract_deduplicates_on_second_run() {
     assert_eq!(r1.entities_created, 1);
     let r2 = extract_from_collection(
         &db,
-        &(Arc::new(MockLlm { response: fixed_json }) as Arc<dyn LlmProvider>),
+        &(Arc::new(MockLlm {
+            response: fixed_json,
+        }) as Arc<dyn LlmProvider>),
         &embed,
         &col_id,
         |_| {},
     )
     .await
     .unwrap();
-    assert_eq!(r2.entities_created, 0, "duplicate entity must not be re-created");
+    assert_eq!(
+        r2.entities_created, 0,
+        "duplicate entity must not be re-created"
+    );
 }
 
 #[tokio::test]

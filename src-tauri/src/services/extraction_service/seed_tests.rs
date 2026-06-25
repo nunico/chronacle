@@ -34,10 +34,9 @@ async fn seed_anchored_builds_named_entity_and_relations_collection_scoped() {
     });
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
     let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore { results: vec![] });
-    let result =
-        extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Commander Varn", |_| {})
-            .await
-            .unwrap();
+    let result = extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Commander Varn", |_| {})
+        .await
+        .unwrap();
     assert_eq!(result.entities_created, 2);
     assert_eq!(result.relations_created, 1);
     let npcs = entity_service::get_by_collection(&db, &col_id, EntityKind::Npc)
@@ -69,7 +68,9 @@ async fn seed_anchored_emits_empty_phase_when_no_passages() {
     let phases = std::sync::Mutex::new(Vec::new());
     let result = extract_seed_anchored(
         &db,
-        &(Arc::new(MockLlm { response: "{}".to_string() }) as Arc<dyn LlmProvider>),
+        &(Arc::new(MockLlm {
+            response: "{}".to_string(),
+        }) as Arc<dyn LlmProvider>),
         &embed,
         &vs,
         "camp1",
@@ -82,10 +83,7 @@ async fn seed_anchored_emits_empty_phase_when_no_passages() {
     .unwrap();
     assert_eq!(result.entities_created, 0);
     let phases = phases.into_inner().unwrap();
-    assert_eq!(
-        phases.last().unwrap().phase,
-        ExtractionPhase::Empty
-    );
+    assert_eq!(phases.last().unwrap().phase, ExtractionPhase::Empty);
 }
 
 #[tokio::test]
@@ -122,11 +120,13 @@ async fn seed_anchored_uses_semantic_hits_without_lexical_match() {
             distance: 0.1,
         }],
     });
-    let result =
-        extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Mystery Lord", |_| {})
-            .await
-            .unwrap();
-    assert_eq!(result.entities_created, 1, "semantic-only hit should still extract");
+    let result = extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Mystery Lord", |_| {})
+        .await
+        .unwrap();
+    assert_eq!(
+        result.entities_created, 1,
+        "semantic-only hit should still extract"
+    );
 }
 
 #[tokio::test]
@@ -148,7 +148,10 @@ async fn seed_anchored_enriches_neighbor_when_setting_enabled() {
     let factions = entity_service::get_by_collection(&db, &col_id, EntityKind::Faction)
         .await
         .unwrap();
-    let fist = factions.iter().find(|n| n.name == "The Iron Fist").expect("neighbor should exist");
+    let fist = factions
+        .iter()
+        .find(|n| n.name == "The Iron Fist")
+        .expect("neighbor should exist");
     assert_eq!(
         fist.summary.as_deref(),
         Some("A militant faction controlling the eastern docks."),
@@ -229,5 +232,8 @@ async fn seed_anchored_caps_enrichment_at_max() {
         .iter()
         .filter(|n| n.summary.as_deref() == Some("PROFILED"))
         .count();
-    assert_eq!(enriched, MAX_ENRICH, "enrichment must be capped at MAX_ENRICH neighbors");
+    assert_eq!(
+        enriched, MAX_ENRICH,
+        "enrichment must be capped at MAX_ENRICH neighbors"
+    );
 }

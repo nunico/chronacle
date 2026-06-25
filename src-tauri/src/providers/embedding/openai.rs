@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
-use super::{CLOUD_EMBED_DIM, OPENAI_DEFAULT_EMBED_MODEL};
 use super::{EmbeddingError, EmbeddingProvider};
+use super::{CLOUD_EMBED_DIM, OPENAI_DEFAULT_EMBED_MODEL};
 
 /// Normalise an OpenAI-compatible base URL to the API root (no trailing slash,
 /// no `/embeddings` suffix). Empty input yields the public OpenAI endpoint.

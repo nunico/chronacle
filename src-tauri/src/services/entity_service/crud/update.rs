@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use super::super::{EntityError, EntityInput, EntityKind, GraphNode, GraphNodeRecord, SELECT_SCOPE_ALIASES};
+use super::super::{
+    EntityError, EntityInput, EntityKind, GraphNode, GraphNodeRecord, SELECT_SCOPE_ALIASES,
+};
 use crate::providers::embedding::EmbeddingProvider;
 
 /// Map an `Option` to a SurrealDB value, using explicit `NULL` for `None`.
@@ -67,10 +69,13 @@ pub async fn update<C: surrealdb::Connection>(
         .bind(("character_level", opt_value(input.character_level)))
         .bind(("status", opt_value(input.status)))
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
     // UPDATE is at index 0; SELECT is at index 1.
-    let records: Vec<GraphNodeRecord> = response.take(1)
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+    let records: Vec<GraphNodeRecord> = response.take(1).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
     let node: GraphNode = records
         .into_iter()
         .next()
@@ -86,9 +91,9 @@ pub async fn update<C: surrealdb::Connection>(
             _ => None,
         };
         if let Some(scope) = scope {
-            let _ = crate::services::wikilink::parse_and_sync_wikilinks(
-                db, table, id, notes, scope,
-            ).await;
+            let _ =
+                crate::services::wikilink::parse_and_sync_wikilinks(db, table, id, notes, scope)
+                    .await;
         }
     }
 
@@ -132,7 +137,9 @@ pub async fn embed_node<C: surrealdb::Connection>(
     let vecs = embed
         .embed_documents(vec![text])
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
     let vec = vecs.into_iter().next().unwrap_or_default();
     if vec.is_empty() {
         return Ok(());
@@ -144,6 +151,8 @@ pub async fn embed_node<C: surrealdb::Connection>(
         .bind(("vec", vec))
         .bind(("model", model))
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
     Ok(())
 }

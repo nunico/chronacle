@@ -173,7 +173,9 @@ pub async fn sync_inbound_wikilinks_for_new_entity<C: surrealdb::Connection>(
         );
         db.query(delete_query)
             .await
-            .map_err(|e| WikilinkError::Database { message: e.to_string() })?;
+            .map_err(|e| WikilinkError::Database {
+                message: e.to_string(),
+            })?;
 
         if edges::has_higher_tier_edge(db, src_table, src_id, new_table, new_id).await? {
             continue;
@@ -185,7 +187,9 @@ pub async fn sync_inbound_wikilinks_for_new_entity<C: surrealdb::Connection>(
         );
         db.query(relate_query)
             .await
-            .map_err(|e| WikilinkError::Database { message: e.to_string() })?;
+            .map_err(|e| WikilinkError::Database {
+                message: e.to_string(),
+            })?;
     }
 
     Ok(())
@@ -198,7 +202,9 @@ fn validate_identifier(s: &str) -> Result<(), WikilinkError> {
     if !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_') {
         Ok(())
     } else {
-        Err(WikilinkError::InvalidIdentifier { value: s.to_string() })
+        Err(WikilinkError::InvalidIdentifier {
+            value: s.to_string(),
+        })
     }
 }
 
@@ -212,9 +218,11 @@ fn validate_record_id(s: &str) -> Result<(), WikilinkError> {
 
 /// Split a full record ID like `"npc:abc123"` into `("npc", "abc123")`.
 fn split_record_id(full_id: &str) -> Result<(&str, &str), WikilinkError> {
-    let pos = full_id.find(':').ok_or_else(|| WikilinkError::MalformedRecordId {
-        value: full_id.to_string(),
-    })?;
+    let pos = full_id
+        .find(':')
+        .ok_or_else(|| WikilinkError::MalformedRecordId {
+            value: full_id.to_string(),
+        })?;
     Ok((&full_id[..pos], &full_id[pos + 1..]))
 }
 

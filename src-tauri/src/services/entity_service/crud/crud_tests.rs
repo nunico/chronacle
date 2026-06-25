@@ -11,13 +11,26 @@ use super::{create, embed_node, embed_text, order_events_for_timeline};
 fn order_events_for_timeline_sorts_by_sequence_then_name_nulls_last() {
     fn event(name: &str, seq: Option<i64>) -> GraphNode {
         GraphNode {
-            id: name.to_string(), kind: "event".to_string(),
-            campaign_id: None, collection_id: None,
-            name: name.to_string(), summary: None, notes: None,
-            created_at: None, updated_at: None, date_start: None, date_end: None,
-            is_ongoing: None, sequence_index: seq, era: None, duration_label: None,
-            session_id: None, player_name: None, character_class: None,
-            character_level: None, status: None,
+            id: name.to_string(),
+            kind: "event".to_string(),
+            campaign_id: None,
+            collection_id: None,
+            name: name.to_string(),
+            summary: None,
+            notes: None,
+            created_at: None,
+            updated_at: None,
+            date_start: None,
+            date_end: None,
+            is_ongoing: None,
+            sequence_index: seq,
+            era: None,
+            duration_label: None,
+            session_id: None,
+            player_name: None,
+            character_class: None,
+            character_level: None,
+            status: None,
         }
     }
     let input = vec![
@@ -34,16 +47,30 @@ fn order_events_for_timeline_sorts_by_sequence_then_name_nulls_last() {
         .collect();
     assert_eq!(
         ordered,
-        vec!["First", "Also Second", "Second", "Third", "Unplaced A", "Unplaced B"]
+        vec![
+            "First",
+            "Also Second",
+            "Second",
+            "Third",
+            "Unplaced A",
+            "Unplaced B"
+        ]
     );
 }
 
 #[test]
 fn embed_text_includes_name_summary_and_notes() {
-    let text = embed_text("Seraphina", Some("the archivist"), Some("Guards the Sunstone."));
+    let text = embed_text(
+        "Seraphina",
+        Some("the archivist"),
+        Some("Guards the Sunstone."),
+    );
     assert!(text.contains("Seraphina"), "name missing: {text}");
     assert!(text.contains("the archivist"), "summary missing: {text}");
-    assert!(text.contains("Guards the Sunstone."), "notes missing: {text}");
+    assert!(
+        text.contains("Guards the Sunstone."),
+        "notes missing: {text}"
+    );
 }
 
 #[test]
@@ -54,32 +81,45 @@ fn embed_text_skips_empty_parts() {
 
 #[tokio::test]
 async fn embed_node_populates_embedding_and_model() {
-    let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(()).await.unwrap();
+    let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+        .await
+        .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
     crate::schema::run_migrations(&db).await.unwrap();
     db.query(
         "CREATE campaign SET id='camp1', name='Test', system='5e', \
          created_at=time::now(), updated_at=time::now()",
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
 
     let node = create(
-        &db, Some("camp1"), None, EntityKind::Npc,
+        &db,
+        Some("camp1"),
+        None,
+        EntityKind::Npc,
         EntityInput {
             name: "Seraphina".to_string(),
             notes: Some("Guards the Sunstone beneath the Iron Tower.".to_string()),
             ..Default::default()
         },
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
 
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
     embed_node(&db, &embed, &node).await.unwrap();
 
     #[derive(Deserialize)]
-    struct Row { embedding: Option<Vec<f32>>, embed_model: Option<String> }
+    struct Row {
+        embedding: Option<Vec<f32>>,
+        embed_model: Option<String>,
+    }
     let mut resp = db
         .query("SELECT embedding, embed_model FROM type::thing('npc', $id)")
         .bind(("id", node.id.clone()))
-        .await.unwrap();
+        .await
+        .unwrap();
     let rows: Vec<Row> = resp.take(0).unwrap();
     let row = rows.into_iter().next().expect("npc row");
     assert_eq!(row.embedding.as_ref().map(|v| v.len()), Some(768));

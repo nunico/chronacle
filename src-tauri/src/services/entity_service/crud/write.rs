@@ -71,7 +71,9 @@ pub async fn create<C: surrealdb::Connection>(
         .bind(("table", table))
         .bind(("id", id.clone()))
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
     }
     if let Some(col) = collection_id {
         db.query(
@@ -83,7 +85,9 @@ pub async fn create<C: surrealdb::Connection>(
         .bind(("table", table))
         .bind(("id", id.clone()))
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
     }
 
     // Build GraphNode from parameters — avoids re-fetch timing issues with
@@ -91,33 +95,56 @@ pub async fn create<C: surrealdb::Connection>(
     #[derive(serde::Deserialize)]
     struct StoredRecord {
         id: surrealdb::sql::Thing,
-        #[serde(default)] name: String,
-        #[serde(default)] summary: Option<String>,
-        #[serde(default)] notes: Option<String>,
-        #[serde(default)] created_at: Option<String>,
-        #[serde(default)] updated_at: Option<String>,
-        #[serde(default)] date_start: Option<String>,
-        #[serde(default)] date_end: Option<String>,
-        #[serde(default)] is_ongoing: Option<bool>,
-        #[serde(default)] sequence_index: Option<i64>,
-        #[serde(default)] era: Option<String>,
-        #[serde(default)] duration_label: Option<String>,
-        #[serde(default)] session: Option<surrealdb::sql::Thing>,
-        #[serde(default)] player_name: Option<String>,
-        #[serde(default)] character_class: Option<String>,
-        #[serde(default)] character_level: Option<i64>,
-        #[serde(default)] status: Option<String>,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        summary: Option<String>,
+        #[serde(default)]
+        notes: Option<String>,
+        #[serde(default)]
+        created_at: Option<String>,
+        #[serde(default)]
+        updated_at: Option<String>,
+        #[serde(default)]
+        date_start: Option<String>,
+        #[serde(default)]
+        date_end: Option<String>,
+        #[serde(default)]
+        is_ongoing: Option<bool>,
+        #[serde(default)]
+        sequence_index: Option<i64>,
+        #[serde(default)]
+        era: Option<String>,
+        #[serde(default)]
+        duration_label: Option<String>,
+        #[serde(default)]
+        session: Option<surrealdb::sql::Thing>,
+        #[serde(default)]
+        player_name: Option<String>,
+        #[serde(default)]
+        character_class: Option<String>,
+        #[serde(default)]
+        character_level: Option<i64>,
+        #[serde(default)]
+        status: Option<String>,
     }
     let mut fetch_resp = db
         .query("SELECT * FROM type::thing($table, $id)")
         .bind(("table", table))
         .bind(("id", id.clone()))
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
-    let recs: Vec<StoredRecord> = fetch_resp.take(0)
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
-    let rec = recs.into_iter().next()
-        .ok_or_else(|| EntityError::Database { message: "No record returned after create".to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let recs: Vec<StoredRecord> = fetch_resp.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
+    let rec = recs
+        .into_iter()
+        .next()
+        .ok_or_else(|| EntityError::Database {
+            message: "No record returned after create".to_string(),
+        })?;
 
     let node = GraphNode {
         id: rec.id.id.to_raw(),
@@ -153,8 +180,13 @@ pub async fn create<C: surrealdb::Connection>(
             };
             if let Some(scope) = scope {
                 let _ = crate::services::wikilink::parse_and_sync_wikilinks(
-                    db, table, &id_for_wikilinks, notes, scope,
-                ).await;
+                    db,
+                    table,
+                    &id_for_wikilinks,
+                    notes,
+                    scope,
+                )
+                .await;
             }
         }
     }
@@ -169,8 +201,13 @@ pub async fn create<C: surrealdb::Connection>(
         };
         if let Some(inbound_scope) = inbound_scope {
             let _ = crate::services::wikilink::sync_inbound_wikilinks_for_new_entity(
-                db, table, &id_for_wikilinks, &node.name, inbound_scope,
-            ).await;
+                db,
+                table,
+                &id_for_wikilinks,
+                &node.name,
+                inbound_scope,
+            )
+            .await;
         }
     }
 
@@ -188,6 +225,8 @@ pub async fn delete<C: surrealdb::Connection>(
         .bind(("table", table))
         .bind(("id", id.to_owned()))
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
     Ok(())
 }

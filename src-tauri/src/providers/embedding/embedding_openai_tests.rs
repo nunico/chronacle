@@ -1,10 +1,13 @@
-use super::*;
 use super::openai::normalize_openai_base_url;
+use super::*;
 
 #[test]
 fn openai_base_url_normalization() {
     assert_eq!(normalize_openai_base_url(""), "https://api.openai.com/v1");
-    assert_eq!(normalize_openai_base_url("   "), "https://api.openai.com/v1");
+    assert_eq!(
+        normalize_openai_base_url("   "),
+        "https://api.openai.com/v1"
+    );
     assert_eq!(
         normalize_openai_base_url("https://api.openai.com/v1/"),
         "https://api.openai.com/v1"
@@ -26,11 +29,8 @@ fn openai_model_identity_and_defaults() {
     assert_eq!(p.model_name(), "openai:text-embedding-3-small:768");
     assert_eq!(p.dimension(), CLOUD_EMBED_DIM);
 
-    let p2 = OpenAiEmbeddingProvider::new(
-        "k".into(),
-        "text-embedding-3-large".into(),
-        String::new(),
-    );
+    let p2 =
+        OpenAiEmbeddingProvider::new("k".into(), "text-embedding-3-large".into(), String::new());
     assert_eq!(p2.model_name(), "openai:text-embedding-3-large:768");
 }
 

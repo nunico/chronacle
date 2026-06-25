@@ -15,9 +15,12 @@ pub async fn get_by_id<C: surrealdb::Connection>(
         .bind(("table", table))
         .bind(("id", id.to_owned()))
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
-    let records: Vec<GraphNodeRecord> = response.take(0)
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
     records
         .into_iter()
         .next()
@@ -51,9 +54,12 @@ pub async fn get_by_campaign<C: surrealdb::Connection>(
         .bind(("table", table))
         .bind(("campaign_id", campaign_id.to_owned()))
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
-    let records: Vec<GraphNodeRecord> = response.take(0)
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
     Ok(records.into_iter().map(Into::into).collect())
 }
 
@@ -90,11 +96,19 @@ pub async fn count_by_campaign<C: surrealdb::Connection>(
     campaign_id: &str,
 ) -> Result<std::collections::HashMap<String, u64>, EntityError> {
     #[derive(Deserialize)]
-    struct CountRow { c: u64 }
+    struct CountRow {
+        c: u64,
+    }
 
     const ALL_KINDS: [EntityKind; 8] = [
-        EntityKind::Npc, EntityKind::Location, EntityKind::Faction, EntityKind::Creature,
-        EntityKind::Item, EntityKind::Event, EntityKind::PlayerCharacter, EntityKind::Misc,
+        EntityKind::Npc,
+        EntityKind::Location,
+        EntityKind::Faction,
+        EntityKind::Creature,
+        EntityKind::Item,
+        EntityKind::Event,
+        EntityKind::PlayerCharacter,
+        EntityKind::Misc,
     ];
 
     let mut counts = std::collections::HashMap::new();
@@ -113,9 +127,13 @@ pub async fn count_by_campaign<C: surrealdb::Connection>(
             .bind(("table", table))
             .bind(("campaign_id", campaign_id.to_owned()))
             .await
-            .map_err(|e| EntityError::Database { message: e.to_string() })?
+            .map_err(|e| EntityError::Database {
+                message: e.to_string(),
+            })?
             .take(0)
-            .map_err(|e| EntityError::Database { message: e.to_string() })?;
+            .map_err(|e| EntityError::Database {
+                message: e.to_string(),
+            })?;
         counts.insert(table.to_string(), row.map(|r| r.c).unwrap_or(0));
     }
     Ok(counts)
@@ -139,9 +157,12 @@ pub async fn get_by_collection<C: surrealdb::Connection>(
         .bind(("table", table))
         .bind(("collection_id", collection_id.to_owned()))
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
-    let records: Vec<GraphNodeRecord> = response.take(0)
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
     Ok(records.into_iter().map(Into::into).collect())
 }
 
@@ -168,9 +189,12 @@ pub async fn find_by_name_and_collection<C: surrealdb::Connection>(
         .bind(("collection_id", collection_id.to_owned()))
         .bind(("name", name.to_owned()))
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
-    let records: Vec<GraphNodeRecord> = response.take(0)
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
     Ok(records.into_iter().next().map(Into::into))
 }
 
@@ -187,8 +211,11 @@ pub async fn get_events_for_session<C: surrealdb::Connection>(
         .query(sql)
         .bind(("session_id", session_id.to_owned()))
         .await
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
-    let records: Vec<GraphNodeRecord> = response.take(0)
-        .map_err(|e| EntityError::Database { message: e.to_string() })?;
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let records: Vec<GraphNodeRecord> = response.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
     Ok(records.into_iter().map(Into::into).collect())
 }

@@ -75,7 +75,11 @@ impl LlmProvider for BranchingLlm {
             .first()
             .map(|m| m.content.contains("\"relations\""))
             .unwrap_or(false);
-        let resp = if is_seed { self.seed.clone() } else { self.profile.clone() };
+        let resp = if is_seed {
+            self.seed.clone()
+        } else {
+            self.profile.clone()
+        };
         let (tx, rx) = tokio::sync::mpsc::channel(4);
         tokio::spawn(async move {
             let _ = tx.send(Ok(resp)).await;
@@ -84,8 +88,8 @@ impl LlmProvider for BranchingLlm {
     }
 }
 
-pub async fn setup_db_with_collection(
-) -> (surrealdb::Surreal<surrealdb::engine::local::Db>, String) {
+pub async fn setup_db_with_collection() -> (surrealdb::Surreal<surrealdb::engine::local::Db>, String)
+{
     let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
         .await
         .unwrap();
@@ -114,7 +118,9 @@ pub async fn setup_db_with_collection(
     .bind(("cid", col_id.clone()))
     .await
     .unwrap();
-    let zeros = std::iter::repeat_n("0.0", 768).collect::<Vec<_>>().join(",");
+    let zeros = std::iter::repeat_n("0.0", 768)
+        .collect::<Vec<_>>()
+        .join(",");
     db.query(format!(
         "CREATE chunk SET id='chunk1', \
          text='The Iron Fist controls the eastern docks. Commander Varn leads them.', \
