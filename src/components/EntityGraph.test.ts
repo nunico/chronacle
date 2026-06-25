@@ -40,6 +40,31 @@ describe('EntityGraph', () => {
     expect(screen.getByText('resides_in')).toBeTruthy();
   });
 
+  it('renders parallel edges between the same pair (different rel_type) without crashing', async () => {
+    // Real extractions produce multiple edges between the same two entities with
+    // different rel_types (e.g. a faction both `located_in` and `related_to` a
+    // location). The link `{#each}` key must include rel_type, otherwise Svelte
+    // throws each_key_duplicate at render time and blanks the entire graph —
+    // including the center node. See entity_service get_entity_graph.
+    const parallel = {
+      nodes: [
+        { id: 'hegemony', kind: 'faction', name: 'Zenithian Hegemony' },
+        { id: 'spire', kind: 'location', name: 'The Spire' },
+      ],
+      edges: [
+        { from_id: 'hegemony', from_kind: 'faction', to_id: 'spire', to_kind: 'location', rel_type: 'located_in', notes: null },
+        { from_id: 'hegemony', from_kind: 'faction', to_id: 'spire', to_kind: 'location', rel_type: 'related_to', notes: null },
+      ],
+    };
+    m.getEntityGraph.mockResolvedValueOnce(parallel);
+    render(EntityGraph, { entityId: 'hegemony', entityKind: 'faction' });
+    // Both nodes render and both edge labels are present.
+    expect(await screen.findByText('Zenithian Hegemony')).toBeTruthy();
+    expect(screen.getByText('The Spire')).toBeTruthy();
+    expect(screen.getByText('located_in')).toBeTruthy();
+    expect(screen.getByText('related_to')).toBeTruthy();
+  });
+
   it('shows an empty state for a lonely entity', async () => {
     m.getEntityGraph.mockResolvedValueOnce({ nodes: [{ id: 'h', kind: 'npc', name: 'Hermit' }], edges: [] });
     render(EntityGraph, { entityId: 'h', entityKind: 'npc' });

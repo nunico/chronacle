@@ -98,7 +98,18 @@
   function buildSimulation(g: EntityGraph) {
     sim?.stop();
     nodes = g.nodes.map((n) => ({ ...n }));
-    links = g.edges.map((e) => ({ source: e.from_id, target: e.to_id, rel_type: e.rel_type }));
+    // Dedupe edges by (source, target, rel_type): the SVG `{#each}` keys links by
+    // this same tuple, and Svelte throws each_key_duplicate (blanking the whole
+    // graph) if two links share a key. Exact-duplicate edges can occur after
+    // re-extraction, so guard here rather than trusting the backend.
+    const seen: Record<string, true> = {};
+    links = [];
+    for (const e of g.edges) {
+      const key = `${e.from_id}->${e.to_id}:${e.rel_type}`;
+      if (seen[key]) continue;
+      seen[key] = true;
+      links.push({ source: e.from_id, target: e.to_id, rel_type: e.rel_type });
+    }
     // Use measured dims if already available, otherwise fall back to defaults.
     const cx = dimsReady ? containerWidth / 2 : 360;
     const cy = dimsReady ? containerHeight / 2 : 260;
@@ -332,7 +343,7 @@
       Edge labels are also wrapped in a 1/zoom counter-scale group at the midpoint.
     -->
     <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
-      {#each links as l (`${linkEndId(l.source)}->${linkEndId(l.target)}`)}
+      {#each links as l (`${linkEndId(l.source)}->${linkEndId(l.target)}:${l.rel_type}`)}
         {@const a = nodeById(linkEndId(l.source))}
         {@const b = nodeById(linkEndId(l.target))}
         {#if a && b}
