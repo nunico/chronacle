@@ -25,7 +25,12 @@ impl IngestionProgress {
     }
 
     /// A batched stage reporting `current`/`total` items processed so far.
-    pub(super) fn counted(fraction: f32, step: impl Into<String>, current: u32, total: u32) -> Self {
+    pub(super) fn counted(
+        fraction: f32,
+        step: impl Into<String>,
+        current: u32,
+        total: u32,
+    ) -> Self {
         Self {
             fraction,
             step: step.into(),

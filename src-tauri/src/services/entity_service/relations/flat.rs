@@ -1,8 +1,8 @@
 use serde::Deserialize;
 use surrealdb::sql::Thing;
 
-use super::edge::{is_safe_record_id, keep_most_specific};
 use super::super::{EntityError, RelatedEntity};
+use super::edge::{is_safe_record_id, keep_most_specific};
 
 /// Fetch all entities related to `id:kind` as a flat list, both directions.
 ///

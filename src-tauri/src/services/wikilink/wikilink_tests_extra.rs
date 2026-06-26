@@ -32,7 +32,9 @@ fn make_npc(name: &str) -> EntityInput {
 
 async fn create_campaign(db: &Surreal<Db>) -> String {
     #[derive(serde::Deserialize)]
-    struct Row { id: surrealdb::sql::Thing }
+    struct Row {
+        id: surrealdb::sql::Thing,
+    }
     let mut resp = db
         .query(
             "CREATE campaign SET name='Test Campaign', system='D&D 5e', \

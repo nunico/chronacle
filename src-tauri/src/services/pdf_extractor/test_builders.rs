@@ -1,6 +1,5 @@
 /// PDF builder helpers for tests. All functions produce minimal valid PDFs
 /// using lopdf; they are purely for use within the test suite.
-
 pub(super) fn pdfium_lib_path() -> std::path::PathBuf {
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/pdfium");
     let name = if cfg!(target_os = "macos") {
@@ -90,8 +89,7 @@ pub(super) fn make_pdf_with_pages(texts: &[&str]) -> Vec<u8> {
                 Operation::new("ET", vec![]),
             ],
         };
-        let content_id =
-            doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
         let page_id = doc.add_object(dictionary! {
             "Type" => "Page",
             "Parent" => pages_id,

@@ -32,7 +32,11 @@ fn make_edge(from: &str, to: &str, rel: &str) -> GraphEdge {
 fn pair_key(e: &GraphEdge) -> (String, String) {
     let a = format!("{}:{}", e.from_kind, e.from_id);
     let b = format!("{}:{}", e.to_kind, e.to_id);
-    if a <= b { (a, b) } else { (b, a) }
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
 }
 
 fn identity(e: &GraphEdge) -> (String, String, String, String, String) {

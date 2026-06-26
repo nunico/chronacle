@@ -8,8 +8,8 @@ mod resolve;
 mod rows;
 
 pub use entity::fetch_entity_context;
-pub use resolve::resolve_collection_ids;
 pub(super) use format::build_context;
+pub use resolve::resolve_collection_ids;
 
 #[cfg(test)]
 #[path = "context_tests.rs"]

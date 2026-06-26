@@ -69,10 +69,7 @@ pub async fn get_sources(
 
 /// Delete a source, its blob data, and all associated chunks.
 #[tauri::command]
-pub async fn delete_source(
-    state: State<'_, Arc<AppState>>,
-    id: String,
-) -> Result<(), String> {
+pub async fn delete_source(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     // Check source exists before deleting
     let mut exists = state
         .db

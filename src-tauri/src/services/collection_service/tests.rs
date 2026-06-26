@@ -1,6 +1,7 @@
 use super::crud::{create, delete, get_all, get_by_id, update};
-use super::subscriptions::{add_campaign_collection, get_campaign_collections,
-    remove_campaign_collection};
+use super::subscriptions::{
+    add_campaign_collection, get_campaign_collections, remove_campaign_collection,
+};
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
 

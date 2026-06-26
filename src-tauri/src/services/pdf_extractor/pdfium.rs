@@ -104,7 +104,12 @@ fn extract_page_text_with_heading_breaks(
                 )
             );
             let y = c.origin_y().map(|p| p.value).unwrap_or(0.0);
-            Some(CharInfo { ch, font_size, is_bold, y })
+            Some(CharInfo {
+                ch,
+                font_size,
+                is_bold,
+                y,
+            })
         })
         .collect();
 

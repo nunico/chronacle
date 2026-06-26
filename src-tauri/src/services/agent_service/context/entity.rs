@@ -1,8 +1,8 @@
 use surrealdb::Connection;
 
+use super::super::AgentError;
 use super::format::format_entity_output;
 use super::rows::{BasicRow, EventRow, PcRow, SessionRow};
-use super::super::AgentError;
 
 /// Query entity tables for a campaign (and optionally subscribed collections)
 /// and format them as a context block.

@@ -36,8 +36,8 @@ fn test_chunk_single_short_document() {
 
 #[test]
 fn test_chunk_preserves_page_range() {
-    let p1 = "This is page one of the document. It introduces the basic rules of combat. "
-        .repeat(30);
+    let p1 =
+        "This is page one of the document. It introduces the basic rules of combat. ".repeat(30);
     let p2 =
         "Page two continues with advanced combat techniques and special maneuvers. ".repeat(40);
 
@@ -101,8 +101,7 @@ fn test_chunk_respects_section_boundaries() {
     let intro_text = "Introductory text about the game world and characters. ".repeat(50);
     let combat_text = "Detailed combat rules describing attacks and damage. ".repeat(50);
 
-    let text =
-        format!("Chapter 1: INTRODUCTION\n{intro_text}\nChapter 2: COMBAT\n{combat_text}");
+    let text = format!("Chapter 1: INTRODUCTION\n{intro_text}\nChapter 2: COMBAT\n{combat_text}");
 
     let doc = make_doc(&text, vec![(text.as_str(), 1)]);
     let chunks = chunk_document(&doc);

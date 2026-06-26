@@ -16,7 +16,8 @@ fn test_approx_token_count_short() {
 
 #[test]
 fn test_approx_token_count_typical() {
-    let text = "The fighter swings his greatsword at the dragon, dealing 12 points of slashing damage.";
+    let text =
+        "The fighter swings his greatsword at the dragon, dealing 12 points of slashing damage.";
     // ~87 chars → 87/4 ≈ 22 tokens
     assert_eq!(approx_token_count(text), 22);
 }
@@ -67,7 +68,9 @@ fn test_is_not_heading_regular_sentence() {
 #[test]
 fn test_is_not_heading_too_long_all_caps() {
     // 20+ words all caps is likely a table or block, not a heading
-    assert!(!is_heading("THIS IS A VERY LONG ALL CAPS LINE THAT LOOKS LIKE A TABLE OR DATA BLOCK AND NOT A HEADING"));
+    assert!(!is_heading(
+        "THIS IS A VERY LONG ALL CAPS LINE THAT LOOKS LIKE A TABLE OR DATA BLOCK AND NOT A HEADING"
+    ));
 }
 
 #[test]

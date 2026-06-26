@@ -1,8 +1,8 @@
 use serde::Deserialize;
 use surrealdb::sql::Thing;
 
-use super::edge::{is_safe_record_id, keep_most_specific};
 use super::super::{EntityError, EntityGraph, GraphEdge, GraphNodeRef};
+use super::edge::{is_safe_record_id, keep_most_specific};
 
 /// Fetch the ego graph around an entity: the center, its `relates_to` neighbors
 /// (one hop), and the edges among them. `_depth` is reserved for future use;
@@ -88,8 +88,7 @@ pub async fn get_entity_graph<C: surrealdb::Connection>(
 
     // 2. Collect distinct (kind, id) node keys: the center plus every endpoint
     //    of the surviving (collapsed) edges.
-    let mut keys: std::collections::BTreeSet<(String, String)> =
-        std::collections::BTreeSet::new();
+    let mut keys: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
     keys.insert((kind.to_string(), id.to_string()));
     for e in &edges {
         keys.insert((e.from_kind.clone(), e.from_id.clone()));

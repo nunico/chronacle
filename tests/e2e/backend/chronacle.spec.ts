@@ -12,40 +12,73 @@ test.describe('Chronacle Backend IPC', () => {
       window.__TAURI_INTERNALS__ = {
         invoke: (cmd: string, _args?: Record<string, unknown>) => {
           switch (cmd) {
+            // ── Embedding model — non-local backend bypasses ModelDownload
+            case 'get_embedding_provider_status':
+              return Promise.resolve({
+                backend: 'openai',
+                model: 'text-embedding-3-small',
+                dimension: 1536,
+                api_key_configured: true,
+                local_available: false,
+                local_cached: false,
+              });
+
+            case 'get_embedding_model_mismatch':
+              return Promise.resolve({ active_model: 'nomic-embed-text-v1.5', stale: [] });
+
+            // ── Campaigns / rail counts
+            case 'get_campaigns':
+              return Promise.resolve([{ id: 'camp1', name: 'Test Campaign', system: 'D&D 5e' }]);
+
+            case 'get_entity_counts':
+              return Promise.resolve({});
+
+            case 'get_sessions':
+              return Promise.resolve([]);
+
+            case 'get_collections':
+              return Promise.resolve([]);
+
+            case 'get_sources':
+              return Promise.resolve([]);
+
+            // ── Settings
             case 'get_settings':
-              return {
+              return Promise.resolve({
                 llm_provider: 'openai',
                 llm_model: 'gpt-4o-mini',
                 llm_api_key: 'sk-test',
                 llm_base_url: '',
                 active_campaign_id: '',
-              };
+              });
 
             case 'update_setting':
-              return null;
+              return Promise.resolve(null);
 
             case 'get_llm_provider_status':
-              return {
+              return Promise.resolve({
                 provider_type: 'openai',
                 model: 'gpt-4o-mini',
                 api_key_configured: true,
-              };
+              });
 
+            // ── Chat
             case 'get_chat_history':
-              return [];
+              return Promise.resolve([]);
 
             case 'chat_send':
-              return null;
+              return Promise.resolve(null);
 
+            // ── Custom providers
             case 'get_custom_providers':
-              return [];
+              return Promise.resolve([]);
 
             case 'get_provider_models':
-              return [];
+              return Promise.resolve([]);
 
             default:
               console.warn(`Unhandled IPC mock: ${cmd}`);
-              return null;
+              return Promise.resolve(null);
           }
         },
       };
@@ -54,20 +87,20 @@ test.describe('Chronacle Backend IPC', () => {
 
   test('loads the app without crashing', async ({ page }) => {
     await page.goto('http://localhost:1420');
-    // App should render with the Chronacle header
-    await expect(page.locator('header h1')).toHaveText('Chronacle');
+    // App should render with the Oracle topbar title
+    await expect(page.locator('header .title')).toHaveText('Oracle');
   });
 
   test('shows the settings page when clicking Settings', async ({ page }) => {
     await page.goto('http://localhost:1420');
-    await page.click('button:has-text("Settings")');
+    await page.click('button[aria-label="Settings"]');
     await expect(page.locator('h2')).toHaveText('Settings');
   });
 
   test('shows the chat interface by default', async ({ page }) => {
     await page.goto('http://localhost:1420');
     await expect(page.locator('textarea')).toBeVisible();
-    await expect(page.locator('button:has-text("Send")')).toBeVisible();
+    await expect(page.locator('button[aria-label="Send"]')).toBeVisible();
   });
 
   test('upload PDF button is visible', async ({ page }) => {
@@ -75,8 +108,8 @@ test.describe('Chronacle Backend IPC', () => {
     await expect(page.locator('button:has-text("Upload PDF")')).toBeVisible();
   });
 
-  test('shows welcome message when no chat history', async ({ page }) => {
+  test('shows empty-library state when no sources indexed', async ({ page }) => {
     await page.goto('http://localhost:1420');
-    await expect(page.locator('text=Welcome to Chronacle')).toBeVisible();
+    await expect(page.locator('text=The oracle has no tomes to consult yet.')).toBeVisible();
   });
 });

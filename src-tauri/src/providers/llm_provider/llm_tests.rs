@@ -59,11 +59,8 @@ async fn test_anthropic_with_base_url_trailing_slash() {
 
 #[tokio::test]
 async fn test_anthropic_with_base_url_empty_falls_back() {
-    let provider = AnthropicProvider::with_base_url(
-        "sk-ant-test".to_string(),
-        String::new(),
-        String::new(),
-    );
+    let provider =
+        AnthropicProvider::with_base_url("sk-ant-test".to_string(), String::new(), String::new());
     assert!(provider.base_url == "https://api.anthropic.com/v1");
 }
 

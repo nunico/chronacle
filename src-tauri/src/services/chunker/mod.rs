@@ -18,6 +18,6 @@ pub use heading::{is_heading, is_title_case_heading};
 pub use types::{Chunk, ExtractedDoc, PageContent};
 
 #[cfg(test)]
-mod tests_heading;
-#[cfg(test)]
 mod tests_chunking;
+#[cfg(test)]
+mod tests_heading;

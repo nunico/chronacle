@@ -43,117 +43,131 @@ test.describe('Session Log', () => {
       localStorage.setItem('chronacle_active_campaign_id', 'camp1');
     });
 
-    await page.addInitScript(() => {
-      // @ts-expect-error -- __TAURI_INTERNALS__ is injected by Tauri at runtime
-      window.__TAURI_INTERNALS__ = {
-        invoke: (cmd: string, args?: Record<string, unknown>) => {
-          switch (cmd) {
-            // ── Embedding model — return true so ModelDownload calls onModelReady
-            case 'check_embedding_model':
-              return Promise.resolve(true);
+    // Pass mock data as arguments — addInitScript serializes only the function
+    // body, so Node.js-scope variables like MOCK_CAMPAIGN are not available
+    // inside the browser. Passing them as the second argument serializes the
+    // values and makes them available as the first parameter.
+    await page.addInitScript(
+      (mocks) => {
+        // @ts-expect-error -- __TAURI_INTERNALS__ is injected by Tauri at runtime
+        window.__TAURI_INTERNALS__ = {
+          invoke: (cmd: string, args?: Record<string, unknown>) => {
+            switch (cmd) {
+              // ── Embedding model — non-local backend bypasses ModelDownload
+              case 'get_embedding_provider_status':
+                return Promise.resolve({
+                  backend: 'openai',
+                  model: 'text-embedding-3-small',
+                  dimension: 1536,
+                  api_key_configured: true,
+                  local_available: false,
+                  local_cached: false,
+                });
 
-            case 'download_embedding_model':
-              return Promise.resolve(null);
+              case 'get_embedding_model_mismatch':
+                return Promise.resolve({
+                  active_model: 'nomic-embed-text-v1.5',
+                  stale: [],
+                });
 
-            case 'get_embedding_model_mismatch':
-              return Promise.resolve({
-                active_model: 'nomic-embed-text-v1.5',
-                stale: [],
-              });
+              // ── Settings
+              case 'get_settings':
+                return Promise.resolve({
+                  llm_provider: 'openai',
+                  llm_model: 'gpt-4o-mini',
+                  llm_api_key: 'sk-test',
+                  llm_base_url: '',
+                  active_campaign_id: 'camp1',
+                });
 
-            // ── Settings
-            case 'get_settings':
-              return Promise.resolve({
-                llm_provider: 'openai',
-                llm_model: 'gpt-4o-mini',
-                llm_api_key: 'sk-test',
-                llm_base_url: '',
-                active_campaign_id: 'camp1',
-              });
+              case 'update_setting':
+                return Promise.resolve(null);
 
-            case 'update_setting':
-              return Promise.resolve(null);
+              // ── Campaigns
+              case 'get_campaigns':
+                return Promise.resolve([mocks.campaign]);
 
-            // ── Campaigns
-            case 'get_campaigns':
-              return Promise.resolve([MOCK_CAMPAIGN]);
+              case 'get_campaign':
+                return Promise.resolve(mocks.campaign);
 
-            case 'get_campaign':
-              return Promise.resolve(MOCK_CAMPAIGN);
+              // ── Sessions
+              case 'get_sessions':
+                return Promise.resolve([mocks.session]);
 
-            // ── Sessions
-            case 'get_sessions':
-              return Promise.resolve([MOCK_SESSION]);
+              case 'create_session':
+                return Promise.resolve({
+                  id: 'sess2',
+                  campaign_id: 'camp1',
+                  session_number: 2,
+                  title: 'Session 2',
+                  date_played: new Date().toISOString().slice(0, 10),
+                  notes: '',
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                });
 
-            case 'create_session':
-              return Promise.resolve({
-                id: 'sess2',
-                campaign_id: 'camp1',
-                session_number: 2,
-                title: 'Session 2',
-                date_played: new Date().toISOString().slice(0, 10),
-                notes: '',
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              });
+              case 'update_session':
+                return Promise.resolve(mocks.session);
 
-            case 'update_session':
-              return Promise.resolve(MOCK_SESSION);
+              case 'delete_session':
+                return Promise.resolve(null);
 
-            case 'delete_session':
-              return Promise.resolve(null);
+              case 'get_session_entities':
+                return Promise.resolve([mocks.npc]);
 
-            case 'get_session_entities':
-              return Promise.resolve([MOCK_NPC]);
+              case 'get_entity_counts':
+                return Promise.resolve({});
 
-            // ── Entities — return MOCK_NPC for npc kind, empty for others
-            case 'get_entities': {
-              const kind = (args as Record<string, unknown>)?.kind;
-              if (kind === 'npc') return Promise.resolve([MOCK_NPC]);
-              return Promise.resolve([]);
+              // ── Entities — return MOCK_NPC for npc kind, empty for others
+              case 'get_entities': {
+                const kind = (args as Record<string, unknown>)?.kind;
+                if (kind === 'npc') return Promise.resolve([mocks.npc]);
+                return Promise.resolve([]);
+              }
+
+              // ── LLM / chat
+              case 'get_llm_provider_status':
+                return Promise.resolve({
+                  provider_type: 'openai',
+                  model: 'gpt-4o-mini',
+                  api_key_configured: true,
+                });
+
+              case 'get_chat_history':
+                return Promise.resolve([]);
+
+              case 'chat_send':
+                return Promise.resolve(null);
+
+              case 'reconfigure_llm_provider':
+                return Promise.resolve('openai');
+
+              // ── Collections / sources
+              case 'get_collections':
+                return Promise.resolve([]);
+
+              case 'get_sources':
+                return Promise.resolve([]);
+
+              case 'get_campaign_collections':
+                return Promise.resolve([]);
+
+              // ── Custom providers / models
+              case 'get_custom_providers':
+                return Promise.resolve([]);
+
+              case 'get_provider_models':
+                return Promise.resolve([]);
+
+              default:
+                console.warn(`Unhandled IPC mock: ${cmd}`);
+                return Promise.resolve(null);
             }
-
-            // ── LLM / chat
-            case 'get_llm_provider_status':
-              return Promise.resolve({
-                provider_type: 'openai',
-                model: 'gpt-4o-mini',
-                api_key_configured: true,
-              });
-
-            case 'get_chat_history':
-              return Promise.resolve([]);
-
-            case 'chat_send':
-              return Promise.resolve(null);
-
-            case 'reconfigure_llm_provider':
-              return Promise.resolve('openai');
-
-            // ── Collections / sources
-            case 'get_collections':
-              return Promise.resolve([]);
-
-            case 'get_sources':
-              return Promise.resolve([]);
-
-            case 'get_campaign_collections':
-              return Promise.resolve([]);
-
-            // ── Custom providers / models
-            case 'get_custom_providers':
-              return Promise.resolve([]);
-
-            case 'get_provider_models':
-              return Promise.resolve([]);
-
-            default:
-              console.warn(`Unhandled IPC mock: ${cmd}`);
-              return Promise.resolve(null);
-          }
-        },
-      };
-    });
+          },
+        };
+      },
+      { campaign: MOCK_CAMPAIGN, session: MOCK_SESSION, npc: MOCK_NPC },
+    );
   });
 
   test('shows Sessions tab in navigation', async ({ page }) => {

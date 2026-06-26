@@ -17,11 +17,9 @@ mod types;
 
 pub(crate) use db::get_source_info;
 pub use types::{IngestionError, IngestionProgress};
-pub(crate) use types::SourceInfo;
 
 use pipeline::{
-    chunk_text, embed_chunks, normalize_extracted, EMBED_FRACTION_END, EMBED_FRACTION_START,
-    EXTRACT_FRACTION_END, EXTRACT_FRACTION_START,
+    chunk_text, embed_chunks, normalize_extracted, EXTRACT_FRACTION_END, EXTRACT_FRACTION_START,
 };
 
 /// Ingest a source PDF: extract text, chunk, embed, and store.
