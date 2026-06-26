@@ -49,10 +49,25 @@ test.describe('Session Log', () => {
     // values and makes them available as the first parameter.
     await page.addInitScript(
       (mocks) => {
+        let _cbId = 0;
+        // @ts-expect-error -- __TAURI_INTERNALS__ is injected by Tauri at runtime
+        window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
         // @ts-expect-error -- __TAURI_INTERNALS__ is injected by Tauri at runtime
         window.__TAURI_INTERNALS__ = {
+          // listen() calls transformCallback() to register a JS callback and get
+          // a numeric handle to pass to the backend. Return a simple counter; we
+          // don't need events to actually fire in these tests.
+          transformCallback: (_cb: unknown, _once?: boolean) => ++_cbId,
           invoke: (cmd: string, args?: Record<string, unknown>) => {
             switch (cmd) {
+              // Tauri event plugin — listen/unlisten go through invoke internally
+              case 'plugin:event|listen':
+                return Promise.resolve(0);
+              case 'plugin:event|unlisten':
+                return Promise.resolve(null);
+              // OS plugin — locale is requested at startup
+              case 'plugin:os|locale':
+                return Promise.resolve('en-US');
               // ── Embedding model — non-local backend bypasses ModelDownload
               case 'get_embedding_provider_status':
                 return Promise.resolve({
