@@ -288,11 +288,11 @@ fn pdfium_lib_path() -> std::path::PathBuf {
 
 #[tokio::test]
 async fn test_full_ingest_and_query_cycle() {
-    use chronacle_lib::providers::blob_store::BlobStore;
-    use chronacle_lib::providers::embedding::{EmbeddingProvider, MockEmbeddingProvider};
-    use chronacle_lib::providers::llm_provider::NoopProvider;
-    use chronacle_lib::providers::vector_store::SurrealDbVector;
     use chronacle_lib::services::ingestion_service;
+    use chronacle_providers::blob_store::BlobStore;
+    use chronacle_providers::embedding::{EmbeddingProvider, MockEmbeddingProvider};
+    use chronacle_providers::llm_provider::NoopProvider;
+    use chronacle_providers::vector_store::SurrealDbVector;
 
     let temp_dir = tempfile::tempdir().expect("tempdir should succeed");
 
@@ -312,10 +312,10 @@ async fn test_full_ingest_and_query_cycle() {
         .expect("create pdfs dir");
 
     let blob_store: Arc<dyn BlobStore> = Arc::new(
-        chronacle_lib::providers::blob_store::LocalFileStore::new(pdfs_dir),
+        chronacle_providers::blob_store::LocalFileStore::new(pdfs_dir),
     );
 
-    let vector_store: Arc<dyn chronacle_lib::providers::vector_store::VectorStore> =
+    let vector_store: Arc<dyn chronacle_providers::vector_store::VectorStore> =
         Arc::new(SurrealDbVector::new(db.clone()));
 
     let embedding_provider: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
@@ -328,7 +328,7 @@ async fn test_full_ingest_and_query_cycle() {
     let state = Arc::new(chronacle_lib::AppState {
         db: db.clone(),
         llm_provider: RwLock::new(
-            llm_provider as Arc<dyn chronacle_lib::providers::llm_provider::LlmProvider>,
+            llm_provider as Arc<dyn chronacle_providers::llm_provider::LlmProvider>,
         ),
         vector_store: vector_store.clone(),
         blob_store: blob_store.clone(),
@@ -652,12 +652,12 @@ async fn test_custom_provider_update() {
 struct FailingEmbeddingProvider;
 
 #[async_trait::async_trait]
-impl chronacle_lib::providers::embedding::EmbeddingProvider for FailingEmbeddingProvider {
+impl chronacle_providers::embedding::EmbeddingProvider for FailingEmbeddingProvider {
     async fn embed_documents(
         &self,
         _texts: Vec<String>,
-    ) -> Result<Vec<Vec<f32>>, chronacle_lib::providers::embedding::EmbeddingError> {
-        Err(chronacle_lib::providers::embedding::EmbeddingError::Embed(
+    ) -> Result<Vec<Vec<f32>>, chronacle_providers::embedding::EmbeddingError> {
+        Err(chronacle_providers::embedding::EmbeddingError::Embed(
             "simulated embedding failure".into(),
         ))
     }
@@ -665,8 +665,8 @@ impl chronacle_lib::providers::embedding::EmbeddingProvider for FailingEmbedding
     async fn embed_query(
         &self,
         _text: &str,
-    ) -> Result<Vec<f32>, chronacle_lib::providers::embedding::EmbeddingError> {
-        Err(chronacle_lib::providers::embedding::EmbeddingError::Embed(
+    ) -> Result<Vec<f32>, chronacle_providers::embedding::EmbeddingError> {
+        Err(chronacle_providers::embedding::EmbeddingError::Embed(
             "simulated embedding failure".into(),
         ))
     }
@@ -690,11 +690,11 @@ impl chronacle_lib::providers::embedding::EmbeddingProvider for FailingEmbedding
 /// `'indexing'` and orphan chunks accumulate across retries.
 #[tokio::test]
 async fn ingestion_failure_marks_source_failed_and_cleans_chunks() {
-    use chronacle_lib::providers::blob_store::BlobStore;
-    use chronacle_lib::providers::embedding::EmbeddingProvider;
-    use chronacle_lib::providers::llm_provider::NoopProvider;
-    use chronacle_lib::providers::vector_store::SurrealDbVector;
     use chronacle_lib::services::ingestion_service;
+    use chronacle_providers::blob_store::BlobStore;
+    use chronacle_providers::embedding::EmbeddingProvider;
+    use chronacle_providers::llm_provider::NoopProvider;
+    use chronacle_providers::vector_store::SurrealDbVector;
 
     let temp_dir = tempfile::tempdir().expect("tempdir");
 
@@ -710,9 +710,9 @@ async fn ingestion_failure_marks_source_failed_and_cleans_chunks() {
         .await
         .expect("pdfs dir");
     let blob_store: Arc<dyn BlobStore> = Arc::new(
-        chronacle_lib::providers::blob_store::LocalFileStore::new(pdfs_dir),
+        chronacle_providers::blob_store::LocalFileStore::new(pdfs_dir),
     );
-    let vector_store: Arc<dyn chronacle_lib::providers::vector_store::VectorStore> =
+    let vector_store: Arc<dyn chronacle_providers::vector_store::VectorStore> =
         Arc::new(SurrealDbVector::new(db.clone()));
     let embedding_provider: Arc<dyn EmbeddingProvider> = Arc::new(FailingEmbeddingProvider);
     let llm_provider = Arc::new(NoopProvider);
@@ -722,7 +722,7 @@ async fn ingestion_failure_marks_source_failed_and_cleans_chunks() {
     let state = Arc::new(chronacle_lib::AppState {
         db: db.clone(),
         llm_provider: RwLock::new(
-            llm_provider as Arc<dyn chronacle_lib::providers::llm_provider::LlmProvider>,
+            llm_provider as Arc<dyn chronacle_providers::llm_provider::LlmProvider>,
         ),
         vector_store,
         blob_store: blob_store.clone(),

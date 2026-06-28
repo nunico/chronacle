@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use crate::providers::embedding::EmbeddingProvider;
-use crate::providers::vector_store::IndexedChunk;
 use crate::services::chunker::{chunk_document, ExtractedDoc, PageContent};
+use chronacle_providers::embedding::EmbeddingProvider;
+use chronacle_providers::vector_store::IndexedChunk;
 
 use super::types::{IngestionError, IngestionProgress, RawChunk};
 

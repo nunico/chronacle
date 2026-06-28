@@ -58,10 +58,10 @@ fn normalize_extracted_preserves_page_boundaries() {
 
 #[tokio::test]
 async fn embed_chunks_emits_per_batch_progress_with_counts() {
-    use crate::providers::embedding::MockEmbeddingProvider;
+    use chronacle_providers::embedding::MockEmbeddingProvider;
     use std::sync::Mutex;
 
-    let provider: Arc<dyn crate::providers::embedding::EmbeddingProvider> =
+    let provider: Arc<dyn chronacle_providers::embedding::EmbeddingProvider> =
         Arc::new(MockEmbeddingProvider::new(8));
     // 70 chunks → spans multiple EMBED_BATCH_SIZE (32) batches.
     let chunk_count = 70;
@@ -107,10 +107,10 @@ async fn embed_chunks_emits_per_batch_progress_with_counts() {
 
 #[tokio::test]
 async fn embed_chunks_empty_emits_no_progress() {
-    use crate::providers::embedding::MockEmbeddingProvider;
+    use chronacle_providers::embedding::MockEmbeddingProvider;
     use std::sync::Mutex;
 
-    let provider: Arc<dyn crate::providers::embedding::EmbeddingProvider> =
+    let provider: Arc<dyn chronacle_providers::embedding::EmbeddingProvider> =
         Arc::new(MockEmbeddingProvider::new(8));
     let updates = Arc::new(Mutex::new(Vec::<IngestionProgress>::new()));
     let captured = updates.clone();

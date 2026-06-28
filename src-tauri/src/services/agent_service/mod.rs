@@ -27,8 +27,8 @@ pub use persistence::{persist_assistant_message, persist_message};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use crate::providers::llm_provider::{ChatMessage, LlmError};
 use crate::AppState;
+use chronacle_providers::llm_provider::{ChatMessage, LlmError};
 
 /// Errors from the agent pipeline.
 #[derive(Debug, thiserror::Error)]
@@ -146,8 +146,8 @@ pub async fn stream_response(
 /// before debugging the LLM's interpretation of it.
 fn log_retrieval_debug(
     query: &str,
-    embed_provider: &Arc<dyn crate::providers::embedding::EmbeddingProvider>,
-    results: &[crate::providers::vector_store::SearchResult],
+    embed_provider: &Arc<dyn chronacle_providers::embedding::EmbeddingProvider>,
+    results: &[chronacle_providers::vector_store::SearchResult],
 ) {
     eprintln!("===RAG_DEBUG_BEGIN===");
     eprintln!("query: {query:?}");

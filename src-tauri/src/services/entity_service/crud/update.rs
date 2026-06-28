@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::super::{
     EntityError, EntityInput, EntityKind, GraphNode, GraphNodeRecord, SELECT_SCOPE_ALIASES,
 };
-use crate::providers::embedding::EmbeddingProvider;
+use chronacle_providers::embedding::EmbeddingProvider;
 
 /// Map an `Option` to a SurrealDB value, using explicit `NULL` for `None`.
 ///

@@ -29,8 +29,8 @@ pub use seed::extract_seed_anchored;
 
 use serde::Serialize;
 
-use crate::providers::llm_provider::{ChatMessage, LlmProvider};
 use crate::services::entity_service::GraphNode;
+use chronacle_providers::llm_provider::{ChatMessage, LlmProvider};
 
 // ── Error ─────────────────────────────────────────────────────────────────────
 
