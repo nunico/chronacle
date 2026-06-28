@@ -398,7 +398,10 @@ pub(crate) async fn build_llm_provider_from_map(
     match provider {
         "anthropic" => Arc::new(AnthropicProvider::with_base_url(api_key, model, base_url)),
         "ollama" => Arc::new(OllamaProvider::new(base_url, model)),
-        _ => Arc::new(OpenAIProvider::new(api_key, model)),
+        // `with_base_url` honors a configured `llm_base_url` (OpenAI-compatible /
+        // self-hosted endpoints) and falls back to api.openai.com when empty.
+        // `::new` would hardcode the OpenAI URL and silently ignore the setting.
+        _ => Arc::new(OpenAIProvider::with_base_url(api_key, model, base_url)),
     }
 }
 

@@ -6,16 +6,23 @@
 // SettingsView wiring added alongside the enrichment feature.
 import assert from 'node:assert/strict';
 import { By, until } from 'selenium-webdriver';
-import { startTauriDriver, buildDriver, invoke, pollUntil } from './driver.mjs';
+import {
+  startTauriDriver,
+  buildDriver,
+  invoke,
+  pollUntil,
+  navigateToApp,
+  waitForWebviewReady,
+} from './driver.mjs';
 
-const SETTINGS_BTN = By.xpath('//button[contains(normalize-space(.), "Settings")]');
+// Icon-only button — identified by aria-label, not visible text.
+const SETTINGS_BTN = By.xpath('//button[@aria-label="Settings"]');
 const ENRICH_CHECKBOX = By.xpath(
   '//label[contains(normalize-space(.), "Enrich related entities")]//input[@type="checkbox"]',
 );
 
 describe('SettingsView — enrich neighbors toggle', function () {
-  // 120 s: 90 s webview startup + 30 s for the test itself.
-  this.timeout(120000);
+  this.timeout(60000);
 
   let tauriDriver;
   let driver;
@@ -23,16 +30,7 @@ describe('SettingsView — enrich neighbors toggle', function () {
   before(async () => {
     tauriDriver = startTauriDriver();
     driver = await buildDriver();
-    // CI headless Xvfb + WebKit software-rendering takes ~30 s to initialize;
-    // use 90 s so we have comfortable headroom on slower runners.
-    await pollUntil(async () => {
-      try {
-        await invoke(driver, 'get_settings');
-        return true;
-      } catch {
-        return false;
-      }
-    }, { timeoutMs: 90000, intervalMs: 2000 });
+    await waitForWebviewReady(driver);
   });
 
   after(async () => {
@@ -48,12 +46,20 @@ describe('SettingsView — enrich neighbors toggle', function () {
   }
 
   it('persists the toggle through IPC and a reload', async () => {
+    // Bypass the first-run model-download gate (App.svelte renders ModelDownload
+    // instead of the Shell until the embedding model is ready). A non-local
+    // embedding backend sends the app straight into the Shell, so the Settings
+    // UI renders without a 250 MB model download. Setting-scoped to this spec —
+    // the enrichment spec needs the local mock embedder.
+    await invoke(driver, 'update_setting', { key: 'embedding_backend', value: 'openai' });
     // Start from a known-off state so the click definitely turns it on.
     await invoke(driver, 'update_setting', {
       key: 'extraction_enrich_neighbors',
       value: 'false',
     });
 
+    // Reload so the gate re-evaluates and the Shell (with Settings) renders.
+    await navigateToApp(driver);
     let checkbox = await openSettings();
     assert.equal(await checkbox.isSelected(), false, 'should load unchecked');
 
@@ -65,7 +71,9 @@ describe('SettingsView — enrich neighbors toggle', function () {
     }, { timeoutMs: 8000, intervalMs: 500 });
 
     // Reload the webview; the persisted value must hydrate the checkbox.
-    await driver.navigate().refresh();
+    // (navigateToApp, not refresh — a plain refresh re-triggers the webview's
+    // about:blank reset.)
+    await navigateToApp(driver);
     checkbox = await openSettings();
     assert.equal(
       await checkbox.isSelected(),

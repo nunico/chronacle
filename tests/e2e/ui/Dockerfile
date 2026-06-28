@@ -12,7 +12,7 @@ FROM rust:1-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
       libayatana-appindicator3-dev webkit2gtk-driver \
-      xvfb dbus dbus-x11 curl ca-certificates \
+      xvfb xauth dbus dbus-x11 curl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 # Node 22 (matches CI's lts/*) + the pnpm version pinned in package.json.
@@ -30,14 +30,18 @@ WORKDIR /app
 COPY . .
 
 RUN pnpm install --config.minimum-release-age=0
-RUN pnpm build                                  # frontend → dist (embedded)
 
 # libclang is needed by bindgen for surrealdb-librocksdb-sys (GitHub runners
 # ship it; the slim rust image does not).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       clang libclang-dev \
   && rm -rf /var/lib/apt/lists/*
-RUN cargo build --release --bin chronacle       # also downloads linux libpdfium.so
+# Build via the Tauri CLI, NOT plain `cargo build`: only the CLI's production
+# build embeds the frontend (`frontendDist`) into the binary. A plain
+# `cargo build --release` produces a binary that serves "asset not found:
+# index.html" at tauri://localhost. `tauri build` runs `beforeBuildCommand`
+# (pnpm build) itself, and also downloads the linux libpdfium.so via build.rs.
+RUN pnpm exec tauri build --no-bundle
 
 # Run under a private DBus session + virtual X display. Args (a spec glob)
 # override the default of running every spec.

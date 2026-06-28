@@ -77,6 +77,47 @@ export async function invoke(driver, cmd, args = {}) {
   return outcome.ok;
 }
 
+/** The app's content origin under webkit2gtk's custom protocol. */
+export const APP_URL = 'tauri://localhost/';
+
+/**
+ * Navigate the WebDriver-controlled webview to the app's served URL.
+ *
+ * WebKitWebDriver attaches to the app's main window but resets its document to
+ * `about:blank` on session start, so the Svelte frontend never loads and the
+ * IPC `Origin` is `null` — every `invoke` is rejected with "Origin header is
+ * not a valid URL". Loading the app URL restores a real document with a valid
+ * origin. Call this before any IPC or DOM interaction, and after any reload
+ * (a refresh re-triggers the about:blank reset).
+ */
+export async function navigateToApp(driver) {
+  await driver.get(APP_URL);
+}
+
+/**
+ * Wait until the webview is on the app URL and IPC answers `get_settings`.
+ *
+ * Centralizes the readiness gate both specs share. Logs the real error on each
+ * failed invoke — the previous inline `catch {}` swallowed it, making every
+ * failure look like an opaque timeout (the about:blank/origin bug above went
+ * undiagnosed for exactly this reason).
+ */
+export async function waitForWebviewReady(driver, { timeoutMs = 20000, intervalMs = 500 } = {}) {
+  await navigateToApp(driver);
+  return pollUntil(
+    async () => {
+      try {
+        await invoke(driver, 'get_settings');
+        return true;
+      } catch (e) {
+        console.log('[e2e] webview not ready:', String(e));
+        return false;
+      }
+    },
+    { timeoutMs, intervalMs },
+  );
+}
+
 /** Poll `fn` until it returns a truthy value or `timeoutMs` elapses. */
 export async function pollUntil(fn, { timeoutMs = 60000, intervalMs = 1000 } = {}) {
   const deadline = Date.now() + timeoutMs;

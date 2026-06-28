@@ -52,11 +52,12 @@ jobs:
       - name: Install JS dependencies
         run: pnpm install --config.minimum-release-age=0
 
-      - name: Build frontend (embedded into the app binary)
-        run: pnpm build
-
-      - name: Build app (release)
-        run: cargo build --release --bin chronacle
+      - name: Build app (release, via Tauri CLI)
+        # Must be the Tauri CLI, not plain `cargo build`: only the CLI's
+        # production build embeds the frontend (`frontendDist`) into the binary.
+        # `cargo build --release` yields a binary that serves "asset not found:
+        # index.html". `tauri build` runs `beforeBuildCommand` (pnpm build) too.
+        run: pnpm exec tauri build --no-bundle
 
       - name: Run UI E2E under Xvfb
         # --server-args: explicit screen avoids DRI3 hardware-probe delay (~30 s)

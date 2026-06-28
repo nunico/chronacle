@@ -22,6 +22,7 @@ import {
   buildDriver,
   invoke,
   pollUntil,
+  waitForWebviewReady,
 } from './driver.mjs';
 
 const FIXTURE_PDF = fileURLToPath(
@@ -39,17 +40,7 @@ describe('entity extraction — neighbor enrichment second pass', function () {
     stub = await startStubLlm();
     tauriDriver = startTauriDriver();
     driver = await buildDriver();
-    // Wait until the webview is up and IPC answers.
-    // CI headless Xvfb + WebKit software-rendering takes ~30 s to initialize;
-    // use 90 s so we have comfortable headroom on slower runners.
-    await pollUntil(async () => {
-      try {
-        await invoke(driver, 'get_settings');
-        return true;
-      } catch {
-        return false;
-      }
-    }, { timeoutMs: 90000, intervalMs: 2000 });
+    await waitForWebviewReady(driver);
   });
 
   after(async () => {
