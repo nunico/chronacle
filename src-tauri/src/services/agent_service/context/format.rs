@@ -172,7 +172,7 @@ pub(super) fn format_entity_output(
 }
 
 /// Build a context block from search results for the LLM prompt.
-pub fn build_context(results: &[crate::providers::vector_store::SearchResult]) -> String {
+pub fn build_context(results: &[chronacle_providers::vector_store::SearchResult]) -> String {
     if results.is_empty() {
         return String::new();
     }

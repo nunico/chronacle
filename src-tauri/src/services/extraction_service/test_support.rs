@@ -1,7 +1,9 @@
 //! Shared test mocks and fixtures for extraction_service tests.
 
-use crate::providers::llm_provider::{ChatMessage, LlmProvider};
-use crate::providers::vector_store::{IndexedChunk, SearchResult, VectorStore, VectorStoreError};
+use chronacle_providers::llm_provider::{ChatMessage, LlmProvider};
+use chronacle_providers::vector_store::{
+    IndexedChunk, SearchResult, VectorStore, VectorStoreError,
+};
 
 pub struct MockLlm {
     pub response: String,
@@ -18,8 +20,8 @@ impl LlmProvider for MockLlm {
         _system_prompt: &str,
         _messages: &[ChatMessage],
     ) -> Result<
-        tokio::sync::mpsc::Receiver<Result<String, crate::providers::llm_provider::LlmError>>,
-        crate::providers::llm_provider::LlmError,
+        tokio::sync::mpsc::Receiver<Result<String, chronacle_providers::llm_provider::LlmError>>,
+        chronacle_providers::llm_provider::LlmError,
     > {
         let (tx, rx) = tokio::sync::mpsc::channel(4);
         let resp = self.response.clone();
@@ -68,8 +70,8 @@ impl LlmProvider for BranchingLlm {
         _system_prompt: &str,
         messages: &[ChatMessage],
     ) -> Result<
-        tokio::sync::mpsc::Receiver<Result<String, crate::providers::llm_provider::LlmError>>,
-        crate::providers::llm_provider::LlmError,
+        tokio::sync::mpsc::Receiver<Result<String, chronacle_providers::llm_provider::LlmError>>,
+        chronacle_providers::llm_provider::LlmError,
     > {
         let is_seed = messages
             .first()

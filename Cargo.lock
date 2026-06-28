@@ -9,6 +9,7 @@ dependencies = [
  "async-trait",
  "chronacle-core",
  "chronacle-db",
+ "chronacle-providers",
  "dirs-next",
  "fastembed",
  "flate2",
@@ -1080,6 +1081,27 @@ dependencies = [
  "serde",
  "serde_json",
  "surrealdb",
+ "tokio",
+]
+
+[[package]]
+name = "chronacle-providers"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chronacle-core",
+ "chronacle-db",
+ "dirs-next",
+ "fastembed",
+ "futures-util",
+ "mockall",
+ "pretty_assertions",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "surrealdb",
+ "tempfile",
+ "thiserror 2.0.18",
  "tokio",
 ]
 

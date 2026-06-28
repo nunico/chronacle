@@ -32,7 +32,7 @@ pub struct EmbeddingProviderStatus {
 pub async fn get_embedding_provider_status(
     state: State<'_, Arc<AppState>>,
 ) -> Result<EmbeddingProviderStatus, String> {
-    use crate::providers::embedding::{local_embeddings_available, FastEmbedProvider};
+    use chronacle_providers::embedding::{local_embeddings_available, FastEmbedProvider};
 
     let map = settings_map(&state.db).await?;
 
@@ -99,7 +99,7 @@ pub async fn reconfigure_embedding_provider(
 #[tauri::command]
 pub async fn get_embedding_model_mismatch(
     state: State<'_, Arc<AppState>>,
-) -> Result<crate::providers::embedding::EmbeddingModelMismatch, String> {
+) -> Result<chronacle_providers::embedding::EmbeddingModelMismatch, String> {
     let active = state
         .embedding_provider
         .read()
@@ -107,12 +107,12 @@ pub async fn get_embedding_model_mismatch(
         .model_name()
         .to_string();
     if active == "mock" {
-        return Ok(crate::providers::embedding::EmbeddingModelMismatch {
+        return Ok(chronacle_providers::embedding::EmbeddingModelMismatch {
             active_model: active,
             stale: Vec::new(),
         });
     }
-    crate::providers::embedding::check_embedding_model_consistency(&state.db, &active)
+    chronacle_providers::embedding::check_embedding_model_consistency(&state.db, &active)
         .await
         .map_err(|e| format!("mismatch check failed: {e}"))
 }
@@ -121,10 +121,8 @@ pub async fn get_embedding_model_mismatch(
 #[tauri::command]
 pub async fn check_embedding_model(_state: State<'_, Arc<AppState>>) -> Result<bool, String> {
     let data_dir = crate::app_data_dir();
-    let cache_dir = crate::providers::embedding::FastEmbedProvider::cache_dir(&data_dir);
-    Ok(crate::providers::embedding::FastEmbedProvider::is_cached(
-        &cache_dir,
-    ))
+    let cache_dir = chronacle_providers::embedding::FastEmbedProvider::cache_dir(&data_dir);
+    Ok(chronacle_providers::embedding::FastEmbedProvider::is_cached(&cache_dir))
 }
 
 /// Download the embedding model with streaming progress.
@@ -264,8 +262,9 @@ pub async fn download_embedding_model(
         .map_err(|e| format!("Failed to write ref: {e}"))?;
 
     // Initialize the real FastEmbedProvider using the custom cache dir
-    let real_provider = crate::providers::embedding::FastEmbedProvider::try_new(Some(&cache_dir))
-        .map_err(|e| format!("Failed to initialize embedding model: {e}"))?;
+    let real_provider =
+        chronacle_providers::embedding::FastEmbedProvider::try_new(Some(&cache_dir))
+            .map_err(|e| format!("Failed to initialize embedding model: {e}"))?;
 
     // Swap the provider in AppState
     *state

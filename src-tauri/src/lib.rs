@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 mod commands;
-pub mod providers;
 pub mod services;
 
-use providers::embedding::EmbeddingProvider;
-use providers::llm_provider::{AnthropicProvider, LlmProvider, OllamaProvider, OpenAIProvider};
+use chronacle_providers::embedding::EmbeddingProvider;
+use chronacle_providers::llm_provider::{
+    AnthropicProvider, LlmProvider, OllamaProvider, OpenAIProvider,
+};
 
 /// Shared application state managed by Tauri.
 ///
@@ -16,9 +17,9 @@ use providers::llm_provider::{AnthropicProvider, LlmProvider, OllamaProvider, Op
 pub struct AppState {
     pub db: surrealdb::Surreal<surrealdb::engine::any::Any>,
     pub llm_provider: RwLock<Arc<dyn LlmProvider>>,
-    pub vector_store: Arc<dyn providers::vector_store::VectorStore>,
-    pub blob_store: Arc<dyn providers::blob_store::BlobStore>,
-    pub embedding_provider: RwLock<Arc<dyn providers::embedding::EmbeddingProvider>>,
+    pub vector_store: Arc<dyn chronacle_providers::vector_store::VectorStore>,
+    pub blob_store: Arc<dyn chronacle_providers::blob_store::BlobStore>,
+    pub embedding_provider: RwLock<Arc<dyn chronacle_providers::embedding::EmbeddingProvider>>,
     pub pdf_extractor: Arc<dyn services::pdf_extractor::PdfExtractor>,
     /// Abort handle for the in-flight chat task, if any (see `chat_cancel`).
     pub chat_task: tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
@@ -118,16 +119,18 @@ pub async fn run() {
     let (data_dir, db) = init_database().await;
 
     // ── Build service dependencies ──────────────────────────────────
-    let vector_store: Arc<dyn providers::vector_store::VectorStore> =
-        Arc::new(providers::vector_store::SurrealDbVector::new(db.clone()));
+    let vector_store: Arc<dyn chronacle_providers::vector_store::VectorStore> = Arc::new(
+        chronacle_providers::vector_store::SurrealDbVector::new(db.clone()),
+    );
 
     let pdfs_dir = data_dir.join("pdfs");
     if !pdfs_dir.exists() {
         std::fs::create_dir_all(&pdfs_dir).expect("Failed to create PDFs directory");
     }
 
-    let blob_store: Arc<dyn providers::blob_store::BlobStore> =
-        Arc::new(providers::blob_store::LocalFileStore::new(pdfs_dir));
+    let blob_store: Arc<dyn chronacle_providers::blob_store::BlobStore> = Arc::new(
+        chronacle_providers::blob_store::LocalFileStore::new(pdfs_dir),
+    );
 
     // Select the embedding backend from settings (local fastembed vs OpenAI
     // cloud). See `build_embedding_provider_from_map`.
@@ -173,7 +176,7 @@ pub async fn run() {
                 if active == "mock" {
                     return;
                 }
-                match providers::embedding::check_embedding_model_consistency(
+                match chronacle_providers::embedding::check_embedding_model_consistency(
                     &state_for_check.db,
                     &active,
                 )
@@ -284,7 +287,7 @@ async fn build_llm_provider_from_db(
 pub(crate) async fn build_embedding_provider_from_db(
     db: &surrealdb::Surreal<surrealdb::engine::any::Any>,
     data_dir: &std::path::Path,
-) -> Arc<dyn providers::embedding::EmbeddingProvider> {
+) -> Arc<dyn chronacle_providers::embedding::EmbeddingProvider> {
     let settings = read_settings_map(db).await;
     build_embedding_provider_from_map(&settings, data_dir).await
 }
@@ -304,8 +307,8 @@ pub(crate) async fn build_embedding_provider_from_db(
 pub(crate) async fn build_embedding_provider_from_map(
     settings: &HashMap<String, String>,
     data_dir: &std::path::Path,
-) -> Arc<dyn providers::embedding::EmbeddingProvider> {
-    use providers::embedding::{
+) -> Arc<dyn chronacle_providers::embedding::EmbeddingProvider> {
+    use chronacle_providers::embedding::{
         local_embeddings_available, FastEmbedProvider, MockEmbeddingProvider,
         OpenAiEmbeddingProvider,
     };

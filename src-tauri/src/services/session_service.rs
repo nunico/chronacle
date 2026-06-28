@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use surrealdb::sql::Thing;
 use thiserror::Error;
 
-use crate::providers::embedding::EmbeddingProvider;
+use chronacle_providers::embedding::EmbeddingProvider;
 
 // ── Error type ──────────────────────────────────────────────────────────────
 
@@ -388,8 +388,9 @@ mod tests {
         .await
         .unwrap();
 
-        let embed: Arc<dyn EmbeddingProvider> =
-            Arc::new(crate::providers::embedding::MockEmbeddingProvider::new(768));
+        let embed: Arc<dyn EmbeddingProvider> = Arc::new(
+            chronacle_providers::embedding::MockEmbeddingProvider::new(768),
+        );
         embed_session(&db, &embed, &session).await.unwrap();
 
         #[derive(Deserialize)]

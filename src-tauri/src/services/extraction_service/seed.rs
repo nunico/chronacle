@@ -12,10 +12,10 @@ use super::{
     batch_passages, llm_complete, ExtractionError, ExtractionPhase, ExtractionProgress,
     ExtractionResult, MAX_ENRICH,
 };
-use crate::providers::embedding::EmbeddingProvider;
-use crate::providers::llm_provider::{ChatMessage, LlmProvider};
-use crate::providers::vector_store::VectorStore;
 use crate::services::entity_service::GraphNode;
+use chronacle_providers::embedding::EmbeddingProvider;
+use chronacle_providers::llm_provider::{ChatMessage, LlmProvider};
+use chronacle_providers::vector_store::VectorStore;
 
 /// Seed-anchored extraction: build the entity named `name` plus its relation
 /// neighborhood from chunks across all collections linked to `campaign_id`.

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use crate::providers::embedding::{EmbeddingProvider, MockEmbeddingProvider};
-use crate::providers::llm_provider::LlmProvider;
 use crate::services::entity_service::{self, EntityInput, EntityKind};
 use crate::services::extraction_service::{ExtractionPhase, ExtractionProgress};
+use chronacle_providers::embedding::{EmbeddingProvider, MockEmbeddingProvider};
+use chronacle_providers::llm_provider::LlmProvider;
 
 use super::super::test_support::{setup_db_with_collection, MockLlm};
 use super::extract_from_collection;

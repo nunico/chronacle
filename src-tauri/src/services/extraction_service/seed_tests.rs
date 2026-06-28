@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use crate::providers::embedding::{EmbeddingProvider, MockEmbeddingProvider};
-use crate::providers::llm_provider::LlmProvider;
-use crate::providers::vector_store::{SearchResult, VectorStore};
 use crate::services::entity_service::{self, EntityKind};
 use crate::services::extraction_service::{ExtractionPhase, MAX_ENRICH};
+use chronacle_providers::embedding::{EmbeddingProvider, MockEmbeddingProvider};
+use chronacle_providers::llm_provider::LlmProvider;
+use chronacle_providers::vector_store::{SearchResult, VectorStore};
 
 use super::super::test_support::{
     link_campaign_to_collection, setup_db_with_collection, BranchingLlm, MockLlm, MockVectorStore,

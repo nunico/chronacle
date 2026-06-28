@@ -11,9 +11,9 @@ use super::{
     llm_complete, ExtractionError, ExtractionPhase, ExtractionProgress, ExtractionResult,
     BATCH_CHAR_BUDGET,
 };
-use crate::providers::embedding::EmbeddingProvider;
-use crate::providers::llm_provider::{ChatMessage, LlmProvider};
 use crate::services::entity_service::GraphNode;
+use chronacle_providers::embedding::EmbeddingProvider;
+use chronacle_providers::llm_provider::{ChatMessage, LlmProvider};
 
 /// Run LLM extraction on all chunks of `collection_id`.
 ///

@@ -8,8 +8,8 @@ use surrealdb::Connection;
 
 use super::parse::{parse_kind, LlmResponse};
 use super::ExtractionError;
-use crate::providers::embedding::EmbeddingProvider;
 use crate::services::entity_service::{self, EntityInput, GraphNode, RelType};
+use chronacle_providers::embedding::EmbeddingProvider;
 
 /// Embed an entity and store the vector + model ID on the record.
 ///

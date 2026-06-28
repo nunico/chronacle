@@ -12,10 +12,10 @@
 //! The tests use the real Nomic embedding model so they exercise the
 //! prefix logic end-to-end. They skip cleanly if the model isn't cached.
 
-use chronacle_lib::providers::embedding::{EmbeddingProvider, FastEmbedProvider};
-use chronacle_lib::providers::vector_store::{IndexedChunk, SurrealDbVector, VectorStore};
 use chronacle_lib::services::chunker::{chunk_document, ExtractedDoc, PageContent};
 use chronacle_lib::services::text_normalizer::normalize;
+use chronacle_providers::embedding::{EmbeddingProvider, FastEmbedProvider};
+use chronacle_providers::vector_store::{IndexedChunk, SurrealDbVector, VectorStore};
 use std::sync::Arc;
 use surrealdb::Surreal;
 

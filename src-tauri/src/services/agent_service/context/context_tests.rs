@@ -11,7 +11,7 @@ fn test_build_context_empty() {
 
 #[test]
 fn test_build_context_with_results() {
-    use crate::providers::vector_store::SearchResult;
+    use chronacle_providers::vector_store::SearchResult;
 
     let results = vec![SearchResult {
         chunk_id: "chunk-1".into(),
