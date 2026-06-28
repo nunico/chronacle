@@ -7,6 +7,7 @@ name = "Chronacle"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chronacle-core",
  "dirs-next",
  "fastembed",
  "flate2",
@@ -1059,6 +1060,17 @@ name = "cfg_aliases"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+
+[[package]]
+name = "chronacle-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
 
 [[package]]
 name = "chrono"

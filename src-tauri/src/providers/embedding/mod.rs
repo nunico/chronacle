@@ -9,8 +9,6 @@
 /// Downloaded files are cached under the app data directory and reused on
 /// subsequent starts. The cache follows hf-hub's directory layout so that
 /// fastembed's native `try_new()` finds them without re-downloading.
-use async_trait::async_trait;
-
 mod consistency;
 mod local;
 mod mock;
@@ -44,46 +42,7 @@ pub const CLOUD_EMBED_DIM: usize = 768;
 /// Default OpenAI embedding model.
 pub const OPENAI_DEFAULT_EMBED_MODEL: &str = "text-embedding-3-small";
 
-// ── Errors ───────────────────────────────────────────────────────────
-
-/// Errors from the embedding provider.
-#[derive(Debug, thiserror::Error)]
-pub enum EmbeddingError {
-    #[error("Model initialization failed: {0}")]
-    Init(String),
-    #[error("Embedding generation failed: {0}")]
-    Embed(String),
-    #[error("Model not available — download may be in progress")]
-    NotAvailable,
-    #[error("Download failed: {0}")]
-    Download(String),
-}
-
-// ── Trait ────────────────────────────────────────────────────────────
-
-/// Trait abstracting embedding generation.
-///
-/// Document-side and query-side embedding go through distinct methods because
-/// some models (notably `nomic-embed-text-v1.5`) are asymmetric and require
-/// different task prefixes (`search_document: ` vs `search_query: `).
-/// Callers MUST pass un-prefixed text — prefixes are applied internally by
-/// each implementation. See ADR-003.
-#[async_trait]
-pub trait EmbeddingProvider: Send + Sync {
-    /// Embed multiple documents (chunks) for indexing.
-    /// Implementations MUST apply any model-specific document prefix.
-    async fn embed_documents(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbeddingError>;
-
-    /// Embed a single query for search.
-    /// Implementations MUST apply any model-specific query prefix.
-    async fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbeddingError>;
-
-    /// The dimension of vectors produced by this provider.
-    fn dimension(&self) -> usize;
-
-    /// A human-readable model identifier (e.g. `"nomic-embed-text-v1.5"`).
-    fn model_name(&self) -> &str;
-}
+pub use chronacle_core::embedding::{EmbeddingError, EmbeddingProvider};
 
 #[cfg(test)]
 #[path = "embedding_tests.rs"]
