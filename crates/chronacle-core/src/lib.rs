@@ -1,0 +1,13 @@
+//! Storage-agnostic dependency contracts (traits) and their DTOs for Chronacle.
+//!
+//! Concrete implementations live in `chronacle-providers`; consumers depend on
+//! these traits so they can be reused by a future cloud server.
+pub mod blob_store;
+pub mod embedding;
+pub mod llm;
+pub mod vector_store;
+
+pub use blob_store::BlobStore;
+pub use embedding::{EmbeddingError, EmbeddingProvider};
+pub use llm::{ChatMessage, LlmError, LlmProvider};
+pub use vector_store::{IndexedChunk, SearchResult, VectorStore};
