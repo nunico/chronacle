@@ -436,3 +436,19 @@ async fn build_custom_provider(
 pub(crate) fn provider_type_name(provider: &Arc<dyn LlmProvider>) -> &'static str {
     provider.provider_type()
 }
+
+#[cfg(test)]
+mod any_engine_probe {
+    #[tokio::test]
+    async fn any_connect_opens_embedded_rocksdb() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe.db");
+        let url = format!("rocksdb://{}", path.display());
+        let db: surrealdb::Surreal<surrealdb::engine::any::Any> =
+            surrealdb::engine::any::connect(&url)
+                .await
+                .expect("any::connect should open embedded RocksDB");
+        db.use_ns("t").use_db("t").await.unwrap();
+        db.query("DEFINE TABLE probe;").await.unwrap();
+    }
+}
