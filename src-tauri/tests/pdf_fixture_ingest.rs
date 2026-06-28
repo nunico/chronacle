@@ -10,11 +10,11 @@
 //! is excluded from the text/chunk assertions because OCR is out of scope for
 //! Phase 1 — for that fixture we only assert "no panic, source ends in `done`".
 
+use chronacle_db as schema;
 use chronacle_lib::providers::blob_store::{BlobStore, LocalFileStore};
 use chronacle_lib::providers::embedding::{EmbeddingProvider, MockEmbeddingProvider};
 use chronacle_lib::providers::llm_provider::{LlmProvider, NoopProvider};
 use chronacle_lib::providers::vector_store::{SurrealDbVector, VectorStore};
-use chronacle_lib::schema;
 use chronacle_lib::services::ingestion_service;
 use chronacle_lib::services::pdf_extractor::{PdfExtractor, PdfiumExtractor};
 use chronacle_lib::AppState;

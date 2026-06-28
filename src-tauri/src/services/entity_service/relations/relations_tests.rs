@@ -115,7 +115,7 @@ fn collapse_does_not_mix_unrelated_pairs() {
 /// Create a campaign + two factions and return their ids.
 async fn setup_pair<C: surrealdb::Connection>(db: &surrealdb::Surreal<C>) -> (String, String) {
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(db).await.unwrap();
+    chronacle_db::run_migrations(db).await.unwrap();
     db.query(
         "CREATE campaign SET id='camp1', name='Test', system='5e', \
          created_at=time::now(), updated_at=time::now()",

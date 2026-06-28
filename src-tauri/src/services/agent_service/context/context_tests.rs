@@ -54,7 +54,7 @@ async fn resolve_collection_ids_returns_subscribed_ids() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
 
     db.query(
         "CREATE collection SET id='col1', name='C1', created_at=time::now(), updated_at=time::now(); \
@@ -84,7 +84,7 @@ async fn resolve_collection_ids_empty_for_no_subscriptions() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
 
     db.query(
         "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
@@ -103,7 +103,7 @@ async fn fetch_entity_context_returns_empty_when_no_entities() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
     db.query(
         "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
          created_at=time::now(), updated_at=time::now()",
@@ -121,7 +121,7 @@ async fn fetch_entity_context_includes_player_character_fields() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
     db.query(
         "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
          created_at=time::now(), updated_at=time::now()",

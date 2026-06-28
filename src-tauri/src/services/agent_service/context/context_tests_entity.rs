@@ -6,7 +6,7 @@ async fn fetch_entity_context_omits_empty_sections() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
     db.query(
         "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
          created_at=time::now(), updated_at=time::now()",
@@ -49,7 +49,7 @@ async fn fetch_entity_context_includes_event_dates() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
     db.query(
         "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
          created_at=time::now(), updated_at=time::now()",
@@ -85,7 +85,7 @@ async fn fetch_entity_context_includes_entity_notes() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
     db.query(
         "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
          created_at=time::now(), updated_at=time::now()",
@@ -116,7 +116,7 @@ async fn fetch_entity_context_includes_session_notes() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
     db.query(
         "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
          created_at=time::now(), updated_at=time::now()",
@@ -149,7 +149,7 @@ async fn fetch_entity_context_event_empty_date_end_no_arrow() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
     db.query(
         "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
          created_at=time::now(), updated_at=time::now()",
@@ -189,7 +189,7 @@ async fn fetch_entity_context_knn_over_collection_executes() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
 
     // 768-dim embeddings (matches the MTREE index dimension in the schema).
     let embedding: Vec<f32> = (0..768).map(|i| (i as f32) * 0.001).collect();

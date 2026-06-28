@@ -1,0 +1,18 @@
+[package]
+name = "chronacle-db"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "chronacle_db"
+
+[dependencies]
+surrealdb.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true

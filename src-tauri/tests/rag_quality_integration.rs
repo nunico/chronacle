@@ -44,7 +44,7 @@ async fn seed_index(
     embed: &Arc<dyn EmbeddingProvider>,
 ) -> SurrealDbVector<surrealdb::engine::local::Db> {
     db.use_ns("test").use_db("test").await.unwrap();
-    chronacle_lib::schema::run_migrations(db).await.unwrap();
+    chronacle_db::run_migrations(db).await.unwrap();
     db.query(
         "CREATE collection SET id='col1', name='Test', \
          created_at=time::now(), updated_at=time::now()",
@@ -174,7 +174,7 @@ async fn retrieval_ranks_target_chunk_above_distractors() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    chronacle_lib::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
     db.query(
         "CREATE collection SET id='col1', name='Test', \
          created_at=time::now(), updated_at=time::now()",

@@ -3,7 +3,7 @@
 /// These tests exercise the service layer directly against an in-memory
 /// SurrealDB instance. They do **not** go through Tauri IPC — that is
 /// covered by the E2E test suite.
-use chronacle_lib::schema;
+use chronacle_db as schema;
 use std::sync::{Arc, RwLock};
 
 /// Helper: set up an in-memory SurrealDB with the Phase 1 schema applied.
