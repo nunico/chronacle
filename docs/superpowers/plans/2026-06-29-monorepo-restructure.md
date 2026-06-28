@@ -427,10 +427,15 @@ async-trait.workspace = true
 thiserror.workspace = true
 ```
 
-> Note: `chronacle-core` does **not** depend on `surrealdb` — the four traits
-> are storage-agnostic (no `Surreal<C>` in their signatures; `VectorStore` is
-> defined over `SearchResult`/`IndexedChunk` DTOs). Confirm during Step 2; if a
-> trait signature genuinely needs `surrealdb`, add it then.
+> Note: `chronacle-core` is intended to **not** depend on `surrealdb` — the four
+> traits should be storage-agnostic (no `Surreal<C>` in their signatures).
+> **Verify before relying on this:** check whether `SearchResult` / `IndexedChunk`
+> carry a `surrealdb::RecordId` (a.k.a. `Thing`) or any other `surrealdb` type in
+> their fields — `grep -n "RecordId\|Thing\|surrealdb" src-tauri/src/providers/vector_store.rs`.
+> If they do, add `surrealdb.workspace = true` to `chronacle-core` (acceptable —
+> only the embedded-engine *features* are the cloud concern, not the crate
+> itself). Don't let A1's "core has no surrealdb" assumption cascade into a
+> confusing B2 build failure.
 
 - [ ] **Step 2: Move each trait + its DTOs/errors into a core module (verbatim bodies)**
 
@@ -621,6 +626,7 @@ fastembed.workspace = true
 dirs-next.workspace = true
 
 [dev-dependencies]
+chronacle-db = { path = "../chronacle-db" }   # embedding_consistency_tests run migrations to define source/chunk tables
 mockall.workspace = true
 tempfile.workspace = true
 pretty_assertions.workspace = true
@@ -1067,55 +1073,75 @@ git add -A
 git commit -m "refactor: extract chronacle-domain and chronacle-retrieval crates"
 ```
 
-### Task B8: Hoist cross-crate types into `chronacle-core` & relocate integration tests
+### Task B8: Hoist cross-crate types into `chronacle-core` & rewrite integration-test imports
 
 **Files:**
-- Modify: `crates/chronacle-core/src/lib.rs` and importers
-- Move: `src-tauri/tests/*` → owning crates' `tests/`
+- Modify (maybe): `crates/chronacle-core/src/lib.rs` and importers
+- Modify (in place, no moves): `src-tauri/tests/*`
 
-- [ ] **Step 1: Find duplicated/cross-imported types**
+> **Integration tests stay in `src-tauri/tests/` — do NOT move them.** Two
+> reasons: (1) they resolve fixtures (`tests/fixtures/pdfs/...`, `llm/*.json`,
+> `db/*.surql`) relative to `CARGO_MANIFEST_DIR`/cwd; moving a test to another
+> crate breaks that path and would force duplicating shared fixtures. (2) Tests
+> like `entity_service_test.rs` set up a campaign/collection first, so moving
+> them to `chronacle-extraction/tests/` would require a `chronacle-domain`
+> dev-dep there, etc. — a dependency web. `src-tauri` already depends on every
+> crate, so the tests compile in place with **only import-path rewrites**.
+> Co-locating tests with their crate is a worthwhile follow-up, but it is not
+> part of "keep green while restructuring." Fixtures move with `src-tauri` in
+> Stage C (Task C1), so the paths keep working.
+
+- [ ] **Step 1: Find genuinely cross-crate types to hoist (often none)**
 
 By this point the workspace builds, meaning cross-crate type access already works
-via the owning crate's public re-exports (e.g. a domain type imported as
-`chronacle_extraction::entity_service::Entity`). Decide which, if any, truly
-belong in `core` because **two or more sibling crates** import them. List them:
+via each owning crate's public re-exports (e.g. `chronacle_extraction::entity_service::Entity`).
+Only move a type to `chronacle-core` if **two or more sibling crates** import it
+AND routing through the owning crate would create an unwanted dependency.
+Otherwise leave it (YAGNI). List candidates:
 
 ```bash
-grep -rn "chronacle_extraction::\|chronacle_ingestion::\|chronacle_providers::" crates/*/src | grep -v "^crates/chronacle-providers" | sort
+grep -rn "chronacle_extraction::\|chronacle_ingestion::\|chronacle_domain::" crates/*/src | sort
 ```
-Only move a type to `chronacle-core` if a sibling crate imports it AND importing
-through the owning crate would create an unwanted dependency. Otherwise leave it
-(YAGNI). Document the moved set in the commit message.
+Document the moved set (likely empty) in the commit message.
 
-- [ ] **Step 2: Relocate integration tests to their owning crate**
+- [ ] **Step 2: Rewrite integration-test import paths in place**
 
-Move each `src-tauri/tests/*` file to the crate that owns the code it exercises,
-updating `chronacle_lib::` references to the new crate path:
+In `src-tauri/tests/*`, the tests currently reference moved code as
+`chronacle_lib::services::X` / `chronacle_lib::providers::Y` /
+`chronacle_lib::schema::run_migrations`. Rewrite those to the new crate paths
+(the test crate already has every `chronacle-*` crate available because
+`src-tauri` depends on them — add any missing `chronacle-*` entries to
+`src-tauri/[dev-dependencies]` as the compiler requests):
 
 ```bash
-git mv src-tauri/tests/entity_service_test.rs crates/chronacle-extraction/tests/entity_service_test.rs
-git mv src-tauri/tests/pdf_fixture_ingest.rs crates/chronacle-ingestion/tests/pdf_fixture_ingest.rs
-git mv src-tauri/tests/retrieval_recall.rs crates/chronacle-retrieval/tests/retrieval_recall.rs
-git mv src-tauri/tests/rag_quality_integration.rs crates/chronacle-retrieval/tests/rag_quality_integration.rs
-git mv src-tauri/tests/campaign_service_test.rs crates/chronacle-domain/tests/campaign_service_test.rs
-git mv src-tauri/tests/session_service_test.rs crates/chronacle-domain/tests/session_service_test.rs
-git mv src-tauri/tests/collection_service_test.rs crates/chronacle-domain/tests/collection_service_test.rs
-git mv src-tauri/tests/settings_service_test.rs src-tauri/tests/settings_service_test.rs   # stays
+cd src-tauri
+sed -i '' \
+  -e 's/chronacle_lib::services::campaign_service/chronacle_domain::campaign_service/g' \
+  -e 's/chronacle_lib::services::session_service/chronacle_domain::session_service/g' \
+  -e 's/chronacle_lib::services::collection_service/chronacle_domain::collection_service/g' \
+  -e 's/chronacle_lib::services::custom_provider_service/chronacle_domain::custom_provider_service/g' \
+  -e 's/chronacle_lib::services::entity_service/chronacle_extraction::entity_service/g' \
+  -e 's/chronacle_lib::services::wikilink/chronacle_extraction::wikilink/g' \
+  -e 's/chronacle_lib::services::extraction_service/chronacle_extraction::extraction_service/g' \
+  -e 's/chronacle_lib::services::agent_service/chronacle_retrieval::agent_service/g' \
+  -e 's/chronacle_lib::services::pdf_extractor/chronacle_ingestion::pdf_extractor/g' \
+  -e 's/chronacle_lib::services::chunker/chronacle_ingestion::chunker/g' \
+  -e 's/chronacle_lib::services::ingestion_service/chronacle_ingestion::ingestion_service/g' \
+  -e 's/chronacle_lib::schema::run_migrations/chronacle_db::run_migrations/g' \
+  tests/*.rs
+cd ..
 ```
-
-Leave app-level cross-cutting tests in `src-tauri/tests/`:
-`integration_test.rs`, `chat_history_test.rs`, `e2e_campaign_notes_query.rs`
-(these likely wire multiple crates + commands — keep them in the app, which
-depends on all crates). Move the shared `tests/fixtures/` only if a single crate
-needs it; otherwise reference fixtures via a relative path constant, or duplicate
-the minimal fixture into the crate that needs it. Inspect each moved test's
-`chronacle_lib::...` imports and rewrite to the proper `chronacle_<crate>::...`
-path.
+Then handle provider references by hand: `chronacle_lib::providers::*` **trait/DTO**
+imports → `chronacle_core::*`; concrete-impl imports (e.g.
+`MockEmbeddingProvider`, `SurrealDbVector`) → `chronacle_providers::*`. Add
+`chronacle-core`, `chronacle-providers`, `chronacle-db` to
+`src-tauri/[dev-dependencies]` as needed.
 
 - [ ] **Step 3: Build all tests across the workspace**
 
 Run: `cargo test --workspace --no-run`
-Expected: all test binaries compile. Fix import paths the compiler flags.
+Expected: all test binaries compile (including `src-tauri/tests/*`). Fix import
+paths the compiler flags.
 
 - [ ] **Step 4: Full Stage B gate**
 
@@ -1131,7 +1157,7 @@ Expected: all PASS.
 
 ```bash
 git add -A
-git commit -m "refactor: relocate integration tests and hoist cross-crate types (Stage B complete)"
+git commit -m "refactor: rewrite integration-test imports for crate layout (Stage B complete)"
 ```
 
 ---
@@ -1290,11 +1316,15 @@ pnpm -C apps/desktop exec tauri build --no-bundle
 ```
 Expected: succeeds; the built binary embeds `apps/desktop/dist`.
 
-- [ ] **Step 2: Run the UI-E2E suite**
+- [ ] **Step 2: Run the UI-E2E suite (mocha + tauri-driver/selenium)**
 
-Run: `pnpm -C apps/desktop playwright test tests/e2e/ui/`
-(or the `e2e:ui` mocha script if that is the canonical UI runner:
-`pnpm -C apps/desktop run e2e:ui`)
+The UI-E2E runner is **mocha**, not Playwright — `package.json` defines
+`e2e:ui: mocha --config tests/e2e/ui/.mocharc.json` (with `selenium-webdriver`
++ tauri-driver). First check `tests/e2e/ui/.mocharc.json` for internal paths
+that referenced repo-root `tests/`/`dist`/`src-tauri` and update them for the
+`apps/desktop/` move. Then:
+
+Run: `pnpm -C apps/desktop run e2e:ui`
 Expected: PASS — webview navigates to `tauri://localhost/` (not `about:blank`),
 IPC origin is valid, SPA is served. If the SPA fails to embed, the cause is a
 `frontendDist` path mismatch from C2 — fix the path, do not widen capabilities.
