@@ -27,7 +27,7 @@ pub async fn get_settings(
 
 /// Helper: query all settings from the DB.
 pub(crate) async fn get_all_settings(
-    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+    db: &surrealdb::Surreal<surrealdb::engine::any::Any>,
 ) -> Result<Vec<SettingRow>, String> {
     let mut response = db
         .query("SELECT * FROM setting")
@@ -44,7 +44,7 @@ pub(crate) async fn get_all_settings(
 /// Read all settings into a flat `HashMap`, for command handlers that need to
 /// inspect several keys at once.
 pub(crate) async fn settings_map(
-    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+    db: &surrealdb::Surreal<surrealdb::engine::any::Any>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     Ok(get_all_settings(db)
         .await?

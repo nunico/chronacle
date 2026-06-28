@@ -298,7 +298,7 @@ async fn test_full_ingest_and_query_cycle() {
 
     // Set up a real RocksDB so AppState type matches
     let db_path = temp_dir.path().join("test.db");
-    let db = surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(db_path)
+    let db = surrealdb::engine::any::connect(format!("rocksdb://{}", db_path.display()))
         .await
         .expect("Failed to create RocksDB");
     db.use_ns("test").use_db("test").await.unwrap();
@@ -699,7 +699,7 @@ async fn ingestion_failure_marks_source_failed_and_cleans_chunks() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
 
     let db_path = temp_dir.path().join("test.db");
-    let db = surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(db_path)
+    let db = surrealdb::engine::any::connect(format!("rocksdb://{}", db_path.display()))
         .await
         .expect("RocksDB");
     db.use_ns("test").use_db("test").await.unwrap();

@@ -89,7 +89,7 @@ async fn measure_recall_at_5() {
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let db_path = tmp.path().join("recall.db");
-    let db = surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(db_path)
+    let db = surrealdb::engine::any::connect(format!("rocksdb://{}", db_path.display()))
         .await
         .expect("rocksdb");
     db.use_ns("recall").use_db("recall").await.unwrap();

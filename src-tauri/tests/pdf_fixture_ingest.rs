@@ -49,7 +49,7 @@ async fn make_state(
     Arc<dyn VectorStore>,
 ) {
     let db_path = temp_dir.join("test.db");
-    let db = surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(db_path)
+    let db = surrealdb::engine::any::connect(format!("rocksdb://{}", db_path.display()))
         .await
         .expect("rocksdb");
     db.use_ns("test").use_db("test").await.unwrap();
