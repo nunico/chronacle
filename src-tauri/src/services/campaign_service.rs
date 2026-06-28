@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use surrealdb::engine::local::Db;
 use surrealdb::sql::Thing;
+use surrealdb::Connection;
 use surrealdb::Surreal;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,7 +30,7 @@ impl From<CampaignRecord> for Campaign {
 }
 
 /// Get all campaigns, ordered by name.
-pub async fn get_all(db: &Surreal<Db>) -> Result<Vec<Campaign>, String> {
+pub async fn get_all<C: Connection>(db: &Surreal<C>) -> Result<Vec<Campaign>, String> {
     let mut response = db
         .query("SELECT * FROM campaign ORDER BY name ASC")
         .await
@@ -42,7 +42,11 @@ pub async fn get_all(db: &Surreal<Db>) -> Result<Vec<Campaign>, String> {
 }
 
 /// Create a new campaign.
-pub async fn create(db: &Surreal<Db>, name: &str, system: &str) -> Result<Campaign, String> {
+pub async fn create<C: Connection>(
+    db: &Surreal<C>,
+    name: &str,
+    system: &str,
+) -> Result<Campaign, String> {
     let id = uuid::Uuid::new_v4().to_string().replace('-', "");
     let mut response = db
         .query(
@@ -69,7 +73,7 @@ pub async fn create(db: &Surreal<Db>, name: &str, system: &str) -> Result<Campai
 }
 
 /// Get a single campaign by id.
-pub async fn get_by_id(db: &Surreal<Db>, id: &str) -> Result<Campaign, String> {
+pub async fn get_by_id<C: Connection>(db: &Surreal<C>, id: &str) -> Result<Campaign, String> {
     let mut response = db
         .query("SELECT * FROM type::thing('campaign', $id)")
         .bind(("id", id.to_owned()))
@@ -86,8 +90,8 @@ pub async fn get_by_id(db: &Surreal<Db>, id: &str) -> Result<Campaign, String> {
 }
 
 /// Update a campaign's name and/or system.
-pub async fn update(
-    db: &Surreal<Db>,
+pub async fn update<C: Connection>(
+    db: &Surreal<C>,
     id: &str,
     name: &str,
     system: &str,
@@ -115,7 +119,7 @@ pub async fn update(
 }
 
 /// Delete a campaign by id.
-pub async fn delete(db: &Surreal<Db>, id: &str) -> Result<(), String> {
+pub async fn delete<C: Connection>(db: &Surreal<C>, id: &str) -> Result<(), String> {
     db.query("DELETE type::thing('campaign', $id)")
         .bind(("id", id.to_owned()))
         .await
