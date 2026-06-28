@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use surrealdb::engine::local::Db;
 use surrealdb::sql::Thing;
+use surrealdb::Connection;
 use surrealdb::Surreal;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,7 +64,7 @@ impl From<CustomProviderModelRecord> for CustomProviderModel {
 }
 
 /// Get a single custom provider by its record id.
-pub async fn get_by_id(db: &Surreal<Db>, id: &str) -> Result<CustomProvider, String> {
+pub async fn get_by_id<C: Connection>(db: &Surreal<C>, id: &str) -> Result<CustomProvider, String> {
     let mut response = db
         .query("SELECT * FROM type::thing('custom_provider', $id)")
         .bind(("id", id.to_owned()))
@@ -79,7 +79,7 @@ pub async fn get_by_id(db: &Surreal<Db>, id: &str) -> Result<CustomProvider, Str
 }
 
 /// Get all custom providers, ordered by name.
-pub async fn get_all(db: &Surreal<Db>) -> Result<Vec<CustomProvider>, String> {
+pub async fn get_all<C: Connection>(db: &Surreal<C>) -> Result<Vec<CustomProvider>, String> {
     let mut response = db
         .query("SELECT * FROM custom_provider ORDER BY name ASC")
         .await
@@ -91,8 +91,8 @@ pub async fn get_all(db: &Surreal<Db>) -> Result<Vec<CustomProvider>, String> {
 }
 
 /// Create a new custom provider with a UUID.
-pub async fn create(
-    db: &Surreal<Db>,
+pub async fn create<C: Connection>(
+    db: &Surreal<C>,
     name: &str,
     provider_type: &str,
     base_url: &str,
@@ -127,8 +127,8 @@ pub async fn create(
 }
 
 /// Update an existing custom provider. Empty string fields are left unchanged.
-pub async fn update(
-    db: &Surreal<Db>,
+pub async fn update<C: Connection>(
+    db: &Surreal<C>,
     id: &str,
     name: &str,
     provider_type: &str,
@@ -182,7 +182,7 @@ pub async fn update(
 
 /// Delete a custom provider and its associated models (SurrealDB does NOT
 /// cascade-delete automatically, so we must delete models first).
-pub async fn delete(db: &Surreal<Db>, id: &str) -> Result<(), String> {
+pub async fn delete<C: Connection>(db: &Surreal<C>, id: &str) -> Result<(), String> {
     // Manually cascade-delete associated models first
     db.query("DELETE custom_provider_model WHERE provider = type::thing('custom_provider', $id)")
         .bind(("id", id.to_owned()))
@@ -197,8 +197,8 @@ pub async fn delete(db: &Surreal<Db>, id: &str) -> Result<(), String> {
 }
 
 /// Get all models for a custom provider, ordered by display_name.
-pub async fn get_models(
-    db: &Surreal<Db>,
+pub async fn get_models<C: Connection>(
+    db: &Surreal<C>,
     provider_id: &str,
 ) -> Result<Vec<CustomProviderModel>, String> {
     let safe_id = provider_id.replace('`', "``");
@@ -218,8 +218,8 @@ pub async fn get_models(
 }
 
 /// Add a model to a custom provider.
-pub async fn add_model(
-    db: &Surreal<Db>,
+pub async fn add_model<C: Connection>(
+    db: &Surreal<C>,
     provider_id: &str,
     model_id: &str,
     display_name: &str,
@@ -250,7 +250,7 @@ pub async fn add_model(
 }
 
 /// Remove a model from a custom provider.
-pub async fn remove_model(db: &Surreal<Db>, id: &str) -> Result<(), String> {
+pub async fn remove_model<C: Connection>(db: &Surreal<C>, id: &str) -> Result<(), String> {
     db.query("DELETE type::thing('custom_provider_model', $id)")
         .bind(("id", id.to_owned()))
         .await
