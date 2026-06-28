@@ -94,7 +94,7 @@ pub async fn setup_db_with_collection() -> (surrealdb::Surreal<surrealdb::engine
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
 
     let mut resp = db
         .query(

@@ -17,11 +17,11 @@
 //! Phase 3 reranker decision; the full 50-query suite from the architecture
 //! spec can grow over time without blocking Phase 1 sign-off.
 
+use chronacle_db as schema;
 use chronacle_lib::providers::blob_store::{BlobStore, LocalFileStore};
 use chronacle_lib::providers::embedding::{EmbeddingProvider, FastEmbedProvider};
 use chronacle_lib::providers::llm_provider::{LlmProvider, NoopProvider};
 use chronacle_lib::providers::vector_store::{SurrealDbVector, VectorStore};
-use chronacle_lib::schema;
 use chronacle_lib::services::ingestion_service;
 use chronacle_lib::services::pdf_extractor::{PdfExtractor, PdfiumExtractor};
 use chronacle_lib::AppState;

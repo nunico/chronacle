@@ -367,7 +367,7 @@ mod tests {
             .await
             .unwrap();
         db.use_ns("test").use_db("test").await.unwrap();
-        crate::schema::run_migrations(&db).await.unwrap();
+        chronacle_db::run_migrations(&db).await.unwrap();
         db.query(
             "CREATE campaign SET id='camp1', name='Test', system='5e', \
              created_at=time::now(), updated_at=time::now()",

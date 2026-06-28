@@ -8,7 +8,7 @@ async fn list_all_source_ids_returns_all_ids() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
     db.query(
         "CREATE collection SET id='col1', name='Test', \
          created_at=time::now(), updated_at=time::now()",
@@ -49,7 +49,7 @@ async fn list_all_source_ids_does_not_wrap_uuids_in_backticks() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
 
     let uuid = "d5a80195-3968-44cb-8b46-270830df952f";
     db.query(

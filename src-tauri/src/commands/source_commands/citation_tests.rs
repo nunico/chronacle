@@ -7,7 +7,7 @@ async fn seed_db() -> surrealdb::Surreal<surrealdb::engine::local::Db> {
         .await
         .unwrap();
     db.use_ns("t").use_db("t").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
     db.query(
         "CREATE collection SET id='col1', name='Test', \
          created_at=time::now(), updated_at=time::now()",

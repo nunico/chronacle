@@ -207,7 +207,7 @@ mod tests {
             .await
             .unwrap();
         db.use_ns("test").use_db("test").await.unwrap();
-        crate::schema::run_migrations(&db).await.unwrap();
+        chronacle_db::run_migrations(&db).await.unwrap();
 
         db.query(
             "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
@@ -256,7 +256,7 @@ mod tests {
             .await
             .unwrap();
         db.use_ns("test").use_db("test").await.unwrap();
-        crate::schema::run_migrations(&db).await.unwrap();
+        chronacle_db::run_migrations(&db).await.unwrap();
 
         // Use the same id shape `campaign_service::create` produces — a UUID
         // with hyphens stripped, so the WHERE literal does not need backticks

@@ -17,6 +17,7 @@ path = "src/lib.rs"
 
 [dependencies]
 chronacle-core = { path = "../crates/chronacle-core" }
+chronacle-db = { path = "../crates/chronacle-db" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 surrealdb = { version = "2", features = ["kv-rocksdb", "kv-mem"] }

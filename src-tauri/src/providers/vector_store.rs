@@ -277,7 +277,7 @@ mod tests {
             .await
             .unwrap();
         db.use_ns("test").use_db("test").await.unwrap();
-        crate::schema::run_migrations(&db).await.unwrap();
+        chronacle_db::run_migrations(&db).await.unwrap();
 
         // Create two collections
         db.query(

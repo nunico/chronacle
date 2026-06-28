@@ -130,7 +130,7 @@ async fn get_source_info_reads_collection_id() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
 
     db.query(
         "CREATE collection SET id='col1', name='Test', created_at=time::now(), updated_at=time::now()"
@@ -154,7 +154,7 @@ async fn get_source_info_not_found_returns_err() {
         .await
         .unwrap();
     db.use_ns("test").use_db("test").await.unwrap();
-    crate::schema::run_migrations(&db).await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
 
     let result = get_source_info(&db, "does-not-exist").await;
     assert!(result.is_err());

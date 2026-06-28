@@ -3,7 +3,6 @@ use std::sync::{Arc, RwLock};
 
 mod commands;
 pub mod providers;
-pub mod schema;
 pub mod services;
 
 use providers::embedding::EmbeddingProvider;
@@ -101,7 +100,7 @@ async fn init_database() -> (
         .await
         .expect("Failed to select namespace / database");
 
-    schema::run_migrations(&db)
+    chronacle_db::run_migrations(&db)
         .await
         .expect("Failed to run schema migrations");
 
