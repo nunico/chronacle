@@ -59,4 +59,7 @@ jobs:
         run: cargo build --release --bin chronacle
 
       - name: Run UI E2E under Xvfb
-        run: xvfb-run -a pnpm e2e:ui
+        # --server-args: explicit screen avoids DRI3 hardware-probe delay (~30 s)
+        # in software-only CI runners.
+        # dbus-run-session: WebKitWebDriver needs a session bus for AT-SPI.
+        run: dbus-run-session -- xvfb-run -a --server-args="-screen 0 1280x1024x24" pnpm e2e:ui

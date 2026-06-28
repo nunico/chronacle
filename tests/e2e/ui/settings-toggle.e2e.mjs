@@ -14,7 +14,8 @@ const ENRICH_CHECKBOX = By.xpath(
 );
 
 describe('SettingsView — enrich neighbors toggle', function () {
-  this.timeout(60000);
+  // 120 s: 90 s webview startup + 30 s for the test itself.
+  this.timeout(120000);
 
   let tauriDriver;
   let driver;
@@ -22,6 +23,8 @@ describe('SettingsView — enrich neighbors toggle', function () {
   before(async () => {
     tauriDriver = startTauriDriver();
     driver = await buildDriver();
+    // CI headless Xvfb + WebKit software-rendering takes ~30 s to initialize;
+    // use 90 s so we have comfortable headroom on slower runners.
     await pollUntil(async () => {
       try {
         await invoke(driver, 'get_settings');
@@ -29,7 +32,7 @@ describe('SettingsView — enrich neighbors toggle', function () {
       } catch {
         return false;
       }
-    }, { timeoutMs: 30000, intervalMs: 1000 });
+    }, { timeoutMs: 90000, intervalMs: 2000 });
   });
 
   after(async () => {

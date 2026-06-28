@@ -40,6 +40,8 @@ describe('entity extraction — neighbor enrichment second pass', function () {
     tauriDriver = startTauriDriver();
     driver = await buildDriver();
     // Wait until the webview is up and IPC answers.
+    // CI headless Xvfb + WebKit software-rendering takes ~30 s to initialize;
+    // use 90 s so we have comfortable headroom on slower runners.
     await pollUntil(async () => {
       try {
         await invoke(driver, 'get_settings');
@@ -47,7 +49,7 @@ describe('entity extraction — neighbor enrichment second pass', function () {
       } catch {
         return false;
       }
-    }, { timeoutMs: 30000, intervalMs: 1000 });
+    }, { timeoutMs: 90000, intervalMs: 2000 });
   });
 
   after(async () => {
