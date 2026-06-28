@@ -15,7 +15,7 @@ use providers::llm_provider::{AnthropicProvider, LlmProvider, OllamaProvider, Op
 /// can be swapped at runtime — e.g. when the embedding model finishes downloading
 /// or the user changes LLM settings — without restarting the app.
 pub struct AppState {
-    pub db: surrealdb::Surreal<surrealdb::engine::local::Db>,
+    pub db: surrealdb::Surreal<surrealdb::engine::any::Any>,
     pub llm_provider: RwLock<Arc<dyn LlmProvider>>,
     pub vector_store: Arc<dyn providers::vector_store::VectorStore>,
     pub blob_store: Arc<dyn providers::blob_store::BlobStore>,
@@ -87,12 +87,12 @@ fn app_data_dir() -> std::path::PathBuf {
 /// paths.
 async fn init_database() -> (
     std::path::PathBuf,
-    surrealdb::Surreal<surrealdb::engine::local::Db>,
+    surrealdb::Surreal<surrealdb::engine::any::Any>,
 ) {
     let data_dir = app_data_dir();
     let db_path = data_dir.join("chronacle.db");
 
-    let db = surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(db_path)
+    let db = surrealdb::engine::any::connect(format!("rocksdb://{}", db_path.display()))
         .await
         .expect("Failed to initialise SurrealDB (RocksDB)");
 
@@ -265,7 +265,7 @@ pub async fn run() {
 
 /// Read all settings from the database into a flat map (empty on error).
 pub(crate) async fn read_settings_map(
-    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+    db: &surrealdb::Surreal<surrealdb::engine::any::Any>,
 ) -> HashMap<String, String> {
     match services::settings_service::get_all(db).await {
         Ok(s) => s.into_iter().map(|s| (s.key, s.value)).collect(),
@@ -275,7 +275,7 @@ pub(crate) async fn read_settings_map(
 
 /// Read LLM settings from the database and construct the correct provider.
 async fn build_llm_provider_from_db(
-    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+    db: &surrealdb::Surreal<surrealdb::engine::any::Any>,
 ) -> Arc<dyn LlmProvider> {
     let settings = read_settings_map(db).await;
     build_llm_provider_from_map(&settings, Some(db)).await
@@ -283,7 +283,7 @@ async fn build_llm_provider_from_db(
 
 /// Read settings from the database and construct the embedding provider.
 pub(crate) async fn build_embedding_provider_from_db(
-    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+    db: &surrealdb::Surreal<surrealdb::engine::any::Any>,
     data_dir: &std::path::Path,
 ) -> Arc<dyn providers::embedding::EmbeddingProvider> {
     let settings = read_settings_map(db).await;
@@ -373,7 +373,7 @@ pub(crate) async fn build_embedding_provider_from_map(
 
 pub(crate) async fn build_llm_provider_from_map(
     settings: &HashMap<String, String>,
-    db: Option<&surrealdb::Surreal<surrealdb::engine::local::Db>>,
+    db: Option<&surrealdb::Surreal<surrealdb::engine::any::Any>>,
 ) -> Arc<dyn LlmProvider> {
     let provider = settings
         .get("llm_provider")
@@ -406,7 +406,7 @@ pub(crate) async fn build_llm_provider_from_map(
 }
 
 async fn build_custom_provider(
-    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+    db: &surrealdb::Surreal<surrealdb::engine::any::Any>,
     name: &str,
     model: &str,
 ) -> Result<Arc<dyn LlmProvider>, String> {
@@ -435,20 +435,4 @@ async fn build_custom_provider(
 /// Return a short human-readable provider type name.
 pub(crate) fn provider_type_name(provider: &Arc<dyn LlmProvider>) -> &'static str {
     provider.provider_type()
-}
-
-#[cfg(test)]
-mod any_engine_probe {
-    #[tokio::test]
-    async fn any_connect_opens_embedded_rocksdb() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("probe.db");
-        let url = format!("rocksdb://{}", path.display());
-        let db: surrealdb::Surreal<surrealdb::engine::any::Any> =
-            surrealdb::engine::any::connect(&url)
-                .await
-                .expect("any::connect should open embedded RocksDB");
-        db.use_ns("t").use_db("t").await.unwrap();
-        db.query("DEFINE TABLE probe;").await.unwrap();
-    }
 }
