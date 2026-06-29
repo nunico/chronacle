@@ -7,18 +7,24 @@ pre-commit:
   commands:
     rustfmt:
       glob: "*.rs"
-      run: cargo fmt --check
+      run: cargo fmt --all --check
       stage_fixed: true
     clippy:
       glob: "*.rs"
-      run: cargo clippy --all-targets --all-features -- -D warnings
+      run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+    # Frontend tooling (prettier, eslint, prettier-plugin-svelte) lives in the
+    # apps/desktop workspace package, so these run from there via `root:` —
+    # lefthook relativizes {staged_files} to that dir and only passes files
+    # under it.
     prettier:
+      root: "apps/desktop/"
       glob: "*.{ts,svelte,json,css,md,yaml,yml}"
-      run: npx prettier --check {staged_files}
+      run: pnpm exec prettier --check {staged_files}
       stage_fixed: true
     eslint:
+      root: "apps/desktop/"
       glob: "*.{ts,svelte}"
-      run: npx eslint {staged_files}
+      run: pnpm exec eslint {staged_files}
 
 commit-msg:
   commands:

@@ -42,13 +42,13 @@ jobs:
             librsvg2-dev libayatana-appindicator3-dev
 
       - name: Format check
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test
+        run: cargo test --workspace
 
       - name: Check the crate graph
         uses: EmbarkStudios/cargo-deny-action@v2
@@ -72,12 +72,15 @@ jobs:
         run: pnpm install --config.minimum-release-age=0
 
       - name: Typecheck
+        working-directory: apps/desktop
         run: pnpm typecheck
 
       - name: Lint
+        working-directory: apps/desktop
         run: pnpm lint
 
       - name: Test
+        working-directory: apps/desktop
         run: pnpm test --run
 
   # ── Coverage + Build (merge to main only) ─────────────────────────
@@ -103,7 +106,7 @@ jobs:
             librsvg2-dev libayatana-appindicator3-dev
 
       - name: Generate coverage
-        run: cargo llvm-cov --html
+        run: cargo llvm-cov --workspace --html
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
@@ -136,4 +139,4 @@ jobs:
             librsvg2-dev libayatana-appindicator3-dev
 
       - name: Build
-        run: cargo build --release
+        run: cargo build --workspace --release
