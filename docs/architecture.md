@@ -25,17 +25,18 @@ The app must run on Windows, Linux, and macOS with no complicated setup. It need
 
 ### Options Considered
 
-| Dimension | Tauri 2 (Rust backend) | Electron (Node backend) | Native per-platform |
-|-----------|------------------------|-------------------------|---------------------|
-| Binary size | ~8–15 MB | ~200 MB | Small but 3× codebase |
-| Runtime required | None (WebView2 on Win, built-in elsewhere) | Bundled Node | None |
-| Rust ecosystem fit | Native — PDF, embeddings, SurrealDB | Needs FFI or re-implementation | N/A |
-| Setup for user | Double-click installer | Double-click installer | Double-click installer |
-| Memory footprint | Low | ~300 MB base | Low |
+| Dimension          | Tauri 2 (Rust backend)                     | Electron (Node backend)        | Native per-platform    |
+| ------------------ | ------------------------------------------ | ------------------------------ | ---------------------- |
+| Binary size        | ~8–15 MB                                   | ~200 MB                        | Small but 3× codebase  |
+| Runtime required   | None (WebView2 on Win, built-in elsewhere) | Bundled Node                   | None                   |
+| Rust ecosystem fit | Native — PDF, embeddings, SurrealDB        | Needs FFI or re-implementation | N/A                    |
+| Setup for user     | Double-click installer                     | Double-click installer         | Double-click installer |
+| Memory footprint   | Low                                        | ~300 MB base                   | Low                    |
 
 **Decision:** Tauri 2 with a Rust backend and a TypeScript/Svelte frontend.
 
 **Consequences:**
+
 - Backend logic lives in Rust; frontend in TypeScript/Svelte.
 - The frontend communicates with the backend via **Tauri IPC commands** (type-safe, zero-serialization-cost) and **Tauri events** for streaming responses. See ADR-005.
 - WebView2 must be present on Windows (auto-installed by the Tauri bootstrapper).
@@ -52,21 +53,22 @@ The app needs relational storage (campaigns, sources, entities, sessions), vecto
 
 ### Options Considered
 
-| Dimension | SurrealDB | SQLite + LanceDB | SQLite + sqlite-vec |
-|-----------|-----------|------------------|---------------------|
-| Stores | Relational + vector + graph (unified) | Relational + vector (split) | Relational + vector (sqlx extension) |
-| Rust SDK | Native (`surrealdb` crate) | `sqlx` + `lancedb` | `sqlx` + rusqlite |
-| Graph edges | Native (RELATION tables) | Manual JOINs on entity_links | Manual JOINs on entity_links |
-| Vector indexes | MTREE index (COSINE distance) | Columnar ANN | Via sqlite-vec extension |
-| Cloud path | SurrealDB Cloud | LanceDB Cloud + PostgreSQL | PostgreSQL + pgvector |
-| Test isolation | In-memory engine (`mem::Db`) | Two temp dirs (sqlx::test + tmpdir) | sqlx::test (single DB) |
-| Transactional consistency | Single store — atomic updates | Two stores — no cross-store tx | Single DB — atomic updates |
-| Migration tooling | SurrealQL schema definitions | sqlx migrations (UP + DOWN) | sqlx migrations |
-| Learning curve | SurrealQL (new dialect) | SQL + LanceDB API | SQL + sqlite-vec |
+| Dimension                 | SurrealDB                             | SQLite + LanceDB                    | SQLite + sqlite-vec                  |
+| ------------------------- | ------------------------------------- | ----------------------------------- | ------------------------------------ |
+| Stores                    | Relational + vector + graph (unified) | Relational + vector (split)         | Relational + vector (sqlx extension) |
+| Rust SDK                  | Native (`surrealdb` crate)            | `sqlx` + `lancedb`                  | `sqlx` + rusqlite                    |
+| Graph edges               | Native (RELATION tables)              | Manual JOINs on entity_links        | Manual JOINs on entity_links         |
+| Vector indexes            | MTREE index (COSINE distance)         | Columnar ANN                        | Via sqlite-vec extension             |
+| Cloud path                | SurrealDB Cloud                       | LanceDB Cloud + PostgreSQL          | PostgreSQL + pgvector                |
+| Test isolation            | In-memory engine (`mem::Db`)          | Two temp dirs (sqlx::test + tmpdir) | sqlx::test (single DB)               |
+| Transactional consistency | Single store — atomic updates         | Two stores — no cross-store tx      | Single DB — atomic updates           |
+| Migration tooling         | SurrealQL schema definitions          | sqlx migrations (UP + DOWN)         | sqlx migrations                      |
+| Learning curve            | SurrealQL (new dialect)               | SQL + LanceDB API                   | SQL + sqlite-vec                     |
 
 **Decision:** SurrealDB as the single store for relational data, vector indexes, and graph edges. The unified engine simplifies the architecture (one backup, one connection, one migrations system) and enables graph traversal that would otherwise require manual JOIN chains or application-level traversal code.
 
 **Consequences:**
+
 - The project uses **SurrealQL** instead of SQL. No compile-time query validation (unlike `sqlx::query!`), so query errors are caught in tests rather than at compile time.
 - Embedded mode uses RocksDB under the hood — first `cargo build` is slower (~30–60 s for the C++ transitive build).
 - The `VectorStore` trait is retained for abstraction, but its SurrealDB implementation is the primary; a future `QdrantCloud` implementation can be added when the cloud path is needed.
@@ -80,11 +82,11 @@ The app needs relational storage (campaigns, sources, entities, sessions), vecto
 
 ### Options Considered
 
-| Option | Quality | Setup | Offline |
-|--------|---------|-------|---------|
-| OpenAI `text-embedding-3-small` | Excellent | API key | No |
-| Ollama embedding model | Good | Requires Ollama | Yes |
-| `fastembed-rs` (`nomic-embed-text-v1.5`) | Good (768-dim) | Downloads on first run | Yes |
+| Option                                   | Quality        | Setup                  | Offline |
+| ---------------------------------------- | -------------- | ---------------------- | ------- |
+| OpenAI `text-embedding-3-small`          | Excellent      | API key                | No      |
+| Ollama embedding model                   | Good           | Requires Ollama        | Yes     |
+| `fastembed-rs` (`nomic-embed-text-v1.5`) | Good (768-dim) | Downloads on first run | Yes     |
 
 **Decision:** `fastembed-rs` as the default. Optional override to use cloud embedding API in settings.
 
@@ -156,11 +158,11 @@ pub trait LlmProvider: Send + Sync {
 }
 ```
 
-| Implementation | Notes |
-|----------------|-------|
-| `OpenAIProvider` | OpenAI API, configurable `base_url` → also covers Azure OpenAI, OpenRouter |
-| `AnthropicProvider` | Anthropic Messages API via `reqwest` |
-| `OllamaProvider` | Native Ollama client speaking Ollama's `/api/chat` wire format (NDJSON streaming with `done: true` sentinel, `keep_alive`/`low_vram`/`num_ctx` params — not an OpenAI-compatible passthrough) |
+| Implementation      | Notes                                                                                                                                                                                         |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OpenAIProvider`    | OpenAI API, configurable `base_url` → also covers Azure OpenAI, OpenRouter                                                                                                                    |
+| `AnthropicProvider` | Anthropic Messages API via `reqwest`                                                                                                                                                          |
+| `OllamaProvider`    | Native Ollama client speaking Ollama's `/api/chat` wire format (NDJSON streaming with `done: true` sentinel, `keep_alive`/`low_vram`/`num_ctx` params — not an OpenAI-compatible passthrough) |
 
 The provider is resolved at startup from config and injected as `Arc<dyn LlmProvider>` into the service layer. In tests, replaced with `MockLlmProvider` (via `mockall`).
 
@@ -179,6 +181,7 @@ The GM wants to eventually run the backend on a server and interact via a mobile
 ### Decision
 
 The Rust backend runs **in-process** with Tauri. The frontend communicates via:
+
 - **Tauri IPC commands** (`#[tauri::command]`) for request/response operations (CRUD, settings, PDF upload). Each command delegates to the service layer — the handler is a thin adapter.
 - **Tauri events** for streaming operations (agent responses, ingestion progress). The streaming source (e.g., an `LlmProvider::stream` response channel) emits events into the Tauri event loop, which delivers them directly to the WebView.
 
@@ -198,22 +201,23 @@ Tauri shell                         Tauri Mobile / static web app
 
 The service layer is no longer coupled to the Tauri binary. The codebase is a Cargo workspace of standalone library crates under `crates/`:
 
-| Crate | Contains | Runtime deps (lib) |
-|-------|----------|--------------------|
-| `chronacle-core` | Dependency traits (`LlmProvider`, `VectorStore`, `BlobStore`, `EmbeddingProvider`) + DTOs/errors | (leaf) `serde`, `async-trait`, `thiserror` |
-| `chronacle-db` | `schema/*.surql` + `run_migrations` | `surrealdb` |
-| `chronacle-providers` | `SurrealDbVector`, `LocalFileStore`, fastembed/OpenAI/Mock embedding, OpenAI/Anthropic/Ollama LLM | `chronacle-core` |
-| `chronacle-ingestion` | `pdf_extractor`, `chunker`, `ingestion_service`, `text_normalizer` | `chronacle-core` |
-| `chronacle-extraction` | `entity_service`, `wikilink`, `extraction_service` | `chronacle-core` |
-| `chronacle-retrieval` | `agent_service` (RAG chat + citation) | `chronacle-core` |
-| `chronacle-domain` | `campaign_service`, `session_service`, `collection_service`, `custom_provider_service` | `chronacle-core`, `chronacle-extraction` |
-| `apps/desktop/src-tauri` | IPC commands, `AppState`, `settings_service` | all `chronacle-*` crates + `tauri` |
+| Crate                    | Contains                                                                                          | Runtime deps (lib)                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `chronacle-core`         | Dependency traits (`LlmProvider`, `VectorStore`, `BlobStore`, `EmbeddingProvider`) + DTOs/errors  | (leaf) `serde`, `async-trait`, `thiserror` |
+| `chronacle-db`           | `schema/*.surql` + `run_migrations`                                                               | `surrealdb`                                |
+| `chronacle-providers`    | `SurrealDbVector`, `LocalFileStore`, fastembed/OpenAI/Mock embedding, OpenAI/Anthropic/Ollama LLM | `chronacle-core`                           |
+| `chronacle-ingestion`    | `pdf_extractor`, `chunker`, `ingestion_service`, `text_normalizer`                                | `chronacle-core`                           |
+| `chronacle-extraction`   | `entity_service`, `wikilink`, `extraction_service`                                                | `chronacle-core`                           |
+| `chronacle-retrieval`    | `agent_service` (RAG chat + citation)                                                             | `chronacle-core`                           |
+| `chronacle-domain`       | `campaign_service`, `session_service`, `collection_service`, `custom_provider_service`            | `chronacle-core`, `chronacle-extraction`   |
+| `apps/desktop/src-tauri` | IPC commands, `AppState`, `settings_service`                                                      | all `chronacle-*` crates + `tauri`         |
 
 `chronacle-ingestion`, `chronacle-extraction`, and `chronacle-retrieval` depend only on `chronacle-core` traits — not on `chronacle-providers`. `chronacle-db` is a dev-dependency (migrations in tests) for all service crates; only the desktop app needs it at runtime. `chronacle-domain` lib-depends on `chronacle-extraction` because `session_service` uses entity/wikilink types. The `chronacle-ingestion` tests use `chronacle-providers` as a dev-dependency for `MockEmbeddingProvider`; `chronacle-extraction` and `chronacle-retrieval` define their own test mocks.
 
 The database connection type is `Surreal<engine::any::Any>`: the same `run_migrations` and query code compiles against both the embedded RocksDB (`rocksdb://<path>`) and SurrealDB Cloud. `settings_service` intentionally stays in `apps/desktop/src-tauri` — no extracted crate depends on it at runtime.
 
 **Remaining path from desktop to cloud:**
+
 1. Add `apps/server/` as a new workspace member: an axum binary that wires the existing `chronacle-*` crates to HTTP route handlers. The IPC command handlers in `apps/desktop/src-tauri/src/commands/` are the mapping reference.
 2. Swap the SurrealDB connection string: `rocksdb://<path>` → SurrealDB Cloud URL. Schema and queries are unchanged.
 3. Add auth middleware (JWT) to the axum router.
@@ -242,11 +246,11 @@ pub trait BlobStore: Send + Sync {
 
 ### Storage Path
 
-| Layer | Desktop | Cloud |
-|-------|---------|-------|
-| Relational + Vector + Graph | SurrealDB embedded (RocksDB) | SurrealDB Cloud (same SurrealQL) |
-| File storage (PDFs) | Local filesystem via `BlobStore` | S3 / GCS via `BlobStore` |
-| Auth | None (single-user) | JWT issued at login |
+| Layer                       | Desktop                          | Cloud                            |
+| --------------------------- | -------------------------------- | -------------------------------- |
+| Relational + Vector + Graph | SurrealDB embedded (RocksDB)     | SurrealDB Cloud (same SurrealQL) |
+| File storage (PDFs)         | Local filesystem via `BlobStore` | S3 / GCS via `BlobStore`         |
+| Auth                        | None (single-user)               | JWT issued at login              |
 
 ### Tauri IPC API Surface
 
@@ -279,6 +283,7 @@ pub trait BlobStore: Send + Sync {
 ### Connectivity & Offline
 
 The app detects network status at startup and during operation:
+
 - If using a cloud LLM provider (OpenAI/Anthropic) and the network is down, surface a clear error in the chat UI: "Network unavailable — switch to Ollama in Settings or retry."
 - If using Ollama locally, no network dependency — works fully offline.
 - SurrealDB embedded is always local — no network dependency for storage.
@@ -306,6 +311,7 @@ Location: `#[cfg(test)]` modules inside each source file.
   - `MockBlobStore` — simulates file storage.
 
 **Note:** Prefer in-memory real implementations over mockall where practical. An in-memory `HashMap`-backed `VectorStore` catches more real bugs than a mock and produces less brittle test setup. Use mocks only for external I/O that's genuinely costly to simulate (LLM API, filesystem).
+
 - Assertion crate: `pretty_assertions` for readable diffs on complex types.
 
 ```toml
@@ -316,6 +322,7 @@ tokio = { version = "1", features = ["test-utils"] }
 ```
 
 Example test structure:
+
 ```rust
 #[cfg(test)]
 mod tests {
@@ -381,12 +388,14 @@ pnpm -C apps/desktop test:run    # CI mode (no watch)
 Tool: **Playwright** against the backend service layer (backend E2E) and optionally the full Tauri app via `tauri-driver` (UI E2E).
 
 **Backend E2E (fast, no UI):**
+
 - Construct the service layer with a real SurrealDB in-memory database.
 - Drive via the service API directly (no IPC layer — test the service, not the glue).
 - Cover: full PDF ingestion flow → query → citation returned.
 - Run in CI on every PR.
 
 **UI E2E via tauri-driver (slow, full stack):**
+
 - Requires a built Tauri app; run via WebDriver protocol.
 - Cover: happy paths only — load PDF, ask question, read response.
 - Run on Linux only in CI on merge to main (expand matrix when platform-specific bugs emerge).
@@ -427,22 +436,22 @@ pnpm -C apps/desktop run e2e:ui
 
 ### Rust
 
-| Tool | Purpose | Command |
-|------|---------|---------|
-| `rustfmt` | Canonical formatting | `cargo fmt --check` (CI), `cargo fmt` (local) |
-| `clippy` | Lints and idiom enforcement | `cargo clippy --all-targets --all-features -- -D warnings` |
-| `cargo audit` | Known vulnerability scan | `cargo audit` |
-| `cargo deny` | License compliance + duplicate deps | `cargo deny check` |
+| Tool          | Purpose                             | Command                                                    |
+| ------------- | ----------------------------------- | ---------------------------------------------------------- |
+| `rustfmt`     | Canonical formatting                | `cargo fmt --check` (CI), `cargo fmt` (local)              |
+| `clippy`      | Lints and idiom enforcement         | `cargo clippy --all-targets --all-features -- -D warnings` |
+| `cargo audit` | Known vulnerability scan            | `cargo audit`                                              |
+| `cargo deny`  | License compliance + duplicate deps | `cargo deny check`                                         |
 
 `clippy` runs with `-D warnings` — any lint is a CI failure, no exceptions. Clippy allow-list exceptions must be documented inline with a comment explaining why.
 
 ### TypeScript / Svelte
 
-| Tool | Purpose | Command |
-|------|---------|---------|
-| `prettier` + `prettier-plugin-svelte` | Formatting | `prettier --check .` (CI) |
-| `eslint` + `@typescript-eslint` + `eslint-plugin-svelte` | Linting | `eslint .` |
-| `tsc --noEmit` | Type checking | `pnpm -C apps/desktop typecheck` |
+| Tool                                                     | Purpose       | Command                          |
+| -------------------------------------------------------- | ------------- | -------------------------------- |
+| `prettier` + `prettier-plugin-svelte`                    | Formatting    | `prettier --check .` (CI)        |
+| `eslint` + `@typescript-eslint` + `eslint-plugin-svelte` | Linting       | `eslint .`                       |
+| `tsc --noEmit`                                           | Type checking | `pnpm -C apps/desktop typecheck` |
 
 ### Pre-commit Hooks
 
@@ -550,23 +559,23 @@ Session files include `session_number`, `title`, and `date_played` in frontmatte
 
 **Sync behaviour — Chronacle → vault (outbound):**
 
-| Event | Action |
-|-------|--------|
-| Note saved in Chronacle | Write / overwrite the `.md` file; suppress the inbound file-watch event for that write |
-| Entity / session deleted | Delete the `.md` file |
-| Entity / session renamed | Delete old file, write new file with updated slug |
-| Campaign renamed | Rename the campaign slug folder |
-| Vault path configured | Full reconcile pass: write any file missing or older than `updated_at` |
+| Event                    | Action                                                                                 |
+| ------------------------ | -------------------------------------------------------------------------------------- |
+| Note saved in Chronacle  | Write / overwrite the `.md` file; suppress the inbound file-watch event for that write |
+| Entity / session deleted | Delete the `.md` file                                                                  |
+| Entity / session renamed | Delete old file, write new file with updated slug                                      |
+| Campaign renamed         | Rename the campaign slug folder                                                        |
+| Vault path configured    | Full reconcile pass: write any file missing or older than `updated_at`                 |
 
 **Sync behaviour — vault → Chronacle (inbound):**
 
-| Event | Action |
-|-------|--------|
-| `.md` file modified | Parse frontmatter; if `id` matches a known entity/session, update `notes` + `name` in SurrealDB and re-index in SurrealDB |
-| `.md` file created (no `id` in frontmatter, inside a known campaign/type folder) | Create new entity or session in SurrealDB; write back the assigned `id` into the frontmatter |
-| `.md` file deleted | Soft-delete: mark `vault_deleted = TRUE` on the record in SurrealDB; surface a "restore or confirm delete" prompt in Chronacle UI |
-| `.md` file moved within vault | If destination folder maps to a different entity type, update `entity_type` in SurrealDB; slug is cosmetic only |
-| `.md` file with unknown `id` or outside campaign folders | Ignored — not managed by Chronacle |
+| Event                                                                            | Action                                                                                                                            |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `.md` file modified                                                              | Parse frontmatter; if `id` matches a known entity/session, update `notes` + `name` in SurrealDB and re-index in SurrealDB         |
+| `.md` file created (no `id` in frontmatter, inside a known campaign/type folder) | Create new entity or session in SurrealDB; write back the assigned `id` into the frontmatter                                      |
+| `.md` file deleted                                                               | Soft-delete: mark `vault_deleted = TRUE` on the record in SurrealDB; surface a "restore or confirm delete" prompt in Chronacle UI |
+| `.md` file moved within vault                                                    | If destination folder maps to a different entity type, update `entity_type` in SurrealDB; slug is cosmetic only                   |
+| `.md` file with unknown `id` or outside campaign folders                         | Ignored — not managed by Chronacle                                                                                                |
 
 **Conflict resolution (both sides modified before sync could propagate):**
 
@@ -777,6 +786,7 @@ DEFINE FIELD value ON setting TYPE string;
 **Note on timestamps:** All datetime fields use SurrealDB's `datetime` type (RFC 3339 / ISO 8601). This avoids the ambiguity of Unix epoch integers (seconds vs milliseconds) and is forward-compatible with SurrealDB Cloud. The vault sync frontmatter uses the same format.
 
 **Timeline queries the Agent can answer** using event fields:
+
 - "What happened before the Cataclysm?" → `era = 'Before the Cataclysm'`
 - "List events in order" → `ORDER BY sequence_index`
 - "What happened in session 4?" → `session = $session_record_id`
@@ -846,7 +856,7 @@ Each carries: text, source name, page range, section heading
 
 The MTREE KNN operator has two non-obvious constraints. Both are caught only at runtime (no compile-time query validation — see ADR-002):
 
-1. **KNN goes in `WHERE`, not `ORDER BY`.** `embedding <|K|> $vec` must live in the `WHERE` clause to activate the MTREE index; ordering is by the computed distance, selected as `vector::distance::knn() AS distance` and used as `ORDER BY distance ASC`. Writing `ORDER BY embedding <|K|> $vec` is rejected: *"Missing order idiom `embedding` in statement selection."*
+1. **KNN goes in `WHERE`, not `ORDER BY`.** `embedding <|K|> $vec` must live in the `WHERE` clause to activate the MTREE index; ordering is by the computed distance, selected as `vector::distance::knn() AS distance` and used as `ORDER BY distance ASC`. Writing `ORDER BY embedding <|K|> $vec` is rejected: _"Missing order idiom `embedding` in statement selection."_
 
 2. **KNN does not compose with an `id IN (subquery)` filter.** AND-ing `embedding <|K|> $vec` with `id IN (SELECT VALUE out FROM …)` **silently returns zero rows**. A field comparison (`collection IN [...]`), a graph-traversal predicate (`<-in_collection<-collection CONTAINS type::thing('collection','id')`), or an explicit-id array (`id IN [type::thing(...)]`) all compose correctly. Collection-scoped entity retrieval in `agent_service::fetch_entity_context` uses the graph-traversal form for this reason; regression test: `fetch_entity_context_knn_over_collection_executes`.
 
@@ -875,21 +885,22 @@ Phase 1–2 everything is GM-visible (single-user app), so the flag has no funct
 consumer yet; its real payoff is a player-safe view/export that actually strips secrets.
 
 **Why the manual flag was the wrong model.** GM-secret content is rarely a whole book — it
-is *passage-level*: the boxed "For the GM" sidebars, secret lore, adventure spoilers,
+is _passage-level_: the boxed "For the GM" sidebars, secret lore, adventure spoilers,
 read-aloud vs behind-the-screen text. A manual per-source / per-entity boolean models a
 granularity that mostly doesn't exist. A Phase 2 implementation (per-source/entity/session
 toggles + chunk inheritance + a chat "GM only" badge) was built and then reverted for this
 reason.
 
 When implemented in Phase 3, alongside player-safe export:
+
 - **AI-detected at index time.** Classify each chunk as GM-secret vs player-safe by
   inspecting its text, rather than asking the GM to flag whole sources. A cheap keyword
   prefilter (headings / first lines hitting "For the GM", "Secret", "Behind the Screen",
   "Development", spoiler-y cues) narrows the LLM pass to candidate chunks to bound cost.
-  - *Known limitation:* GM-secret cues are often **visual** (shaded boxes, sidebars, icons)
+  - _Known limitation:_ GM-secret cues are often **visual** (shaded boxes, sidebars, icons)
     and `pdfium` text extraction drops them, so detection leans on explicit textual labels;
     needs a small eval set to tune precision/recall (false negatives leak secrets).
-- `is_gm_only` then lives on `chunk` (and entity/session notes) as a *derived* flag.
+- `is_gm_only` then lives on `chunk` (and entity/session notes) as a _derived_ flag.
 - Retrieval never filters GM-secret chunks (single-user GM app); the flag drives a
   player-safe export/view that strips them and a "spoiler" indicator in chat.
 
@@ -962,12 +973,12 @@ Goal: Multi-campaign support, hybrid notes, lore retrieval.
 
 - [x] Campaign CRUD — `campaign_service` + `CampaignView.svelte`; tested (`campaign_service_test.rs`, `CampaignView.test.ts`)
 - [x] Entity manager (NPC, location, faction, creature, item, misc) — `entity_service` + `EntityManager.svelte` / `EntityForm.svelte`; all 8 typed node tables (migration `004_graph_entities.surql`)
-- [x] `event` entity type + temporal fields UI — all fields (`date_start`/`date_end`/`is_ongoing`/`sequence_index`/`era`/`duration_label`/`session`) in form; *timeline visualisation moved to Phase 3*
+- [x] `event` entity type + temporal fields UI — all fields (`date_start`/`date_end`/`is_ongoing`/`sequence_index`/`era`/`duration_label`/`session`) in form; _timeline visualisation moved to Phase 3_
 - [x] `player_character` entity type with player name / class / status — form fields + status enum; tested
 - [x] Entity notes editor (markdown) — `WikiLinkEditor.svelte` with `[[Entity]]` autocomplete + `WikiText` rendering
 - [~] **`is_gm_only` — deferred to Phase 3.** Built then reverted (commits `6a1634b`/`01d63ac` reverted): a manual whole-source/entity boolean models a granularity that rarely exists — GM-secret material is passage-level (boxed "For the GM" sidebars, secret lore, spoilers) — and in a single-user app the flag only powers a cosmetic badge. The real payoff (player-safe view/export) is Phase 3, where it returns as **AI-detected passage-level** secrecy (classify chunks at index time) rather than a manual toggle. See Phase 3.
-- [x] Notes indexing pipeline (entity + session notes → embed → SurrealDB) — `entity_service::embed_node` (name+summary+notes, single source of truth, called by manual create/update **and** extraction) + `session_service::embed_session` (migration `007_session_embedding.surql`); `agent_service::fetch_entity_context` now includes entity *and* session note excerpts in the LLM context
-- [x] Collection-scoped sources — sources attach to collections; campaigns `subscribes_to` collections (migration `003_collections.surql`). *Supersedes the original "global vs campaign-scoped (NULL)" design — there is no global source scope.*
+- [x] Notes indexing pipeline (entity + session notes → embed → SurrealDB) — `entity_service::embed_node` (name+summary+notes, single source of truth, called by manual create/update **and** extraction) + `session_service::embed_session` (migration `007_session_embedding.surql`); `agent_service::fetch_entity_context` now includes entity _and_ session note excerpts in the LLM context
+- [x] Collection-scoped sources — sources attach to collections; campaigns `subscribes_to` collections (migration `003_collections.surql`). _Supersedes the original "global vs campaign-scoped (NULL)" design — there is no global source scope._
 - [x] Keyboard-first shortcuts (GM is at the table) — Vim-style g-chords for navigation (`g o/p/n/l/f/c/i/e/s/m/,`), `c` new entity, `/` focus chat, `?` help overlay, Esc close; suppressed while typing (`lib/shortcuts.ts` + `Shell.svelte`); unit + Shell integration tests
 - **Tests shipped with Phase 2:**
   - [x] Unit: entity CRUD service (`entity_service_test.rs`); event `sequence_index` timeline ordering (`order_events_for_timeline` unit + `get_events_timeline` integration)
@@ -1007,17 +1018,17 @@ Goal: Deploy backend as a server; access from mobile.
 
 ## Key Technical Risks
 
-| Risk | Mitigation |
-|------|------------|
-| PDF text extraction quality varies (multi-column, scanned) | Use `pdfium-render`; add "preview extracted text" view so GMs can spot bad extractions before indexing |
-| fastembed first-run download (~250 MB) looks like a hang | Dedicated onboarding screen: "Downloading AI model (one time)" with a real progress bar |
-| Embedding model locked in after indexing | Store model ID in `sources.embed_model`; detect mismatch at startup; offer re-index with a warning |
-| SurrealDB embedded RocksDB compile time | Expected on first build (~30–60 s for C++ transitive); mitigated by caching CI builds via `sccache` or GitHub Actions cache |
-| SurrealQL learning curve (no compile-time query validation) | Mitigated by comprehensive integration tests using SurrealDB in-memory engine; all queries exercised in test suite before hitting production |
-| Embedding model locked in after indexing | Store model ID in `source.embed_model` and `chunk.embed_model`; detect mismatch at startup; offer re-index with a warning and provide a batch re-index workflow |
-| Context window overflow with many chunks | Count tokens before sending; surface a warning in the UI; let the GM limit sources per query |
-| LLM hallucinating rules despite strict prompt | Track retrieval scores; show a low-confidence indicator when the top chunk similarity is below a threshold |
-| Vector index performance at scale (>100K chunks) | SurrealDB's MTREE index performs well at moderate scale; if needed, add a `QdrantCloud` implementation behind the `VectorStore` trait — no data model changes required |
+| Risk                                                        | Mitigation                                                                                                                                                             |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PDF text extraction quality varies (multi-column, scanned)  | Use `pdfium-render`; add "preview extracted text" view so GMs can spot bad extractions before indexing                                                                 |
+| fastembed first-run download (~250 MB) looks like a hang    | Dedicated onboarding screen: "Downloading AI model (one time)" with a real progress bar                                                                                |
+| Embedding model locked in after indexing                    | Store model ID in `sources.embed_model`; detect mismatch at startup; offer re-index with a warning                                                                     |
+| SurrealDB embedded RocksDB compile time                     | Expected on first build (~30–60 s for C++ transitive); mitigated by caching CI builds via `sccache` or GitHub Actions cache                                            |
+| SurrealQL learning curve (no compile-time query validation) | Mitigated by comprehensive integration tests using SurrealDB in-memory engine; all queries exercised in test suite before hitting production                           |
+| Embedding model locked in after indexing                    | Store model ID in `source.embed_model` and `chunk.embed_model`; detect mismatch at startup; offer re-index with a warning and provide a batch re-index workflow        |
+| Context window overflow with many chunks                    | Count tokens before sending; surface a warning in the UI; let the GM limit sources per query                                                                           |
+| LLM hallucinating rules despite strict prompt               | Track retrieval scores; show a low-confidence indicator when the top chunk similarity is below a threshold                                                             |
+| Vector index performance at scale (>100K chunks)            | SurrealDB's MTREE index performs well at moderate scale; if needed, add a `QdrantCloud` implementation behind the `VectorStore` trait — no data model changes required |
 
 ---
 
@@ -1027,46 +1038,46 @@ Goal: Deploy backend as a server; access from mobile.
 
 These are first-party library crates in the Cargo workspace. They are not external dependencies and do not require an ADR to modify; changes are governed by the crate boundary rules in ADR-005.
 
-| Crate | Responsibility |
-|-------|----------------|
-| `chronacle-core` | Dependency traits (`LlmProvider`, `VectorStore`, `BlobStore`, `EmbeddingProvider`) + DTOs and error types |
-| `chronacle-db` | SurrealQL schema (`.surql` files) + `run_migrations` |
-| `chronacle-providers` | Concrete impls: `SurrealDbVector`, `LocalFileStore`, fastembed/OpenAI/Mock embedding, OpenAI/Anthropic/Ollama LLM |
-| `chronacle-ingestion` | PDF extraction (`pdfium-render`), chunker, text normalizer, ingestion pipeline |
-| `chronacle-extraction` | Entity CRUD/relations, wikilink resolution, LLM-driven entity extraction |
-| `chronacle-retrieval` | RAG agent service: retrieval, context assembly, cited-answer generation |
-| `chronacle-domain` | Campaign, session, collection, and custom-provider CRUD services |
+| Crate                  | Responsibility                                                                                                    |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `chronacle-core`       | Dependency traits (`LlmProvider`, `VectorStore`, `BlobStore`, `EmbeddingProvider`) + DTOs and error types         |
+| `chronacle-db`         | SurrealQL schema (`.surql` files) + `run_migrations`                                                              |
+| `chronacle-providers`  | Concrete impls: `SurrealDbVector`, `LocalFileStore`, fastembed/OpenAI/Mock embedding, OpenAI/Anthropic/Ollama LLM |
+| `chronacle-ingestion`  | PDF extraction (`pdfium-render`), chunker, text normalizer, ingestion pipeline                                    |
+| `chronacle-extraction` | Entity CRUD/relations, wikilink resolution, LLM-driven entity extraction                                          |
+| `chronacle-retrieval`  | RAG agent service: retrieval, context assembly, cited-answer generation                                           |
+| `chronacle-domain`     | Campaign, session, collection, and custom-provider CRUD services                                                  |
 
 ### Rust Crates
 
-| Purpose | Crate |
-|---------|-------|
-| Desktop app framework | `tauri` 2.x |
-| Unified store (relational + vector + graph) | `surrealdb` (embedded, `kv-rocksdb` feature) |
-| PDF text extraction | `pdfium-render` |
-| Local embeddings | `fastembed` (ONNX Runtime via `ort-load-dynamic`) |
+| Purpose                                               | Crate                                                        |
+| ----------------------------------------------------- | ------------------------------------------------------------ |
+| Desktop app framework                                 | `tauri` 2.x                                                  |
+| Unified store (relational + vector + graph)           | `surrealdb` (embedded, `kv-rocksdb` feature)                 |
+| PDF text extraction                                   | `pdfium-render`                                              |
+| Local embeddings                                      | `fastembed` (ONNX Runtime via `ort-load-dynamic`)            |
 | Native-lib fetch at build time (pdfium, ONNX Runtime) | `reqwest` (blocking) + `flate2` + `tar` + `zip` (build-deps) |
-| OpenAI LLM | `async-openai` |
-| HTTP client (Anthropic, Ollama) | `reqwest` |
-| Async runtime | `tokio` |
-| Serialisation | `serde` + `serde_json` |
-| Unique IDs | `uuid` |
-| Mocking in tests | `mockall` |
-| YAML frontmatter (vault sync) | `serde_yaml` |
-| Filesystem watcher (vault sync) | `notify` |
-| Coverage | `cargo-llvm-cov` |
-| Audit | `cargo-audit`, `cargo-deny` |
+| OpenAI LLM                                            | `async-openai`                                               |
+| HTTP client (Anthropic, Ollama)                       | `reqwest`                                                    |
+| Async runtime                                         | `tokio`                                                      |
+| Serialisation                                         | `serde` + `serde_json`                                       |
+| Unique IDs                                            | `uuid`                                                       |
+| Mocking in tests                                      | `mockall`                                                    |
+| YAML frontmatter (vault sync)                         | `serde_yaml`                                                 |
+| Filesystem watcher (vault sync)                       | `notify`                                                     |
+| Coverage                                              | `cargo-llvm-cov`                                             |
+| Audit                                                 | `cargo-audit`, `cargo-deny`                                  |
 
 ### Frontend / Tooling
 
-| Purpose | Tool |
-|---------|------|
-| Framework | Svelte 5 + TypeScript |
-| Build | Vite |
-| Unit / component tests | Vitest + `@testing-library/svelte` |
-| API mocking in tests | `msw` (Mock Service Worker) — intercepts Tauri IPC calls in the WebView |
-| E2E tests | Playwright |
-| Linting | ESLint + `@typescript-eslint` + `eslint-plugin-svelte` |
-| Formatting | Prettier + `prettier-plugin-svelte` |
-| Pre-commit hooks | lefthook |
-| Graph layout | `d3-force` (entity relationship graph, Phase 3) |
+| Purpose                | Tool                                                                    |
+| ---------------------- | ----------------------------------------------------------------------- |
+| Framework              | Svelte 5 + TypeScript                                                   |
+| Build                  | Vite                                                                    |
+| Unit / component tests | Vitest + `@testing-library/svelte`                                      |
+| API mocking in tests   | `msw` (Mock Service Worker) — intercepts Tauri IPC calls in the WebView |
+| E2E tests              | Playwright                                                              |
+| Linting                | ESLint + `@typescript-eslint` + `eslint-plugin-svelte`                  |
+| Formatting             | Prettier + `prettier-plugin-svelte`                                     |
+| Pre-commit hooks       | lefthook                                                                |
+| Graph layout           | `d3-force` (entity relationship graph, Phase 3)                         |

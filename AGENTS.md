@@ -179,23 +179,23 @@ Formatting and linting are enforced by tooling and run automatically via `leftho
 
 ## Phases
 
-| Phase | Goal |
-|-------|------|
-| 1 | Core RAG — load PDF, ask question, get cited answer ← *current* |
-| 2 | Campaign & Notes — multi-campaign, entity manager, hybrid retrieval |
-| 3 | Polish — session timeline, entity graph, vault sync, conditional cross-encoder |
-| 4 | Cloud/Mobile — axum extraction, SurrealDB Cloud, JWT auth, mobile |
+| Phase | Goal                                                                           |
+| ----- | ------------------------------------------------------------------------------ |
+| 1     | Core RAG — load PDF, ask question, get cited answer ← _current_                |
+| 2     | Campaign & Notes — multi-campaign, entity manager, hybrid retrieval            |
+| 3     | Polish — session timeline, entity graph, vault sync, conditional cross-encoder |
+| 4     | Cloud/Mobile — axum extraction, SurrealDB Cloud, JWT auth, mobile              |
 
 ## Subagents (`.claude/agents/`)
 
-| Agent | Use for |
-|-------|---------|
-| `planner` | Feature decomposition, ADR drafting |
-| `implementer` | Production Rust / Svelte code |
-| `test-engineer` | Writing or debugging tests |
-| `librarian` | "Where is X?" / architecture Q&A |
-| `doc-writer` | ADRs, `///` doc comments, README |
-| `code-reviewer` | Pre-merge review |
-| `bug-detective` | Root-cause analysis and fixes |
-| `dependency-auditor` | `cargo audit`, licenses, unapproved crates |
-| `user-guide-writer` | GM-facing feature guides, how-tos, worked examples |
+| Agent                | Use for                                            |
+| -------------------- | -------------------------------------------------- |
+| `planner`            | Feature decomposition, ADR drafting                |
+| `implementer`        | Production Rust / Svelte code                      |
+| `test-engineer`      | Writing or debugging tests                         |
+| `librarian`          | "Where is X?" / architecture Q&A                   |
+| `doc-writer`         | ADRs, `///` doc comments, README                   |
+| `code-reviewer`      | Pre-merge review                                   |
+| `bug-detective`      | Root-cause analysis and fixes                      |
+| `dependency-auditor` | `cargo audit`, licenses, unapproved crates         |
+| `user-guide-writer`  | GM-facing feature guides, how-tos, worked examples |
