@@ -1,0 +1,32 @@
+[package]
+name = "chronacle-ingestion"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "chronacle_ingestion"
+
+[dependencies]
+chronacle-core = { path = "../chronacle-core" }
+surrealdb.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+regex.workspace = true
+unicode-segmentation.workspace = true
+pdfium-render.workspace = true
+uuid.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+chronacle-db = { path = "../chronacle-db" }
+chronacle-providers = { path = "../chronacle-providers" }
+mockall.workspace = true
+tempfile.workspace = true
+pretty_assertions.workspace = true
+lopdf.workspace = true
+tokio.workspace = true

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::services::chunker::ExtractedDoc;
+use crate::chunker::ExtractedDoc;
 
 /// Callback invoked once per PDF page during extraction: `(page_num, total)`,
 /// 1-based page number and total page count. Held behind an `Arc` so it can be

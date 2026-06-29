@@ -9,6 +9,7 @@ dependencies = [
  "async-trait",
  "chronacle-core",
  "chronacle-db",
+ "chronacle-ingestion",
  "chronacle-providers",
  "dirs-next",
  "fastembed",
@@ -1082,6 +1083,29 @@ dependencies = [
  "serde_json",
  "surrealdb",
  "tokio",
+]
+
+[[package]]
+name = "chronacle-ingestion"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chronacle-core",
+ "chronacle-db",
+ "chronacle-providers",
+ "lopdf",
+ "mockall",
+ "pdfium-render",
+ "pretty_assertions",
+ "regex",
+ "serde",
+ "serde_json",
+ "surrealdb",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "unicode-segmentation",
+ "uuid",
 ]
 
 [[package]]

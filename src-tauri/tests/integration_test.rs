@@ -242,7 +242,7 @@ fn create_test_pdf() -> Vec<u8> {
 
 #[tokio::test]
 async fn test_pdfium_extract_text() {
-    use chronacle_lib::services::pdf_extractor::{PdfExtractor, PdfiumExtractor};
+    use chronacle_ingestion::pdf_extractor::{PdfExtractor, PdfiumExtractor};
     let lib = pdfium_lib_path();
     if !lib.exists() {
         eprintln!("Skipping — pdfium binary not present at {lib:?}");
@@ -288,7 +288,7 @@ fn pdfium_lib_path() -> std::path::PathBuf {
 
 #[tokio::test]
 async fn test_full_ingest_and_query_cycle() {
-    use chronacle_lib::services::ingestion_service;
+    use chronacle_ingestion::ingestion_service;
     use chronacle_providers::blob_store::BlobStore;
     use chronacle_providers::embedding::{EmbeddingProvider, MockEmbeddingProvider};
     use chronacle_providers::llm_provider::NoopProvider;
@@ -322,8 +322,9 @@ async fn test_full_ingest_and_query_cycle() {
 
     let llm_provider = Arc::new(NoopProvider);
 
-    let pdf_extractor: Arc<dyn chronacle_lib::services::pdf_extractor::PdfExtractor> =
-        Arc::new(chronacle_lib::services::pdf_extractor::PdfiumExtractor::new(pdfium_lib_path()));
+    let pdf_extractor: Arc<dyn chronacle_ingestion::pdf_extractor::PdfExtractor> = Arc::new(
+        chronacle_ingestion::pdf_extractor::PdfiumExtractor::new(pdfium_lib_path()),
+    );
 
     let state = Arc::new(chronacle_lib::AppState {
         db: db.clone(),
@@ -409,9 +410,17 @@ async fn test_full_ingest_and_query_cycle() {
     // Run ingestion — this calls get_source_filename which queries WHERE id = $id
     // with the same source_id string. SurrealDB coerces the string to match the
     // record's Thing id when queried via bind parameters.
-    ingestion_service::ingest_source(&state, source_id, std::sync::Arc::new(|_| {}))
-        .await
-        .expect("ingestion should succeed");
+    ingestion_service::ingest_source(
+        &state.db,
+        &state.blob_store,
+        &state.pdf_extractor,
+        &state.embedding_provider,
+        &state.vector_store,
+        source_id,
+        std::sync::Arc::new(|_| {}),
+    )
+    .await
+    .expect("ingestion should succeed");
 
     // Debug: check chunk table schema + any records
     let mut debug2 = db
@@ -690,7 +699,7 @@ impl chronacle_providers::embedding::EmbeddingProvider for FailingEmbeddingProvi
 /// `'indexing'` and orphan chunks accumulate across retries.
 #[tokio::test]
 async fn ingestion_failure_marks_source_failed_and_cleans_chunks() {
-    use chronacle_lib::services::ingestion_service;
+    use chronacle_ingestion::ingestion_service;
     use chronacle_providers::blob_store::BlobStore;
     use chronacle_providers::embedding::EmbeddingProvider;
     use chronacle_providers::llm_provider::NoopProvider;
@@ -716,8 +725,9 @@ async fn ingestion_failure_marks_source_failed_and_cleans_chunks() {
         Arc::new(SurrealDbVector::new(db.clone()));
     let embedding_provider: Arc<dyn EmbeddingProvider> = Arc::new(FailingEmbeddingProvider);
     let llm_provider = Arc::new(NoopProvider);
-    let pdf_extractor: Arc<dyn chronacle_lib::services::pdf_extractor::PdfExtractor> =
-        Arc::new(chronacle_lib::services::pdf_extractor::PdfiumExtractor::new(pdfium_lib_path()));
+    let pdf_extractor: Arc<dyn chronacle_ingestion::pdf_extractor::PdfExtractor> = Arc::new(
+        chronacle_ingestion::pdf_extractor::PdfiumExtractor::new(pdfium_lib_path()),
+    );
 
     let state = Arc::new(chronacle_lib::AppState {
         db: db.clone(),
@@ -784,8 +794,16 @@ async fn ingestion_failure_marks_source_failed_and_cleans_chunks() {
         .expect("blob store");
 
     // Run ingestion — should fail at the embedding stage.
-    let result =
-        ingestion_service::ingest_source(&state, source_id, std::sync::Arc::new(|_| {})).await;
+    let result = ingestion_service::ingest_source(
+        &state.db,
+        &state.blob_store,
+        &state.pdf_extractor,
+        &state.embedding_provider,
+        &state.vector_store,
+        source_id,
+        std::sync::Arc::new(|_| {}),
+    )
+    .await;
     assert!(
         result.is_err(),
         "ingest should fail with FailingEmbeddingProvider; got: {:?}",
