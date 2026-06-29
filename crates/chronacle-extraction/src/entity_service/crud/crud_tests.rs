@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::services::entity_service::{EntityInput, EntityKind, GraphNode};
-use chronacle_providers::embedding::{EmbeddingProvider, MockEmbeddingProvider};
+use crate::entity_service::{EntityInput, EntityKind, GraphNode};
+use crate::extraction_service::test_support::MockEmbeddingProvider;
+use chronacle_core::embedding::EmbeddingProvider;
 
 use super::{create, embed_node, embed_text, order_events_for_timeline};
 

@@ -1,4 +1,4 @@
-use crate::services::entity_service::{EntityInput, EntityKind};
+use crate::entity_service::{EntityInput, EntityKind};
 
 use super::{create, find_by_name_and_collection, get_by_campaign, get_by_collection};
 

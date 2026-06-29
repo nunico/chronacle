@@ -172,14 +172,14 @@ pub async fn create<C: surrealdb::Connection>(
     // Sync wikilinks (fire-and-forget: ignore errors so failures never block saves).
     if let Some(notes) = &notes_for_wikilinks {
         if !notes.is_empty() {
-            use crate::services::wikilink::WikilinkScope;
+            use crate::wikilink::WikilinkScope;
             let scope = match (campaign_id, collection_id) {
                 (Some(cid), _) => Some(WikilinkScope::Campaign { campaign_id: cid }),
                 (_, Some(col)) => Some(WikilinkScope::Collection { collection_id: col }),
                 _ => None,
             };
             if let Some(scope) = scope {
-                let _ = crate::services::wikilink::parse_and_sync_wikilinks(
+                let _ = crate::wikilink::parse_and_sync_wikilinks(
                     db,
                     table,
                     &id_for_wikilinks,
@@ -193,14 +193,14 @@ pub async fn create<C: surrealdb::Connection>(
 
     // Reconcile forward-reference wikilinks (fire-and-forget).
     {
-        use crate::services::wikilink::WikilinkScope;
+        use crate::wikilink::WikilinkScope;
         let inbound_scope = match (campaign_id, collection_id) {
             (Some(cid), _) => Some(WikilinkScope::Campaign { campaign_id: cid }),
             (_, Some(col)) => Some(WikilinkScope::Collection { collection_id: col }),
             _ => None,
         };
         if let Some(inbound_scope) = inbound_scope {
-            let _ = crate::services::wikilink::sync_inbound_wikilinks_for_new_entity(
+            let _ = crate::wikilink::sync_inbound_wikilinks_for_new_entity(
                 db,
                 table,
                 &id_for_wikilinks,

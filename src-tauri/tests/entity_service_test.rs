@@ -1,4 +1,4 @@
-use chronacle_lib::services::entity_service::{
+use chronacle_extraction::entity_service::{
     create, delete, get_by_campaign, get_by_id, get_entity_graph, get_entity_relations,
     get_events_timeline, relate, resync_all_wikilinks, update, EntityError, EntityInput,
     EntityKind,

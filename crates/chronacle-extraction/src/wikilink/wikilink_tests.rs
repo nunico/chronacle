@@ -1,5 +1,5 @@
 use super::*;
-use crate::services::entity_service::{create, relate, EntityInput, EntityKind};
+use crate::entity_service::{create, relate, EntityInput, EntityKind};
 use surrealdb::{engine::local::Db, Surreal};
 
 async fn setup_db() -> Surreal<Db> {

@@ -12,25 +12,29 @@ use super::{
     batch_passages, llm_complete, ExtractionError, ExtractionPhase, ExtractionProgress,
     ExtractionResult, MAX_ENRICH,
 };
-use crate::services::entity_service::GraphNode;
-use chronacle_providers::embedding::EmbeddingProvider;
-use chronacle_providers::llm_provider::{ChatMessage, LlmProvider};
-use chronacle_providers::vector_store::VectorStore;
+use crate::entity_service::GraphNode;
+use chronacle_core::embedding::EmbeddingProvider;
+use chronacle_core::llm::{ChatMessage, LlmProvider};
+use chronacle_core::vector_store::VectorStore;
 
 /// Seed-anchored extraction: build the entity named `name` plus its relation
-/// neighborhood from chunks across all collections linked to `campaign_id`.
+/// neighborhood from chunks across the given `collection_ids`.
 ///
 /// For each linked collection it gathers candidate passages by the union of
 /// semantic search (`VectorStore`) and a lexical `CONTAINS` scan, then runs the
 /// seed-anchored prompt and persists collection-scoped (same dedup path as the
 /// full sweep). Passing a single collection id to `search` guarantees every
 /// semantic hit belongs to that collection, so scoping is unambiguous.
+///
+/// The caller is responsible for resolving campaign subscriptions to collection
+/// ids before calling (e.g. via `agent_service::resolve_collection_ids` in the
+/// app crate), keeping this crate free of any `agent_service` dependency.
 pub async fn extract_seed_anchored<C: Connection>(
     db: &surrealdb::Surreal<C>,
     llm: &Arc<dyn LlmProvider>,
     embed: &Arc<dyn EmbeddingProvider>,
     vector_store: &Arc<dyn VectorStore>,
-    campaign_id: &str,
+    collection_ids: &[String],
     name: &str,
     on_progress: impl Fn(ExtractionProgress),
 ) -> Result<ExtractionResult, ExtractionError> {
@@ -40,10 +44,6 @@ pub async fn extract_seed_anchored<C: Connection>(
         entities_found: 0,
         relations_found: 0,
     });
-
-    let collection_ids = crate::services::agent_service::resolve_collection_ids(db, campaign_id)
-        .await
-        .map_err(|e| ExtractionError::Db(e.to_string()))?;
 
     let query_vec = embed
         .embed_documents(vec![name.to_string()])
@@ -62,7 +62,7 @@ pub async fn extract_seed_anchored<C: Connection>(
 
     let system_prompt = "You are a structured data extraction assistant. Return ONLY valid JSON.";
 
-    for cid in &collection_ids {
+    for cid in collection_ids {
         let passages = search_passages(db, vector_store, &query_vec, cid, &needle).await?;
         if passages.is_empty() {
             continue;

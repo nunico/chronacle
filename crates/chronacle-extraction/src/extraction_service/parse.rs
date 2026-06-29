@@ -3,7 +3,7 @@
 
 use serde::Deserialize;
 
-use crate::services::entity_service::EntityKind;
+use crate::entity_service::EntityKind;
 
 // ── LLM response schema ───────────────────────────────────────────────────────
 

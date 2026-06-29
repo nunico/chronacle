@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::super::{
     EntityError, EntityInput, EntityKind, GraphNode, GraphNodeRecord, SELECT_SCOPE_ALIASES,
 };
-use chronacle_providers::embedding::EmbeddingProvider;
+use chronacle_core::embedding::EmbeddingProvider;
 
 /// Map an `Option` to a SurrealDB value, using explicit `NULL` for `None`.
 ///
@@ -84,16 +84,14 @@ pub async fn update<C: surrealdb::Connection>(
 
     // Sync wikilinks in notes to relates_to edges (fire-and-forget).
     if let Some(ref notes) = notes_for_wikilinks {
-        use crate::services::wikilink::WikilinkScope;
+        use crate::wikilink::WikilinkScope;
         let scope = match (node.campaign_id.as_deref(), node.collection_id.as_deref()) {
             (Some(cid), _) => Some(WikilinkScope::Campaign { campaign_id: cid }),
             (_, Some(col)) => Some(WikilinkScope::Collection { collection_id: col }),
             _ => None,
         };
         if let Some(scope) = scope {
-            let _ =
-                crate::services::wikilink::parse_and_sync_wikilinks(db, table, id, notes, scope)
-                    .await;
+            let _ = crate::wikilink::parse_and_sync_wikilinks(db, table, id, notes, scope).await;
         }
     }
 

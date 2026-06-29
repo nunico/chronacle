@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use tauri::State;
 
-use crate::services::entity_service::{
+use crate::AppState;
+use chronacle_extraction::entity_service::{
     self, EntityError, EntityGraph, EntityInput, EntityKind, GraphNode, RelatedEntity,
 };
-use crate::AppState;
 
 fn parse_kind(kind: &str) -> Result<EntityKind, EntityError> {
     serde_json::from_value(serde_json::Value::String(kind.to_owned())).map_err(|_| {

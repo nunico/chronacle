@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use crate::services::entity_service::{self, EntityInput, EntityKind};
-use crate::services::extraction_service::{ExtractionPhase, ExtractionProgress};
-use chronacle_providers::embedding::{EmbeddingProvider, MockEmbeddingProvider};
-use chronacle_providers::llm_provider::LlmProvider;
+use crate::entity_service::{self, EntityInput, EntityKind};
+use crate::extraction_service::{ExtractionPhase, ExtractionProgress};
+use chronacle_core::embedding::EmbeddingProvider;
+use chronacle_core::llm::LlmProvider;
 
-use super::super::test_support::{setup_db_with_collection, MockLlm};
+use super::super::test_support::{setup_db_with_collection, MockEmbeddingProvider, MockLlm};
 use super::extract_from_collection;
 
 #[tokio::test]

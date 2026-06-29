@@ -20,6 +20,7 @@ chronacle-core = { path = "../crates/chronacle-core" }
 chronacle-db = { path = "../crates/chronacle-db" }
 chronacle-providers = { path = "../crates/chronacle-providers" }
 chronacle-ingestion = { path = "../crates/chronacle-ingestion" }
+chronacle-extraction = { path = "../crates/chronacle-extraction" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 surrealdb = { version = "2", features = ["kv-rocksdb", "kv-mem"] }

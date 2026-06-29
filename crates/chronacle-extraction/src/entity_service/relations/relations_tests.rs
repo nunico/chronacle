@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use super::edge;
 use super::{relate, relate_collapsing};
-use crate::services::entity_service::{create, EntityInput, EntityKind, GraphEdge};
+use crate::entity_service::{create, EntityInput, EntityKind, GraphEdge};
 
 #[test]
 fn rel_specificity_tiers_match_vocab() {

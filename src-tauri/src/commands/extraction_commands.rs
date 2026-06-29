@@ -4,8 +4,8 @@ use serde::Serialize;
 use tauri::Emitter;
 use tauri::State;
 
-use crate::services::extraction_service::ExtractionProgress;
 use crate::AppState;
+use chronacle_extraction::extraction_service::ExtractionProgress;
 
 /// Summary returned to the frontend when extraction completes.
 #[derive(Debug, Clone, Serialize)]
@@ -94,16 +94,23 @@ pub async fn extract_entity_by_name(
     let vector_store = state_ref.vector_store.clone();
     let app = app_handle.clone();
     let task_state = state_ref.clone();
-    let task_campaign = campaign_id.clone();
+
+    // Resolve collection IDs here (in the app crate where agent_service lives)
+    // before spawning, so extract_seed_anchored has no dependency on agent_service.
+    let collection_ids =
+        crate::services::agent_service::resolve_collection_ids(&state_ref.db, &campaign_id)
+            .await
+            .map_err(|e| format!("Failed to resolve collections: {e}"))?;
+
     let task_name = name.clone();
 
     let task = tokio::spawn(async move {
-        crate::services::extraction_service::extract_seed_anchored(
+        chronacle_extraction::extraction_service::extract_seed_anchored(
             &task_state.db,
             &llm,
             &embed,
             &vector_store,
-            &task_campaign,
+            &collection_ids,
             &task_name,
             move |p| emit_progress(&app, &p),
         )
@@ -167,7 +174,7 @@ pub async fn extract_all_from_campaign(
             let app = app.clone();
             let ec = entities_created;
             let rc = relations_created;
-            let result = crate::services::extraction_service::extract_from_collection(
+            let result = chronacle_extraction::extraction_service::extract_from_collection(
                 &task_state.db,
                 &llm,
                 &embed,

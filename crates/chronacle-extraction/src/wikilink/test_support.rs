@@ -1,4 +1,4 @@
-use crate::services::entity_service::{EntityInput, EntityKind};
+use crate::entity_service::{EntityInput, EntityKind};
 use surrealdb::engine::local::Db;
 use surrealdb::sql::Thing;
 use surrealdb::Surreal;

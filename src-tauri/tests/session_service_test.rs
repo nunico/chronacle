@@ -228,9 +228,7 @@ async fn delete_session_removes_record() {
 
 #[tokio::test]
 async fn get_session_entities_returns_linked_events() {
-    use chronacle_lib::services::entity_service::{
-        create as create_entity, EntityInput, EntityKind,
-    };
+    use chronacle_extraction::entity_service::{create as create_entity, EntityInput, EntityKind};
 
     let db = setup_db().await;
     let campaign = create_test_campaign(&db).await;

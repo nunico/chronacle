@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use surrealdb::sql::Thing;
 use thiserror::Error;
 
-use chronacle_providers::embedding::EmbeddingProvider;
+use chronacle_core::embedding::EmbeddingProvider;
 
 // ── Error type ──────────────────────────────────────────────────────────────
 
@@ -132,12 +132,12 @@ pub async fn create<C: surrealdb::Connection>(
     // Awaited synchronously: wikilink resolution is fast in practice (entity
     // count is small), and spawning would require C: Clone + Send + 'static
     // which conflicts with the generic bound used in tests.
-    let _ = crate::services::wikilink::parse_and_sync_wikilinks(
+    let _ = chronacle_extraction::wikilink::parse_and_sync_wikilinks(
         db,
         "session",
         &id,
         &input.notes,
-        crate::services::wikilink::WikilinkScope::Campaign { campaign_id },
+        chronacle_extraction::wikilink::WikilinkScope::Campaign { campaign_id },
     )
     .await;
 
@@ -252,12 +252,12 @@ pub async fn update<C: surrealdb::Connection>(
     // Awaited synchronously: wikilink resolution is fast in practice (entity
     // count is small), and spawning would require C: Clone + Send + 'static
     // which conflicts with the generic bound used in tests.
-    let _ = crate::services::wikilink::parse_and_sync_wikilinks(
+    let _ = chronacle_extraction::wikilink::parse_and_sync_wikilinks(
         db,
         "session",
         id,
         &input.notes,
-        crate::services::wikilink::WikilinkScope::Campaign {
+        chronacle_extraction::wikilink::WikilinkScope::Campaign {
             campaign_id: &campaign_id_for_wikilinks,
         },
     )
@@ -325,8 +325,8 @@ pub async fn delete<C: surrealdb::Connection>(
 pub async fn get_entities<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     session_id: &str,
-) -> Result<Vec<crate::services::entity_service::GraphNode>, SessionError> {
-    crate::services::entity_service::get_events_for_session(db, session_id)
+) -> Result<Vec<chronacle_extraction::entity_service::GraphNode>, SessionError> {
+    chronacle_extraction::entity_service::get_events_for_session(db, session_id)
         .await
         .map_err(|e| SessionError::Database {
             message: e.to_string(),

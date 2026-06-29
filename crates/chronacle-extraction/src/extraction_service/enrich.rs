@@ -8,10 +8,10 @@ use surrealdb::Connection;
 use super::parse::parse_profile_response;
 use super::prompts::build_profile_prompt;
 use super::{batch_passages, llm_complete, ExtractionError, SEED_SEARCH_K};
-use crate::services::entity_service::{self, GraphNode};
-use chronacle_providers::embedding::EmbeddingProvider;
-use chronacle_providers::llm_provider::{ChatMessage, LlmProvider};
-use chronacle_providers::vector_store::VectorStore;
+use crate::entity_service::{self, GraphNode};
+use chronacle_core::embedding::EmbeddingProvider;
+use chronacle_core::llm::{ChatMessage, LlmProvider};
+use chronacle_core::vector_store::VectorStore;
 
 /// Gather candidate passages for `needle_lower` within a single collection by
 /// the union of semantic search (`query_vec`) and a lexical `CONTAINS` scan.

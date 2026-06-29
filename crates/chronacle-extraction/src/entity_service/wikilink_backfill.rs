@@ -61,23 +61,23 @@ pub async fn resync_all_wikilinks<C: surrealdb::Connection>(
             let scope_campaign: Option<String> = row.campaign.map(|t| t.id.to_raw());
 
             let result = if let Some(ref col_id) = scope_collection {
-                crate::services::wikilink::parse_and_sync_wikilinks(
+                crate::wikilink::parse_and_sync_wikilinks(
                     db,
                     table,
                     &entity_id,
                     &notes,
-                    crate::services::wikilink::WikilinkScope::Collection {
+                    crate::wikilink::WikilinkScope::Collection {
                         collection_id: col_id,
                     },
                 )
                 .await
             } else if let Some(ref camp_id) = scope_campaign {
-                crate::services::wikilink::parse_and_sync_wikilinks(
+                crate::wikilink::parse_and_sync_wikilinks(
                     db,
                     table,
                     &entity_id,
                     &notes,
-                    crate::services::wikilink::WikilinkScope::Campaign {
+                    crate::wikilink::WikilinkScope::Campaign {
                         campaign_id: camp_id,
                     },
                 )

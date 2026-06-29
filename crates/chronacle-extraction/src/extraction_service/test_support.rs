@@ -1,15 +1,15 @@
 //! Shared test mocks and fixtures for extraction_service tests.
 
-use chronacle_providers::llm_provider::{ChatMessage, LlmProvider};
-use chronacle_providers::vector_store::{
-    IndexedChunk, SearchResult, VectorStore, VectorStoreError,
-};
+use async_trait::async_trait;
+use chronacle_core::embedding::{EmbeddingError, EmbeddingProvider};
+use chronacle_core::llm::{ChatMessage, LlmError, LlmProvider};
+use chronacle_core::vector_store::{IndexedChunk, SearchResult, VectorStore, VectorStoreError};
 
 pub struct MockLlm {
     pub response: String,
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl LlmProvider for MockLlm {
     fn provider_type(&self) -> &'static str {
         "mock_extraction"
@@ -19,10 +19,7 @@ impl LlmProvider for MockLlm {
         &self,
         _system_prompt: &str,
         _messages: &[ChatMessage],
-    ) -> Result<
-        tokio::sync::mpsc::Receiver<Result<String, chronacle_providers::llm_provider::LlmError>>,
-        chronacle_providers::llm_provider::LlmError,
-    > {
+    ) -> Result<tokio::sync::mpsc::Receiver<Result<String, LlmError>>, LlmError> {
         let (tx, rx) = tokio::sync::mpsc::channel(4);
         let resp = self.response.clone();
         tokio::spawn(async move {
@@ -36,7 +33,7 @@ pub struct MockVectorStore {
     pub results: Vec<SearchResult>,
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl VectorStore for MockVectorStore {
     async fn upsert(&self, _s: &str, _c: &[IndexedChunk]) -> Result<(), VectorStoreError> {
         Ok(())
@@ -60,7 +57,7 @@ pub struct BranchingLlm {
     pub profile: String,
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl LlmProvider for BranchingLlm {
     fn provider_type(&self) -> &'static str {
         "mock_branching"
@@ -69,10 +66,7 @@ impl LlmProvider for BranchingLlm {
         &self,
         _system_prompt: &str,
         messages: &[ChatMessage],
-    ) -> Result<
-        tokio::sync::mpsc::Receiver<Result<String, chronacle_providers::llm_provider::LlmError>>,
-        chronacle_providers::llm_provider::LlmError,
-    > {
+    ) -> Result<tokio::sync::mpsc::Receiver<Result<String, LlmError>>, LlmError> {
         let is_seed = messages
             .first()
             .map(|m| m.content.contains("\"relations\""))
@@ -87,6 +81,40 @@ impl LlmProvider for BranchingLlm {
             let _ = tx.send(Ok(resp)).await;
         });
         Ok(rx)
+    }
+}
+
+/// A mock embedding provider for tests. Produces zero vectors of the given dimension.
+pub struct MockEmbeddingProvider {
+    dim: usize,
+    name: String,
+}
+
+impl MockEmbeddingProvider {
+    pub fn new(dim: usize) -> Self {
+        Self {
+            dim,
+            name: "mock".to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl EmbeddingProvider for MockEmbeddingProvider {
+    async fn embed_documents(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        Ok(texts.into_iter().map(|_| vec![0.0; self.dim]).collect())
+    }
+
+    async fn embed_query(&self, _text: &str) -> Result<Vec<f32>, EmbeddingError> {
+        Ok(vec![0.0; self.dim])
+    }
+
+    fn dimension(&self) -> usize {
+        self.dim
+    }
+
+    fn model_name(&self) -> &str {
+        &self.name
     }
 }
 
