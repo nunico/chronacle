@@ -1,3 +1,5 @@
+packages:
+  - apps/desktop
 allowBuilds:
   esbuild: true
   msw: true

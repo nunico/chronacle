@@ -16,8 +16,9 @@ const DRIVER_URL = `http://127.0.0.1:${DRIVER_PORT}/`;
 export function appBinary() {
   // `src-tauri` is a workspace member, so the build output lands in the
   // workspace-root `target/`, not `src-tauri/target/`. Honor CARGO_TARGET_DIR
-  // when set, otherwise default to the repo-root target dir.
-  const repoRoot = new URL('../../../', import.meta.url);
+  // when set, otherwise default to the repo-root target dir. This file lives at
+  // `apps/desktop/tests/e2e/ui/driver.mjs`, so the repo root is five levels up.
+  const repoRoot = new URL('../../../../../', import.meta.url);
   const targetDir = process.env.CARGO_TARGET_DIR
     ? new URL('release/chronacle', `file://${process.env.CARGO_TARGET_DIR}/`)
     : new URL('target/release/chronacle', repoRoot);
