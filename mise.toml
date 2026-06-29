@@ -1,5 +1,7 @@
 [env]
-_.path = ['{{config_root}}/node_modules/.bin']
+# Frontend tooling (tauri-cli, vite, …) is installed in the apps/desktop
+# workspace package; pnpm does not hoist these to the repo-root node_modules.
+_.path = ['{{config_root}}/apps/desktop/node_modules/.bin']
 
 NODE_ENV = "{{ env.NODE_ENV | default(value='development') }}"
 
@@ -18,17 +20,19 @@ outputs = ['node_modules/.pnpm/lock.yaml']
 
 [tasks.prebuild]
 description = 'Generate icons'
-dir = '{{config_root}}/src-tauri'
+dir = '{{config_root}}/apps/desktop/src-tauri'
 run = 'tauri icon'
 depends = ['pnpm-install']
 
 [tasks.dev]
 description = 'Run application in DEV mode'
+dir = '{{config_root}}/apps/desktop'
 run = 'tauri dev'
 depends = ['pnpm-install']
 
 [tasks.build]
 description = 'Build application package'
+dir = '{{config_root}}/apps/desktop'
 run = 'node --run build'
 depends = ['pnpm-install']
 
