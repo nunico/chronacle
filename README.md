@@ -1,7 +1,7 @@
 # Chronacle
 
 <p align="center">
-  <img src="src-tauri/app-icon.png" alt="Chronacle app icon" width="128" height="128">
+  <img src="apps/desktop/src-tauri/app-icon.png" alt="Chronacle app icon" width="128" height="128">
 </p>
 
 **A desktop TTRPG GM assistant.** Load your own rulebook PDFs, take structured notes, and query an AI agent that answers with source citations.
@@ -93,14 +93,16 @@ For full details, see the [Tauri prerequisites guide](https://v2.tauri.app/start
 git clone https://github.com/nunico/chronacle.git
 cd chronacle
 
-# Install frontend dependencies
+# Install frontend dependencies (installs the workspace; apps/desktop is a pnpm workspace package)
 pnpm install
 
 # Run in development mode (hot-reload frontend + debug backend)
-pnpm tauri dev
+pnpm -C apps/desktop tauri dev
+# Alternatively: mise run dev
 
 # Build a production release
-pnpm tauri build
+pnpm -C apps/desktop exec tauri build
+# Alternatively: mise run build
 ```
 
 ---
@@ -110,32 +112,32 @@ pnpm tauri build
 ### Rust Backend
 
 ```bash
-cargo build                          # Build all workspace crates
-cargo fmt && cargo fmt --check       # Format / check formatting
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test                           # Unit + integration tests
-cargo test -- --nocapture <name>     # Single test with output
-cargo llvm-cov --html                # Coverage report (HTML)
-cargo audit                          # Security audit
-cargo deny check                     # License + dependency check
+cargo build --workspace                          # Build all workspace crates
+cargo fmt --all && cargo fmt --all --check       # Format / check formatting
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace                           # Unit + integration tests
+cargo test -p <crate> -- --nocapture <name>      # Single test in a specific crate
+cargo llvm-cov --workspace --html                # Coverage report (HTML)
+cargo audit                                      # Security audit
+cargo deny check                                 # License + dependency check
 ```
 
 ### Frontend
 
 ```bash
-pnpm dev                 # Vite dev server (standalone)
-pnpm typecheck           # TypeScript type checking
-pnpm lint                # ESLint
-pnpm test:run            # Vitest (CI mode)
-pnpm test:coverage       # With coverage
-pnpm playwright test tests/e2e/backend/   # E2E backend tests
+pnpm -C apps/desktop dev                 # Vite dev server (standalone)
+pnpm -C apps/desktop typecheck           # TypeScript type checking
+pnpm -C apps/desktop lint                # ESLint
+pnpm -C apps/desktop test:run            # Vitest (CI mode)
+pnpm -C apps/desktop test:coverage       # With coverage
+pnpm -C apps/desktop exec playwright test tests/e2e/backend/   # E2E backend tests
 ```
 
 ### Full App
 
 ```bash
-pnpm tauri dev           # Dev with hot-reload
-pnpm tauri build         # Production bundle
+pnpm -C apps/desktop tauri dev           # Dev with hot-reload
+pnpm -C apps/desktop exec tauri build    # Production bundle
 ```
 
 ---
@@ -144,31 +146,25 @@ pnpm tauri build         # Production bundle
 
 ```
 chronacle/
-├── src/                 # Frontend (Svelte 5 + TypeScript)
-│   ├── App.svelte
-│   ├── main.ts
-│   ├── lib/             # Shared UI components and utilities
-│   ├── ChatPage.svelte
-│   ├── CampaignsPage.svelte
-│   ├── SettingsPage.svelte
-│   ├── UploadProgress.svelte
-│   ├── ModelDownload.svelte
-│   └── App.test.ts
-├── src-tauri/           # Rust backend (Tauri 2)
-│   ├── src/
-│   │   ├── main.rs      # Binary entrypoint
-│   │   ├── lib.rs       # Library root
-│   │   ├── commands/    # Tauri IPC command handlers
-│   │   ├── services/    # Business logic (rag, ingestion, etc.)
-│   │   ├── providers/   # LLM, vector, blob store impls
-│   │   └── schema/      # SurrealQL schema definitions
-│   ├── Cargo.toml
-│   └── tauri.conf.json
-├── docs/                # Architecture docs and ADRs
-├── tests/               # Integration tests and fixtures
-├── package.json
-├── Cargo.toml           # Workspace root
-└── vite.config.ts
+├── Cargo.toml              # Workspace root: members = ["crates/*", "apps/desktop/src-tauri"]
+├── crates/
+│   ├── chronacle-core/     # Dependency traits + DTOs (LlmProvider, VectorStore, BlobStore, EmbeddingProvider)
+│   ├── chronacle-db/       # SurrealQL schema + run_migrations
+│   ├── chronacle-providers/# Concrete provider impls (SurrealDB, fastembed, OpenAI/Anthropic/Ollama LLM)
+│   ├── chronacle-ingestion/# PDF extraction, chunking, ingestion pipeline
+│   ├── chronacle-extraction/# Entity extraction, wikilink resolution
+│   ├── chronacle-retrieval/ # RAG agent service (chat + cited answers)
+│   └── chronacle-domain/   # Campaign, session, collection, custom-provider CRUD
+├── apps/
+│   └── desktop/            # Svelte frontend + Tauri shell
+│       ├── src/            # Svelte 5 + TypeScript frontend
+│       ├── src-tauri/      # Rust Tauri backend (commands, AppState, settings_service)
+│       │   └── tests/      # Rust integration tests + fixtures
+│       ├── tests/e2e/      # Playwright backend E2E + tauri-driver UI E2E
+│       ├── package.json
+│       └── vite.config.ts
+├── docs/                   # Architecture docs and ADRs
+└── package.json            # pnpm workspace root (minimal)
 ```
 
 ---
