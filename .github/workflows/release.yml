@@ -55,7 +55,7 @@ jobs:
       - name: Check version consistency
         run: |
           TAG="${{ github.ref_name }}"
-          CONF_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          CONF_VERSION=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
           if [ "v${CONF_VERSION}" != "${TAG}" ]; then
             echo "Tag ${TAG} does not match tauri.conf.json version ${CONF_VERSION}"
             exit 1
@@ -63,21 +63,24 @@ jobs:
           echo "Tag ${TAG} matches tauri.conf.json version ${CONF_VERSION}"
 
       - name: Format check
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test
+        run: cargo test --workspace
 
       - name: Typecheck
+        working-directory: apps/desktop
         run: pnpm typecheck
 
       - name: Lint
+        working-directory: apps/desktop
         run: pnpm lint
 
       - name: Frontend tests
+        working-directory: apps/desktop
         run: pnpm test --run
 
   # ── Build + publish to GitHub Releases ───────────────────────────────
@@ -122,6 +125,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
           releaseName: Chronacle ${{ github.ref_name }}
           releaseDraft: false

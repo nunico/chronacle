@@ -57,10 +57,11 @@ jobs:
         # production build embeds the frontend (`frontendDist`) into the binary.
         # `cargo build --release` yields a binary that serves "asset not found:
         # index.html". `tauri build` runs `beforeBuildCommand` (pnpm build) too.
+        working-directory: apps/desktop
         run: pnpm exec tauri build --no-bundle
 
       - name: Run UI E2E under Xvfb
         # --server-args: explicit screen avoids DRI3 hardware-probe delay (~30 s)
         # in software-only CI runners.
         # dbus-run-session: WebKitWebDriver needs a session bus for AT-SPI.
-        run: dbus-run-session -- xvfb-run -a --server-args="-screen 0 1280x1024x24" pnpm e2e:ui
+        run: dbus-run-session -- xvfb-run -a --server-args="-screen 0 1280x1024x24" pnpm -C apps/desktop e2e:ui
