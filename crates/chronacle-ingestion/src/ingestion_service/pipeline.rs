@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use crate::services::chunker::{chunk_document, ExtractedDoc, PageContent};
-use chronacle_providers::embedding::EmbeddingProvider;
-use chronacle_providers::vector_store::IndexedChunk;
+use crate::chunker::{chunk_document, ExtractedDoc, PageContent};
+use chronacle_core::embedding::EmbeddingProvider;
+use chronacle_core::vector_store::IndexedChunk;
 
 use super::types::{IngestionError, IngestionProgress, RawChunk};
 
@@ -22,7 +22,7 @@ pub(super) const EMBED_FRACTION_END: f32 = 0.85;
 /// full text. This repairs PDF extraction artifacts (soft hyphens, intra-paragraph
 /// newlines) before chunking so that embeddings see clean prose.
 pub(super) fn normalize_extracted(doc: &ExtractedDoc) -> ExtractedDoc {
-    use crate::services::text_normalizer::normalize;
+    use crate::text_normalizer::normalize;
     let pages: Vec<PageContent> = doc
         .pages
         .iter()

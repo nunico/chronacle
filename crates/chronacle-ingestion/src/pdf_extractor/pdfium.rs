@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::services::chunker::{ExtractedDoc, PageContent};
+use crate::chunker::{ExtractedDoc, PageContent};
 
 use super::types::{PageProgressFn, PdfExtractError, PdfExtractor};
 

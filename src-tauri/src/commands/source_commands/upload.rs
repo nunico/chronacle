@@ -99,9 +99,9 @@ pub async fn upload_source(
     let sid = source_id.clone();
     let handle = app_handle.clone();
     let on_progress: std::sync::Arc<
-        dyn Fn(crate::services::ingestion_service::IngestionProgress) + Send + Sync,
+        dyn Fn(chronacle_ingestion::ingestion_service::IngestionProgress) + Send + Sync,
     > = std::sync::Arc::new(
-        move |p: crate::services::ingestion_service::IngestionProgress| {
+        move |p: chronacle_ingestion::ingestion_service::IngestionProgress| {
             let _ = handle.emit(
                 "ingestion-progress",
                 serde_json::json!({
@@ -119,7 +119,17 @@ pub async fn upload_source(
     let state_ref = state.inner().clone();
     let sid = source_id.clone();
 
-    match crate::services::ingestion_service::ingest_source(&state_ref, &sid, on_progress).await {
+    match chronacle_ingestion::ingestion_service::ingest_source(
+        &state_ref.db,
+        &state_ref.blob_store,
+        &state_ref.pdf_extractor,
+        &state_ref.embedding_provider,
+        &state_ref.vector_store,
+        &sid,
+        on_progress,
+    )
+    .await
+    {
         Ok(()) => {
             let _ = app_handle.emit(
                 "ingestion-progress",

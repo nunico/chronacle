@@ -7,9 +7,12 @@
 /// Progress reporting: every pipeline stage calls `on_progress` with a fractional
 /// progress (0.0–1.0) and a human-readable step label. The caller is responsible
 /// for forwarding these to the UI (e.g. via Tauri events).
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use crate::AppState;
+use chronacle_core::blob_store::BlobStore;
+use chronacle_core::embedding::EmbeddingProvider;
+use chronacle_core::vector_store::VectorStore;
+use surrealdb::Connection;
 
 mod db;
 mod pipeline;
@@ -18,6 +21,7 @@ mod types;
 pub(crate) use db::get_source_info;
 pub use types::{IngestionError, IngestionProgress};
 
+use crate::pdf_extractor::PdfExtractor;
 use pipeline::{
     chunk_text, embed_chunks, normalize_extracted, EXTRACT_FRACTION_END, EXTRACT_FRACTION_START,
 };
@@ -30,15 +34,28 @@ use pipeline::{
 /// On any failure, this function marks `source.index_status = 'failed'` and
 /// deletes orphan chunks written before the error so a retry starts from a
 /// clean slate (architecture.md Phase 1: "cleanup partial chunks on failure").
-pub async fn ingest_source(
-    state: &Arc<AppState>,
+pub async fn ingest_source<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    blob_store: &Arc<dyn BlobStore>,
+    pdf_extractor: &Arc<dyn PdfExtractor>,
+    embedding_provider: &RwLock<Arc<dyn EmbeddingProvider>>,
+    vector_store: &Arc<dyn VectorStore>,
     source_id: &str,
     on_progress: Arc<dyn Fn(IngestionProgress) + Send + Sync>,
 ) -> Result<(), IngestionError> {
-    let result = ingest_source_inner(state, source_id, on_progress).await;
+    let result = ingest_source_inner(
+        db,
+        blob_store,
+        pdf_extractor,
+        embedding_provider,
+        vector_store,
+        source_id,
+        on_progress,
+    )
+    .await;
     if let Err(e) = &result {
         eprintln!("Ingestion failed for source {source_id}: {e}");
-        if let Err(cleanup_err) = db::mark_failed_and_cleanup(&state.db, source_id).await {
+        if let Err(cleanup_err) = db::mark_failed_and_cleanup(db, source_id).await {
             eprintln!(
                 "Ingestion cleanup also failed for {source_id}: {cleanup_err} (original error: {e})"
             );
@@ -47,28 +64,29 @@ pub async fn ingest_source(
     result
 }
 
-async fn ingest_source_inner(
-    state: &Arc<AppState>,
+async fn ingest_source_inner<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    blob_store: &Arc<dyn BlobStore>,
+    pdf_extractor: &Arc<dyn PdfExtractor>,
+    embedding_provider: &RwLock<Arc<dyn EmbeddingProvider>>,
+    vector_store: &Arc<dyn VectorStore>,
     source_id: &str,
     on_progress: Arc<dyn Fn(IngestionProgress) + Send + Sync>,
 ) -> Result<(), IngestionError> {
     on_progress(IngestionProgress::stage(0.02, "Reading source metadata"));
 
-    state
-        .db
-        .query("UPDATE source SET index_status = 'indexing' WHERE id = type::thing('source', $id)")
+    db.query("UPDATE source SET index_status = 'indexing' WHERE id = type::thing('source', $id)")
         .bind(("id", source_id.to_owned()))
         .await
         .map_err(|e| IngestionError::Db(format!("Failed to update index_status: {e}")))?;
 
-    let source_info = get_source_info(&state.db, source_id).await?;
+    let source_info = get_source_info(db, source_id).await?;
 
     on_progress(IngestionProgress::stage(
         0.05,
         "Loading PDF file from storage",
     ));
-    let pdf_data = state
-        .blob_store
+    let pdf_data = blob_store
         .retrieve(source_id, &source_info.filename)
         .await
         .map_err(|e| IngestionError::Store(e.to_string()))?;
@@ -78,7 +96,7 @@ async fn ingest_source_inner(
         "Extracting text from PDF pages",
     ));
     let page_progress = on_progress.clone();
-    let on_page: crate::services::pdf_extractor::PageProgressFn =
+    let on_page: crate::pdf_extractor::PageProgressFn =
         Arc::new(move |page: usize, total: usize| {
             let span = EXTRACT_FRACTION_END - EXTRACT_FRACTION_START;
             let fraction = if total == 0 {
@@ -93,8 +111,7 @@ async fn ingest_source_inner(
                 total as u32,
             ));
         });
-    let extracted = state
-        .pdf_extractor
+    let extracted = pdf_extractor
         .extract_with_progress(&pdf_data, on_page)
         .await
         .map_err(|e| IngestionError::PdfExtraction(e.to_string()))?;
@@ -116,8 +133,10 @@ async fn ingest_source_inner(
         chunk_count as u32,
     ));
 
-    let embed_provider = state
-        .embedding_provider
+    // Resolve the embedding provider here, after extraction+chunking, to preserve
+    // hot-swap semantics: if the provider changed while extraction was in progress,
+    // we pick up the latest one at embedding time (matching original AppState behaviour).
+    let embed_provider = embedding_provider
         .read()
         .map_err(|e| IngestionError::Db(format!("Embedding lock: {e}")))?
         .clone();
@@ -136,16 +155,13 @@ async fn ingest_source_inner(
         0.85,
         format!("Writing {chunk_count} chunks to database"),
     ));
-    state
-        .vector_store
+    vector_store
         .upsert(source_id, &indexed)
         .await
         .map_err(|e| IngestionError::Db(e.to_string()))?;
 
     on_progress(IngestionProgress::stage(0.98, "Finalizing indexing"));
-    state
-        .db
-        .query("UPDATE source SET index_status = 'done', page_count = $page_count WHERE id = type::thing('source', $id)")
+    db.query("UPDATE source SET index_status = 'done', page_count = $page_count WHERE id = type::thing('source', $id)")
         .bind(("id", source_id.to_owned()))
         .bind(("page_count", extracted.page_count as i64))
         .await

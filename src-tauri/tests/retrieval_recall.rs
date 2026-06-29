@@ -18,8 +18,8 @@
 //! spec can grow over time without blocking Phase 1 sign-off.
 
 use chronacle_db as schema;
-use chronacle_lib::services::ingestion_service;
-use chronacle_lib::services::pdf_extractor::{PdfExtractor, PdfiumExtractor};
+use chronacle_ingestion::ingestion_service;
+use chronacle_ingestion::pdf_extractor::{PdfExtractor, PdfiumExtractor};
 use chronacle_lib::AppState;
 use chronacle_providers::blob_store::{BlobStore, LocalFileStore};
 use chronacle_providers::embedding::{EmbeddingProvider, FastEmbedProvider};
@@ -150,9 +150,17 @@ async fn measure_recall_at_5() {
         .unwrap();
         let bytes = tokio::fs::read(&path).await.unwrap();
         blob_store.store(&source_id, fixture, &bytes).await.unwrap();
-        ingestion_service::ingest_source(&state, &source_id, std::sync::Arc::new(|_| {}))
-            .await
-            .unwrap_or_else(|e| panic!("ingest {fixture}: {e}"));
+        ingestion_service::ingest_source(
+            &state.db,
+            &state.blob_store,
+            &state.pdf_extractor,
+            &state.embedding_provider,
+            &state.vector_store,
+            &source_id,
+            std::sync::Arc::new(|_| {}),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("ingest {fixture}: {e}"));
     }
 
     let queries = query_set();

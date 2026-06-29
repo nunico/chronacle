@@ -11,8 +11,8 @@
 //! Phase 1 — for that fixture we only assert "no panic, source ends in `done`".
 
 use chronacle_db as schema;
-use chronacle_lib::services::ingestion_service;
-use chronacle_lib::services::pdf_extractor::{PdfExtractor, PdfiumExtractor};
+use chronacle_ingestion::ingestion_service;
+use chronacle_ingestion::pdf_extractor::{PdfExtractor, PdfiumExtractor};
 use chronacle_lib::AppState;
 use chronacle_providers::blob_store::{BlobStore, LocalFileStore};
 use chronacle_providers::embedding::{EmbeddingProvider, MockEmbeddingProvider};
@@ -166,9 +166,17 @@ async fn assert_text_fixture(fixture: &str) {
     let (state, embed, vector_store) = make_state(tmp.path()).await;
     let source_id = seed_source(&state, fixture).await;
 
-    ingestion_service::ingest_source(&state, &source_id, std::sync::Arc::new(|_| {}))
-        .await
-        .unwrap_or_else(|e| panic!("ingest failed for {fixture}: {e}"));
+    ingestion_service::ingest_source(
+        &state.db,
+        &state.blob_store,
+        &state.pdf_extractor,
+        &state.embedding_provider,
+        &state.vector_store,
+        &source_id,
+        std::sync::Arc::new(|_| {}),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("ingest failed for {fixture}: {e}"));
 
     assert_eq!(
         source_status(&state, &source_id).await,
@@ -236,7 +244,16 @@ async fn ingest_scanned_pdf_does_not_panic() {
 
     // Result may be Ok (no text, zero chunks) or Err (chunker rejected empty
     // input). Either way the call must return without panicking.
-    let _ = ingestion_service::ingest_source(&state, &source_id, std::sync::Arc::new(|_| {})).await;
+    let _ = ingestion_service::ingest_source(
+        &state.db,
+        &state.blob_store,
+        &state.pdf_extractor,
+        &state.embedding_provider,
+        &state.vector_store,
+        &source_id,
+        std::sync::Arc::new(|_| {}),
+    )
+    .await;
 
     let status = source_status(&state, &source_id).await;
     assert!(

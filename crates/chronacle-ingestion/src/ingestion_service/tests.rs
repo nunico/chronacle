@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::services::chunker::{ExtractedDoc, PageContent};
+use crate::chunker::{ExtractedDoc, PageContent};
 
 use super::db::get_source_info;
 use super::pipeline::{

@@ -20,7 +20,7 @@ pub struct AppState {
     pub vector_store: Arc<dyn chronacle_providers::vector_store::VectorStore>,
     pub blob_store: Arc<dyn chronacle_providers::blob_store::BlobStore>,
     pub embedding_provider: RwLock<Arc<dyn chronacle_providers::embedding::EmbeddingProvider>>,
-    pub pdf_extractor: Arc<dyn services::pdf_extractor::PdfExtractor>,
+    pub pdf_extractor: Arc<dyn chronacle_ingestion::pdf_extractor::PdfExtractor>,
     /// Abort handle for the in-flight chat task, if any (see `chat_cancel`).
     pub chat_task: tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
     /// Abort handle for the in-flight extraction task, if any (see `cancel_extraction`).
@@ -142,8 +142,8 @@ pub async fn run() {
     let provider_name = provider_type_name(&llm_provider);
     eprintln!("LLM provider '{}' initialised", provider_name);
 
-    let pdf_extractor: Arc<dyn services::pdf_extractor::PdfExtractor> = Arc::new(
-        services::pdf_extractor::PdfiumExtractor::new(pdfium_library_path()),
+    let pdf_extractor: Arc<dyn chronacle_ingestion::pdf_extractor::PdfExtractor> = Arc::new(
+        chronacle_ingestion::pdf_extractor::PdfiumExtractor::new(pdfium_library_path()),
     );
 
     let state = Arc::new(AppState {

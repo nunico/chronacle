@@ -23,7 +23,7 @@ pub async fn reindex_all_sources(
         let sid_for_progress = sid.clone();
         let handle = app_handle.clone();
         let on_progress: std::sync::Arc<
-            dyn Fn(crate::services::ingestion_service::IngestionProgress) + Send + Sync,
+            dyn Fn(chronacle_ingestion::ingestion_service::IngestionProgress) + Send + Sync,
         > = std::sync::Arc::new(move |p| {
             let _ = handle.emit(
                 "reindex-progress",
@@ -44,9 +44,17 @@ pub async fn reindex_all_sources(
             .map_err(|e| format!("delete chunks for {sid}: {e}"))?;
 
         let state_ref = state.inner().clone();
-        crate::services::ingestion_service::ingest_source(&state_ref, sid, on_progress)
-            .await
-            .map_err(|e| format!("re-ingest {sid}: {e}"))?;
+        chronacle_ingestion::ingestion_service::ingest_source(
+            &state_ref.db,
+            &state_ref.blob_store,
+            &state_ref.pdf_extractor,
+            &state_ref.embedding_provider,
+            &state_ref.vector_store,
+            sid,
+            on_progress,
+        )
+        .await
+        .map_err(|e| format!("re-ingest {sid}: {e}"))?;
     }
 
     Ok(total)
