@@ -3,7 +3,7 @@
 # matching nothing until the first crate exists (no missing-dir errors).
 members = [
     "crates/*",
-    "src-tauri",
+    "apps/desktop/src-tauri",
 ]
 resolver = "2"
 

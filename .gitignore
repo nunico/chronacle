@@ -33,15 +33,16 @@ lcov.info
 .env.local
 .env.*.local
 src-tauri/.fastembed_cache/
+apps/desktop/src-tauri/.fastembed_cache/
 .fastembed_cache/
 
 # ── pdfium binaries (downloaded by build.rs) ─────────────────────────
-src-tauri/resources/pdfium/*
-!src-tauri/resources/pdfium/.gitkeep
+apps/desktop/src-tauri/resources/pdfium/*
+!apps/desktop/src-tauri/resources/pdfium/.gitkeep
 
 # ── ONNX Runtime binaries (downloaded by build.rs) ───────────────────
-src-tauri/resources/onnxruntime/*
-!src-tauri/resources/onnxruntime/.gitkeep
+apps/desktop/src-tauri/resources/onnxruntime/*
+!apps/desktop/src-tauri/resources/onnxruntime/.gitkeep
 
 /.crew/
 /.crew
