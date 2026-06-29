@@ -1,11 +1,13 @@
 # Linux container to run the tauri-driver UI E2E from a macOS host (or any host).
 #
 # tauri-driver needs WebKitWebDriver, which exists only on Linux/Windows — this
-# image provides the Linux side. Build context is the repo root:
+# image provides the Linux side. Build context MUST be the repo root (not
+# apps/desktop) because the Tauri crate depends on workspace crates at
+# ../../../crates/* and the workspace target dir is at the repo root.
 #
-#   docker build -f tests/e2e/ui/Dockerfile -t chronacle-e2e .
-#   docker run --rm chronacle-e2e                 # runs all UI specs
-#   docker run --rm chronacle-e2e <spec>          # e.g. settings-toggle.e2e.mjs
+#   docker build -f apps/desktop/tests/e2e/ui/Dockerfile -t chronacle-e2e .
+#   docker run --rm chronacle-e2e                          # runs all UI specs
+#   docker run --rm chronacle-e2e tests/e2e/ui/<spec>.mjs  # single spec (relative to apps/desktop)
 FROM rust:1-bookworm
 
 # WebKitGTK + driver, GTK, headless X, and a session bus (WebKitGTK needs DBus).
@@ -41,8 +43,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `cargo build --release` produces a binary that serves "asset not found:
 # index.html" at tauri://localhost. `tauri build` runs `beforeBuildCommand`
 # (pnpm build) itself, and also downloads the linux libpdfium.so via build.rs.
-RUN pnpm exec tauri build --no-bundle
+RUN pnpm -C apps/desktop exec tauri build --no-bundle
 
 # Run under a private DBus session + virtual X display. Args (a spec glob)
 # override the default of running every spec.
-ENTRYPOINT ["tests/e2e/ui/run-in-container.sh"]
+ENTRYPOINT ["apps/desktop/tests/e2e/ui/run-in-container.sh"]
