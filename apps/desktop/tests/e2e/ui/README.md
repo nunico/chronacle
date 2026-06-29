@@ -38,14 +38,17 @@ Xvfb. To run locally, use a Linux machine or container.
 
 ## Running (on Linux)
 
+Run from the `apps/desktop/` directory (or use `pnpm -C apps/desktop <cmd>`
+from the repo root). Build via the Tauri CLI — plain `cargo build --release`
+does NOT embed the frontend (`frontendDist`) and the SPA will not serve.
+
 ```bash
-cargo install tauri-driver --locked   # once
+cargo install tauri-driver --locked       # once
 sudo apt-get install -y webkit2gtk-driver xvfb   # WebKitWebDriver + headless X
 
 pnpm install
-pnpm build                            # frontend → dist (embedded in the binary)
-cargo build --release --bin chronacle
-xvfb-run -a pnpm e2e:ui               # or omit xvfb-run on a real display
+pnpm exec tauri build --no-bundle        # CLI build: embeds dist/ into the binary
+xvfb-run -a pnpm e2e:ui                  # or omit xvfb-run on a real display
 ```
 
 The first run downloads the embedding model (`nomic-embed-text-v1.5`), so allow
