@@ -1,9 +1,7 @@
-use chronacle_lib::services::{
-    campaign_service,
-    collection_service::{
-        add_campaign_collection, create, delete, get_all, get_by_id, get_campaign_collections,
-        remove_campaign_collection, update,
-    },
+use chronacle_domain::campaign_service;
+use chronacle_domain::collection_service::{
+    add_campaign_collection, create, delete, get_all, get_by_id, get_campaign_collections,
+    remove_campaign_collection, update,
 };
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;

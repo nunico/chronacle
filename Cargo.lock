@@ -9,9 +9,11 @@ dependencies = [
  "async-trait",
  "chronacle-core",
  "chronacle-db",
+ "chronacle-domain",
  "chronacle-extraction",
  "chronacle-ingestion",
  "chronacle-providers",
+ "chronacle-retrieval",
  "dirs-next",
  "fastembed",
  "flate2",
@@ -1087,6 +1089,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "chronacle-domain"
+version = "0.1.0"
+dependencies = [
+ "chronacle-core",
+ "chronacle-db",
+ "chronacle-extraction",
+ "chronacle-providers",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "surrealdb",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "chronacle-extraction"
 version = "0.1.0"
 dependencies = [
@@ -1143,6 +1163,21 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "surrealdb",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "chronacle-retrieval"
+version = "0.1.0"
+dependencies = [
+ "chronacle-core",
+ "chronacle-db",
+ "pretty_assertions",
+ "regex",
+ "serde",
  "surrealdb",
  "tempfile",
  "thiserror 2.0.18",

@@ -1,0 +1,23 @@
+[package]
+name = "chronacle-retrieval"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "chronacle_retrieval"
+
+[dependencies]
+chronacle-core = { path = "../chronacle-core" }
+surrealdb.workspace = true
+serde.workspace = true
+regex.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+chronacle-db = { path = "../chronacle-db" }
+tempfile.workspace = true
+pretty_assertions.workspace = true

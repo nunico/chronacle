@@ -1,4 +1,4 @@
-use chronacle_lib::services::session_service::{
+use chronacle_domain::session_service::{
     create, delete, get_all, get_by_id, get_entities, update, SessionError, SessionInput,
 };
 use surrealdb::engine::local::Db;
@@ -13,10 +13,8 @@ async fn setup_db() -> Surreal<Db> {
     db
 }
 
-async fn create_test_campaign(
-    db: &Surreal<Db>,
-) -> chronacle_lib::services::campaign_service::Campaign {
-    chronacle_lib::services::campaign_service::create(db, "Test Campaign", "D&D 5e")
+async fn create_test_campaign(db: &Surreal<Db>) -> chronacle_domain::campaign_service::Campaign {
+    chronacle_domain::campaign_service::create(db, "Test Campaign", "D&D 5e")
         .await
         .unwrap()
 }

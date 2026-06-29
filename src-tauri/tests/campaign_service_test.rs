@@ -1,4 +1,4 @@
-use chronacle_lib::services::campaign_service::{create, delete, get_all, get_by_id, update};
+use chronacle_domain::campaign_service::{create, delete, get_all, get_by_id, update};
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
 

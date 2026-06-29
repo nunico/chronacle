@@ -90,8 +90,11 @@ pub async fn chat_send(
     // Spawn so the command returns immediately — tokens come via events
     let task = tokio::spawn(async move {
         // Run the RAG pipeline
-        let mut rx = match crate::services::agent_service::stream_response(
-            &state_ref,
+        let mut rx = match chronacle_retrieval::agent_service::stream_response(
+            &state_ref.db,
+            &state_ref.embedding_provider,
+            &state_ref.vector_store,
+            &state_ref.llm_provider,
             &message,
             campaign_id.as_deref(),
         )
@@ -132,7 +135,7 @@ pub async fn chat_send(
         }
 
         // Persist the full assistant response with parsed citations
-        if let Err(e) = crate::services::agent_service::persist_assistant_message(
+        if let Err(e) = chronacle_retrieval::agent_service::persist_assistant_message(
             &state_ref.db,
             &full_response,
             campaign_id.as_deref(),
