@@ -4,9 +4,9 @@
 //! context the LLM would receive. Drives the service API directly (no IPC, no
 //! mock LLM) per ADR-006's "backend E2E" pattern.
 
+use chronacle_extraction::entity_service::{self, EntityInput, EntityKind};
 use chronacle_lib::services::agent_service::fetch_entity_context;
 use chronacle_lib::services::campaign_service;
-use chronacle_lib::services::entity_service::{self, EntityInput, EntityKind};
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
 

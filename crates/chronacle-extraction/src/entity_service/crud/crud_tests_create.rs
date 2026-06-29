@@ -1,4 +1,4 @@
-use crate::services::entity_service::{EntityInput, EntityKind};
+use crate::entity_service::{EntityInput, EntityKind};
 
 use super::{count_by_campaign, create};
 

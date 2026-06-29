@@ -1,42 +1,36 @@
 use std::sync::Arc;
 
-use crate::services::entity_service::{self, EntityKind};
-use crate::services::extraction_service::{ExtractionPhase, MAX_ENRICH};
-use chronacle_providers::embedding::{EmbeddingProvider, MockEmbeddingProvider};
-use chronacle_providers::llm_provider::LlmProvider;
-use chronacle_providers::vector_store::{SearchResult, VectorStore};
+use crate::entity_service::{self, EntityKind};
+use crate::extraction_service::{ExtractionPhase, MAX_ENRICH};
+use chronacle_core::embedding::EmbeddingProvider;
+use chronacle_core::llm::LlmProvider;
+use chronacle_core::vector_store::{SearchResult, VectorStore};
 
 use super::super::test_support::{
-    link_campaign_to_collection, setup_db_with_collection, BranchingLlm, MockLlm, MockVectorStore,
+    link_campaign_to_collection, setup_db_with_collection, BranchingLlm, MockEmbeddingProvider,
+    MockLlm, MockVectorStore,
 };
 use super::extract_seed_anchored;
 
 #[tokio::test]
 async fn seed_anchored_builds_named_entity_and_relations_collection_scoped() {
     let (db, col_id) = setup_db_with_collection().await;
-    db.query(
-        "CREATE campaign SET id='camp1', name='C', system='5e', \
-         created_at=time::now(), updated_at=time::now()",
-    )
-    .await
-    .unwrap();
-    db.query(
-        "LET $in  = type::thing('campaign',   $campaign_id); \
-         LET $out = type::thing('collection', $collection_id); \
-         RELATE $in->subscribes_to->$out SET created_at=time::now()",
-    )
-    .bind(("campaign_id", "camp1"))
-    .bind(("collection_id", col_id.clone()))
-    .await
-    .unwrap();
     let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
         response: r#"{"entities":[{"name":"Commander Varn","kind":"npc","summary":"Leader.","notes":null,"relations":[{"name":"The Iron Fist","kind":"faction","rel_type":"commands","summary":"Militia.","notes":null}]}]}"#.to_string(),
     });
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
     let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore { results: vec![] });
-    let result = extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Commander Varn", |_| {})
-        .await
-        .unwrap();
+    let result = extract_seed_anchored(
+        &db,
+        &llm,
+        &embed,
+        &vs,
+        std::slice::from_ref(&col_id),
+        "Commander Varn",
+        |_| {},
+    )
+    .await
+    .unwrap();
     assert_eq!(result.entities_created, 2);
     assert_eq!(result.relations_created, 1);
     let npcs = entity_service::get_by_collection(&db, &col_id, EntityKind::Npc)
@@ -48,21 +42,6 @@ async fn seed_anchored_builds_named_entity_and_relations_collection_scoped() {
 #[tokio::test]
 async fn seed_anchored_emits_empty_phase_when_no_passages() {
     let (db, col_id) = setup_db_with_collection().await;
-    db.query(
-        "CREATE campaign SET id='camp1', name='C', system='5e', \
-         created_at=time::now(), updated_at=time::now()",
-    )
-    .await
-    .unwrap();
-    db.query(
-        "LET $in  = type::thing('campaign',   $campaign_id); \
-         LET $out = type::thing('collection', $collection_id); \
-         RELATE $in->subscribes_to->$out SET created_at=time::now()",
-    )
-    .bind(("campaign_id", "camp1"))
-    .bind(("collection_id", col_id.clone()))
-    .await
-    .unwrap();
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
     let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore { results: vec![] });
     let phases = std::sync::Mutex::new(Vec::new());
@@ -73,7 +52,7 @@ async fn seed_anchored_emits_empty_phase_when_no_passages() {
         }) as Arc<dyn LlmProvider>),
         &embed,
         &vs,
-        "camp1",
+        std::slice::from_ref(&col_id),
         "Nonexistent Entity",
         |p| {
             phases.lock().unwrap().push(p);
@@ -89,20 +68,6 @@ async fn seed_anchored_emits_empty_phase_when_no_passages() {
 #[tokio::test]
 async fn seed_anchored_uses_semantic_hits_without_lexical_match() {
     let (db, col_id) = setup_db_with_collection().await;
-    db.query(
-        "CREATE campaign SET id='camp1', name='C', system='5e', \
-         created_at=time::now(), updated_at=time::now()",
-    )
-    .await
-    .unwrap();
-    db.query(
-        "LET $in = type::thing('campaign','camp1'); \
-         LET $out = type::thing('collection', $cid); \
-         RELATE $in->subscribes_to->$out SET created_at=time::now()",
-    )
-    .bind(("cid", col_id.clone()))
-    .await
-    .unwrap();
     let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
         response: r#"{"entities":[{"name":"Mystery Lord","kind":"npc","summary":"A figure.","notes":null,"relations":[]}]}"#.to_string(),
     });
@@ -120,9 +85,17 @@ async fn seed_anchored_uses_semantic_hits_without_lexical_match() {
             distance: 0.1,
         }],
     });
-    let result = extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Mystery Lord", |_| {})
-        .await
-        .unwrap();
+    let result = extract_seed_anchored(
+        &db,
+        &llm,
+        &embed,
+        &vs,
+        std::slice::from_ref(&col_id),
+        "Mystery Lord",
+        |_| {},
+    )
+    .await
+    .unwrap();
     assert_eq!(
         result.entities_created, 1,
         "semantic-only hit should still extract"
@@ -133,7 +106,7 @@ async fn seed_anchored_uses_semantic_hits_without_lexical_match() {
 async fn seed_anchored_enriches_neighbor_when_setting_enabled() {
     let (db, col_id) = setup_db_with_collection().await;
     link_campaign_to_collection(&db, &col_id).await;
-    crate::services::settings_service::upsert(&db, "extraction_enrich_neighbors", "true")
+    db.query("UPSERT setting:extraction_enrich_neighbors SET value = 'true'")
         .await
         .unwrap();
     let llm: Arc<dyn LlmProvider> = Arc::new(BranchingLlm {
@@ -142,9 +115,17 @@ async fn seed_anchored_enriches_neighbor_when_setting_enabled() {
     });
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
     let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore { results: vec![] });
-    extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Commander Varn", |_| {})
-        .await
-        .unwrap();
+    extract_seed_anchored(
+        &db,
+        &llm,
+        &embed,
+        &vs,
+        std::slice::from_ref(&col_id),
+        "Commander Varn",
+        |_| {},
+    )
+    .await
+    .unwrap();
     let factions = entity_service::get_by_collection(&db, &col_id, EntityKind::Faction)
         .await
         .unwrap();
@@ -170,9 +151,17 @@ async fn seed_anchored_skips_enrichment_when_setting_disabled() {
     });
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
     let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore { results: vec![] });
-    extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Commander Varn", |_| {})
-        .await
-        .unwrap();
+    extract_seed_anchored(
+        &db,
+        &llm,
+        &embed,
+        &vs,
+        std::slice::from_ref(&col_id),
+        "Commander Varn",
+        |_| {},
+    )
+    .await
+    .unwrap();
     let factions = entity_service::get_by_collection(&db, &col_id, EntityKind::Faction)
         .await
         .unwrap();
@@ -188,7 +177,7 @@ async fn seed_anchored_skips_enrichment_when_setting_disabled() {
 async fn seed_anchored_caps_enrichment_at_max() {
     let (db, col_id) = setup_db_with_collection().await;
     link_campaign_to_collection(&db, &col_id).await;
-    crate::services::settings_service::upsert(&db, "extraction_enrich_neighbors", "true")
+    db.query("UPSERT setting:extraction_enrich_neighbors SET value = 'true'")
         .await
         .unwrap();
 
@@ -222,9 +211,17 @@ async fn seed_anchored_caps_enrichment_at_max() {
         profile: r#"{"summary":"PROFILED","notes":null}"#.to_string(),
     });
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
-    extract_seed_anchored(&db, &llm, &embed, &vs, "camp1", "Commander Varn", |_| {})
-        .await
-        .unwrap();
+    extract_seed_anchored(
+        &db,
+        &llm,
+        &embed,
+        &vs,
+        std::slice::from_ref(&col_id),
+        "Commander Varn",
+        |_| {},
+    )
+    .await
+    .unwrap();
     let npcs = entity_service::get_by_collection(&db, &col_id, EntityKind::Npc)
         .await
         .unwrap();
