@@ -8,33 +8,46 @@ This file provides guidance to AI coding agents (Claude Code, Codex, Cursor, Cop
 chronacle/
 ├── AGENTS.md             # this file — agent guidance (CLAUDE.md → symlink)
 ├── README.md             # human-facing overview
-├── Cargo.toml            # Rust workspace manifest
-├── package.json          # frontend deps + scripts (pnpm)
+├── Cargo.toml            # Rust workspace root: members = ["crates/*", "apps/desktop/src-tauri"]
+├── package.json          # pnpm workspace root (minimal, no scripts)
+├── pnpm-workspace.yaml   # packages: [apps/desktop]
 ├── lefthook.yml          # git hooks (pre-commit, commit-msg) — ADR-007
-├── mise.toml             # toolchain pinning
+├── mise.toml             # toolchain pinning + task definitions (mise run dev / build)
 ├── deny.toml             # cargo-deny license/advisory policy
 ├── docs/
 │   ├── architecture.md   # authoritative stack + ADRs (source of truth)
 │   ├── user-guide.md     # GM-facing usage docs
 │   └── superpowers/      # design specs + implementation plans
-├── src/                  # Svelte 5 frontend
-│   ├── components/       # reusable UI components
-│   ├── views/            # top-level screens
-│   ├── shell/            # app chrome / layout
-│   ├── lib/              # frontend utilities, Tauri invoke wrappers
-│   ├── App.svelte        # root component
-│   └── main.ts           # entrypoint
-├── src-tauri/            # Rust backend (Tauri)
-│   ├── src/
-│   │   ├── commands/     # Tauri IPC command handlers (invoke targets)
-│   │   ├── services/     # business logic (RAG, extraction, retrieval)
-│   │   ├── providers/    # trait impls: LLM, vector store, blob store
-│   │   └── schema/       # SurrealQL DEFINE statements + .surql migrations
-│   ├── capabilities/     # Tauri permission manifests
-│   ├── resources/        # bundled assets (ONNX models, etc.)
-│   ├── tests/            # Rust integration tests
-│   └── tauri.conf.json   # Tauri app config
-├── tests/e2e/            # Playwright end-to-end tests (backend + ui)
+├── crates/
+│   ├── chronacle-core/       # dependency traits + DTOs: LlmProvider, VectorStore, BlobStore, EmbeddingProvider
+│   ├── chronacle-db/         # schema/*.surql + run_migrations (SurrealDB embedded + cloud)
+│   ├── chronacle-providers/  # concrete impls: SurrealDbVector, LocalFileStore, fastembed/OpenAI/Mock embedding, OpenAI/Anthropic/Ollama LLM
+│   ├── chronacle-ingestion/  # pdf_extractor, chunker, ingestion_service, text_normalizer
+│   ├── chronacle-extraction/ # entity_service, wikilink, extraction_service
+│   ├── chronacle-retrieval/  # agent_service (RAG chat + citation)
+│   └── chronacle-domain/     # campaign, session, collection, custom_provider services
+├── apps/
+│   └── desktop/              # Svelte frontend + Tauri shell
+│       ├── src/              # Svelte 5 frontend
+│       │   ├── components/   # reusable UI components
+│       │   ├── views/        # top-level screens
+│       │   ├── shell/        # app chrome / layout
+│       │   ├── lib/          # frontend utilities, Tauri invoke wrappers
+│       │   ├── App.svelte    # root component
+│       │   └── main.ts       # entrypoint
+│       ├── src-tauri/        # Rust backend (Tauri)
+│       │   ├── src/
+│       │   │   ├── commands/ # Tauri IPC command handlers (invoke targets)
+│       │   │   └── services/ # settings_service (desktop-only; other services live in crates/)
+│       │   ├── capabilities/ # Tauri permission manifests
+│       │   ├── resources/    # bundled assets (ONNX models, etc.)
+│       │   ├── tests/        # Rust integration tests + fixtures
+│       │   └── tauri.conf.json # Tauri app config
+│       ├── tests/e2e/        # end-to-end tests
+│       │   ├── backend/      # Playwright backend service-layer E2E (every PR)
+│       │   └── ui/           # tauri-driver UI E2E (merge to main only)
+│       ├── package.json      # app frontend scripts + deps
+│       └── vite.config.ts    # Vite build config
 ├── .agents/skills/       # portable agent skill packages (source of truth)
 ├── .claude/
 │   ├── agents/           # subagent definitions (see Subagents below)
@@ -49,25 +62,26 @@ Chronacle is a desktop TTRPG GM assistant: load rulebook PDFs, take structured n
 ## Commands
 
 ```bash
-# Rust
-cargo build
-cargo fmt && cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test                              # unit + integration
-cargo test -- --nocapture <test_name>   # single test
-cargo test --test '*'                   # integration only
+# Rust (run from the workspace root)
+cargo build --workspace
+cargo fmt --all && cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace                              # unit + integration
+cargo test -p <crate> -- --nocapture <test_name>   # single test in a specific crate
+cargo test -p <crate> --test '*'                   # integration only for a specific crate
 cargo audit && cargo deny check
-cargo llvm-cov --html
+cargo llvm-cov --workspace --html
 
-# Frontend
-pnpm dev && pnpm typecheck && pnpm lint
-pnpm test --run                         # Vitest CI mode
-pnpm test --run --coverage
-pnpm playwright test tests/e2e/backend/
-pnpm playwright test tests/e2e/ui/      # requires built Tauri app
+# Frontend (commands target apps/desktop)
+pnpm -C apps/desktop dev && pnpm -C apps/desktop typecheck && pnpm -C apps/desktop lint
+pnpm -C apps/desktop test:run                      # Vitest CI mode
+pnpm -C apps/desktop test:coverage
+pnpm -C apps/desktop exec playwright test tests/e2e/backend/
+pnpm -C apps/desktop run e2e:ui                    # requires built Tauri app (tauri build --no-bundle)
 
 # Full app
-cargo tauri dev && cargo tauri build
+pnpm -C apps/desktop tauri dev                     # dev with hot-reload
+pnpm -C apps/desktop exec tauri build              # production bundle (or: mise run build)
 ```
 
 ## License
@@ -95,24 +109,24 @@ This project is licensed under **AGPL-3.0 with a Branding Exception**.
 
 Tests ship with every feature — never after.
 
-- **Unit:** `#[cfg(test)]` in the same file. Mock all deps with `mockall`.
-- **Integration:** `tests/` dir. SurrealDB in-memory engine (`mem::Db`) per test — run schema setup, drop on completion. Test service layer directly, no HTTP layer. `tempfile::TempDir` for filesystem tests.
-- **Frontend:** Vitest + `@testing-library/svelte`. Backend mocked with `msw`.
-- **E2E:** Playwright at `tests/e2e/backend/` (every PR); tauri-driver UI tests at `tests/e2e/ui/` (merge to main only).
-- **Fixtures:** `tests/fixtures/pdfs/` (diverse suite: single-column, multi-column, tables, stat-block, scanned), `tests/fixtures/llm/*.json`, `tests/fixtures/db/*.surql`.
+- **Unit:** `#[cfg(test)]` in the same file within each crate. Mock all deps with `mockall`.
+- **Integration:** `apps/desktop/src-tauri/tests/` dir. SurrealDB in-memory engine (`mem::Db`) per test — run schema setup, drop on completion. Test service layer directly, no HTTP layer. `tempfile::TempDir` for filesystem tests.
+- **Frontend:** Vitest + `@testing-library/svelte` under `apps/desktop/src/`. Backend mocked with `msw`.
+- **E2E:** Playwright at `apps/desktop/tests/e2e/backend/` (every PR); tauri-driver UI tests at `apps/desktop/tests/e2e/ui/` (merge to main only).
+- **Fixtures:** `apps/desktop/src-tauri/tests/fixtures/pdfs/` (diverse suite: single-column, multi-column, tables, stat-block, scanned), `tests/fixtures/llm/*.json`, `tests/fixtures/db/*.surql`.
 
 ## Code style
 
 Formatting and linting are enforced by tooling and run automatically via `lefthook` pre-commit hooks — do not hand-format. The config files are authoritative; the rules below are the highlights agents must follow.
 
-**Rust (`src-tauri/`)**
+**Rust (workspace crates)**
 
 - Format with `cargo fmt`; CI runs `cargo fmt --check`. Lint with `cargo clippy --all-targets --all-features -- -D warnings` — **clippy warnings are errors**, leave none.
 - Prefer `?` propagation with typed errors over `unwrap()`/`expect()` outside tests.
 - Use the dependency traits (`Arc<dyn LlmProvider>`, etc.) — never concrete external clients (see Hard constraints).
 - Public items in library crates carry `///` doc comments.
 
-**Frontend (`src/`) — TypeScript + Svelte 5**
+**Frontend (`apps/desktop/src/`) — TypeScript + Svelte 5**
 
 - Formatted by Prettier (`.prettierrc`): semicolons, single quotes, trailing commas (`all`), 2-space indent, 100-char print width, `prettier-plugin-svelte` for `.svelte`.
 - Linted by ESLint (`eslint.config.js`): `typescript-eslint` strict + stylistic, `eslint-plugin-svelte` recommended.
@@ -148,12 +162,12 @@ Formatting and linting are enforced by tooling and run automatically via `leftho
 
 - **Lockfiles (never hand-edit):** `Cargo.lock`, `pnpm-lock.yaml`, `mise.lock`, `skills-lock.json`. Update only via the owning tool (`cargo`, `pnpm`, `mise`).
 - **Secrets & local state:** any `.env*` file, `llm_api_key` / `embedding_api_key` settings values (stored **encrypted** in the `setting` table — never log, echo, or commit decrypted secrets), local SurrealDB data files, and anything matched by `.gitignore`.
-- **Generated / build output:** `target/`, `dist/`, `src-tauri/gen/` — never edit by hand; regenerate via the toolchain.
+- **Generated / build output:** `target/`, `dist/`, `apps/desktop/src-tauri/gen/` — never edit by hand; regenerate via the toolchain.
 - **Vendored agent assets:** `.agents/skills/*` and `.claude/skills/*` (the latter are symlinks) — do not reformat or lint; edit a skill only with intent, not as a side effect.
 - **License & branding:** do not modify `LICENSE`, `LICENSE-EXCEPTION.md`, or any Brand Assets (name, logos, icons) — these are excluded from the AGPL (see License). Forks must remove/replace Brand Assets.
-- **Tauri capability manifests:** treat `src-tauri/capabilities/*` and `tauri.conf.json` permissions as security-sensitive — widen scopes only deliberately, never to silence an error.
+- **Tauri capability manifests:** treat `apps/desktop/src-tauri/capabilities/*` and `apps/desktop/src-tauri/tauri.conf.json` permissions as security-sensitive — widen scopes only deliberately, never to silence an error.
 
-**General:** never commit credentials, tokens, or API keys in code, fixtures, or test data. Use `tests/fixtures/` placeholders for anything secret-shaped.
+**General:** never commit credentials, tokens, or API keys in code, fixtures, or test data. Use `apps/desktop/src-tauri/tests/fixtures/` placeholders for anything secret-shaped.
 
 ## Key data-model facts
 

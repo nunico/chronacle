@@ -11,7 +11,7 @@
 
 A desktop application that lets a GM load their own TTRPG PDFs (rules, sourcebooks, lore), take structured notes, and query an AI agent for rules answers and lore lookups — with source citations on every response. The LLM backend is configurable at setup: cloud API or local via Ollama.
 
-The backend runs in-process with the Tauri app, using IPC commands for request/response and Tauri events for streaming. All external dependencies (database, vector store, file storage) are behind traits, so a future cloud or mobile deployment means extracting the service layer into an HTTP server — a tactical extraction, not a rewrite.
+The backend runs in-process with the Tauri app, using IPC commands for request/response and Tauri events for streaming. All external dependencies (database, vector store, file storage) are behind traits. The service layer already lives in standalone `chronacle-*` library crates under `crates/` (realisable in a future cloud deployment); the Tauri shell in `apps/desktop/src-tauri/` is a thin adapter that wires them together.
 
 ---
 
@@ -105,7 +105,7 @@ change — see `docs/superpowers/plans/2026-05-31-rag-quality-improvements.md`).
 feature, so ONNX Runtime is loaded from a dynamic library at runtime rather than
 linked. `build.rs` downloads the matching ONNX Runtime binary (pinned to the
 version `ort-sys` expects — currently **1.24.2**) for the build target into
-`src-tauri/resources/onnxruntime/`, mirroring the pdfium provisioning. Tauri
+`apps/desktop/src-tauri/resources/onnxruntime/`, mirroring the pdfium provisioning. Tauri
 bundles it via `bundle.resources`; `embedding.rs::ensure_ort_dylib_path()`
 resolves the bundled library and sets `ORT_DYLIB_PATH` before the first session
 is created (dev resolves via `CARGO_MANIFEST_DIR`, bundled via the executable's
@@ -194,9 +194,28 @@ Tauri shell                         Tauri Mobile / static web app
   └─ SurrealDB embedded                  └─ JWT auth middleware
 ```
 
-**Migration steps from desktop to cloud:**
-1. Extract the service layer into a standalone axum binary. The IPC handlers become axum route handlers; the trait boundaries are already in place.
-2. Swap storage: SurrealDB embedded → SurrealDB Cloud (different connection string, same SurrealQL queries).
+**Realised crate workspace (as of the monorepo restructure):**
+
+The service layer is no longer coupled to the Tauri binary. The codebase is a Cargo workspace of standalone library crates under `crates/`:
+
+| Crate | Contains | Runtime deps (lib) |
+|-------|----------|--------------------|
+| `chronacle-core` | Dependency traits (`LlmProvider`, `VectorStore`, `BlobStore`, `EmbeddingProvider`) + DTOs/errors | (leaf) `serde`, `async-trait`, `thiserror` |
+| `chronacle-db` | `schema/*.surql` + `run_migrations` | `surrealdb` |
+| `chronacle-providers` | `SurrealDbVector`, `LocalFileStore`, fastembed/OpenAI/Mock embedding, OpenAI/Anthropic/Ollama LLM | `chronacle-core` |
+| `chronacle-ingestion` | `pdf_extractor`, `chunker`, `ingestion_service`, `text_normalizer` | `chronacle-core` |
+| `chronacle-extraction` | `entity_service`, `wikilink`, `extraction_service` | `chronacle-core` |
+| `chronacle-retrieval` | `agent_service` (RAG chat + citation) | `chronacle-core` |
+| `chronacle-domain` | `campaign_service`, `session_service`, `collection_service`, `custom_provider_service` | `chronacle-core`, `chronacle-extraction` |
+| `apps/desktop/src-tauri` | IPC commands, `AppState`, `settings_service` | all `chronacle-*` crates + `tauri` |
+
+`chronacle-ingestion`, `chronacle-extraction`, and `chronacle-retrieval` depend only on `chronacle-core` traits — not on `chronacle-providers`. `chronacle-db` is a dev-dependency (migrations in tests) for all service crates; only the desktop app needs it at runtime. `chronacle-domain` lib-depends on `chronacle-extraction` because `session_service` uses entity/wikilink types. The `chronacle-ingestion` tests use `chronacle-providers` as a dev-dependency for `MockEmbeddingProvider`; `chronacle-extraction` and `chronacle-retrieval` define their own test mocks.
+
+The database connection type is `Surreal<engine::any::Any>`: the same `run_migrations` and query code compiles against both the embedded RocksDB (`rocksdb://<path>`) and SurrealDB Cloud. `settings_service` intentionally stays in `apps/desktop/src-tauri` — no extracted crate depends on it at runtime.
+
+**Remaining path from desktop to cloud:**
+1. Add `apps/server/` as a new workspace member: an axum binary that wires the existing `chronacle-*` crates to HTTP route handlers. The IPC command handlers in `apps/desktop/src-tauri/src/commands/` are the mapping reference.
+2. Swap the SurrealDB connection string: `rocksdb://<path>` → SurrealDB Cloud URL. Schema and queries are unchanged.
 3. Add auth middleware (JWT) to the axum router.
 4. Ship the Svelte frontend as a static web app, or wrap in Tauri Mobile.
 
@@ -353,8 +372,8 @@ Tool: **Vitest** + `@testing-library/svelte`.
 - **Coverage target:** ≥ 70% on components (not just utilities — the hard parts are rendering, streaming state, and error recovery).
 
 ```bash
-pnpm test            # watch mode
-pnpm test --run      # CI mode (no watch)
+pnpm -C apps/desktop test        # watch mode
+pnpm -C apps/desktop test:run    # CI mode (no watch)
 ```
 
 ### E2E Tests — Full App
@@ -373,11 +392,11 @@ Tool: **Playwright** against the backend service layer (backend E2E) and optiona
 - Run on Linux only in CI on merge to main (expand matrix when platform-specific bugs emerge).
 
 ```bash
-# Backend E2E
-cargo test --test e2e
+# Backend E2E (service-layer, no UI)
+pnpm -C apps/desktop exec playwright test tests/e2e/backend/
 
-# Full UI E2E (requires built app)
-pnpm playwright test tests/e2e/ui/
+# Full UI E2E (requires built app: pnpm -C apps/desktop exec tauri build --no-bundle)
+pnpm -C apps/desktop run e2e:ui
 ```
 
 ### Test Data & Fixtures
@@ -423,7 +442,7 @@ pnpm playwright test tests/e2e/ui/
 |------|---------|---------|
 | `prettier` + `prettier-plugin-svelte` | Formatting | `prettier --check .` (CI) |
 | `eslint` + `@typescript-eslint` + `eslint-plugin-svelte` | Linting | `eslint .` |
-| `tsc --noEmit` | Type checking | `pnpm typecheck` |
+| `tsc --noEmit` | Type checking | `pnpm -C apps/desktop typecheck` |
 
 ### Pre-commit Hooks
 
@@ -455,22 +474,22 @@ Hooks are enforced locally and mirrored in CI — local and CI must be identical
 ```
 On every PR:
   ├── rust-check
-  │     ├── cargo fmt --check
-  │     ├── cargo clippy -- -D warnings
+  │     ├── cargo fmt --all --check
+  │     ├── cargo clippy --workspace --all-targets -- -D warnings
   │     ├── cargo audit
-  │     └── cargo test (unit + integration)
+  │     └── cargo test --workspace (unit + integration)
   ├── frontend-check
   │     ├── prettier --check
   │     ├── eslint
-  │     ├── tsc --noEmit
-  │     └── pnpm test --run (Vitest)
+  │     ├── pnpm -C apps/desktop typecheck
+  │     └── pnpm -C apps/desktop test:run (Vitest)
   └── e2e-backend
-        └── pnpm playwright test tests/e2e/backend/
+        └── pnpm -C apps/desktop exec playwright test tests/e2e/backend/
 
 On merge to main:
   ├── All of the above
-  ├── e2e-ui (tauri-driver, matrix: ubuntu, windows, macos)
-  ├── cargo-llvm-cov (coverage report artifact)
+  ├── e2e-ui (tauri-driver via pnpm -C apps/desktop run e2e:ui, matrix: ubuntu, windows, macos)
+  ├── cargo-llvm-cov --workspace (coverage report artifact)
   └── build-artifacts (installers for all platforms)
 ```
 
@@ -650,7 +669,7 @@ App data dir: ~/.local/share/chronacle/
   ├── pdfs/{source_id}/               (stored PDF files)
   └── embeddings_cache/               (fastembed model)
 
-Cloud deployment: extract service layer → axum binary → SurrealDB Cloud → container
+Cloud deployment: add apps/server/ (axum) reusing chronacle-* crates → SurrealDB Cloud → container
 Mobile:           same Svelte frontend → Tauri Mobile or static web app
 ```
 
@@ -976,7 +995,7 @@ Goal: Production quality, power-user features.
 
 Goal: Deploy backend as a server; access from mobile.
 
-- [ ] Extract service layer into standalone axum HTTP server; Tauri IPC handlers become axum route handlers (same trait boundaries, new thin adapters)
+- [ ] Add `apps/server/` workspace member: an axum binary reusing the existing `chronacle-*` crates; IPC handlers in `apps/desktop/src-tauri/src/commands/` are the mapping reference (service layer already extracted — see ADR-005)
 - [ ] SurrealDB embedded → SurrealDB Cloud (different connection string, same SurrealQL queries)
 - [ ] `S3Store` implementation of `BlobStore` trait for PDF storage
 - [ ] Auth middleware (JWT) on the axum router
@@ -1003,6 +1022,20 @@ Goal: Deploy backend as a server; access from mobile.
 ---
 
 ## Crate & Tool Summary
+
+### Internal Workspace Crates (`crates/`)
+
+These are first-party library crates in the Cargo workspace. They are not external dependencies and do not require an ADR to modify; changes are governed by the crate boundary rules in ADR-005.
+
+| Crate | Responsibility |
+|-------|----------------|
+| `chronacle-core` | Dependency traits (`LlmProvider`, `VectorStore`, `BlobStore`, `EmbeddingProvider`) + DTOs and error types |
+| `chronacle-db` | SurrealQL schema (`.surql` files) + `run_migrations` |
+| `chronacle-providers` | Concrete impls: `SurrealDbVector`, `LocalFileStore`, fastembed/OpenAI/Mock embedding, OpenAI/Anthropic/Ollama LLM |
+| `chronacle-ingestion` | PDF extraction (`pdfium-render`), chunker, text normalizer, ingestion pipeline |
+| `chronacle-extraction` | Entity CRUD/relations, wikilink resolution, LLM-driven entity extraction |
+| `chronacle-retrieval` | RAG agent service: retrieval, context assembly, cited-answer generation |
+| `chronacle-domain` | Campaign, session, collection, and custom-provider CRUD services |
 
 ### Rust Crates
 
