@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use tauri::State;
 
-use crate::services::session_service::{self, Session, SessionError, SessionInput};
 use crate::AppState;
+use chronacle_domain::session_service::{self, Session, SessionError, SessionInput};
 use chronacle_extraction::entity_service::GraphNode;
 
 /// Embed a session's notes for semantic retrieval after a create/update.

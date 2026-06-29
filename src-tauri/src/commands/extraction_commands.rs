@@ -59,7 +59,7 @@ async fn persist_extraction_summary(
     relations: usize,
 ) {
     let content = extraction_summary_content(name, entities, relations);
-    if let Err(e) = crate::services::agent_service::persist_message(
+    if let Err(e) = chronacle_retrieval::agent_service::persist_message(
         db,
         "extraction",
         &content,
@@ -98,7 +98,7 @@ pub async fn extract_entity_by_name(
     // Resolve collection IDs here (in the app crate where agent_service lives)
     // before spawning, so extract_seed_anchored has no dependency on agent_service.
     let collection_ids =
-        crate::services::agent_service::resolve_collection_ids(&state_ref.db, &campaign_id)
+        chronacle_retrieval::agent_service::resolve_collection_ids(&state_ref.db, &campaign_id)
             .await
             .map_err(|e| format!("Failed to resolve collections: {e}"))?;
 
@@ -163,10 +163,12 @@ pub async fn extract_all_from_campaign(
     let task_campaign = campaign_id.clone();
 
     let task = tokio::spawn(async move {
-        let cids =
-            crate::services::agent_service::resolve_collection_ids(&task_state.db, &task_campaign)
-                .await
-                .map_err(|e| e.to_string())?;
+        let cids = chronacle_retrieval::agent_service::resolve_collection_ids(
+            &task_state.db,
+            &task_campaign,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
 
         let mut entities_created = 0usize;
         let mut relations_created = 0usize;

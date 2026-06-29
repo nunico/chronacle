@@ -151,10 +151,9 @@ async fn get_by_id_not_found_returns_error() {
 async fn get_by_campaign_returns_only_matching_entities() {
     let db = setup_db().await;
 
-    let campaign =
-        chronacle_lib::services::campaign_service::create(&db, "Test Campaign", "D&D 5e")
-            .await
-            .unwrap();
+    let campaign = chronacle_domain::campaign_service::create(&db, "Test Campaign", "D&D 5e")
+        .await
+        .unwrap();
 
     let n1 = create(
         &db,
@@ -204,10 +203,10 @@ async fn create_with_empty_name_returns_validation_error() {
 #[tokio::test]
 async fn get_by_campaign_excludes_other_campaign_entities() {
     let db = setup_db().await;
-    let c1 = chronacle_lib::services::campaign_service::create(&db, "Campaign One", "D&D 5e")
+    let c1 = chronacle_domain::campaign_service::create(&db, "Campaign One", "D&D 5e")
         .await
         .unwrap();
-    let c2 = chronacle_lib::services::campaign_service::create(&db, "Campaign Two", "PF2e")
+    let c2 = chronacle_domain::campaign_service::create(&db, "Campaign Two", "PF2e")
         .await
         .unwrap();
     create(
@@ -426,16 +425,15 @@ async fn create_event_with_session_id_stores_session_link() {
     let db = setup_db().await;
 
     // Create a campaign
-    let campaign =
-        chronacle_lib::services::campaign_service::create(&db, "Test Campaign", "D&D 5e")
-            .await
-            .unwrap();
+    let campaign = chronacle_domain::campaign_service::create(&db, "Test Campaign", "D&D 5e")
+        .await
+        .unwrap();
 
     // Create a session first
-    let session = chronacle_lib::services::session_service::create(
+    let session = chronacle_domain::session_service::create(
         &db,
         &campaign.id,
-        chronacle_lib::services::session_service::SessionInput {
+        chronacle_domain::session_service::SessionInput {
             session_number: 1,
             title: "Session One".to_string(),
             date_played: "2026-06-05".to_string(),
@@ -479,7 +477,7 @@ async fn create_event_with_session_id_stores_session_link() {
     );
 
     // Verify get_session_entities returns this event
-    let entities = chronacle_lib::services::session_service::get_entities(&db, &session.id)
+    let entities = chronacle_domain::session_service::get_entities(&db, &session.id)
         .await
         .unwrap();
     assert_eq!(entities.len(), 1);
@@ -490,7 +488,7 @@ async fn create_event_with_session_id_stores_session_link() {
 
 /// Create a campaign and return its raw ID string.
 async fn create_campaign(db: &Surreal<Db>) -> String {
-    chronacle_lib::services::campaign_service::create(db, "Test Campaign", "D&D 5e")
+    chronacle_domain::campaign_service::create(db, "Test Campaign", "D&D 5e")
         .await
         .unwrap()
         .id
@@ -698,7 +696,7 @@ async fn update_entity_to_empty_notes_removes_wikilink_edges() {
 #[tokio::test]
 async fn get_events_timeline_orders_by_sequence_index_nulls_last() {
     let db = setup_db().await;
-    let campaign = chronacle_lib::services::campaign_service::create(&db, "Saga", "D&D 5e")
+    let campaign = chronacle_domain::campaign_service::create(&db, "Saga", "D&D 5e")
         .await
         .unwrap();
 

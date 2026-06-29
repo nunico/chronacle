@@ -28,7 +28,7 @@ pub struct ProviderModelResponse {
 pub async fn get_custom_providers(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<CustomProviderResponse>, String> {
-    let providers = crate::services::custom_provider_service::get_all(&state.db).await?;
+    let providers = chronacle_domain::custom_provider_service::get_all(&state.db).await?;
     Ok(providers
         .into_iter()
         .map(|p| CustomProviderResponse {
@@ -58,7 +58,7 @@ pub async fn create_custom_provider(
     if base_url.trim().is_empty() {
         return Err("Base URL is required".to_string());
     }
-    let provider = crate::services::custom_provider_service::create(
+    let provider = chronacle_domain::custom_provider_service::create(
         &state.db,
         name.trim(),
         &provider_type,
@@ -84,7 +84,7 @@ pub async fn update_custom_provider(
     base_url: String,
     api_key: String,
 ) -> Result<CustomProviderResponse, String> {
-    let provider = crate::services::custom_provider_service::update(
+    let provider = chronacle_domain::custom_provider_service::update(
         &state.db,
         &id,
         &name,
@@ -107,7 +107,7 @@ pub async fn delete_custom_provider(
     state: State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<(), String> {
-    crate::services::custom_provider_service::delete(&state.db, &id).await
+    chronacle_domain::custom_provider_service::delete(&state.db, &id).await
 }
 
 #[tauri::command]
@@ -116,7 +116,7 @@ pub async fn get_provider_models(
     provider_id: String,
 ) -> Result<Vec<ProviderModelResponse>, String> {
     let models =
-        crate::services::custom_provider_service::get_models(&state.db, &provider_id).await?;
+        chronacle_domain::custom_provider_service::get_models(&state.db, &provider_id).await?;
     Ok(models
         .into_iter()
         .map(|m| ProviderModelResponse {
@@ -141,7 +141,7 @@ pub async fn add_provider_model(
     if display_name.trim().is_empty() {
         return Err("Display name is required".to_string());
     }
-    let model = crate::services::custom_provider_service::add_model(
+    let model = chronacle_domain::custom_provider_service::add_model(
         &state.db,
         &provider_id,
         model_id.trim(),
@@ -161,5 +161,5 @@ pub async fn remove_provider_model(
     state: State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<(), String> {
-    crate::services::custom_provider_service::remove_model(&state.db, &id).await
+    chronacle_domain::custom_provider_service::remove_model(&state.db, &id).await
 }

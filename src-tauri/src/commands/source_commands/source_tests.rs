@@ -17,10 +17,10 @@ async fn setup_db() -> Surreal<Db> {
 async fn get_sources_filters_by_collection() {
     let db = setup_db().await;
 
-    let col_a = crate::services::collection_service::create(&db, "Col A", None)
+    let col_a = chronacle_domain::collection_service::create(&db, "Col A", None)
         .await
         .unwrap();
-    let col_b = crate::services::collection_service::create(&db, "Col B", None)
+    let col_b = chronacle_domain::collection_service::create(&db, "Col B", None)
         .await
         .unwrap();
 

@@ -14,8 +14,8 @@ pub struct CollectionResponse {
     pub description: Option<String>,
 }
 
-impl From<crate::services::collection_service::Collection> for CollectionResponse {
-    fn from(c: crate::services::collection_service::Collection) -> Self {
+impl From<chronacle_domain::collection_service::Collection> for CollectionResponse {
+    fn from(c: chronacle_domain::collection_service::Collection) -> Self {
         Self {
             id: c.id,
             name: c.name,
@@ -29,7 +29,7 @@ impl From<crate::services::collection_service::Collection> for CollectionRespons
 pub async fn get_collections(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<CollectionResponse>, String> {
-    let collections = crate::services::collection_service::get_all(&state.db).await?;
+    let collections = chronacle_domain::collection_service::get_all(&state.db).await?;
     Ok(collections.into_iter().map(Into::into).collect())
 }
 
@@ -43,9 +43,12 @@ pub async fn create_collection(
     if name.trim().is_empty() {
         return Err("Collection name is required".to_string());
     }
-    let c =
-        crate::services::collection_service::create(&state.db, name.trim(), description.as_deref())
-            .await?;
+    let c = chronacle_domain::collection_service::create(
+        &state.db,
+        name.trim(),
+        description.as_deref(),
+    )
+    .await?;
     Ok(c.into())
 }
 
@@ -60,7 +63,7 @@ pub async fn update_collection(
     if name.trim().is_empty() {
         return Err("Collection name is required".to_string());
     }
-    let c = crate::services::collection_service::update(
+    let c = chronacle_domain::collection_service::update(
         &state.db,
         &id,
         name.trim(),
@@ -74,7 +77,7 @@ pub async fn update_collection(
 /// still reference it.
 #[tauri::command]
 pub async fn delete_collection(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    crate::services::collection_service::delete(&state.db, &id).await
+    chronacle_domain::collection_service::delete(&state.db, &id).await
 }
 
 /// Subscribes a campaign to a collection.  Idempotent.
@@ -84,7 +87,7 @@ pub async fn add_campaign_collection(
     campaign_id: String,
     collection_id: String,
 ) -> Result<(), String> {
-    crate::services::collection_service::add_campaign_collection(
+    chronacle_domain::collection_service::add_campaign_collection(
         &state.db,
         &campaign_id,
         &collection_id,
@@ -99,7 +102,7 @@ pub async fn remove_campaign_collection(
     campaign_id: String,
     collection_id: String,
 ) -> Result<(), String> {
-    crate::services::collection_service::remove_campaign_collection(
+    chronacle_domain::collection_service::remove_campaign_collection(
         &state.db,
         &campaign_id,
         &collection_id,
@@ -114,7 +117,7 @@ pub async fn get_campaign_collections(
     campaign_id: String,
 ) -> Result<Vec<CollectionResponse>, String> {
     let cols =
-        crate::services::collection_service::get_campaign_collections(&state.db, &campaign_id)
+        chronacle_domain::collection_service::get_campaign_collections(&state.db, &campaign_id)
             .await?;
     Ok(cols.into_iter().map(Into::into).collect())
 }
@@ -125,7 +128,7 @@ mod tests {
 
     #[test]
     fn collection_response_from_collection() {
-        let c = crate::services::collection_service::Collection {
+        let c = chronacle_domain::collection_service::Collection {
             id: "abc123".to_string(),
             name: "D&D 5e Core".to_string(),
             description: Some("Core rulebooks".to_string()),
@@ -138,7 +141,7 @@ mod tests {
 
     #[test]
     fn collection_response_from_collection_no_desc() {
-        let c = crate::services::collection_service::Collection {
+        let c = chronacle_domain::collection_service::Collection {
             id: "xyz".to_string(),
             name: "Pathfinder".to_string(),
             description: None,

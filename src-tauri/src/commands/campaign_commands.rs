@@ -17,7 +17,7 @@ pub struct CampaignResponse {
 pub async fn get_campaigns(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<CampaignResponse>, String> {
-    let campaigns = crate::services::campaign_service::get_all(&state.db).await?;
+    let campaigns = chronacle_domain::campaign_service::get_all(&state.db).await?;
     Ok(campaigns
         .into_iter()
         .map(|c| CampaignResponse {
@@ -33,7 +33,7 @@ pub async fn get_campaign(
     state: State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<CampaignResponse, String> {
-    let campaign = crate::services::campaign_service::get_by_id(&state.db, &id).await?;
+    let campaign = chronacle_domain::campaign_service::get_by_id(&state.db, &id).await?;
     Ok(CampaignResponse {
         id: campaign.id,
         name: campaign.name,
@@ -51,7 +51,7 @@ pub async fn create_campaign(
         return Err("Campaign name is required".to_string());
     }
     let campaign =
-        crate::services::campaign_service::create(&state.db, name.trim(), system.trim()).await?;
+        chronacle_domain::campaign_service::create(&state.db, name.trim(), system.trim()).await?;
     Ok(CampaignResponse {
         id: campaign.id,
         name: campaign.name,
@@ -67,7 +67,7 @@ pub async fn update_campaign(
     system: String,
 ) -> Result<CampaignResponse, String> {
     let campaign =
-        crate::services::campaign_service::update(&state.db, &id, &name, &system).await?;
+        chronacle_domain::campaign_service::update(&state.db, &id, &name, &system).await?;
     Ok(CampaignResponse {
         id: campaign.id,
         name: campaign.name,
@@ -77,5 +77,5 @@ pub async fn update_campaign(
 
 #[tauri::command]
 pub async fn delete_campaign(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    crate::services::campaign_service::delete(&state.db, &id).await
+    chronacle_domain::campaign_service::delete(&state.db, &id).await
 }

@@ -24,11 +24,12 @@ pub use citation::Citation;
 pub use context::{fetch_entity_context, resolve_collection_ids};
 pub use persistence::{persist_assistant_message, persist_message};
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
 
-use crate::AppState;
-use chronacle_providers::llm_provider::{ChatMessage, LlmError};
+use chronacle_core::embedding::EmbeddingProvider;
+use chronacle_core::llm::{ChatMessage, LlmError, LlmProvider};
+use chronacle_core::vector_store::VectorStore;
 
 /// Errors from the agent pipeline.
 #[derive(Debug, thiserror::Error)]
@@ -47,17 +48,19 @@ pub enum AgentError {
 ///
 /// Returns a channel of streaming tokens. Once the channel is exhausted,
 /// call `persist_assistant_message` with the accumulated response.
-pub async fn stream_response(
-    state: &Arc<AppState>,
+pub async fn stream_response<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    embedding_provider: &RwLock<Arc<dyn EmbeddingProvider>>,
+    vector_store: &Arc<dyn VectorStore>,
+    llm_provider: &RwLock<Arc<dyn LlmProvider>>,
     message: &str,
     campaign_id: Option<&str>,
 ) -> Result<mpsc::Receiver<Result<String, LlmError>>, AgentError> {
     // 1. Persist the user message
-    persist_message(&state.db, "user", message, campaign_id).await?;
+    persist_message(db, "user", message, campaign_id).await?;
 
     // 2. Embed the query
-    let embed_provider = state
-        .embedding_provider
+    let embed_provider = embedding_provider
         .read()
         .map_err(|e| AgentError::Llm(format!("Embedding lock: {e}")))?
         .clone();
@@ -68,14 +71,14 @@ pub async fn stream_response(
 
     // 3. Resolve collection IDs for the active campaign
     let collection_ids = match campaign_id {
-        Some(cid) => resolve_collection_ids(&state.db, cid)
+        Some(cid) => resolve_collection_ids(db, cid)
             .await
             .map_err(|e| AgentError::Retrieval(e.to_string()))?,
         None => Vec::new(),
     };
 
     let entity_context = match campaign_id {
-        Some(cid) => fetch_entity_context(&state.db, cid, &collection_ids, Some(&query_vector))
+        Some(cid) => fetch_entity_context(db, cid, &collection_ids, Some(&query_vector))
             .await
             .unwrap_or_else(|e| {
                 eprintln!("entity context fetch failed: {e}");
@@ -90,8 +93,7 @@ pub async fn stream_response(
     // position 11-14 (e.g. a long list-of-regions section that spans pages
     // in a rulebook) still lands in context. Above ~20 the context gets
     // noisy and slows answer quality more than it helps recall.
-    let results = state
-        .vector_store
+    let results = vector_store
         .search(&query_vector, &collection_ids, 15)
         .await
         .map_err(|e| AgentError::Retrieval(e.to_string()))?;
@@ -107,8 +109,7 @@ pub async fn stream_response(
     let system_prompt = prompt::build_system_prompt(&context, &entity_context);
 
     if std::env::var("CHRONACLE_RAG_DEBUG").is_ok() {
-        let llm_type = state
-            .llm_provider
+        let llm_type = llm_provider
             .read()
             .map(|p| p.provider_type().to_string())
             .unwrap_or_else(|_| "unknown".into());
@@ -127,8 +128,7 @@ pub async fn stream_response(
 
     // Clone the current provider out of the RwLock so the streaming task
     // doesn't hold the lock for the entire response.
-    let llm = state
-        .llm_provider
+    let llm = llm_provider
         .read()
         .map_err(|e| AgentError::Llm(format!("Lock error: {e}")))?
         .clone();
@@ -146,8 +146,8 @@ pub async fn stream_response(
 /// before debugging the LLM's interpretation of it.
 fn log_retrieval_debug(
     query: &str,
-    embed_provider: &Arc<dyn chronacle_providers::embedding::EmbeddingProvider>,
-    results: &[chronacle_providers::vector_store::SearchResult],
+    embed_provider: &Arc<dyn chronacle_core::embedding::EmbeddingProvider>,
+    results: &[chronacle_core::vector_store::SearchResult],
 ) {
     eprintln!("===RAG_DEBUG_BEGIN===");
     eprintln!("query: {query:?}");

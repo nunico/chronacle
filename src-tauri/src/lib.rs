@@ -412,7 +412,7 @@ async fn build_custom_provider(
     name: &str,
     model: &str,
 ) -> Result<Arc<dyn LlmProvider>, String> {
-    let providers = crate::services::custom_provider_service::get_all(db).await?;
+    let providers = chronacle_domain::custom_provider_service::get_all(db).await?;
 
     let cp = providers
         .into_iter()

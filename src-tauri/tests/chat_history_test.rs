@@ -1,5 +1,5 @@
-use chronacle_lib::services::agent_service::{persist_assistant_message, persist_message};
-use chronacle_lib::services::campaign_service;
+use chronacle_domain::campaign_service;
+use chronacle_retrieval::agent_service::{persist_assistant_message, persist_message};
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
 
