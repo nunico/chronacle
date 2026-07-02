@@ -91,10 +91,10 @@ pub async fn create<C: Connection>(
     let campaign_id = uuid::Uuid::new_v4().to_string().replace('-', "");
     let collection_id = uuid::Uuid::new_v4().to_string().replace('-', "");
 
-    // Run campaign + collection + subscribes_to as a single batched query.
-    // SurrealDB embedded does not give us transactional guarantees across
-    // separate `.query()` calls; batching keeps the operation self-contained.
-    // If any statement fails, none of the following ones execute.
+    // Two queries — SurrealDB embedded doesn't give us cross-`.query()`
+    // transactionality anyway, and splitting keeps the response shape simple.
+    //
+    // 1. Create the campaign row.
     let mut response = db
         .query(
             "CREATE campaign SET
@@ -102,37 +102,40 @@ pub async fn create<C: Connection>(
                 name = $name,
                 system = $system,
                 created_at = time::now(),
-                updated_at = time::now();
-             CREATE collection SET
-                id = $collection_id,
-                name = $name,
-                description = NULL,
-                owner_campaign = type::thing('campaign', $campaign_id),
-                created_at = time::now(),
-                updated_at = time::now();
-             RELATE type::thing('campaign', $campaign_id)
-                    ->subscribes_to
-                    ->type::thing('collection', $collection_id)
-                    SET created_at = time::now();",
+                updated_at = time::now()",
         )
         .bind(("campaign_id", campaign_id.clone()))
-        .bind(("collection_id", collection_id))
         .bind(("name", name.to_owned()))
         .bind(("system", system.to_owned()))
         .await
         .map_err(|e| format!("Failed to create campaign: {e}"))?;
-
-    // First statement (the campaign itself) is the one we return to the caller.
     let created: Vec<CampaignRecord> = response
         .take(0)
         .map_err(|e| format!("Failed to parse created campaign: {e}"))?;
 
-    // Surface later-statement errors too — a failed collection CREATE would
-    // otherwise silently leave a dangling campaign. `.check()` promotes
-    // per-statement errors into the returned Result.
-    response
-        .check()
-        .map_err(|e| format!("Failed to create owned collection or subscription: {e}"))?;
+    // 2. Create the owned collection + subscribes_to edge.
+    //
+    // SurrealQL does not accept `type::thing(...)` on either side of a
+    // `RELATE` arrow (see `entity_service/relations/edge.rs`). We pre-bind
+    // the record handles via `LET` and reuse them for the RELATE.
+    db.query(
+        "LET $cam = type::thing('campaign', $campaign_id);
+         LET $col = type::thing('collection', $collection_id);
+         CREATE $col SET
+            name = $name,
+            description = NULL,
+            owner_campaign = $cam,
+            created_at = time::now(),
+            updated_at = time::now();
+         RELATE $cam->subscribes_to->$col SET created_at = time::now();",
+    )
+    .bind(("campaign_id", campaign_id.clone()))
+    .bind(("collection_id", collection_id))
+    .bind(("name", name.to_owned()))
+    .await
+    .map_err(|e| format!("Failed to create owned collection: {e}"))?
+    .check()
+    .map_err(|e| format!("Failed to create owned collection: {e}"))?;
 
     created
         .into_iter()
