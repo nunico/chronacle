@@ -253,7 +253,8 @@ async fn delete_cascade_removes_entities_inside_owned_collection() {
         "CREATE npc SET \
             id = 'harshnag', name = 'Harshnag', \
             created_at = time::now(), updated_at = time::now(); \
-         RELATE type::thing('collection', $col)->in_collection->npc:harshnag \
+         LET $col_thing = type::thing('collection', $col); \
+         RELATE $col_thing->in_collection->npc:harshnag \
             SET created_at = time::now()",
     )
     .bind(("col", owned.id.clone()))
@@ -366,12 +367,14 @@ async fn delete_convert_orphans_only_intra_owned_edges_and_logs_findings() {
 
     // Two NPCs inside the owned collection, one NPC inside the shared one.
     db.query(
-        "CREATE npc SET id = 'a', name = 'Artus Cimber', created_at = time::now(), updated_at = time::now(); \
+        "LET $co = type::thing('collection', $col_owned); \
+         LET $cs = type::thing('collection', $col_shared); \
+         CREATE npc SET id = 'a', name = 'Artus Cimber', created_at = time::now(), updated_at = time::now(); \
          CREATE npc SET id = 'b', name = 'Dragonbait',   created_at = time::now(), updated_at = time::now(); \
          CREATE npc SET id = 's', name = 'T-Rex',        created_at = time::now(), updated_at = time::now(); \
-         RELATE type::thing('collection', $col_owned) ->in_collection->npc:a SET created_at = time::now(); \
-         RELATE type::thing('collection', $col_owned) ->in_collection->npc:b SET created_at = time::now(); \
-         RELATE type::thing('collection', $col_shared)->in_collection->npc:s SET created_at = time::now(); \
+         RELATE $co->in_collection->npc:a SET created_at = time::now(); \
+         RELATE $co->in_collection->npc:b SET created_at = time::now(); \
+         RELATE $cs->in_collection->npc:s SET created_at = time::now(); \
          RELATE npc:a->relates_to->npc:b SET rel_type = 'allied_with', created_at = time::now(); \
          RELATE npc:a->relates_to->npc:s SET rel_type = 'hunts',       created_at = time::now();",
     )
