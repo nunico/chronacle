@@ -5,10 +5,12 @@
 /// idempotent on re-run; the `relates_to` edge table uses `DEFINE … OVERWRITE`
 /// to re-assert its definition without dropping existing edges.
 ///
-/// # Schema file
+/// # Schema files
 ///
 /// - `001_base_schema.surql` — complete consolidated schema (squashed from
 ///   Phases 1-3 individual migrations; safe to re-run on every app startup)
+/// - `002_wiki_layer.surql` — LLM Wiki layer, additive; adds
+///   `collection.owner_campaign` and the `lint_finding` table (A1a onward)
 use std::path::Path;
 
 /// Run all pending schema migrations against the given database.
