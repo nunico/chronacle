@@ -11,7 +11,20 @@ exclude-dev = true
 # from Tauri v2 / GTK3 bindings that we cannot directly upgrade.
 unmaintained = "workspace"
 unsound = "workspace"
-ignore = []
+ignore = [
+    # RUSTSEC-2026-0194 / RUSTSEC-2026-0195: quick-xml 0.39.4 DoS advisories, fixed in
+    # 0.41.0. Pulled in transitively via plist v1.9.0 (Tauri's tray-icon feature, for
+    # reading Info.plist). plist pins `quick-xml = "^0.39.2"` and its latest release
+    # (and unreleased main, checked 2026-07-02) still has not bumped this — no fix is
+    # reachable via `cargo update` until upstream releases one.
+    # Risk is negligible for our usage: plist's xml_reader.rs uses a plain
+    # `quick_xml::Reader`, never `NsReader` (0195 requires NsReader and doesn't apply
+    # at all), and the XML being parsed is the app's own bundled Info.plist metadata,
+    # not attacker-supplied input (0194's quadratic cost requires untrusted XML).
+    # Revisit when plist releases a version depending on quick-xml >=0.41.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
 
 [licenses]
 allow = [
