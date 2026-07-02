@@ -7,7 +7,7 @@ mod crud;
 mod subscriptions;
 mod types;
 
-pub use crud::{create, delete, get_all, get_by_id, update};
+pub use crud::{create, delete, get_all, get_by_id, hard_delete_with_content, owned_by, update};
 pub use subscriptions::{
     add_campaign_collection, get_campaign_collections, remove_campaign_collection,
 };

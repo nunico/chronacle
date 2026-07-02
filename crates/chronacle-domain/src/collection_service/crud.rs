@@ -162,3 +162,92 @@ where
         .map_err(|e| format!("Failed to delete collection: {e}"))?;
     Ok(())
 }
+
+/// Look up the collection that a given campaign owns, if any.
+///
+/// Returns `Ok(None)` when the campaign has no owned collection — this
+/// includes both legacy campaigns created before the LLM Wiki layer and
+/// campaigns whose owned collection has been demoted via
+/// `OnOwnedCollection::ConvertToRegular`.
+pub async fn owned_by<C>(
+    db: &surrealdb::Surreal<C>,
+    campaign_id: &str,
+) -> Result<Option<Collection>, String>
+where
+    C: Connection,
+{
+    let mut response = db
+        .query(
+            "SELECT * FROM collection
+             WHERE owner_campaign = type::thing('campaign', $cid)",
+        )
+        .bind(("cid", campaign_id.to_owned()))
+        .await
+        .map_err(|e| format!("Failed to query owned collection: {e}"))?;
+    let records: Vec<CollectionRecord> = response
+        .take(0)
+        .map_err(|e| format!("Failed to parse owned collection: {e}"))?;
+    Ok(records.into_iter().next().map(Into::into))
+}
+
+/// Cascade-delete a collection and all of its DB-side content.
+///
+/// Removes, in order:
+/// * every `chunk` whose `source` is in this collection,
+/// * every `source` in this collection,
+/// * every `in_collection` edge originating from this collection
+///   (which enumerates the entities to remove next),
+/// * every `relates_to` edge that touches one of those entities
+///   (either endpoint),
+/// * every entity row those edges pointed at,
+/// * the collection row itself.
+///
+/// **Source blob files on disk are not touched.** Callers that also want to
+/// unlink files should invoke the source-command layer separately; the
+/// service layer stays free of `AppState`/`blob_store` coupling.
+///
+/// Unlike [`delete`], this function does *not* check that the collection is
+/// empty. It is intended for the campaign-cascade path in
+/// `campaign_service::delete`; general "delete this collection" flows should
+/// keep using [`delete`], which fails safely on non-empty state.
+pub async fn hard_delete_with_content<C>(
+    db: &surrealdb::Surreal<C>,
+    id: &str,
+) -> Result<(), String>
+where
+    C: Connection,
+{
+    // Single batched query so a partial failure surfaces via `.check()`.
+    // Order matters: we snapshot entity ids into $entities before mutating
+    // in_collection, because DELETE mid-query would clear that snapshot.
+    //
+    // Entities are deleted per-table (all 8 node tables enumerated) rather
+    // than via `FOR $e IN $entities { DELETE $e }`. `DELETE <record>` in a
+    // FOR loop is not exercised anywhere else in the codebase, and per-table
+    // DELETE-WHERE uses the standard, well-covered SurrealQL path.
+    db.query(
+        "LET $col = type::thing('collection', $id);
+         LET $sources  = (SELECT VALUE id FROM source WHERE collection = $col);
+         LET $entities = (SELECT VALUE out FROM in_collection WHERE in = $col);
+         DELETE chunk         WHERE source IN $sources;
+         DELETE source        WHERE id IN $sources;
+         DELETE relates_to    WHERE in IN $entities OR out IN $entities;
+         DELETE in_collection WHERE in = $col;
+         DELETE in_campaign   WHERE out IN $entities;
+         DELETE npc              WHERE id IN $entities;
+         DELETE location         WHERE id IN $entities;
+         DELETE faction          WHERE id IN $entities;
+         DELETE creature         WHERE id IN $entities;
+         DELETE item             WHERE id IN $entities;
+         DELETE event            WHERE id IN $entities;
+         DELETE player_character WHERE id IN $entities;
+         DELETE misc             WHERE id IN $entities;
+         DELETE $col;",
+    )
+    .bind(("id", id.to_owned()))
+    .await
+    .map_err(|e| format!("Failed to cascade-delete collection '{id}': {e}"))?
+    .check()
+    .map_err(|e| format!("Failed to cascade-delete collection '{id}': {e}"))?;
+    Ok(())
+}
