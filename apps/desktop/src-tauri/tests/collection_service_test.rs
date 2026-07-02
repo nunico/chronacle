@@ -193,10 +193,11 @@ async fn add_campaign_collection_creates_subscription() {
         .await
         .unwrap();
 
+    // Campaigns now auto-own a collection; filter to the one we added.
     let cols = get_campaign_collections(&db, &campaign.id).await.unwrap();
-
-    assert_eq!(cols.len(), 1);
-    assert_eq!(cols[0].id, col.id);
+    let added: Vec<_> = cols.iter().filter(|c| c.id == col.id).collect();
+    assert_eq!(added.len(), 1);
+    assert_eq!(added[0].id, col.id);
 }
 
 // ── Test 11 ──────────────────────────────────────────────────────────────────
@@ -215,12 +216,14 @@ async fn add_campaign_collection_is_idempotent() {
         .await
         .unwrap();
 
+    // Campaigns now auto-own a collection; filter to the one we added.
     let cols = get_campaign_collections(&db, &campaign.id).await.unwrap();
+    let added: Vec<_> = cols.iter().filter(|c| c.id == col.id).collect();
     assert_eq!(
-        cols.len(),
+        added.len(),
         1,
-        "expected exactly 1 entry, got {}",
-        cols.len()
+        "expected exactly 1 entry for col.id, got {}",
+        added.len()
     );
 }
 
@@ -240,8 +243,12 @@ async fn remove_campaign_collection_unsubscribes() {
         .await
         .unwrap();
 
+    // The auto-owned collection remains subscribed; only `col` must be gone.
     let subscribed = get_campaign_collections(&db, &campaign.id).await.unwrap();
-    assert!(subscribed.is_empty());
+    assert!(
+        !subscribed.iter().any(|c| c.id == col.id),
+        "col must be unsubscribed"
+    );
 }
 
 // ── Test 13 ──────────────────────────────────────────────────────────────────
@@ -259,10 +266,12 @@ async fn get_campaign_collections_excludes_unsubscribed() {
         .await
         .unwrap();
 
+    // The auto-owned collection is also present; assert on membership only.
     let cols = get_campaign_collections(&db, &campaign.id).await.unwrap();
-
-    assert_eq!(cols.len(), 1);
-    assert_eq!(cols[0].id, col_a.id);
+    assert!(
+        cols.iter().any(|c| c.id == col_a.id),
+        "col_a must appear in campaign collections"
+    );
     assert!(
         !cols.iter().any(|c| c.id == col_b.id),
         "col_b must not appear in campaign collections"
