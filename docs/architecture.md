@@ -1081,3 +1081,97 @@ These are first-party library crates in the Cargo workspace. They are not extern
 | Formatting             | Prettier + `prettier-plugin-svelte`                                     |
 | Pre-commit hooks       | lefthook                                                                |
 | Graph layout           | `d3-force` (entity relationship graph, Phase 3)                         |
+
+---
+
+## ADR-010: Campaign-owned collections
+
+**Status:** Accepted (PR-A1a).
+
+Companion ADR-009 (Compiled World Model — LLM Wiki) is planned for A2 and
+introduces the wiki and rules aggregates that live *inside* an owned
+collection. ADR-010 is scoped to the collection-ownership plumbing only.
+
+### Context
+
+Chronacle historically treats collections as flat, shareable groups of source
+material — a collection can be subscribed to by any number of campaigns.
+There is no place to store material that belongs *only* to one campaign
+(session-derived NPCs, the party's home town, table-specific factions).
+Users have worked around this by creating an ad-hoc "MyCampaign notes"
+regular collection and remembering never to subscribe another campaign to
+it.
+
+The LLM Wiki layer (A2 onward) needs a durable, per-campaign home for
+compiled wiki entries and rules. Rather than invent a new aggregate outside
+the collection model, we mark specific collections as *owned* by a campaign.
+
+### Decision
+
+A collection gains one optional field, `owner_campaign: option<record<campaign>>`.
+
+- `NONE` → **regular collection** — indistinguishable in behaviour from every
+  pre-A1a collection, freely shareable across campaigns.
+- `Some(campaign)` → **campaign-bound** — auto-created when a campaign is
+  created, subscribed to that campaign, and cannot be transferred to another
+  campaign. It can only be turned back into a regular collection by
+  deleting its owner (see below).
+
+Every new campaign now auto-creates exactly one owned collection with the
+campaign's own name. Existing regular collections are unaffected.
+
+### Campaign deletion
+
+Deleting a campaign requires an explicit choice about its owned collection:
+
+- **`OnOwnedCollection::Delete`** — cascade: delete the owned collection and
+  every DB-side artefact inside it (sources, chunks, entities,
+  `relates_to`/`in_collection`/`in_campaign` edges). Source blob files on
+  disk are deliberately left in place — filesystem cleanup is the caller's
+  responsibility (source-command layer).
+- **`OnOwnedCollection::ConvertToRegular`** — keep the collection, clear its
+  `owner_campaign` field, and delete every `relates_to` edge whose *both*
+  endpoints are inside the collection. Each dropped edge is recorded as a
+  `lint_finding` row with `kind = "orphaned_edge"` so nothing is silently
+  lost.
+
+Edges that cross into a regular collection (only one endpoint inside) are
+preserved by convert — they now legitimately connect two shareable
+collections. Regular collections the campaign was subscribed to are never
+touched.
+
+The Tauri command layer surfaces this as an `on_owned_collection` parameter
+on `delete_campaign`. In PR-A1a the parameter is temporarily optional and
+defaults to `"delete"` so the pre-A1a frontend keeps working; PR-A1b makes
+it required once the two-mode confirmation UI lands.
+
+### `lint_finding` table
+
+A minimal, additive `lint_finding` table is introduced early to give
+convert-to-regular somewhere to write its findings. In A1a exactly one
+`kind` is produced (`orphaned_edge`); later PRs (C1 onward) extend the
+schema of `kind`s and add UI to review and resolve findings. Payload shape
+per kind is documented in `002_wiki_layer.surql`.
+
+### Consequences
+
+- **Positive.** Every campaign has a durable, private home for its own
+  material — the same shape the wiki layer will land into in A2. The delete
+  flow no longer forces a false choice between "lose the notes" and "leave
+  a dangling campaign shell".
+- **Negative.** The `delete_campaign` command surface grows a required
+  parameter (once A1b lands), so any third-party automation calling that
+  command directly must update. This is judged worthwhile against the
+  alternative of silently defaulting to cascade, which would destroy user
+  data.
+- **Retrieval.** No retrieval changes in A1a. The wiki-layer retrieval
+  integration (block ordering RULES → WIKI → ENTITIES → CHUNKS) is planned
+  for PR-B3 after the aggregates land in A2.
+
+### Migration
+
+Additive only: `002_wiki_layer.surql` adds the field, its index, and the
+`lint_finding` table with all `DEFINE ... OVERWRITE` so repeat-runs are
+idempotent (matching the pattern established by `001_base_schema.surql`).
+Pre-A1a databases pick up the field with `owner_campaign = NONE`
+everywhere — no backfill needed.
