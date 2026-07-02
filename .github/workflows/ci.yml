@@ -32,9 +32,10 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force
+        # Don't prune docker images here: actions/runner pre-builds this
+        # job's docker-based actions (e.g. cargo-deny-action) before this
+        # step runs, and a later step still needs that image.
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
