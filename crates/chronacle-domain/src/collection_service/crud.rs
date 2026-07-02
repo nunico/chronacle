@@ -210,10 +210,7 @@ where
 /// empty. It is intended for the campaign-cascade path in
 /// `campaign_service::delete`; general "delete this collection" flows should
 /// keep using [`delete`], which fails safely on non-empty state.
-pub async fn hard_delete_with_content<C>(
-    db: &surrealdb::Surreal<C>,
-    id: &str,
-) -> Result<(), String>
+pub async fn hard_delete_with_content<C>(db: &surrealdb::Surreal<C>, id: &str) -> Result<(), String>
 where
     C: Connection,
 {

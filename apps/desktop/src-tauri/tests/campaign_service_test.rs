@@ -242,9 +242,7 @@ async fn delete_cascade_removes_owned_collection() {
 #[tokio::test]
 async fn delete_cascade_removes_entities_inside_owned_collection() {
     let db = setup_db().await;
-    let campaign = create(&db, "Storm King's Thunder", "D&D 5e")
-        .await
-        .unwrap();
+    let campaign = create(&db, "Storm King's Thunder", "D&D 5e").await.unwrap();
     let owned = collection_service::owned_by(&db, &campaign.id)
         .await
         .unwrap()
@@ -267,7 +265,10 @@ async fn delete_cascade_removes_entities_inside_owned_collection() {
         .unwrap();
 
     let n_npc = count(&db, "SELECT count() FROM npc:harshnag GROUP ALL").await;
-    assert_eq!(n_npc, 0, "cascade must remove entities inside the collection");
+    assert_eq!(
+        n_npc, 0,
+        "cascade must remove entities inside the collection"
+    );
     let n_edge = count(&db, "SELECT count() FROM in_collection GROUP ALL").await;
     assert_eq!(n_edge, 0, "cascade must sweep the scope edge");
 }
@@ -300,7 +301,10 @@ async fn delete_cascade_leaves_regular_collections_untouched() {
         ),
     )
     .await;
-    assert_eq!(n, 1, "regular collections must survive cascade of another campaign");
+    assert_eq!(
+        n, 1,
+        "regular collections must survive cascade of another campaign"
+    );
 }
 
 #[tokio::test]
@@ -349,9 +353,7 @@ async fn delete_convert_keeps_owned_collection_but_drops_owner_field() {
 #[tokio::test]
 async fn delete_convert_orphans_only_intra_owned_edges_and_logs_findings() {
     let db = setup_db().await;
-    let campaign = create(&db, "Tomb of Annihilation", "D&D 5e")
-        .await
-        .unwrap();
+    let campaign = create(&db, "Tomb of Annihilation", "D&D 5e").await.unwrap();
     let owned = collection_service::owned_by(&db, &campaign.id)
         .await
         .unwrap()
@@ -396,7 +398,10 @@ async fn delete_convert_orphans_only_intra_owned_edges_and_logs_findings() {
         "SELECT count() FROM relates_to WHERE in = npc:a AND out = npc:s GROUP ALL",
     )
     .await;
-    assert_eq!(cross, 1, "edge crossing into a regular collection must be preserved");
+    assert_eq!(
+        cross, 1,
+        "edge crossing into a regular collection must be preserved"
+    );
 
     // Exactly one lint_finding with kind = 'orphaned_edge'.
     let findings = count(
@@ -404,5 +409,8 @@ async fn delete_convert_orphans_only_intra_owned_edges_and_logs_findings() {
         "SELECT count() FROM lint_finding WHERE kind = 'orphaned_edge' GROUP ALL",
     )
     .await;
-    assert_eq!(findings, 1, "exactly one orphaned_edge finding must be recorded");
+    assert_eq!(
+        findings, 1,
+        "exactly one orphaned_edge finding must be recorded"
+    );
 }
