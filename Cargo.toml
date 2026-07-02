@@ -36,7 +36,7 @@ lopdf = "0.38"
 
 [profile.test]
 opt-level = 0
-debug = 2
+debug = "line-tables-only"
 
 [workspace.metadata.chronacle]
 coverage = "cargo llvm-cov --html"
