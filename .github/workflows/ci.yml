@@ -19,6 +19,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # Incremental artifacts inflate on-disk usage during the job but aren't
+  # persisted by Swatinem/rust-cache (it strips them before saving), so
+  # they're pure disk waste on ephemeral runners — disable them.
+  CARGO_INCREMENTAL: 0
 
 jobs:
   # ── Rust checks (PR + merge) ──────────────────────────────────────
@@ -26,6 +30,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -62,7 +71,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: 'lts/*'
+          node-version: "lts/*"
           check-latest: true
 
       - name: Setup pnpm
@@ -127,7 +136,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: 'lts/*'
+          node-version: "lts/*"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
