@@ -30,7 +30,7 @@ DEFINE INDEX OVERWRITE collection_owner_campaign_idx
 
 DEFINE TABLE OVERWRITE lint_finding SCHEMAFULL;
 DEFINE FIELD OVERWRITE kind        ON TABLE lint_finding TYPE string;
-DEFINE FIELD OVERWRITE payload     ON TABLE lint_finding TYPE object;
+DEFINE FIELD OVERWRITE payload     ON TABLE lint_finding FLEXIBLE TYPE object;
 DEFINE FIELD OVERWRITE created_at  ON TABLE lint_finding TYPE datetime DEFAULT time::now();
 DEFINE FIELD OVERWRITE resolved_at ON TABLE lint_finding TYPE option<datetime> DEFAULT NONE;
 
@@ -52,42 +52,42 @@ DEFINE INDEX OVERWRITE lint_finding_unresolved_idx
 DEFINE FIELD OVERWRITE codex_article     ON TABLE npc TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE npc TYPE option<datetime> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_stale       ON TABLE npc TYPE bool DEFAULT false;
-DEFINE FIELD OVERWRITE codex_sources     ON TABLE npc TYPE array<object> DEFAULT [];
+DEFINE FIELD OVERWRITE codex_sources     ON TABLE npc FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE location TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE location TYPE option<datetime> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_stale       ON TABLE location TYPE bool DEFAULT false;
-DEFINE FIELD OVERWRITE codex_sources     ON TABLE location TYPE array<object> DEFAULT [];
+DEFINE FIELD OVERWRITE codex_sources     ON TABLE location FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE faction TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE faction TYPE option<datetime> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_stale       ON TABLE faction TYPE bool DEFAULT false;
-DEFINE FIELD OVERWRITE codex_sources     ON TABLE faction TYPE array<object> DEFAULT [];
+DEFINE FIELD OVERWRITE codex_sources     ON TABLE faction FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE creature TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE creature TYPE option<datetime> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_stale       ON TABLE creature TYPE bool DEFAULT false;
-DEFINE FIELD OVERWRITE codex_sources     ON TABLE creature TYPE array<object> DEFAULT [];
+DEFINE FIELD OVERWRITE codex_sources     ON TABLE creature FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE item TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE item TYPE option<datetime> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_stale       ON TABLE item TYPE bool DEFAULT false;
-DEFINE FIELD OVERWRITE codex_sources     ON TABLE item TYPE array<object> DEFAULT [];
+DEFINE FIELD OVERWRITE codex_sources     ON TABLE item FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE event TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE event TYPE option<datetime> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_stale       ON TABLE event TYPE bool DEFAULT false;
-DEFINE FIELD OVERWRITE codex_sources     ON TABLE event TYPE array<object> DEFAULT [];
+DEFINE FIELD OVERWRITE codex_sources     ON TABLE event FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE player_character TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE player_character TYPE option<datetime> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_stale       ON TABLE player_character TYPE bool DEFAULT false;
-DEFINE FIELD OVERWRITE codex_sources     ON TABLE player_character TYPE array<object> DEFAULT [];
+DEFINE FIELD OVERWRITE codex_sources     ON TABLE player_character FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE misc TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE misc TYPE option<datetime> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_stale       ON TABLE misc TYPE bool DEFAULT false;
-DEFINE FIELD OVERWRITE codex_sources     ON TABLE misc TYPE array<object> DEFAULT [];
+DEFINE FIELD OVERWRITE codex_sources     ON TABLE misc FLEXIBLE TYPE array<object> DEFAULT [];
 
 -- ── Rule entries (compiled rules layer; ADR-009) ─────────────────────────────
 -- body/category/page_refs/sources are compiler-owned; notes is GM-owned and
@@ -101,8 +101,8 @@ DEFINE FIELD OVERWRITE category    ON TABLE rule_entry TYPE string
     ASSERT $value IN ['mechanic', 'ability', 'state', 'procedure', 'resource', 'statistic', 'entry'];
 DEFINE FIELD OVERWRITE body        ON TABLE rule_entry TYPE string;
 DEFINE FIELD OVERWRITE notes       ON TABLE rule_entry TYPE string | NULL DEFAULT NULL;
-DEFINE FIELD OVERWRITE page_refs   ON TABLE rule_entry TYPE array<object> DEFAULT [];
-DEFINE FIELD OVERWRITE sources     ON TABLE rule_entry TYPE array<object> DEFAULT [];
+DEFINE FIELD OVERWRITE page_refs   ON TABLE rule_entry FLEXIBLE TYPE array<object> DEFAULT [];
+DEFINE FIELD OVERWRITE sources     ON TABLE rule_entry FLEXIBLE TYPE array<object> DEFAULT [];
 DEFINE FIELD OVERWRITE compiled_at ON TABLE rule_entry TYPE datetime;
 DEFINE FIELD OVERWRITE stale       ON TABLE rule_entry TYPE bool DEFAULT false;
 DEFINE FIELD OVERWRITE embedding   ON TABLE rule_entry TYPE array<float> | NULL DEFAULT NULL;
@@ -125,8 +125,8 @@ DEFINE FIELD OVERWRITE kind        ON TABLE codex_proposal TYPE string
 DEFINE FIELD OVERWRITE target      ON TABLE codex_proposal TYPE option<record> DEFAULT NONE;
 DEFINE FIELD OVERWRITE collection  ON TABLE codex_proposal TYPE record<collection>;
 DEFINE FIELD OVERWRITE campaign    ON TABLE codex_proposal TYPE option<record<campaign>> DEFAULT NONE;
-DEFINE FIELD OVERWRITE payload     ON TABLE codex_proposal TYPE object;
-DEFINE FIELD OVERWRITE origin      ON TABLE codex_proposal TYPE object;
+DEFINE FIELD OVERWRITE payload     ON TABLE codex_proposal FLEXIBLE TYPE object;
+DEFINE FIELD OVERWRITE origin      ON TABLE codex_proposal FLEXIBLE TYPE object;
 DEFINE FIELD OVERWRITE status      ON TABLE codex_proposal TYPE string DEFAULT 'pending'
     ASSERT $value IN ['pending', 'accepted', 'rejected'];
 DEFINE FIELD OVERWRITE created_at  ON TABLE codex_proposal TYPE datetime DEFAULT time::now();
