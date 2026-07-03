@@ -8,7 +8,7 @@ use surrealdb::Connection;
 
 use super::parse::{parse_kind, LlmResponse};
 use super::ExtractionError;
-use crate::entity_service::{self, EntityInput, GraphNode, RelType};
+use crate::entity_service::{self, EntityError, EntityInput, GraphNode, RelType};
 use chronacle_core::embedding::EmbeddingProvider;
 
 /// Embed an entity and store the vector + model ID on the record.
@@ -87,6 +87,12 @@ pub(super) async fn persist_batch<C: Connection>(
             node
         };
 
+        if let Err(e) =
+            crate::codex_service::mark_entity_stale(db, &origin_node.kind, &origin_node.id).await
+        {
+            eprintln!("extraction: failed to mark {} stale: {e}", origin_node.name);
+        }
+
         for rel in &ent.relations {
             let rel_kind = parse_kind(&rel.kind);
             let existing_rel = entity_service::find_by_name_and_collection(
@@ -137,6 +143,12 @@ pub(super) async fn persist_batch<C: Connection>(
                 node
             };
 
+            if let Err(e) =
+                crate::codex_service::mark_entity_stale(db, &rel_node.kind, &rel_node.id).await
+            {
+                eprintln!("extraction: failed to mark {} stale: {e}", rel_node.name);
+            }
+
             if rel_node.campaign_id.is_some() {
                 eprintln!(
                     "extraction: skipping cross-link {} → {} (collection→campaign forbidden)",
@@ -182,15 +194,43 @@ pub(super) async fn persist_batch<C: Connection>(
             match result {
                 Ok(true) => relations_created += 1,
                 Ok(false) => {} // redundant edge collapsed away — not counted
-                Err(e) => eprintln!(
-                    "extraction: failed to relate {} -> {} ({}): {e}",
-                    origin_node.name,
-                    rel_node.name,
-                    canonical.as_str()
-                ),
+                Err(e) => handle_relate_error(db, collection_id, &origin_node, &rel_node, e).await,
             }
         }
     }
 
     Ok((entities_created, relations_created))
+}
+
+/// Handle a failed relate on an extraction bulk path.
+///
+/// Scope violations are recorded as `scope_violation` lint findings and the
+/// edge is skipped — extraction must never fail the whole run over one edge
+/// (ADR-009). All other errors are logged, matching prior behaviour.
+pub(super) async fn handle_relate_error<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    collection_id: &str,
+    origin: &GraphNode,
+    target: &GraphNode,
+    err: EntityError,
+) {
+    match err {
+        EntityError::ScopeViolation { from, to } => {
+            let payload = serde_json::json!({
+                "edge": serde_json::Value::Null,
+                "from": from,
+                "to": to,
+                "from_collection": collection_id,
+                "to_collection": serde_json::Value::Null,
+            });
+            if let Err(e) = crate::codex_service::record_lint(db, "scope_violation", payload).await
+            {
+                eprintln!("extraction: failed to record scope_violation lint: {e}");
+            }
+        }
+        e => eprintln!(
+            "extraction: failed to relate {} -> {}: {e}",
+            origin.name, target.name
+        ),
+    }
 }

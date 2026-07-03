@@ -217,3 +217,108 @@ async fn extract_cross_link_collection_to_campaign_is_skipped() {
     assert_eq!(result.entities_created, 1);
     assert_eq!(result.relations_created, 0);
 }
+
+#[tokio::test]
+async fn extraction_marks_touched_entities_stale() {
+    let (db, col_id) = setup_db_with_collection().await;
+    // Pre-existing entity → the mock LLM re-emitting it takes the dedup path.
+    entity_service::create(
+        &db,
+        None,
+        Some(&col_id),
+        EntityKind::Faction,
+        EntityInput {
+            name: "The Iron Fist".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+        response: r#"{
+            "entities": [{
+                "name": "The Iron Fist",
+                "kind": "faction",
+                "summary": "Militant faction.",
+                "notes": null,
+                "relations": []
+            }]
+        }"#
+        .to_string(),
+    });
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+    extract_from_collection(&db, &llm, &embed, &col_id, |_| {})
+        .await
+        .unwrap();
+
+    #[derive(serde::Deserialize)]
+    struct C {
+        count: i64,
+    }
+    let mut resp = db
+        .query("SELECT count() FROM faction WHERE codex_stale = true GROUP ALL")
+        .await
+        .unwrap();
+    let counts: Vec<C> = resp.take(0).unwrap();
+    assert_eq!(
+        counts.first().map(|c| c.count).unwrap_or(0),
+        1,
+        "extraction touching an entity must mark its article stale"
+    );
+}
+
+#[tokio::test]
+async fn scope_violation_during_extraction_is_linted_not_fatal() {
+    let (db, col_id) = setup_db_with_collection().await;
+    let a = entity_service::create(
+        &db,
+        None,
+        Some(&col_id),
+        EntityKind::Npc,
+        EntityInput {
+            name: "A".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let b = entity_service::create(
+        &db,
+        None,
+        Some(&col_id),
+        EntityKind::Npc,
+        EntityInput {
+            name: "B".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    crate::extraction_service::persist::handle_relate_error(
+        &db,
+        &col_id,
+        &a,
+        &b,
+        entity_service::EntityError::ScopeViolation {
+            from: format!("npc:{}", a.id),
+            to: format!("npc:{}", b.id),
+        },
+    )
+    .await;
+
+    #[derive(serde::Deserialize)]
+    struct C {
+        count: i64,
+    }
+    let mut resp = db
+        .query(
+            "SELECT count() FROM lint_finding WHERE kind = 'scope_violation' \
+               AND resolved_at = NONE GROUP ALL",
+        )
+        .await
+        .unwrap();
+    let counts: Vec<C> = resp.take(0).unwrap();
+    assert_eq!(counts.first().map(|c| c.count).unwrap_or(0), 1);
+}
