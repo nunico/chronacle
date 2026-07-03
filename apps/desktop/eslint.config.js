@@ -8,7 +8,7 @@ import svelteConfig from './svelte.config.js';
 
 export default defineConfig(
   {
-    ignores: ['.agents/*', '.claude/*', 'dist/*', 'target/*'],
+    ignores: ['.agents/*', '.claude/*', 'dist/*', 'target/*', 'tests/e2e/.features-gen/*'],
   },
   { languageOptions: { globals: { ...globals.browser } } },
   js.configs.recommended,
