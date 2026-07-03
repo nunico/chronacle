@@ -4,7 +4,7 @@
 use surrealdb::engine::local::{Db, Mem};
 use surrealdb::Surreal;
 
-use crate::entity_service::{relate, EntityError};
+use crate::entity_service::{relate, relate_collapsing, EntityError};
 
 async fn setup_db() -> Surreal<Db> {
     let db = Surreal::new::<Mem>(()).await.unwrap();
@@ -93,4 +93,64 @@ async fn unscoped_legacy_entities_are_not_blocked() {
     relate(&db, "floating", "npc", "own_a", "npc", "knows", None)
         .await
         .expect("entities without scope edges (legacy/tests) must not be blocked");
+}
+
+#[tokio::test]
+async fn rejected_write_preserves_existing_lower_tier_edge() {
+    let db = setup_db().await;
+    seed(&db).await;
+    // A legacy 'mentioned' edge between a cross-scope pair (predates
+    // enforcement): insert directly, bypassing relate()'s guard.
+    db.query("RELATE npc:`r1_a`->relates_to->npc:`r2_a` SET rel_type = 'mentioned', created_at = time::now()")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+
+    // A specific relationship on the same pair must be rejected on scope…
+    let err = relate_collapsing(&db, "r1_a", "npc", "r2_a", "npc", "allied_with", None)
+        .await
+        .expect_err("regular↔regular stays forbidden");
+    assert!(matches!(err, EntityError::ScopeViolation { .. }));
+
+    // …and must NOT have destroyed the pre-existing edge.
+    let mut resp = db
+        .query("SELECT count() FROM relates_to WHERE rel_type = 'mentioned' GROUP ALL")
+        .await
+        .unwrap();
+    #[derive(serde::Deserialize)]
+    struct C {
+        count: i64,
+    }
+    let rows: Vec<C> = resp.take(0).unwrap();
+    assert_eq!(
+        rows.first().map(|c| c.count).unwrap_or(0),
+        1,
+        "rejected write must not delete pre-existing edges"
+    );
+}
+
+#[tokio::test]
+async fn in_campaign_direct_edge_governs_scope() {
+    let db = setup_db().await;
+    seed(&db).await;
+    db.query(
+        "CREATE npc:`direct_a` SET name = 'DirectA';
+         RELATE campaign:`cam1`->in_campaign->npc:`direct_a` SET created_at = time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    // cam1 subscribes to reg1 → allowed.
+    relate_collapsing(&db, "direct_a", "npc", "r1_a", "npc", "allied_with", None)
+        .await
+        .expect("campaign governed via direct in_campaign edge, subscribed collection is legal");
+
+    // cam1 does not subscribe to reg2 → rejected.
+    let err = relate_collapsing(&db, "direct_a", "npc", "r2_a", "npc", "allied_with", None)
+        .await
+        .expect_err("cam1 does not subscribe to reg2");
+    assert!(matches!(err, EntityError::ScopeViolation { .. }));
 }
