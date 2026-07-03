@@ -219,6 +219,15 @@ codex article provenance, and rule citations:
 2. Content in a **regular** collection may reference **only content in that
    same collection**.
 
+> **Note (A2b):** for `relates_to` edges the validate-on-write check is
+> deliberately **pair-symmetric** — an edge between a campaign's own content
+> and a collection that campaign subscribes to is legal in either direction,
+> because a relationship edge is inherently undirected and ADR-010 already
+> treats such cross-edges as legitimate. The directional reading of rules 1-2
+> still governs the genuinely directional enforcement points (compile
+> provenance, wikilinks, rule citations) — do not copy the symmetric logic
+> there.
+
 Enforcement points (all three, in this order of strength):
 
 1. **Validate-on-write** — `entity_service` relation creation computes both

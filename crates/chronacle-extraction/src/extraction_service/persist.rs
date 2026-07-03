@@ -194,7 +194,17 @@ pub(super) async fn persist_batch<C: Connection>(
             match result {
                 Ok(true) => relations_created += 1,
                 Ok(false) => {} // redundant edge collapsed away — not counted
-                Err(e) => handle_relate_error(db, collection_id, &origin_node, &rel_node, e).await,
+                Err(e) => {
+                    handle_relate_error(
+                        db,
+                        collection_id,
+                        &origin_node,
+                        &rel_node,
+                        canonical.as_str(),
+                        e,
+                    )
+                    .await
+                }
             }
         }
     }
@@ -212,6 +222,7 @@ pub(super) async fn handle_relate_error<C: Connection>(
     collection_id: &str,
     origin: &GraphNode,
     target: &GraphNode,
+    rel_type: &str,
     err: EntityError,
 ) {
     match err {
@@ -229,7 +240,7 @@ pub(super) async fn handle_relate_error<C: Connection>(
             }
         }
         e => eprintln!(
-            "extraction: failed to relate {} -> {}: {e}",
+            "extraction: failed to relate {} -> {} ({rel_type}): {e}",
             origin.name, target.name
         ),
     }
