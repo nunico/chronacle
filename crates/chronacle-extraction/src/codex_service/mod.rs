@@ -70,7 +70,11 @@ mod tests {
         db.query("CREATE npc:`n1` SET name = 'Mira'").await.unwrap();
         mark_entity_stale(&db, "npc", "n1").await.unwrap();
         assert_eq!(
-            count(&db, "SELECT count() FROM npc WHERE codex_stale = true GROUP ALL").await,
+            count(
+                &db,
+                "SELECT count() FROM npc WHERE codex_stale = true GROUP ALL"
+            )
+            .await,
             1
         );
     }
@@ -90,6 +94,18 @@ mod tests {
                 &db,
                 "SELECT count() FROM lint_finding WHERE kind = 'scope_violation' \
                    AND resolved_at = NONE GROUP ALL"
+            )
+            .await,
+            1
+        );
+        // The payload must round-trip as a structured object, not a blob or
+        // an empty object: assert on fields inside it. (`from`/`to` are
+        // SurrealQL keywords, hence the backticks.)
+        assert_eq!(
+            count(
+                &db,
+                "SELECT count() FROM lint_finding WHERE payload.`from` = 'npc:a' \
+                   AND payload.`to` = 'npc:b' GROUP ALL"
             )
             .await,
             1
