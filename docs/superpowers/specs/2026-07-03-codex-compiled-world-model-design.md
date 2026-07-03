@@ -123,7 +123,7 @@ DEFINE TABLE OVERWRITE rule_entry SCHEMAFULL;
 DEFINE FIELD OVERWRITE collection  ON rule_entry TYPE record<collection>;
 DEFINE FIELD OVERWRITE name        ON rule_entry TYPE string;
 DEFINE FIELD OVERWRITE category    ON rule_entry TYPE string
-    ASSERT $value IN ['mechanic', 'ability', 'state', 'procedure', 'resource', 'entry'];
+    ASSERT $value IN ['mechanic', 'ability', 'state', 'procedure', 'resource', 'statistic', 'entry'];
 DEFINE FIELD OVERWRITE body        ON rule_entry TYPE string;
 DEFINE FIELD OVERWRITE notes       ON rule_entry TYPE string | NULL DEFAULT NULL;
 DEFINE FIELD OVERWRITE page_refs   ON rule_entry TYPE array<object> DEFAULT [];
@@ -148,6 +148,7 @@ Category semantics (closed enum, chosen by the maintainer):
 | `state`     | a condition or status affecting an actor (poisoned, exhausted, hunted)            |
 | `procedure` | a step-by-step sequence (character creation, long rest, chase scene)              |
 | `resource`  | a countable in-play thing with rules attached (hit points, mana, stress, ammo)    |
+| `statistic` | a numerical value used or modified in or by another rule (armor class, speed)     |
 | `entry`     | freeform fallback (equivalent to the existing `misc` idiom on entities)           |
 
 Editability: `body`, `category`, `page_refs`, `sources` are compiler-owned.
@@ -506,7 +507,7 @@ when the C series has landed and ADR-008 implementation starts.
 | `docs/architecture.md` ADR-010                 | One-line status note when A1b lands (parameter now required)                                   | A1b     |
 | `docs/superpowers/specs/` (this file)          | The approved design                                                                            | now     |
 | `docs/superpowers/plans/`                      | One plan doc per series (`a2-…`, `b1-…`, `b2-…`, `b3-…`, `c1-…`, `c2-…`), written just-in-time before each series starts | rolling |
-| `docs/user-guide.md`                           | New **"The Codex"** chapter: what compiling does and costs; setting vs. rules; the six rule categories in GM terms; redo-with-objections; Save to Codex + inbox; staleness badges; collection types and what they may reference; lint checks | B1b, extended through C2b |
+| `docs/user-guide.md`                           | New **"The Codex"** chapter: what compiling does and costs; setting vs. rules; the seven rule categories in GM terms; redo-with-objections; Save to Codex + inbox; staleness badges; collection types and what they may reference; lint checks | B1b, extended through C2b |
 
 ## Risks & tradeoffs
 
@@ -558,6 +559,7 @@ when the C series has landed and ADR-008 implementation starts.
 - `rule_entry` editability: GM `notes` field + redo-with-objections; body
   compiler-owned.
 - Chat write-back granularity: several targeted proposals per answer.
-- Category taxonomy: the closed six-value enum above.
+- Category taxonomy: the closed seven-value enum above (`statistic` added
+  on review).
 - Naming, data shape, review queue, manual compile, article-field
   separation, plan depth: see "Decisions locked".
