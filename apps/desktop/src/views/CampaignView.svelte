@@ -14,6 +14,7 @@
     type Collection,
     type Campaign,
     type Source,
+    type OnOwnedCollection,
   } from '../lib/commands';
   import { collectionIcon } from './collection-icons';
   import EntityManager from '../components/EntityManager.svelte';
@@ -155,11 +156,19 @@
     }
   }
 
-  async function removeCampaign(c: Campaign) {
-    if (!confirm(`Delete campaign "${c.name}"?`)) return;
+  let deleteTarget = $state<Campaign | null>(null);
+
+  function removeCampaign(c: Campaign) {
+    deleteTarget = c;
+  }
+
+  async function confirmDelete(mode: OnOwnedCollection) {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    deleteTarget = null;
     try {
-      await deleteCampaign(c.id);
-      if (activeCampaignId === c.id) setActiveCampaignId(null);
+      await deleteCampaign(target.id, mode);
+      if (activeCampaignId === target.id) setActiveCampaignId(null);
       await refreshCampaigns();
     } catch (e) {
       error = String(e);
@@ -356,6 +365,32 @@
       <p class="muted">Select a campaign to manage entities.</p>
     {/if}
   </div>
+
+  {#if deleteTarget}
+    <div class="modal-overlay" role="presentation" onclick={() => (deleteTarget = null)}>
+      <div
+        class="modal"
+        role="dialog"
+        aria-label="Delete campaign"
+        onclick={(e) => e.stopPropagation()}
+      >
+        <h3>Delete "{deleteTarget.name}"?</h3>
+        <p>
+          This campaign owns a collection holding its notes and entities. Choose what happens to
+          that collection.
+        </p>
+        <div class="modal-actions">
+          <button class="m-btn danger" onclick={() => confirmDelete('delete')}>
+            Delete campaign and its notes
+          </button>
+          <button class="m-btn" onclick={() => confirmDelete('convert_to_regular')}>
+            Keep notes as a regular collection
+          </button>
+          <button class="m-btn" onclick={() => (deleteTarget = null)}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -736,5 +771,26 @@
   .view-tab.active {
     color: var(--fg-1);
     border-bottom-color: var(--violet-300);
+  }
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: grid;
+    place-items: center;
+    z-index: 50;
+  }
+  .modal {
+    background: var(--bg-raised, #1d1a17);
+    border: 1px solid var(--border, #3a352f);
+    border-radius: 8px;
+    padding: 1.25rem;
+    max-width: 26rem;
+  }
+  .modal-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 1rem;
   }
 </style>
