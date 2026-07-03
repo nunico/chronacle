@@ -301,6 +301,7 @@ async fn scope_violation_during_extraction_is_linted_not_fatal() {
         &col_id,
         &a,
         &b,
+        "knows",
         entity_service::EntityError::ScopeViolation {
             from: format!("npc:{}", a.id),
             to: format!("npc:{}", b.id),
