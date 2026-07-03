@@ -79,19 +79,13 @@ pub async fn update_campaign(
 ///
 /// `on_owned_collection` mirrors `campaign_service::OnOwnedCollection` and is
 /// deserialized with `snake_case` naming (`"delete"` or `"convert_to_regular"`).
-///
-/// **Temporary default (PR-A1a):** if the frontend omits `on_owned_collection`
-/// the command defaults to `"delete"` so the pre-A1a frontend keeps compiling.
-/// PR-A1b removes this default and makes the parameter required, once the
-/// two-mode UI dialog is in place. Do not add new callers that rely on the
-/// default.
+/// The parameter is required (PR-A1b): omitting it is a command error, so the
+/// frontend must always make the cascade-vs-convert choice explicit.
 #[tauri::command]
 pub async fn delete_campaign(
     state: State<'_, Arc<AppState>>,
     id: String,
-    on_owned_collection: Option<chronacle_domain::campaign_service::OnOwnedCollection>,
+    on_owned_collection: chronacle_domain::campaign_service::OnOwnedCollection,
 ) -> Result<(), String> {
-    let mode = on_owned_collection
-        .unwrap_or(chronacle_domain::campaign_service::OnOwnedCollection::Delete);
-    chronacle_domain::campaign_service::delete(&state.db, &id, mode).await
+    chronacle_domain::campaign_service::delete(&state.db, &id, on_owned_collection).await
 }
