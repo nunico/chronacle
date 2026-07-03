@@ -6,6 +6,7 @@ target/
 node_modules/
 dist/
 .pnpm-store/
+apps/desktop/tests/e2e/.features-gen/
 
 # ── Tauri ─────────────────────────────────────────────────────────────
 src-tauri/target/

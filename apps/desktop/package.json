@@ -14,9 +14,11 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "e2e:backend": "bddgen && playwright test",
     "e2e:ui": "mocha --config tests/e2e/ui/.mocharc.json"
   },
   "devDependencies": {
+    "@cucumber/cucumber": "^13.0.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.60.0",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
@@ -32,6 +34,7 @@
     "jsdom": "^29.1.1",
     "mocha": "^11.7.6",
     "msw": "^2.2.0",
+    "playwright-bdd": "^9.2.0",
     "prettier": "^3.2.0",
     "prettier-plugin-svelte": "^4.1.0",
     "selenium-webdriver": "^4.44.0",
