@@ -1085,6 +1085,55 @@ These are first-party library crates in the Cargo workspace. They are not extern
 
 ---
 
+## ADR-009: Compiled World Model — The Codex
+
+**Status:** Accepted (2026-07-03). Schema landed in PR-A2a; behaviour lands
+across the A2b–C2 series. Full design:
+`docs/superpowers/specs/2026-07-03-codex-compiled-world-model-design.md`.
+
+### Context
+
+Chronacle answered every question by re-deriving from raw chunks plus thin
+entity summaries: no durable compiled knowledge, no write-back of durable
+results, no linting, and no compiled rules layer (the LLM Wiki gap).
+
+### Decision
+
+A compiled layer — the **Codex** — sits between extraction and answering:
+
+- **Setting articles live on the entity tables** as machine-owned fields
+  (`codex_article`, `codex_compiled_at`, `codex_stale`, `codex_sources`).
+  User `summary`/`notes` are never machine-overwritten.
+- **Rules are a separate aggregate**, `rule_entry`, collection-scoped, with
+  a closed category enum (`mechanic`, `ability`, `state`, `procedure`,
+  `resource`, `statistic`, `entry`), compiler-owned body/page-refs and a
+  GM-owned `notes` field. Corrections go through "redo with objections".
+- **Write-back is a review queue** (`codex_proposal`): chat answers and
+  session notes propose changes; nothing mutates the compiled layer
+  without explicit accept.
+- **Compilation is manual with staleness markers** — never automatic.
+- **Reference rules are enforced**: content of a campaign-bound collection
+  may reference collections its owner campaign subscribes to; content of a
+  regular collection may reference only that same collection. Enforced at
+  relation write time, at compile-provenance time, and by lint pass.
+- Retrieval consumes compiled layers first: RULES → CODEX → ENTITIES →
+  CHUNKS block ordering (lands in PR-B3).
+- Everything compiler-owned is derived state, recompilable from chunks +
+  accepted proposals + stored objections — the layer's core safety
+  property.
+
+### Consequences
+
+- Positive: durable, citable, incrementally-maintained knowledge; rules
+  and setting stay separate in the domain model, retrieval, and UX.
+- Negative: LLM compile cost (mitigated: manual trigger + staleness
+  increments); entity embeddings change semantics once articles are
+  folded in (accepted — strictly richer signal, same embed model).
+- The `codex_service` lives in `chronacle-extraction` (same dependency
+  shape as extraction); extracting a dedicated crate later is mechanical.
+
+---
+
 ## ADR-010: Campaign-owned collections
 
 **Status:** Accepted (PR-A1a).
