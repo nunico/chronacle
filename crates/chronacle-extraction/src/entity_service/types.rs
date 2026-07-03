@@ -22,6 +22,8 @@ pub enum EntityError {
     Validation { field: String, message: String },
     #[error("Database error: {message}")]
     Database { message: String },
+    #[error("Scope violation: {from} may not reference {to} (see reference rules, ADR-009)")]
+    ScopeViolation { from: String, to: String },
 }
 
 // ── Entity kind ──────────────────────────────────────────────────────────────
