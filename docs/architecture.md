@@ -1138,8 +1138,8 @@ A compiled layer — the **Codex** — sits between extraction and answering:
 
 **Status:** Accepted (PR-A1a).
 
-Companion ADR-009 (Compiled World Model — LLM Wiki) is planned for A2 and
-introduces the wiki and rules aggregates that live *inside* an owned
+Companion ADR-009 (Compiled World Model — The Codex), accepted in PR-A2a,
+introduces the codex and rules aggregates that live *inside* an owned
 collection. ADR-010 is scoped to the collection-ownership plumbing only.
 
 ### Context
