@@ -2,7 +2,8 @@ import { test as base, createBdd } from 'playwright-bdd';
 import { installIpcMock } from '../ipc-mock';
 
 /** BDD test with the Tauri IPC mock auto-installed before every scenario. */
-export const test = base.extend<{ ipcMock: unknown }>({
+// eslint-disable-next-line @typescript-eslint/no-invalid-void-type
+export const test = base.extend<{ ipcMock: void }>({
   ipcMock: [
     async ({ page }, use) => {
       await installIpcMock(page);
