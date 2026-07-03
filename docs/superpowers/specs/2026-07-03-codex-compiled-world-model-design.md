@@ -385,7 +385,8 @@ external crates anywhere in the series, green CI before merge.
 
 | PR  | Branch                        | Content                                                                                     |
 | --- | ----------------------------- | ------------------------------------------------------------------------------------------- |
-| A1b | `feat/a1b-two-mode-delete-ui` | Frontend two-mode delete dialog; make `on_owned_collection` required; ADR-010 status note    |
+| A0  | `chore/a0-bdd-tooling`        | `playwright-bdd` + `@cucumber/cucumber` devDeps; `tests/e2e/features/` + `steps/` scaffolding; gitignore `.features-gen/`; one smoke `.feature` bound end-to-end; CI wiring; ADR-011 |
+| A1b | `feat/a1b-two-mode-delete-ui` | Frontend two-mode delete dialog; make `on_owned_collection` required; ADR-010 status note; A1b `.feature` |
 | A2a | `feat/a2a-codex-schema`       | Schema: entity codex fields ×8, `rule_entry`, `codex_proposal`, lint-kind docs; ADR-009      |
 | A2b | `feat/a2b-staleness-scope`    | Staleness producers (ingestion, extraction, entity edits); scope validation in `entity_service` with lint fallback on bulk paths |
 | B1a | `feat/b1a-setting-compile`    | `codex_service::compile_collection` (articles) + progress events + Tauri command             |
@@ -399,7 +400,8 @@ external crates anywhere in the series, green CI before merge.
 | C2a | `feat/c2a-lint-pass`          | Lint detectors (scope, wikilink, stale, duplicate) + manual pass command                     |
 | C2b | `feat/c2b-lint-ui`            | Maintenance inbox (findings tab): per-kind resolve actions                                   |
 
-Dependency chain: A1b is independent. A2a → A2b → {B1a → B1b, B2a → B2b} →
+Dependency chain: A0 first (every later PR ships `.feature` scenarios
+against its tooling). A1b is otherwise independent. A2a → A2b → {B1a → B1b, B2a → B2b} →
 {B3a, B3b} → {C1a → C1b, C2a → C2b}. B1 and B2 can proceed in parallel
 after A2b; C1 and C2 in parallel after B3.
 
@@ -410,6 +412,15 @@ player-safe export gated on Phase-3 AI-detected GM-secret flags. Planned
 when the C series has landed and ADR-008 implementation starts.
 
 ## BDD scenarios (acceptance criteria per series)
+
+**These scenarios are executable, not prose** (ADR-011). Each series' PRs
+ship them as Cucumber `.feature` files under
+`apps/desktop/tests/e2e/features/`, bound by `playwright-bdd` step
+definitions to the backend Playwright E2E suite. The Given/When/Then text
+below transfers into the feature files verbatim (tightened into strict
+Gherkin syntax during each series' planning). Scenarios that require a live
+LLM bind their steps against the mock/fixture LLM layer, consistent with the
+existing backend E2E approach.
 
 **A1b**
 
@@ -495,15 +506,17 @@ when the C series has landed and ADR-008 implementation starts.
   tab grouping + redo dialog; article section renders markdown and never
   offers editing; inbox diff + accept/reject; delete-campaign two-mode
   dialog.
-- **E2E (Playwright backend, every PR):** ingest fixture → extract →
-  compile → ask rules question → assert cited answer; save-to-codex →
-  accept → recompiled answer reflects it.
+- **E2E (Playwright backend, every PR):** the `.feature` scenarios above,
+  executed via `playwright-bdd` (ADR-011), plus flow tests: ingest fixture →
+  extract → compile → ask rules question → assert cited answer;
+  save-to-codex → accept → recompiled answer reflects it.
 
 ## Documentation plan
 
 | Doc                                            | Change                                                                                       | When    |
 | ---------------------------------------------- | --------------------------------------------------------------------------------------------- | ------- |
 | `docs/architecture.md`                         | New **ADR-009: Compiled World Model (Codex)**; data-model section (+codex fields, `rule_entry`, `codex_proposal`); RAG pipeline section (block ordering); phases table | A2a (ADR), then per-series updates |
+| `docs/architecture.md` ADR-011                 | Executable BDD acceptance specs (Cucumber via `playwright-bdd`) — written with this spec; tooling lands in A0 | done    |
 | `docs/architecture.md` ADR-010                 | One-line status note when A1b lands (parameter now required)                                   | A1b     |
 | `docs/superpowers/specs/` (this file)          | The approved design                                                                            | now     |
 | `docs/superpowers/plans/`                      | One plan doc per series (`a2-…`, `b1-…`, `b2-…`, `b3-…`, `c1-…`, `c2-…`), written just-in-time before each series starts | rolling |
