@@ -307,8 +307,14 @@ export async function createCampaign(name: string, system: string): Promise<Camp
   });
 }
 
-export async function deleteCampaign(id: string): Promise<void> {
-  return invoke('delete_campaign', { id });
+/** What happens to a campaign's owned collection when the campaign is deleted. */
+export type OnOwnedCollection = 'delete' | 'convert_to_regular';
+
+export async function deleteCampaign(
+  id: string,
+  onOwnedCollection: OnOwnedCollection,
+): Promise<void> {
+  return invoke('delete_campaign', { id, onOwnedCollection });
 }
 
 // MRU collection tracking (persisted in localStorage)

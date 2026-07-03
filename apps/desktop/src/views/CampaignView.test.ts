@@ -161,4 +161,47 @@ describe('CampaignView', () => {
       expect(setActive).toHaveBeenCalledWith('new-1');
     });
   });
+
+  async function openDeleteDialog() {
+    render(CampaignView, {
+      props: {
+        activeCampaignId: 'camp-1',
+        campaigns: [camp('camp-1', 'Hollow Reach', '5e')],
+        setActiveCampaignId: vi.fn(),
+        onOpenUpload: vi.fn(),
+        refreshCampaigns: vi.fn(),
+      },
+    });
+    await fireEvent.click(screen.getByText(/Manage campaigns/));
+    await fireEvent.click(screen.getByTitle('Delete'));
+    return screen.findByRole('dialog', { name: /delete campaign/i });
+  }
+
+  it('delete opens a dialog offering cascade and convert', async () => {
+    await openDeleteDialog();
+    expect(screen.getByText('Delete campaign and its notes')).toBeTruthy();
+    expect(screen.getByText('Keep notes as a regular collection')).toBeTruthy();
+    expect(m.deleteCampaign).not.toHaveBeenCalled();
+  });
+
+  it('cascade choice forwards mode "delete"', async () => {
+    await openDeleteDialog();
+    await fireEvent.click(screen.getByText('Delete campaign and its notes'));
+    await waitFor(() => expect(m.deleteCampaign).toHaveBeenCalledWith('camp-1', 'delete'));
+  });
+
+  it('keep-notes choice forwards mode "convert_to_regular"', async () => {
+    await openDeleteDialog();
+    await fireEvent.click(screen.getByText('Keep notes as a regular collection'));
+    await waitFor(() =>
+      expect(m.deleteCampaign).toHaveBeenCalledWith('camp-1', 'convert_to_regular'),
+    );
+  });
+
+  it('cancel closes the dialog without deleting', async () => {
+    await openDeleteDialog();
+    await fireEvent.click(screen.getByText('Cancel'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(m.deleteCampaign).not.toHaveBeenCalled();
+  });
 });
