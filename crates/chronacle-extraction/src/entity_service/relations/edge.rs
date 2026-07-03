@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
 use super::super::EntityError;
+use super::scope;
 
 /// True when `id` is a safe SurrealDB record-id fragment (alphanumeric plus
 /// `_`/`-`). Record ids are interpolated into query strings in a few places
@@ -37,6 +38,7 @@ pub async fn relate<C: surrealdb::Connection>(
             message: "Invalid entity id".to_string(),
         });
     }
+    scope::check_scope(db, from_kind, from_id, to_kind, to_id).await?;
     // Delete any pre-existing edge for this (from, to, rel_type) triple so that
     // RELATE does not create a duplicate on repeated calls. Mirrors the
     // delete-then-relate pattern in `wikilink::upsert_mentioned_edges`.

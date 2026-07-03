@@ -4,6 +4,7 @@
 pub(super) mod edge;
 mod flat;
 mod graph;
+mod scope;
 
 pub use edge::{relate, relate_collapsing};
 pub use flat::get_entity_relations;
@@ -12,3 +13,7 @@ pub use graph::get_entity_graph;
 #[cfg(test)]
 #[path = "relations_tests.rs"]
 mod relations_tests;
+
+#[cfg(test)]
+#[path = "scope_tests.rs"]
+mod scope_tests;
