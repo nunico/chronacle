@@ -1077,6 +1077,7 @@ These are first-party library crates in the Cargo workspace. They are not extern
 | Unit / component tests | Vitest + `@testing-library/svelte`                                      |
 | API mocking in tests   | `msw` (Mock Service Worker) — intercepts Tauri IPC calls in the WebView |
 | E2E tests              | Playwright                                                              |
+| BDD acceptance specs   | `playwright-bdd` + `@cucumber/cucumber` (Gherkin `.feature` files) — ADR-011 |
 | Linting                | ESLint + `@typescript-eslint` + `eslint-plugin-svelte`                  |
 | Formatting             | Prettier + `prettier-plugin-svelte`                                     |
 | Pre-commit hooks       | lefthook                                                                |
@@ -1175,3 +1176,57 @@ Additive only: `002_wiki_layer.surql` adds the field, its index, and the
 idempotent (matching the pattern established by `001_base_schema.surql`).
 Pre-A1a databases pick up the field with `owner_campaign = NONE`
 everywhere — no backfill needed.
+
+---
+
+## ADR-011: Executable BDD Acceptance Specs — Cucumber/Gherkin via playwright-bdd
+
+**Status:** Accepted (2026-07-03). Tooling lands in the Codex series' PR A0.
+
+### Context
+
+Design specs under `docs/superpowers/specs/` express user-visible behaviour
+as BDD scenarios (Given/When/Then), but those scenarios are prose: nothing
+executes them, so they drift from the implementation the moment a PR merges.
+The E2E layer (backend Playwright suite, ADR-006) tests real behaviour but is
+organised around code paths, not the acceptance criteria the specs promised.
+
+### Decision
+
+BDD scenarios become **executable Cucumber specs** and are **mandatory for
+all future feature development**:
+
+- Scenarios live as Gherkin `.feature` files in
+  `apps/desktop/tests/e2e/features/`, one file per feature area.
+- Step definitions live in `apps/desktop/tests/e2e/backend/steps/`
+  (TypeScript), reusing the backend service-layer E2E harness.
+- **`playwright-bdd`** (with `@cucumber/cucumber` for Gherkin parsing)
+  generates Playwright test files from the features at test time into a
+  gitignored `.features-gen/` directory. The existing Playwright runner
+  stays the **single** E2E runner — same config, reporters, and CI job.
+- The backend E2E CI step runs the generated BDD specs alongside the
+  existing Playwright tests on every PR.
+- **Process rule:** every PR that adds or changes user-visible behaviour
+  must add or update `.feature` scenarios in the same PR. Design specs
+  author their acceptance criteria in Gherkin so scenarios transfer
+  verbatim from spec to `.feature` file.
+
+### Options Considered
+
+| Option                                        | Verdict                                                                                     |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `playwright-bdd` + `@cucumber/cucumber`       | **Chosen** — real Gherkin, one test runner, existing CI job unchanged                        |
+| Standalone `@cucumber/cucumber` runner        | Rejected — second test runner with its own config, reporting, and CI wiring to keep in sync |
+| Prose-only BDD in specs (status quo)          | Rejected — not executable; scenarios drift from implementation silently                     |
+
+### Consequences
+
+- **Positive.** Specs become regression tests; acceptance criteria cannot
+  silently rot. Reviewers check a PR against its `.feature` diff.
+- **Negative.** Two new npm devDependencies in `apps/desktop`
+  (`playwright-bdd`, `@cucumber/cucumber`) — recorded in the tooling table
+  per the dependency policy. Step-definition maintenance is a real cost;
+  mitigated by reusing the existing E2E harness helpers.
+- **Scope.** UI-level (tauri-driver) E2E is unaffected; features bind to
+  the backend service-layer suite. Rust unit/integration and Vitest layers
+  are unaffected (ADR-006 unchanged).

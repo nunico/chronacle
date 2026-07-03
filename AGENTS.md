@@ -44,7 +44,9 @@ chronacle/
 │       │   ├── tests/        # Rust integration tests + fixtures
 │       │   └── tauri.conf.json # Tauri app config
 │       ├── tests/e2e/        # end-to-end tests
+│       │   ├── features/     # Gherkin .feature acceptance specs (ADR-011)
 │       │   ├── backend/      # Playwright backend service-layer E2E (every PR)
+│       │   │   └── steps/    # playwright-bdd step definitions for features/
 │       │   └── ui/           # tauri-driver UI E2E (merge to main only)
 │       ├── package.json      # app frontend scripts + deps
 │       └── vite.config.ts    # Vite build config
@@ -113,6 +115,7 @@ Tests ship with every feature — never after.
 - **Integration:** `apps/desktop/src-tauri/tests/` dir. SurrealDB in-memory engine (`mem::Db`) per test — run schema setup, drop on completion. Test service layer directly, no HTTP layer. `tempfile::TempDir` for filesystem tests.
 - **Frontend:** Vitest + `@testing-library/svelte` under `apps/desktop/src/`. Backend mocked with `msw`.
 - **E2E:** Playwright at `apps/desktop/tests/e2e/backend/` (every PR); tauri-driver UI tests at `apps/desktop/tests/e2e/ui/` (merge to main only).
+- **Acceptance (BDD, mandatory — ADR-011):** every feature ships Gherkin scenarios in `apps/desktop/tests/e2e/features/*.feature`, executed by the backend Playwright suite via `playwright-bdd` step definitions in `tests/e2e/backend/steps/`. Design specs write acceptance criteria in Gherkin so scenarios transfer verbatim into `.feature` files. Generated `.features-gen/` output is gitignored — never edit or commit it.
 - **Fixtures:** `apps/desktop/src-tauri/tests/fixtures/pdfs/` (diverse suite: single-column, multi-column, tables, stat-block, scanned), `tests/fixtures/llm/*.json`, `tests/fixtures/db/*.surql`.
 
 ## Code style
@@ -153,6 +156,7 @@ Formatting and linting are enforced by tooling and run automatically via `leftho
 - Keep PRs scoped to one logical change; split unrelated refactors.
 - PR description must state: **what** changed, **why**, and **how it was tested** (commands run). Link the relevant `docs/superpowers/` plan or spec.
 - Tests ship in the same PR as the feature — never a follow-up (see Testing).
+- New or changed user-visible behaviour must add or update `.feature` acceptance scenarios in the same PR (ADR-011).
 - Green CI is required: backend Playwright E2E, unit/integration, lint, and `cargo deny check` all pass before merge.
 - New `Cargo.toml` dependencies require an ADR and an entry in the architecture doc's "Crate & Tool Summary" (see Hard constraints).
 
