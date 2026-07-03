@@ -44,6 +44,7 @@ pub async fn update<C: surrealdb::Connection>(
             character_class = $character_class,
             character_level = $character_level,
             status         = $status,
+            codex_stale    = true,
             updated_at     = time::now();
          SELECT *, {SELECT_SCOPE_ALIASES} FROM type::thing($table, $id)"
     );
