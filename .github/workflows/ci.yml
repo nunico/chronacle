@@ -93,6 +93,14 @@ jobs:
         working-directory: apps/desktop
         run: pnpm test --run
 
+      - name: Install Playwright browsers
+        working-directory: apps/desktop
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Backend E2E + BDD acceptance
+        working-directory: apps/desktop
+        run: pnpm run e2e:backend
+
   # ── Coverage + Build (merge to main only) ─────────────────────────
   coverage:
     if: github.ref == 'refs/heads/main'
