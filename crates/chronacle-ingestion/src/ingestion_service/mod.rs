@@ -167,6 +167,35 @@ async fn ingest_source_inner<C: Connection>(
         .await
         .map_err(|e| IngestionError::Db(e.to_string()))?;
 
+    mark_codex_stale_for_source(db, source_id).await?;
+
+    Ok(())
+}
+
+/// Mark the Codex stale for everything in this source's collection (ADR-009).
+///
+/// Entities get `codex_stale = true`; existing rule entries are marked stale
+/// when the source can contain rules (`rules` / `supplement`). This lives in
+/// the ingestion crate (not `codex_service`) because ingestion and extraction
+/// are sibling crates with no dependency edge; the query is small and its
+/// shape is documented in the codex spec.
+pub(crate) async fn mark_codex_stale_for_source<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    source_id: &str,
+) -> Result<(), IngestionError> {
+    db.query(
+        "LET $src = type::thing('source', $id);
+         LET $col = array::first((SELECT VALUE collection FROM source WHERE id = $src));
+         LET $stype = array::first((SELECT VALUE source_type FROM source WHERE id = $src));
+         LET $ents = (SELECT VALUE out FROM in_collection WHERE in = $col);
+         UPDATE $ents SET codex_stale = true;
+         IF $stype IN ['rules', 'supplement'] THEN
+             (UPDATE rule_entry SET stale = true WHERE collection = $col)
+         END;",
+    )
+    .bind(("id", source_id.to_owned()))
+    .await
+    .map_err(|e| IngestionError::Db(format!("Failed to mark codex stale: {e}")))?;
     Ok(())
 }
 

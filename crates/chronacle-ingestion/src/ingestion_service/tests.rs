@@ -164,3 +164,54 @@ async fn get_source_info_not_found_returns_err() {
         "Got: {msg}"
     );
 }
+
+async fn setup_db() -> surrealdb::Surreal<surrealdb::engine::local::Db> {
+    let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+        .await
+        .unwrap();
+    db.use_ns("test").use_db("test").await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
+    db
+}
+
+#[derive(serde::Deserialize)]
+struct CountRow {
+    count: i64,
+}
+
+#[tokio::test]
+async fn ingest_completion_marks_collection_entities_and_rules_stale() {
+    let db = setup_db().await;
+    db.query(
+        "CREATE collection:`c1` SET name = 'Rules', description = NULL, \
+             created_at = time::now(), updated_at = time::now();
+         CREATE source:`s1` SET collection = collection:`c1`, campaign = NULL, \
+             filename = 'f.pdf', display_name = 'F', source_type = 'rules', \
+             page_count = 0, indexed_at = time::now(), index_status = 'done', \
+             embed_model = 'test';
+         CREATE npc:`n1` SET name = 'Mira';
+         RELATE collection:`c1`->in_collection->npc:`n1` SET created_at = time::now();
+         CREATE rule_entry SET collection = collection:`c1`, name = 'Initiative', \
+             category = 'mechanic', body = 'b', compiled_at = time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    super::mark_codex_stale_for_source(&db, "s1").await.unwrap();
+
+    let mut resp = db
+        .query("SELECT count() FROM npc WHERE codex_stale = true GROUP ALL")
+        .await
+        .unwrap();
+    let rows: Vec<CountRow> = resp.take(0).unwrap();
+    assert_eq!(rows.first().map(|r| r.count).unwrap_or(0), 1);
+
+    let mut resp2 = db
+        .query("SELECT count() FROM rule_entry WHERE stale = true GROUP ALL")
+        .await
+        .unwrap();
+    let rows2: Vec<CountRow> = resp2.take(0).unwrap();
+    assert_eq!(rows2.first().map(|r| r.count).unwrap_or(0), 1);
+}
