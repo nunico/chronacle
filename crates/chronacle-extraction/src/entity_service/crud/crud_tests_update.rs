@@ -140,5 +140,8 @@ async fn update_marks_codex_stale() {
         .await
         .unwrap();
     let rows: Vec<Row> = resp.take(0).unwrap();
-    assert!(rows[0].codex_stale, "user edits must mark the article stale");
+    assert!(
+        rows[0].codex_stale,
+        "user edits must mark the article stale"
+    );
 }
