@@ -181,6 +181,12 @@
   );
 </script>
 
+<svelte:window
+  onkeydown={(e) => {
+    if (e.key === 'Escape' && deleteTarget) deleteTarget = null;
+  }}
+/>
+
 <div class="scroll">
   <div class="cv">
     {#if error}
@@ -376,8 +382,8 @@
       >
         <h3>Delete "{deleteTarget.name}"?</h3>
         <p>
-          This campaign owns a collection holding its notes and entities. Choose what happens to
-          that collection.
+          If this campaign has its own collection of notes and entities, choose what happens to
+          it.
         </p>
         <div class="modal-actions">
           <button class="m-btn danger" onclick={() => confirmDelete('delete')}>

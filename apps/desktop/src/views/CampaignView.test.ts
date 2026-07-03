@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/svelte';
 import CampaignView from './CampaignView.svelte';
 import * as commands from '../lib/commands';
 
@@ -173,7 +173,11 @@ describe('CampaignView', () => {
       },
     });
     await fireEvent.click(screen.getByText(/Manage campaigns/));
-    await fireEvent.click(screen.getByTitle('Delete'));
+    const row = screen
+      .getAllByText('Hollow Reach')
+      .map((el) => el.closest('.manage-row'))
+      .find((el): el is HTMLElement => el !== null) as HTMLElement;
+    await fireEvent.click(within(row).getByTitle('Delete'));
     return screen.findByRole('dialog', { name: /delete campaign/i });
   }
 
@@ -201,6 +205,13 @@ describe('CampaignView', () => {
   it('cancel closes the dialog without deleting', async () => {
     await openDeleteDialog();
     await fireEvent.click(screen.getByText('Cancel'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(m.deleteCampaign).not.toHaveBeenCalled();
+  });
+
+  it('escape closes the dialog without deleting', async () => {
+    await openDeleteDialog();
+    await fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(m.deleteCampaign).not.toHaveBeenCalled();
   });
