@@ -105,6 +105,8 @@ pub async fn relate_collapsing<C: surrealdb::Connection>(
         });
     }
 
+    scope::check_scope(db, from_kind, from_id, to_kind, to_id).await?;
+
     let new_tier = rel_specificity(rel_type);
 
     // Existing edge rel_types between the unordered pair (both directions).
