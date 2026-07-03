@@ -100,3 +100,45 @@ async fn update_clears_nullable_event_fields() {
     assert_eq!(updated.era, None);
     assert_eq!(updated.sequence_index, None);
 }
+
+#[tokio::test]
+async fn update_marks_codex_stale() {
+    let db = setup_db().await;
+    let node = create(
+        &db,
+        Some("camp1"),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Mira".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    update(
+        &db,
+        &node.id,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Mira".to_string(),
+            notes: Some("She now runs the Gilded Flagon.".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        codex_stale: bool,
+    }
+    let mut resp = db
+        .query("SELECT codex_stale FROM type::thing('npc', $id)")
+        .bind(("id", node.id.clone()))
+        .await
+        .unwrap();
+    let rows: Vec<Row> = resp.take(0).unwrap();
+    assert!(rows[0].codex_stale, "user edits must mark the article stale");
+}
