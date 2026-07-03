@@ -1141,10 +1141,10 @@ preserved by convert — they now legitimately connect two shareable
 collections. Regular collections the campaign was subscribed to are never
 touched.
 
-The Tauri command layer surfaces this as an `on_owned_collection` parameter
-on `delete_campaign`. In PR-A1a the parameter is temporarily optional and
-defaults to `"delete"` so the pre-A1a frontend keeps working; PR-A1b makes
-it required once the two-mode confirmation UI lands.
+The Tauri command layer surfaces this as a **required** `on_owned_collection`
+parameter on `delete_campaign` (made required in PR-A1b, 2026-07, together
+with the two-mode confirmation dialog). Callers must pass `"delete"` or
+`"convert_to_regular"`; omitting it is a command error.
 
 ### `lint_finding` table
 
