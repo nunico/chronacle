@@ -266,8 +266,24 @@ pub async fn compile_collection<C: Connection>(
             compiled,
             total,
         });
-        if compile_one(db, llm, embed, vector_store, node, &scope).await? {
-            compiled += 1;
+        // Best-effort: a failed compile must not abort the whole run.
+        match compile_one(db, llm, embed, vector_store, node, &scope).await {
+            Ok(true) => {
+                compiled += 1;
+                on_progress(CompileProgress {
+                    phase: CodexPhase::Embedding,
+                    detail: format!("Embedding {}", node.name),
+                    compiled,
+                    total,
+                });
+            }
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!(
+                    "codex: compile failed for {} ({}): {e}",
+                    node.name, node.kind
+                );
+            }
         }
     }
 

@@ -54,7 +54,9 @@ pub struct CompileProgress {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CompileResult {
     pub articles_compiled: usize,
-    /// Entities still needing compile after the per-run cap.
+    /// Entities still needing compile after the per-run cap. Counts entities
+    /// still flagged stale after the cap; entities skipped mid-run for lack
+    /// of passages are not re-counted here — the next run picks them up.
     pub remaining_stale: usize,
 }
 
