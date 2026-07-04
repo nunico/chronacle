@@ -36,3 +36,6 @@ pub use embedding_commands::*;
 
 pub mod custom_provider_commands;
 pub use custom_provider_commands::*;
+
+pub mod codex_commands;
+pub use codex_commands::*;

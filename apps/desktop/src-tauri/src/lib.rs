@@ -25,6 +25,8 @@ pub struct AppState {
     pub chat_task: tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
     /// Abort handle for the in-flight extraction task, if any (see `cancel_extraction`).
     pub extract_task: tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
+    /// Abort handle for the in-flight codex compile task, if any (see `cancel_compile`).
+    pub compile_task: tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
 }
 
 /// Locate the bundled pdfium dynamic library.
@@ -155,6 +157,7 @@ pub async fn run() {
         pdf_extractor,
         chat_task: tokio::sync::Mutex::new(None),
         extract_task: tokio::sync::Mutex::new(None),
+        compile_task: tokio::sync::Mutex::new(None),
     });
 
     tauri::Builder::default()
@@ -260,6 +263,10 @@ pub async fn run() {
             commands::extract_all_from_campaign,
             commands::cancel_extraction,
             commands::resync_wikilinks,
+            commands::compile_collection,
+            commands::compile_entity,
+            commands::get_codex_status,
+            commands::cancel_compile,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");

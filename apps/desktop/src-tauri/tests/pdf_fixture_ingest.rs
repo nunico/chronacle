@@ -84,6 +84,7 @@ async fn make_state(
         pdf_extractor,
         chat_task: tokio::sync::Mutex::new(None),
         extract_task: tokio::sync::Mutex::new(None),
+        compile_task: tokio::sync::Mutex::new(None),
     });
     (state, embedding_provider, vector_store)
 }
