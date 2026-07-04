@@ -268,7 +268,12 @@ describe('CampaignView', () => {
     m.getCodexStatus.mockResolvedValue({
       stale_entities: 1, total_entities: 1, rules_stale: 0, rule_entries: 0,
     });
-    m.compileCollection.mockResolvedValue({ articles_compiled: 1, remaining_stale: 0 });
+    m.compileCollection.mockResolvedValue({
+      articles_compiled: 1,
+      remaining_stale: 0,
+      entries_created: 0,
+      entries_updated: 0,
+    });
     renderView();
     await fireEvent.click(await screen.findByLabelText('Compile World Guide'));
     await waitFor(() => expect(m.compileCollection).toHaveBeenCalledWith('c-1'));

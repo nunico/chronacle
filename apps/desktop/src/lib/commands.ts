@@ -690,6 +690,8 @@ export interface CodexStatus {
 export interface CompileSummary {
   articles_compiled: number;
   remaining_stale: number;
+  entries_created: number;
+  entries_updated: number;
 }
 
 /** Compile codex articles for every stale entity in a collection. Progress arrives via the `codex-progress` Tauri event. */
@@ -710,4 +712,37 @@ export async function cancelCompile(): Promise<void> {
 /** Codex staleness/coverage snapshot for a collection. */
 export async function getCodexStatus(collectionId: string): Promise<CodexStatus> {
   return invoke<CodexStatus>('get_codex_status', { collectionId });
+}
+
+// ── Rules Codex Types & Commands ───────────────────────────────────────────
+
+export interface RulePageRef {
+  source_name: string;
+  page_start: number;
+  page_end: number;
+}
+
+export interface RuleEntry {
+  id: string;
+  name: string;
+  category: string;
+  body: string;
+  notes: string | null;
+  page_refs: RulePageRef[];
+  stale: boolean;
+}
+
+/** Retrieve all compiled rule entries for a collection. */
+export async function getRuleEntries(collectionId: string): Promise<RuleEntry[]> {
+  return invoke<RuleEntry[]>('get_rule_entries', { collectionId });
+}
+
+/** Update a rule entry's freeform GM notes. */
+export async function updateRuleNotes(id: string, notes: string | null): Promise<void> {
+  return invoke('update_rule_notes', { id, notes });
+}
+
+/** Regenerate a single rule entry honoring a new GM objection. */
+export async function redoRuleEntry(id: string, objection: string): Promise<void> {
+  return invoke('redo_rule_entry', { id, objection });
 }
