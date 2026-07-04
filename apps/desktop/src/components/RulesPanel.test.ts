@@ -77,4 +77,48 @@ describe('RulesPanel', () => {
     await fireEvent.blur(notes);
     expect(m.updateRuleNotes).not.toHaveBeenCalled();
   });
+
+  it('keeps the notes baseline fresh after a save, so clearing then blurring saves null', async () => {
+    m.getRuleEntries.mockResolvedValue([rule('r1', 'Initiative', 'mechanic')]);
+    render(RulesPanel, { props: { collectionId: 'c-1' } });
+    await fireEvent.click(await screen.findByText('Initiative'));
+    const notes = screen.getByLabelText('Table notes');
+
+    await fireEvent.input(notes, { target: { value: 'house rule' } });
+    await fireEvent.blur(notes);
+    await waitFor(() => expect(m.updateRuleNotes).toHaveBeenCalledWith('r1', 'house rule'));
+
+    await fireEvent.input(notes, { target: { value: '' } });
+    await fireEvent.blur(notes);
+    await waitFor(() => expect(m.updateRuleNotes).toHaveBeenCalledWith('r1', null));
+    expect(m.updateRuleNotes).toHaveBeenCalledTimes(2);
+  });
+
+  it('collapses page refs to a single page when start equals end', async () => {
+    m.getRuleEntries.mockResolvedValue([
+      {
+        ...rule('r1', 'Initiative', 'mechanic'),
+        page_refs: [{ source_name: 'PHB', page_start: 42, page_end: 42 }],
+      },
+    ]);
+    render(RulesPanel, { props: { collectionId: 'c-1' } });
+    await fireEvent.click(await screen.findByText('Initiative'));
+    expect(screen.getByText(/PHB p\.42/)).toBeTruthy();
+    expect(screen.queryByText(/p\.42-42/)).toBeNull();
+  });
+
+  it('shows the redo error and keeps the dialog open when redo fails', async () => {
+    m.getRuleEntries.mockResolvedValue([rule('r1', 'Initiative', 'mechanic')]);
+    m.redoRuleEntry.mockRejectedValue(new Error('redo boom'));
+    render(RulesPanel, { props: { collectionId: 'c-1' } });
+    await fireEvent.click(await screen.findByText('Initiative'));
+    await fireEvent.click(screen.getByText(/Redo with objections/));
+    await fireEvent.input(screen.getByLabelText('Objection'), {
+      target: { value: 'range is wrong' },
+    });
+    await fireEvent.click(screen.getByText('Submit'));
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(screen.getByText(/Failed to redo: Error: redo boom/)).toBeTruthy();
+    expect(screen.getByLabelText('Objection')).toBeTruthy();
+  });
 });
