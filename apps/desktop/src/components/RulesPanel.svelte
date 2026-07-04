@@ -87,7 +87,9 @@
   async function handleNotesBlur(entry: RuleEntry) {
     const value = notesDraft[entry.id] ?? '';
     if (value === (entry.notes ?? '')) return;
-    await updateRuleNotes(entry.id, value.length > 0 ? value : null);
+    const saved = value.length > 0 ? value : null;
+    await updateRuleNotes(entry.id, saved);
+    entry.notes = saved;
   }
 
   function openRedo(entry: RuleEntry) {
@@ -151,7 +153,10 @@
                   {#if entry.page_refs.length > 0}
                     <p class="page-refs">
                       {#each entry.page_refs as ref, i (i)}
-                        {i > 0 ? ' · ' : ''}{ref.source_name} p.{ref.page_start}-{ref.page_end}
+                        {i > 0 ? ' · ' : ''}{ref.source_name} p.{ref.page_start}{ref.page_start ===
+                        ref.page_end
+                          ? ''
+                          : `-${ref.page_end}`}
                       {/each}
                     </p>
                   {/if}
