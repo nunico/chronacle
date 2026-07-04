@@ -259,4 +259,26 @@ describe('EntityManager', () => {
       expect(commands.compileEntity).toHaveBeenCalledWith('npc', 'npc1'),
     );
   });
+
+  it('shows no-context toast when recompile finds no source', async () => {
+    const node: GraphNode = {
+      ...mockNpc(),
+      codex_article: 'Some prior article.',
+      codex_stale: false,
+    };
+    vi.mocked(commands.getEntities).mockResolvedValue([node]);
+    vi.mocked(commands.compileEntity).mockResolvedValue(false);
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
+    await waitFor(() => expect(screen.getByText('Torvin')).toBeTruthy());
+    await fireEvent.click(screen.getByText('Torvin'));
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Recompile article' })).toBeTruthy(),
+    );
+    await fireEvent.click(screen.getByRole('button', { name: 'Recompile article' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('No source context found — article unchanged')).toBeTruthy(),
+    );
+  });
 });
