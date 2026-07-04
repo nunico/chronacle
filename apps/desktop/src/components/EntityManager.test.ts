@@ -27,6 +27,7 @@ const mockNpc = (): GraphNode => ({
   session_id: null,
   player_name: null, character_class: null,
   character_level: null, status: null,
+  codex_article: null, codex_stale: null, codex_compiled_at: null,
 });
 
 describe('EntityManager', () => {

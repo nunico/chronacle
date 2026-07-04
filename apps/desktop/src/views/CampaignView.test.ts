@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/svelte';
 import CampaignView from './CampaignView.svelte';
 import * as commands from '../lib/commands';
+import type { Campaign } from '../lib/commands';
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+}));
 
 vi.mock('../lib/commands', () => ({
   getCollections: vi.fn().mockResolvedValue([]),
@@ -13,6 +18,9 @@ vi.mock('../lib/commands', () => ({
   createCampaign: vi.fn(),
   updateCampaign: vi.fn(),
   deleteCampaign: vi.fn(),
+  getCodexStatus: vi.fn(),
+  compileCollection: vi.fn(),
+  cancelCompile: vi.fn(),
 }));
 
 const m = vi.mocked(commands);
@@ -36,12 +44,39 @@ function src(id: string, name: string, status = 'done') {
   };
 }
 
+function renderView(
+  overrides: Partial<{
+    activeCampaignId: string | null;
+    campaigns: Campaign[];
+    setActiveCampaignId: (id: string | null) => void;
+    onOpenUpload: (collectionId: string) => void;
+    refreshCampaigns: () => Promise<void>;
+  }> = {},
+) {
+  return render(CampaignView, {
+    props: {
+      activeCampaignId: 'camp-1',
+      campaigns: [camp('camp-1', 'Reach')],
+      setActiveCampaignId: vi.fn(),
+      onOpenUpload: vi.fn(),
+      refreshCampaigns: vi.fn(),
+      ...overrides,
+    },
+  });
+}
+
 describe('CampaignView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     m.getCollections.mockResolvedValue([]);
     m.getCampaignCollections.mockResolvedValue([]);
     m.getSources.mockResolvedValue([]);
+    m.getCodexStatus.mockResolvedValue({
+      stale_entities: 0,
+      total_entities: 0,
+      rules_stale: 0,
+      rule_entries: 0,
+    });
   });
 
   it('renders the active campaign name in the hero', async () => {
@@ -113,7 +148,7 @@ describe('CampaignView', () => {
     });
 
     // Click the collection header to expand
-    const head = await screen.findByRole('button', { name: /Rules/ });
+    const head = await screen.findByRole('button', { name: /^Rules/ });
     await fireEvent.click(head);
 
     // Sources are listed, and Add book is reachable
@@ -214,5 +249,28 @@ describe('CampaignView', () => {
     await fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(m.deleteCampaign).not.toHaveBeenCalled();
+  });
+
+  it('shows a stale badge and compile button per collection', async () => {
+    m.getCollections.mockResolvedValue([col('c-1', 'World Guide')]);
+    m.getCampaignCollections.mockResolvedValue([col('c-1', 'World Guide')]);
+    m.getCodexStatus.mockResolvedValue({
+      stale_entities: 12, total_entities: 40, rules_stale: 0, rule_entries: 0,
+    });
+    renderView();
+    await waitFor(() => expect(screen.getByText('12 stale')).toBeTruthy());
+    expect(screen.getByLabelText('Compile World Guide')).toBeTruthy();
+  });
+
+  it('compile button invokes compileCollection and refreshes status', async () => {
+    m.getCollections.mockResolvedValue([col('c-1', 'World Guide')]);
+    m.getCampaignCollections.mockResolvedValue([col('c-1', 'World Guide')]);
+    m.getCodexStatus.mockResolvedValue({
+      stale_entities: 1, total_entities: 1, rules_stale: 0, rule_entries: 0,
+    });
+    m.compileCollection.mockResolvedValue({ articles_compiled: 1, remaining_stale: 0 });
+    renderView();
+    await fireEvent.click(await screen.findByLabelText('Compile World Guide'));
+    await waitFor(() => expect(m.compileCollection).toHaveBeenCalledWith('c-1'));
   });
 });

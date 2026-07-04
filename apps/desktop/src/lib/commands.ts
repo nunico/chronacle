@@ -444,6 +444,10 @@ export interface GraphNode {
   character_class: string | null;
   character_level: number | null; // Rust i64; safe as JS number for level 1-20
   status: 'active' | 'retired' | 'deceased' | 'missing' | 'on_hiatus' | null;
+  // codex fields
+  codex_article: string | null;
+  codex_stale: boolean | null;
+  codex_compiled_at: string | null;
 }
 
 export interface GraphNodeRef {
@@ -663,4 +667,47 @@ export async function cancelExtraction(): Promise<void> {
  */
 export async function resyncWikilinks(): Promise<number> {
   return invoke<number>('resync_wikilinks');
+}
+
+// ── Codex ─────────────────────────────────────────────────────────────────────
+
+export type CodexPhase = 'resolving' | 'compiling' | 'embedding' | 'done' | 'empty';
+
+export interface CompileProgress {
+  phase: CodexPhase;
+  detail: string;
+  compiled: number;
+  total: number;
+}
+
+export interface CodexStatus {
+  stale_entities: number;
+  total_entities: number;
+  rules_stale: number;
+  rule_entries: number;
+}
+
+export interface CompileSummary {
+  articles_compiled: number;
+  remaining_stale: number;
+}
+
+/** Compile codex articles for every stale entity in a collection. Progress arrives via the `codex-progress` Tauri event. */
+export async function compileCollection(collectionId: string): Promise<CompileSummary> {
+  return invoke<CompileSummary>('compile_collection', { collectionId });
+}
+
+/** Compile a single entity's codex article. Returns false if no context was found (article left unchanged). */
+export async function compileEntity(kind: string, id: string): Promise<boolean> {
+  return invoke<boolean>('compile_entity', { kind, id });
+}
+
+/** Abort the in-flight codex compile, if any. */
+export async function cancelCompile(): Promise<void> {
+  return invoke('cancel_compile');
+}
+
+/** Codex staleness/coverage snapshot for a collection. */
+export async function getCodexStatus(collectionId: string): Promise<CodexStatus> {
+  return invoke<CodexStatus>('get_codex_status', { collectionId });
 }

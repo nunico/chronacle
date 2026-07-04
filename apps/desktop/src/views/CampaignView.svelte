@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import Icon from '../components/Icon.svelte';
   import {
     getCollections,
@@ -11,10 +12,15 @@
     createCampaign,
     updateCampaign,
     deleteCampaign,
+    getCodexStatus,
+    compileCollection,
+    cancelCompile,
     type Collection,
     type Campaign,
     type Source,
     type OnOwnedCollection,
+    type CodexStatus,
+    type CompileProgress,
   } from '../lib/commands';
   import { collectionIcon } from './collection-icons';
   import EntityManager from '../components/EntityManager.svelte';
@@ -40,6 +46,11 @@
   let expanded = new SvelteSet<string>();
   let error = $state('');
 
+  let codexStatusByCol = new SvelteMap<string, CodexStatus>();
+  let compilingCol = $state<string | null>(null);
+  let compileDetail = $state('');
+  let unlistenCodex: UnlistenFn | null = null;
+
   let manageOpen = $state(false);
   let newName = $state('');
   let newSystem = $state('');
@@ -57,6 +68,14 @@
       error = String(e);
     }
     await refreshSubscribed();
+    unlistenCodex = await listen<CompileProgress>('codex-progress', (event) => {
+      if (!compilingCol) return;
+      compileDetail = event.payload.detail;
+    });
+  });
+
+  onDestroy(() => {
+    if (unlistenCodex) unlistenCodex();
   });
 
   $effect(() => {
@@ -71,8 +90,42 @@
     }
     try {
       subscribed = await getCampaignCollections(activeCampaignId);
+      await refreshCodexStatuses();
     } catch (e) {
       error = String(e);
+    }
+  }
+
+  async function refreshCodexStatuses() {
+    for (const c of subscribed) {
+      try {
+        codexStatusByCol.set(c.id, await getCodexStatus(c.id));
+      } catch (e) {
+        error = String(e);
+      }
+    }
+  }
+
+  async function toggleCompile(c: Collection) {
+    if (compilingCol === c.id) {
+      try {
+        await cancelCompile();
+      } catch (e) {
+        error = String(e);
+      }
+      return;
+    }
+    error = '';
+    compilingCol = c.id;
+    compileDetail = '';
+    try {
+      await compileCollection(c.id);
+      codexStatusByCol.set(c.id, await getCodexStatus(c.id));
+    } catch (e) {
+      error = String(e);
+    } finally {
+      compilingCol = null;
+      compileDetail = '';
     }
   }
 
@@ -295,8 +348,21 @@
         {@const on = isSubscribed(c.id)}
         {@const isOpen = expanded.has(c.id)}
         {@const list = sourcesByCol.get(c.id) ?? []}
+        {@const codexStatus = codexStatusByCol.get(c.id)}
+        {@const compiling = compilingCol === c.id}
         <div class="coll" class:on>
-          <button class="coll-head" onclick={() => toggleExpand(c)}>
+          <div
+            class="coll-head"
+            role="button"
+            tabindex="0"
+            onclick={() => toggleExpand(c)}
+            onkeydown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggleExpand(c);
+              }
+            }}
+          >
             <span class="coll-ic"><Icon name={collectionIcon(c.name)} size={18} /></span>
             <span class="coll-text">
               <span class="nm">{c.name}</span>
@@ -311,6 +377,24 @@
                 {/if}
               </span>
             </span>
+            {#if on && codexStatus && codexStatus.stale_entities > 0}
+              <span class="codex-badge">{codexStatus.stale_entities} stale</span>
+            {/if}
+            {#if on}
+              <button
+                class="m-btn compile-btn"
+                aria-label="{compiling ? 'Cancel' : 'Compile'} {c.name}"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  toggleCompile(c);
+                }}
+                onkeydown={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                {compiling ? 'Cancel' : 'Compile'}
+              </button>
+            {/if}
             <span
               class="sub-toggle"
               class:on
@@ -323,6 +407,7 @@
                 toggleSubscribe(c);
               }}
               onkeydown={(e) => {
+                e.stopPropagation();
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   toggleSubscribe(c);
@@ -332,7 +417,10 @@
               <span class="knob"></span>
             </span>
             <Icon name={isOpen ? 'chevron-up' : 'chevron-down'} size={16} />
-          </button>
+          </div>
+          {#if compiling}
+            <div class="codex-progress">{compileDetail || 'Compiling…'}</div>
+          {/if}
           {#if isOpen}
             <div class="books">
               {#each list as s (s.id)}
@@ -644,6 +732,7 @@
     background: none;
     border: 0;
     text-align: left;
+    cursor: pointer;
   }
   .coll-ic {
     color: var(--violet-300);
@@ -660,6 +749,26 @@
     font-size: 14px;
   }
   .coll-text .ct {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--fg-3);
+  }
+  .codex-badge {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: var(--r-full);
+    background: var(--warning-bg);
+    color: var(--warning);
+    flex: none;
+  }
+  .compile-btn {
+    flex: none;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+  .codex-progress {
+    padding: 0 12px 8px;
     font-family: var(--font-mono);
     font-size: 11.5px;
     color: var(--fg-3);
