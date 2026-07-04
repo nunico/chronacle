@@ -5,6 +5,10 @@
 
 use surrealdb::Connection;
 
+pub mod status;
+
+pub use status::{codex_status, CodexStatus};
+
 /// Mark one entity's codex article as stale (needs recompilation).
 ///
 /// Producers: extraction touching an entity, user edits to summary/notes,
