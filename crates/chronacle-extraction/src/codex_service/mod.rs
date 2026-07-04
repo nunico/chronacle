@@ -7,16 +7,20 @@ use surrealdb::Connection;
 
 mod compile;
 mod prompts;
+mod rules;
 pub mod status;
 
 #[cfg(test)]
 mod compile_tests;
+#[cfg(test)]
+mod rules_tests;
 
 // Re-exported for future callers (e.g. a later PR's per-field re-embed
 // trigger); not yet consumed outside `compile.rs` itself.
 #[allow(unused_imports)]
 pub(crate) use compile::embed_entity_with_article;
 pub use compile::{compile_collection, compile_entity};
+pub use rules::{compile_rules, list_rule_entries, redo_rule_entry, update_rule_notes};
 pub use status::{codex_status, CodexStatus};
 
 /// Errors from codex compilation.
@@ -62,6 +66,50 @@ pub struct CompileResult {
 
 /// Per-run cap on compiled entities (cost control; mirrors MAX_ENRICH).
 pub const MAX_COMPILE_PER_RUN: usize = 50;
+
+/// Result of a rules-compile run.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RulesCompileResult {
+    pub entries_created: usize,
+    pub entries_updated: usize,
+    /// Batches left over after the per-run cap; the next run picks them up.
+    pub remaining_batches: usize,
+}
+
+/// Per-run cap on labeled-chunk batches sent to the LLM (cost control).
+pub const MAX_RULE_BATCHES_PER_RUN: usize = 40;
+
+/// A page reference into a source document, attached to a compiled rule entry.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RulePageRef {
+    pub source_name: String,
+    pub page_start: i64,
+    pub page_end: i64,
+}
+
+/// A compiled rules-codex entry (a distilled, categorized rule).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RuleEntry {
+    pub id: String,
+    pub name: String,
+    pub category: String,
+    pub body: String,
+    pub notes: Option<String>,
+    pub page_refs: Vec<RulePageRef>,
+    pub stale: bool,
+}
+
+/// Rule categories accepted by the `rule_entry.category` schema ASSERT
+/// (`002_wiki_layer.surql`); anything else falls back to `"entry"`.
+pub(crate) const RULE_CATEGORIES: [&str; 7] = [
+    "mechanic",
+    "ability",
+    "state",
+    "procedure",
+    "resource",
+    "statistic",
+    "entry",
+];
 
 /// Mark one entity's codex article as stale (needs recompilation).
 ///
