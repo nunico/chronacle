@@ -5,11 +5,13 @@ import type { GraphNode } from '../lib/commands';
 
 vi.mock('../lib/commands', () => ({
   getEntities: vi.fn().mockResolvedValue([]),
+  getEntity: vi.fn(),
   createEntity: vi.fn(),
   updateEntity: vi.fn(),
   deleteEntity: vi.fn(),
   getSessions: vi.fn().mockResolvedValue([]),
   getEntityRelations: vi.fn().mockResolvedValue([]),
+  compileEntity: vi.fn(),
 }));
 
 import * as commands from '../lib/commands';
@@ -216,5 +218,45 @@ describe('EntityManager', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
     expect(commands.deleteEntity).not.toHaveBeenCalled();
+  });
+
+  it('renders the codex article read-only with a stale chip', async () => {
+    const node: GraphNode = {
+      ...mockNpc(),
+      codex_article: 'Mira runs the [[Gilded Flagon]].',
+      codex_stale: true,
+    };
+    vi.mocked(commands.getEntities).mockResolvedValue([node]);
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
+    await waitFor(() => expect(screen.getByText('Torvin')).toBeTruthy());
+    await fireEvent.click(screen.getByText('Torvin'));
+
+    await waitFor(() => expect(screen.getByText('Codex Article')).toBeTruthy());
+    expect(screen.getByText(/Mira runs the/)).toBeTruthy();
+    expect(screen.getByText('Stale')).toBeTruthy();
+    expect(screen.queryByDisplayValue(/Mira runs the/)).toBeNull();
+  });
+
+  it('recompile button calls compileEntity with kind and id', async () => {
+    const node: GraphNode = {
+      ...mockNpc(),
+      codex_article: 'Some prior article.',
+      codex_stale: false,
+    };
+    vi.mocked(commands.getEntities).mockResolvedValue([node]);
+    vi.mocked(commands.compileEntity).mockResolvedValue(true);
+    vi.mocked(commands.getEntity).mockResolvedValue(node);
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
+    await waitFor(() => expect(screen.getByText('Torvin')).toBeTruthy());
+    await fireEvent.click(screen.getByText('Torvin'));
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Recompile article' })).toBeTruthy(),
+    );
+    await fireEvent.click(screen.getByRole('button', { name: 'Recompile article' }));
+
+    await waitFor(() =>
+      expect(commands.compileEntity).toHaveBeenCalledWith('npc', 'npc1'),
+    );
   });
 });
