@@ -267,6 +267,9 @@ pub async fn run() {
             commands::compile_entity,
             commands::get_codex_status,
             commands::cancel_compile,
+            commands::get_rule_entries,
+            commands::update_rule_notes,
+            commands::redo_rule_entry,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");
