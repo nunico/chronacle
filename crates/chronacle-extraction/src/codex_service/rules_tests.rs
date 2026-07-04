@@ -1,5 +1,7 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use crate::codex_service::rules::compile_rules_with_cap;
 use crate::codex_service::{compile_rules, list_rule_entries, redo_rule_entry, update_rule_notes};
 use crate::extraction_service::test_support::{
     setup_db_with_collection, MockEmbeddingProvider, MockLlm,
@@ -290,6 +292,172 @@ async fn redo_rule_entry_stores_objection_and_regenerates() {
         .sources
         .iter()
         .any(|s| s["kind"] == "objection" && s["text"] == "the range is wrong"));
+}
+
+#[tokio::test]
+async fn rules_recompile_preserves_stored_objections_in_sources() {
+    let (db, col_id) = setup_db_with_collection().await;
+    seed_rules_chunk(
+        &db,
+        &col_id,
+        "chunk_rules5",
+        "src_rules5",
+        "Grappling requires a contested strength check against the target.",
+        50,
+        50,
+    )
+    .await;
+
+    let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+        response: r#"{"entries":[{"name":"Grappling","category":"mechanic",
+            "body":"A contested strength check resolves a grapple attempt.",
+            "page_refs":[{"source_name":"Core Rules","page_start":50,"page_end":50}]}]}"#
+            .into(),
+    });
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+
+    // First compile: creates the entry.
+    let res = compile_rules(&db, &llm, &embed, &col_id, |_| {})
+        .await
+        .unwrap();
+    assert_eq!(res.entries_created, 1);
+
+    #[derive(serde::Deserialize)]
+    struct IdRow {
+        id: surrealdb::sql::Thing,
+    }
+    let mut resp = db
+        .query(
+            "SELECT id FROM rule_entry \
+             WHERE collection = type::thing('collection', $cid) AND name = 'Grappling'",
+        )
+        .bind(("cid", col_id.clone()))
+        .await
+        .unwrap();
+    let rows: Vec<IdRow> = resp.take(0).unwrap();
+    let entry_id = rows.first().unwrap().id.id.to_raw();
+
+    // Inject a GM objection directly, mirroring what `redo_rule_entry` stores.
+    db.query(
+        "UPDATE type::thing('rule_entry', $id) SET \
+             sources = array::append(sources, { kind: 'objection', \
+                 text: 'this ignores size differences', at: time::now() })",
+    )
+    .bind(("id", entry_id.clone()))
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    // Recompile with the same rule (same name+category) re-emitted by the LLM.
+    let res = compile_rules(&db, &llm, &embed, &col_id, |_| {})
+        .await
+        .unwrap();
+    assert_eq!(res.entries_created, 0, "must update, not duplicate");
+    assert_eq!(res.entries_updated, 1);
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        sources: Vec<serde_json::Value>,
+    }
+    let mut resp = db
+        .query(
+            "SELECT sources FROM rule_entry \
+             WHERE collection = type::thing('collection', $cid) AND name = 'Grappling'",
+        )
+        .bind(("cid", col_id.clone()))
+        .await
+        .unwrap();
+    let rows: Vec<Row> = resp.take(0).unwrap();
+    assert_eq!(rows.len(), 1, "recompile must not create a duplicate entry");
+    assert!(
+        rows[0]
+            .sources
+            .iter()
+            .any(|s| s["kind"] == "objection" && s["text"] == "this ignores size differences"),
+        "the dedup-merge UPDATE must not clobber sources, sources = {:?}",
+        rows[0].sources
+    );
+}
+
+/// Counts how many times the LLM is invoked, to prove the batch cap is
+/// honored (only `cap` batches ever reach the LLM).
+struct CountingLlm {
+    response: String,
+    calls: AtomicUsize,
+}
+
+#[async_trait]
+impl LlmProvider for CountingLlm {
+    fn provider_type(&self) -> &'static str {
+        "counting"
+    }
+
+    async fn chat_stream(
+        &self,
+        _system_prompt: &str,
+        _messages: &[ChatMessage],
+    ) -> Result<tokio::sync::mpsc::Receiver<Result<String, LlmError>>, LlmError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let resp = self.response.clone();
+        tokio::spawn(async move {
+            let _ = tx.send(Ok(resp)).await;
+        });
+        Ok(rx)
+    }
+}
+
+#[tokio::test]
+async fn rules_compile_honors_batch_cap_and_reports_honest_remainder() {
+    let (db, col_id) = setup_db_with_collection().await;
+    // Two chunks whose combined labeled text exceeds BATCH_CHAR_BUDGET
+    // (16_000 chars), forcing `batch_labeled_chunks` to split them into two
+    // distinct batches: a large one, then a second.
+    let big_text = "a".repeat(17_000);
+    seed_rules_chunk(
+        &db,
+        &col_id,
+        "chunk_rules_cap1",
+        "src_rules_cap1",
+        &big_text,
+        60,
+        60,
+    )
+    .await;
+    seed_rules_chunk(
+        &db,
+        &col_id,
+        "chunk_rules_cap2",
+        "src_rules_cap2",
+        "A short second passage that lands in its own batch.",
+        61,
+        61,
+    )
+    .await;
+
+    let llm = Arc::new(CountingLlm {
+        response: r#"{"entries":[{"name":"Whatever","category":"entry",
+            "body":"filler body","page_refs":[]}]}"#
+            .into(),
+        calls: AtomicUsize::new(0),
+    });
+    let llm_dyn: Arc<dyn LlmProvider> = llm.clone();
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+
+    let res = compile_rules_with_cap(&db, &llm_dyn, &embed, &col_id, 1, |_| {})
+        .await
+        .unwrap();
+
+    assert_eq!(
+        llm.calls.load(Ordering::SeqCst),
+        1,
+        "only `cap` batches may reach the LLM"
+    );
+    assert_eq!(
+        res.remaining_batches, 1,
+        "the leftover batch count must be honest, not zero or clamped"
+    );
 }
 
 #[tokio::test]
