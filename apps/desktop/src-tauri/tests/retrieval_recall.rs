@@ -122,6 +122,7 @@ async fn measure_recall_at_5() {
         pdf_extractor,
         chat_task: tokio::sync::Mutex::new(None),
         extract_task: tokio::sync::Mutex::new(None),
+        compile_task: tokio::sync::Mutex::new(None),
     });
 
     let fixtures = [
