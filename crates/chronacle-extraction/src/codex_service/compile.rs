@@ -89,6 +89,17 @@ async fn compile_targets<C: Connection>(
     db: &surrealdb::Surreal<C>,
     collection_id: &str,
 ) -> Result<(Vec<GraphNode>, usize), CodexError> {
+    compile_targets_with_cap(db, collection_id, MAX_COMPILE_PER_RUN).await
+}
+
+/// Same as [`compile_targets`] but with an explicit cap, so tests can pin
+/// cap-overflow behavior (`remaining_stale` honesty) without creating
+/// `MAX_COMPILE_PER_RUN + 1` entities.
+pub(super) async fn compile_targets_with_cap<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    collection_id: &str,
+    cap: usize,
+) -> Result<(Vec<GraphNode>, usize), CodexError> {
     let mut stale: Vec<GraphNode> = Vec::new();
     for kind in ALL_KINDS {
         let nodes = entity_service::get_by_collection(db, collection_id, kind)
@@ -104,7 +115,7 @@ async fn compile_targets<C: Connection>(
     stale.sort_by(|a, b| a.kind.cmp(&b.kind).then_with(|| a.name.cmp(&b.name)));
 
     let total = stale.len();
-    let targets: Vec<GraphNode> = stale.into_iter().take(MAX_COMPILE_PER_RUN).collect();
+    let targets: Vec<GraphNode> = stale.into_iter().take(cap).collect();
     let remaining = total.saturating_sub(targets.len());
     Ok((targets, remaining))
 }
@@ -175,6 +186,12 @@ async fn compile_one<C: Connection>(
     let article = llm_complete(llm.as_ref(), system_prompt, &messages)
         .await
         .map_err(|e| CodexError::Llm(e.to_string()))?;
+
+    // An empty LLM response must not clear staleness or persist a blank
+    // article — leave the entity flagged stale so the next run retries it.
+    if article.trim().is_empty() {
+        return Ok(false);
+    }
 
     /// One cited chunk's provenance, persisted verbatim into `codex_sources`.
     ///
