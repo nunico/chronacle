@@ -24,6 +24,7 @@
   } from '../lib/commands';
   import { collectionIcon } from './collection-icons';
   import EntityManager from '../components/EntityManager.svelte';
+  import RulesPanel from '../components/RulesPanel.svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   let {
@@ -61,6 +62,12 @@
 
   let active = $derived(campaigns.find((c) => c.id === activeCampaignId) ?? null);
   let activeTab = $state<'library' | 'entities'>('library');
+  // Per-collection Books/Rules sub-tab within the expanded collection panel.
+  let collTabByCol = new SvelteMap<string, 'books' | 'rules'>();
+
+  function collTab(id: string): 'books' | 'rules' {
+    return collTabByCol.get(id) ?? 'books';
+  }
 
   onMount(async () => {
     try {
@@ -277,7 +284,9 @@
         aria-selected={activeTab === 'library'}
         class="view-tab"
         class:active={activeTab === 'library'}
-        onclick={() => { activeTab = 'library'; }}
+        onclick={() => {
+          activeTab = 'library';
+        }}
       >
         Library
       </button>
@@ -286,180 +295,216 @@
         aria-selected={activeTab === 'entities'}
         class="view-tab"
         class:active={activeTab === 'entities'}
-        onclick={() => { activeTab = 'entities'; }}
+        onclick={() => {
+          activeTab = 'entities';
+        }}
       >
         Entities
       </button>
     </div>
 
     {#if activeTab === 'library'}
-    <div class="stats">
-      <div class="stat"><span class="n">{subCount}</span><span class="l">collections</span></div>
-      <div class="stat"><span class="n">{bookCount}</span><span class="l">books loaded</span></div>
-      <div class="stat"><span class="n">—</span><span class="l">notebook entries</span></div>
-      <div class="stat"><span class="n">—</span><span class="l">sessions logged</span></div>
-    </div>
-
-    <section class="manage">
-      <button class="manage-head" onclick={() => (manageOpen = !manageOpen)}>
-        <Icon name={manageOpen ? 'chevron-down' : 'chevron-right'} size={16} />
-        Manage campaigns
-        <span class="ct">{campaigns.length}</span>
-      </button>
-      {#if manageOpen}
-        <div class="manage-body">
-          {#each campaigns as c (c.id)}
-            <div class="manage-row" class:active={activeCampaignId === c.id}>
-              {#if editingId === c.id}
-                <input class="m-edit" bind:value={editName} placeholder="Name" />
-                <input class="m-edit" bind:value={editSystem} placeholder="System (optional)" />
-                <button class="m-btn primary" onclick={commitEdit}>Save</button>
-                <button class="m-btn" onclick={() => (editingId = null)}>Cancel</button>
-              {:else}
-                <button class="m-pick" onclick={() => setActiveCampaignId(c.id)}>
-                  <span class="m-nm">{c.name}</span>
-                  {#if c.system}<span class="m-sys">{c.system}</span>{/if}
-                </button>
-                <button class="m-btn" onclick={() => startEdit(c)} title="Rename">
-                  <Icon name="pencil" size={13} />
-                </button>
-                <button class="m-btn danger" onclick={() => removeCampaign(c)} title="Delete">
-                  <Icon name="trash-2" size={13} />
-                </button>
-              {/if}
-            </div>
-          {/each}
-          <div class="manage-new">
-            <input bind:value={newName} placeholder="New campaign name" />
-            <input bind:value={newSystem} placeholder="System (optional)" />
-            <button class="m-btn primary" onclick={createNewCampaign}>+ Create</button>
-          </div>
+      <div class="stats">
+        <div class="stat"><span class="n">{subCount}</span><span class="l">collections</span></div>
+        <div class="stat">
+          <span class="n">{bookCount}</span><span class="l">books loaded</span>
         </div>
-      {/if}
-    </section>
-
-    <section class="collections">
-      <div class="sec-head">
-        <h2>Source collections</h2>
-        <p>
-          Subscribe this campaign to the rulebooks and lore it should draw from. Collections are
-          shared across campaigns; subscribing is per-campaign.
-        </p>
+        <div class="stat"><span class="n">—</span><span class="l">notebook entries</span></div>
+        <div class="stat"><span class="n">—</span><span class="l">sessions logged</span></div>
       </div>
 
-      {#if collections.length === 0}
-        <p class="muted">No collections yet. Upload a PDF to create one.</p>
-      {/if}
-
-      {#each collections as c (c.id)}
-        {@const on = isSubscribed(c.id)}
-        {@const isOpen = expanded.has(c.id)}
-        {@const list = sourcesByCol.get(c.id) ?? []}
-        {@const codexStatus = codexStatusByCol.get(c.id)}
-        {@const compiling = compilingCol === c.id}
-        <div class="coll" class:on>
-          <div
-            class="coll-head"
-            role="button"
-            tabindex="0"
-            onclick={() => toggleExpand(c)}
-            onkeydown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                toggleExpand(c);
-              }
-            }}
-          >
-            <span class="coll-ic"><Icon name={collectionIcon(c.name)} size={18} /></span>
-            <span class="coll-text">
-              <span class="nm">{c.name}</span>
-              <span class="ct">
-                {list.length} {list.length === 1 ? 'book' : 'books'} ·
-                {#if !activeCampaignId}
-                  shared
-                {:else if on}
-                  subscribed
+      <section class="manage">
+        <button class="manage-head" onclick={() => (manageOpen = !manageOpen)}>
+          <Icon name={manageOpen ? 'chevron-down' : 'chevron-right'} size={16} />
+          Manage campaigns
+          <span class="ct">{campaigns.length}</span>
+        </button>
+        {#if manageOpen}
+          <div class="manage-body">
+            {#each campaigns as c (c.id)}
+              <div class="manage-row" class:active={activeCampaignId === c.id}>
+                {#if editingId === c.id}
+                  <input class="m-edit" bind:value={editName} placeholder="Name" />
+                  <input class="m-edit" bind:value={editSystem} placeholder="System (optional)" />
+                  <button class="m-btn primary" onclick={commitEdit}>Save</button>
+                  <button class="m-btn" onclick={() => (editingId = null)}>Cancel</button>
                 {:else}
-                  not subscribed
+                  <button class="m-pick" onclick={() => setActiveCampaignId(c.id)}>
+                    <span class="m-nm">{c.name}</span>
+                    {#if c.system}<span class="m-sys">{c.system}</span>{/if}
+                  </button>
+                  <button class="m-btn" onclick={() => startEdit(c)} title="Rename">
+                    <Icon name="pencil" size={13} />
+                  </button>
+                  <button class="m-btn danger" onclick={() => removeCampaign(c)} title="Delete">
+                    <Icon name="trash-2" size={13} />
+                  </button>
                 {/if}
-              </span>
-            </span>
-            {#if on && codexStatus && codexStatus.stale_entities > 0}
-              <span class="codex-badge">{codexStatus.stale_entities} stale</span>
-            {/if}
-            {#if on}
-              <button
-                class="m-btn compile-btn"
-                aria-label="{compiling ? 'Cancel' : 'Compile'} {c.name}"
-                onclick={(e) => {
-                  e.stopPropagation();
-                  toggleCompile(c);
-                }}
-                onkeydown={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                {compiling ? 'Cancel' : 'Compile'}
-              </button>
-            {/if}
-            <span
-              class="sub-toggle"
-              class:on
-              role="switch"
-              aria-checked={on}
+              </div>
+            {/each}
+            <div class="manage-new">
+              <input bind:value={newName} placeholder="New campaign name" />
+              <input bind:value={newSystem} placeholder="System (optional)" />
+              <button class="m-btn primary" onclick={createNewCampaign}>+ Create</button>
+            </div>
+          </div>
+        {/if}
+      </section>
+
+      <section class="collections">
+        <div class="sec-head">
+          <h2>Source collections</h2>
+          <p>
+            Subscribe this campaign to the rulebooks and lore it should draw from. Collections are
+            shared across campaigns; subscribing is per-campaign.
+          </p>
+        </div>
+
+        {#if collections.length === 0}
+          <p class="muted">No collections yet. Upload a PDF to create one.</p>
+        {/if}
+
+        {#each collections as c (c.id)}
+          {@const on = isSubscribed(c.id)}
+          {@const isOpen = expanded.has(c.id)}
+          {@const list = sourcesByCol.get(c.id) ?? []}
+          {@const codexStatus = codexStatusByCol.get(c.id)}
+          {@const compiling = compilingCol === c.id}
+          <div class="coll" class:on>
+            <div
+              class="coll-head"
+              role="button"
               tabindex="0"
-              aria-label="Subscribe to {c.name}"
-              onclick={(e) => {
-                e.stopPropagation();
-                toggleSubscribe(c);
-              }}
+              onclick={() => toggleExpand(c)}
               onkeydown={(e) => {
-                e.stopPropagation();
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  toggleSubscribe(c);
+                  toggleExpand(c);
                 }
               }}
             >
-              <span class="knob"></span>
-            </span>
-            <Icon name={isOpen ? 'chevron-up' : 'chevron-down'} size={16} />
-          </div>
-          {#if compiling}
-            <div class="codex-progress">{compileDetail || 'Compiling…'}</div>
-          {/if}
-          {#if isOpen}
-            <div class="books">
-              {#each list as s (s.id)}
-                <div class="book">
-                  <Icon name="file-text" size={14} />
-                  <span class="bnm">{s.display_name}</span>
-                  <span
-                    class="book-status"
-                    class:ok={s.index_status === 'done'}
-                    class:idx={s.index_status === 'pending' || s.index_status === 'indexing'}
-                    class:err={s.index_status === 'error'}
-                  >
-                    {s.index_status === 'done'
-                      ? 'Indexed'
-                      : s.index_status === 'error'
-                        ? 'Error'
-                        : 'Indexing…'}
-                  </span>
-                  <button class="m-btn danger" onclick={() => removeSource(s, c.id)} title="Delete">
-                    <Icon name="trash-2" size={13} />
+              <span class="coll-ic"><Icon name={collectionIcon(c.name)} size={18} /></span>
+              <span class="coll-text">
+                <span class="nm">{c.name}</span>
+                <span class="ct">
+                  {list.length}
+                  {list.length === 1 ? 'book' : 'books'} ·
+                  {#if !activeCampaignId}
+                    shared
+                  {:else if on}
+                    subscribed
+                  {:else}
+                    not subscribed
+                  {/if}
+                </span>
+              </span>
+              {#if on && codexStatus && codexStatus.stale_entities > 0}
+                <span class="codex-badge">{codexStatus.stale_entities} stale</span>
+              {/if}
+              {#if on}
+                <button
+                  class="m-btn compile-btn"
+                  aria-label="{compiling ? 'Cancel' : 'Compile'} {c.name}"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    toggleCompile(c);
+                  }}
+                  onkeydown={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  {compiling ? 'Cancel' : 'Compile'}
+                </button>
+              {/if}
+              <span
+                class="sub-toggle"
+                class:on
+                role="switch"
+                aria-checked={on}
+                tabindex="0"
+                aria-label="Subscribe to {c.name}"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  toggleSubscribe(c);
+                }}
+                onkeydown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSubscribe(c);
+                  }
+                }}
+              >
+                <span class="knob"></span>
+              </span>
+              <Icon name={isOpen ? 'chevron-up' : 'chevron-down'} size={16} />
+            </div>
+            {#if compiling}
+              <div class="codex-progress">{compileDetail || 'Compiling…'}</div>
+            {/if}
+            {#if isOpen}
+              {@const tab = collTab(c.id)}
+              <div class="coll-subtabs" role="tablist">
+                <button
+                  role="tab"
+                  aria-selected={tab === 'books'}
+                  class="coll-subtab"
+                  class:active={tab === 'books'}
+                  onclick={() => collTabByCol.set(c.id, 'books')}
+                >
+                  Books
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={tab === 'rules'}
+                  class="coll-subtab"
+                  class:active={tab === 'rules'}
+                  onclick={() => collTabByCol.set(c.id, 'rules')}
+                >
+                  Rules
+                </button>
+              </div>
+              {#if tab === 'books'}
+                <div class="books">
+                  {#each list as s (s.id)}
+                    <div class="book">
+                      <Icon name="file-text" size={14} />
+                      <span class="bnm">{s.display_name}</span>
+                      <span
+                        class="book-status"
+                        class:ok={s.index_status === 'done'}
+                        class:idx={s.index_status === 'pending' || s.index_status === 'indexing'}
+                        class:err={s.index_status === 'error'}
+                      >
+                        {s.index_status === 'done'
+                          ? 'Indexed'
+                          : s.index_status === 'error'
+                            ? 'Error'
+                            : 'Indexing…'}
+                      </span>
+                      <button
+                        class="m-btn danger"
+                        onclick={() => removeSource(s, c.id)}
+                        title="Delete"
+                      >
+                        <Icon name="trash-2" size={13} />
+                      </button>
+                    </div>
+                  {/each}
+                  <button class="add-book" onclick={() => onOpenUpload(c.id)}>
+                    <Icon name="plus" size={14} />
+                    Add book
                   </button>
                 </div>
-              {/each}
-              <button class="add-book" onclick={() => onOpenUpload(c.id)}>
-                <Icon name="plus" size={14} />
-                Add book
-              </button>
-            </div>
-          {/if}
-        </div>
-      {/each}
-    </section>
+              {:else}
+                <div class="rules-tab">
+                  <RulesPanel collectionId={c.id} />
+                </div>
+              {/if}
+            {/if}
+          </div>
+        {/each}
+      </section>
     {:else if activeTab === 'entities' && active}
       <EntityManager campaignId={active.id} />
     {:else if activeTab === 'entities'}
@@ -477,8 +522,7 @@
       >
         <h3>Delete "{deleteTarget.name}"?</h3>
         <p>
-          If this campaign has its own collection of notes and entities, choose what happens to
-          it.
+          If this campaign has its own collection of notes and entities, choose what happens to it.
         </p>
         <div class="modal-actions">
           <button class="m-btn danger" onclick={() => confirmDelete('delete')}>
@@ -798,7 +842,9 @@
     height: 12px;
     border-radius: 50%;
     background: var(--fg-3);
-    transition: transform var(--dur) var(--ease-arcane), background var(--dur);
+    transition:
+      transform var(--dur) var(--ease-arcane),
+      background var(--dur);
   }
   .sub-toggle.on {
     background: rgba(91, 120, 255, 0.3);
@@ -809,8 +855,32 @@
     transform: translateX(13px);
     background: var(--gem);
   }
-  .books {
+  .coll-subtabs {
+    display: flex;
+    gap: 2px;
+    padding: 0 12px;
     border-top: 1px solid var(--line-faint);
+  }
+  .coll-subtab {
+    background: none;
+    border: none;
+    color: var(--fg-3);
+    padding: 8px 10px;
+    cursor: pointer;
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .coll-subtab.active {
+    color: var(--fg-1);
+    border-bottom-color: var(--violet-300);
+  }
+  .rules-tab {
+    padding: 8px 12px 12px;
+  }
+  .books {
     padding: 8px 12px 12px;
     display: flex;
     flex-direction: column;
