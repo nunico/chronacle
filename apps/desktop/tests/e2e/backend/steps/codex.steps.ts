@@ -87,10 +87,13 @@ When('the GM submits the objection {string}', async ({ page }, objection: string
   await page.getByRole('button', { name: 'Submit', exact: true }).click();
 });
 
-Then('a redo command is sent for the entry {string}', async ({ page }, _entryName: string) => {
+// Entry names in the Gherkin map to the ipc-mock fixture ids.
+const RULE_ENTRY_IDS: Record<string, string> = { Initiative: 'rule1' };
+
+Then('a redo command is sent for the entry {string}', async ({ page }, entryName: string) => {
   const calls = await page.evaluate(() => (window as unknown as { __ipcCalls: IpcCall[] }).__ipcCalls);
   const redoCall = calls.find(
-    (c) => c.cmd === 'redo_rule_entry' && c.args?.objection === 'the range is wrong',
+    (c) => c.cmd === 'redo_rule_entry' && c.args?.id === RULE_ENTRY_IDS[entryName],
   );
   expect(redoCall).toBeDefined();
 });
