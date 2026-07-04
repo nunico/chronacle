@@ -216,6 +216,10 @@ pub(crate) struct GraphNodeRecord {
     pub character_class: Option<String>,
     pub character_level: Option<i64>,
     pub status: Option<String>,
+    // codex fields
+    pub codex_article: Option<String>,
+    pub codex_stale: Option<bool>,
+    pub codex_compiled_at: Option<surrealdb::sql::Datetime>,
 }
 
 impl From<GraphNodeRecord> for GraphNode {
@@ -241,6 +245,9 @@ impl From<GraphNodeRecord> for GraphNode {
             character_class: r.character_class,
             character_level: r.character_level,
             status: r.status,
+            codex_article: r.codex_article,
+            codex_stale: r.codex_stale,
+            codex_compiled_at: r.codex_compiled_at.map(|d| d.to_string()),
         }
     }
 }
@@ -270,6 +277,10 @@ pub struct GraphNode {
     pub character_class: Option<String>,
     pub character_level: Option<i64>,
     pub status: Option<String>,
+    // codex fields
+    pub codex_article: Option<String>,
+    pub codex_stale: Option<bool>,
+    pub codex_compiled_at: Option<String>,
 }
 
 /// A node as it appears in a relationship graph — identity + display only.

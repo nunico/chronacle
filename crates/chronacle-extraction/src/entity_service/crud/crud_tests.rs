@@ -32,6 +32,9 @@ fn order_events_for_timeline_sorts_by_sequence_then_name_nulls_last() {
             character_class: None,
             character_level: None,
             status: None,
+            codex_article: None,
+            codex_stale: None,
+            codex_compiled_at: None,
         }
     }
     let input = vec![

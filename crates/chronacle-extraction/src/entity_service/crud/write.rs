@@ -127,6 +127,12 @@ pub async fn create<C: surrealdb::Connection>(
         character_level: Option<i64>,
         #[serde(default)]
         status: Option<String>,
+        #[serde(default)]
+        codex_article: Option<String>,
+        #[serde(default)]
+        codex_stale: Option<bool>,
+        #[serde(default)]
+        codex_compiled_at: Option<surrealdb::sql::Datetime>,
     }
     let mut fetch_resp = db
         .query("SELECT * FROM type::thing($table, $id)")
@@ -167,6 +173,9 @@ pub async fn create<C: surrealdb::Connection>(
         character_class: rec.character_class,
         character_level: rec.character_level,
         status: rec.status,
+        codex_article: rec.codex_article,
+        codex_stale: rec.codex_stale,
+        codex_compiled_at: rec.codex_compiled_at.map(|d| d.to_string()),
     };
 
     // Sync wikilinks (fire-and-forget: ignore errors so failures never block saves).
