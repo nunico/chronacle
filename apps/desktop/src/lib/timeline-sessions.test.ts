@@ -8,6 +8,7 @@ function ev(name: string, session_id: string | null): GraphNode {
     created_at: null, updated_at: null, date_start: null, date_end: null,
     is_ongoing: false, sequence_index: null, era: null, duration_label: null,
     session_id, player_name: null, character_class: null, character_level: null, status: null,
+    codex_article: null, codex_stale: null, codex_compiled_at: null,
   };
 }
 function sess(id: string, title: string): Session {
