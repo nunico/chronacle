@@ -173,7 +173,11 @@
     if (!formNode || recompiling) return;
     recompiling = true;
     try {
-      await compileEntity(kind, formNode.id);
+      const ok = await compileEntity(kind, formNode.id);
+      if (!ok) {
+        showToastMsg('No source context found — article unchanged');
+        return;
+      }
       const refreshed = await getEntity(formNode.id, kind);
       formNode = refreshed;
       entities = entities.map((e) => (e.id === refreshed.id ? refreshed : e));

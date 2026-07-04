@@ -50,6 +50,7 @@
   let compilingCol = $state<string | null>(null);
   let compileDetail = $state('');
   let unlistenCodex: UnlistenFn | null = null;
+  let destroyed = false;
 
   let manageOpen = $state(false);
   let newName = $state('');
@@ -68,13 +69,19 @@
       error = String(e);
     }
     await refreshSubscribed();
-    unlistenCodex = await listen<CompileProgress>('codex-progress', (event) => {
+    const un = await listen<CompileProgress>('codex-progress', (event) => {
       if (!compilingCol) return;
       compileDetail = event.payload.detail;
     });
+    if (destroyed) {
+      un();
+    } else {
+      unlistenCodex = un;
+    }
   });
 
   onDestroy(() => {
+    destroyed = true;
     if (unlistenCodex) unlistenCodex();
   });
 
