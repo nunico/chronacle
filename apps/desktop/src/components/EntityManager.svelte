@@ -2,10 +2,12 @@
   import { SvelteMap } from 'svelte/reactivity';
   import {
     getEntities,
+    getEntity,
     createEntity,
     updateEntity,
     deleteEntity,
     getSessions,
+    compileEntity,
     type EntityKind,
     type GraphNode,
     type EntityInput,
@@ -54,6 +56,7 @@
   // SvelteMap is inherently reactive — no $state wrapper needed
   let entityMap = new SvelteMap<string, { id: string; kind: string }>();
   let sessions = $state<Session[]>([]);
+  let recompiling = $state(false);
 
   async function loadEntities() {
     loading = true;
@@ -166,6 +169,21 @@
     }
   }
 
+  async function handleRecompile() {
+    if (!formNode || recompiling) return;
+    recompiling = true;
+    try {
+      await compileEntity(kind, formNode.id);
+      const refreshed = await getEntity(formNode.id, kind);
+      formNode = refreshed;
+      entities = entities.map((e) => (e.id === refreshed.id ? refreshed : e));
+    } catch (e) {
+      showToastMsg((e as EntityError).message ?? 'Failed to recompile article');
+    } finally {
+      recompiling = false;
+    }
+  }
+
   function showToastMsg(msg: string) {
     toast = msg;
     setTimeout(() => {
@@ -227,6 +245,36 @@
         {#if formNode?.notes}
           <div class="notes-preview">
             <WikiText text={formNode.notes} entities={entityMap} />
+          </div>
+        {/if}
+        {#if formNode}
+          <div class="codex-section">
+            <div class="codex-header">
+              <h3>Codex Article</h3>
+              {#if formNode.codex_stale !== false}
+                <span class="chip-stale">Stale</span>
+              {/if}
+              <button
+                class="btn-ghost btn-recompile"
+                type="button"
+                aria-label="Recompile article"
+                disabled={recompiling}
+                onclick={handleRecompile}
+              >
+                {recompiling ? 'Recompiling…' : 'Recompile'}
+              </button>
+            </div>
+            <div class="codex-article">
+              {#if formNode.codex_article}
+                <WikiText
+                  text={formNode.codex_article}
+                  entities={entityMap}
+                  onEntityClick={onOpenEntity}
+                />
+              {:else}
+                <p class="muted">No article compiled yet</p>
+              {/if}
+            </div>
           </div>
         {/if}
         <EntityForm
@@ -358,6 +406,43 @@
     color: var(--fg-3);
     font-size: 0.85rem;
     padding: 16px;
+  }
+  .codex-section {
+    background: var(--bg-panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+  }
+  .codex-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .codex-header h3 {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--fg-1);
+    flex: 1;
+  }
+  .chip-stale {
+    background: var(--danger);
+    color: var(--bg-abyss);
+    border-radius: 10px;
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .btn-recompile {
+    font-size: 0.8rem;
+    padding: 4px 10px;
+  }
+  .codex-article {
+    white-space: pre-wrap;
+    font-size: 0.9rem;
+    color: var(--fg-2);
+    line-height: 1.5;
   }
   .btn-primary {
     background: var(--violet-300);
