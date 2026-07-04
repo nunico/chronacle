@@ -51,42 +51,42 @@ DEFINE INDEX OVERWRITE lint_finding_unresolved_idx
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE npc TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE npc TYPE option<datetime> DEFAULT NONE;
-DEFINE FIELD OVERWRITE codex_stale       ON TABLE npc TYPE option<bool> DEFAULT false;
+DEFINE FIELD OVERWRITE codex_stale       ON TABLE npc TYPE bool DEFAULT false;
 DEFINE FIELD OVERWRITE codex_sources     ON TABLE npc FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE location TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE location TYPE option<datetime> DEFAULT NONE;
-DEFINE FIELD OVERWRITE codex_stale       ON TABLE location TYPE option<bool> DEFAULT false;
+DEFINE FIELD OVERWRITE codex_stale       ON TABLE location TYPE bool DEFAULT false;
 DEFINE FIELD OVERWRITE codex_sources     ON TABLE location FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE faction TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE faction TYPE option<datetime> DEFAULT NONE;
-DEFINE FIELD OVERWRITE codex_stale       ON TABLE faction TYPE option<bool> DEFAULT false;
+DEFINE FIELD OVERWRITE codex_stale       ON TABLE faction TYPE bool DEFAULT false;
 DEFINE FIELD OVERWRITE codex_sources     ON TABLE faction FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE creature TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE creature TYPE option<datetime> DEFAULT NONE;
-DEFINE FIELD OVERWRITE codex_stale       ON TABLE creature TYPE option<bool> DEFAULT false;
+DEFINE FIELD OVERWRITE codex_stale       ON TABLE creature TYPE bool DEFAULT false;
 DEFINE FIELD OVERWRITE codex_sources     ON TABLE creature FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE item TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE item TYPE option<datetime> DEFAULT NONE;
-DEFINE FIELD OVERWRITE codex_stale       ON TABLE item TYPE option<bool> DEFAULT false;
+DEFINE FIELD OVERWRITE codex_stale       ON TABLE item TYPE bool DEFAULT false;
 DEFINE FIELD OVERWRITE codex_sources     ON TABLE item FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE event TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE event TYPE option<datetime> DEFAULT NONE;
-DEFINE FIELD OVERWRITE codex_stale       ON TABLE event TYPE option<bool> DEFAULT false;
+DEFINE FIELD OVERWRITE codex_stale       ON TABLE event TYPE bool DEFAULT false;
 DEFINE FIELD OVERWRITE codex_sources     ON TABLE event FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE player_character TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE player_character TYPE option<datetime> DEFAULT NONE;
-DEFINE FIELD OVERWRITE codex_stale       ON TABLE player_character TYPE option<bool> DEFAULT false;
+DEFINE FIELD OVERWRITE codex_stale       ON TABLE player_character TYPE bool DEFAULT false;
 DEFINE FIELD OVERWRITE codex_sources     ON TABLE player_character FLEXIBLE TYPE array<object> DEFAULT [];
 
 DEFINE FIELD OVERWRITE codex_article     ON TABLE misc TYPE option<string> DEFAULT NONE;
 DEFINE FIELD OVERWRITE codex_compiled_at ON TABLE misc TYPE option<datetime> DEFAULT NONE;
-DEFINE FIELD OVERWRITE codex_stale       ON TABLE misc TYPE option<bool> DEFAULT false;
+DEFINE FIELD OVERWRITE codex_stale       ON TABLE misc TYPE bool DEFAULT false;
 DEFINE FIELD OVERWRITE codex_sources     ON TABLE misc FLEXIBLE TYPE array<object> DEFAULT [];
 
 -- ── Rule entries (compiled rules layer; ADR-009) ─────────────────────────────

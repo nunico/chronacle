@@ -58,27 +58,32 @@ pub async fn codex_status<C: Connection>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use surrealdb::engine::local::{Db, Mem};
-    use surrealdb::Surreal;
-
-    async fn setup_db() -> Surreal<Db> {
-        let db = Surreal::new::<Mem>(()).await.unwrap();
-        db.use_ns("test").use_db("test").await.unwrap();
-        chronacle_db::run_migrations(&db).await.unwrap();
-        db
-    }
 
     #[tokio::test]
     async fn status_counts_stale_unset_and_missing_articles() {
-        let db = setup_db().await;
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        // A row created BEFORE the migration defines the codex fields: this is the
+        // genuine pre-migration state (field absent → reads as NONE; DEFAULT only
+        // applies at create time and migrations never backfill).
+        db.query(
+            "CREATE npc:`legacy` SET name = 'Legacy', summary = NULL, notes = NULL, \
+                 created_at = time::now(), updated_at = time::now()",
+        )
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+        chronacle_db::run_migrations(&db).await.unwrap();
+
         db.query(
             "CREATE collection:`c1` SET name = 'World', description = NULL, \
                  created_at = time::now(), updated_at = time::now();
              CREATE npc:`fresh` SET name = 'Fresh', codex_stale = false, \
                  codex_article = 'compiled text';
              CREATE npc:`stale` SET name = 'Stale', codex_stale = true;
-             CREATE npc:`legacy` SET name = 'Legacy';
-             UPDATE npc:`legacy` UNSET codex_stale;
              RELATE collection:`c1`->in_collection->npc:`fresh` SET created_at = time::now();
              RELATE collection:`c1`->in_collection->npc:`stale` SET created_at = time::now();
              RELATE collection:`c1`->in_collection->npc:`legacy` SET created_at = time::now();
