@@ -5,13 +5,15 @@ use tauri::Emitter;
 use tauri::State;
 
 use crate::AppState;
-use chronacle_extraction::codex_service::CompileProgress;
+use chronacle_extraction::codex_service::{CompileProgress, RuleEntry};
 
 /// Summary returned to the frontend when a codex compile run completes.
 #[derive(Debug, Clone, Serialize)]
 pub struct CompileSummary {
     pub articles_compiled: usize,
     pub remaining_stale: usize,
+    pub entries_created: usize,
+    pub entries_updated: usize,
 }
 
 /// Emit a phased progress event to the frontend.
@@ -43,24 +45,46 @@ pub async fn compile_collection(
     let task_state = state_ref.clone();
     let task_collection = collection_id.clone();
 
-    let task = tokio::spawn(async move {
-        chronacle_extraction::codex_service::compile_collection(
+    let task: tokio::task::JoinHandle<
+        Result<
+            (
+                chronacle_extraction::codex_service::CompileResult,
+                chronacle_extraction::codex_service::RulesCompileResult,
+            ),
+            chronacle_extraction::codex_service::CodexError,
+        >,
+    > = tokio::spawn(async move {
+        let article_app = app.clone();
+        let articles = chronacle_extraction::codex_service::compile_collection(
             &task_state.db,
             &llm,
             &embed,
             &vector_store,
             &task_collection,
+            move |p| emit_progress(&article_app, &p),
+        )
+        .await?;
+
+        let rules = chronacle_extraction::codex_service::compile_rules(
+            &task_state.db,
+            &llm,
+            &embed,
+            &task_collection,
             move |p| emit_progress(&app, &p),
         )
-        .await
+        .await?;
+
+        Ok((articles, rules))
     });
 
     *state.compile_task.lock().await = Some(task.abort_handle());
 
     match task.await {
-        Ok(Ok(result)) => Ok(CompileSummary {
-            articles_compiled: result.articles_compiled,
-            remaining_stale: result.remaining_stale,
+        Ok(Ok((articles, rules))) => Ok(CompileSummary {
+            articles_compiled: articles.articles_compiled,
+            remaining_stale: articles.remaining_stale,
+            entries_created: rules.entries_created,
+            entries_updated: rules.entries_updated,
         }),
         Ok(Err(e)) => Err(format!("Compile failed: {e}")),
         Err(join_err) if join_err.is_cancelled() => Err("cancelled".to_string()),
@@ -115,6 +139,56 @@ pub async fn get_codex_status(
 pub async fn cancel_compile(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     crate::commands::cancel_chat_task(&state.compile_task).await;
     Ok(())
+}
+
+/// List all compiled rule entries for a collection (drives the Rules UI).
+#[tauri::command]
+pub async fn get_rule_entries(
+    state: State<'_, Arc<AppState>>,
+    collection_id: String,
+) -> Result<Vec<RuleEntry>, String> {
+    chronacle_extraction::codex_service::list_rule_entries(&state.db, &collection_id).await
+}
+
+/// Update a rule entry's freeform GM notes.
+#[tauri::command]
+pub async fn update_rule_notes(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    notes: Option<String>,
+) -> Result<(), String> {
+    chronacle_extraction::codex_service::update_rule_notes(&state.db, &id, notes).await
+}
+
+/// Regenerate a single rule entry honoring a new GM objection. Runs inline —
+/// single-entry latency is acceptable, so no abort handle is needed.
+#[tauri::command]
+pub async fn redo_rule_entry(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    objection: String,
+) -> Result<(), String> {
+    let state_ref = state.inner().clone();
+    let llm = state_ref
+        .llm_provider
+        .read()
+        .map_err(|e| format!("LLM lock: {e}"))?
+        .clone();
+    let embed = state_ref
+        .embedding_provider
+        .read()
+        .map_err(|e| format!("Embed lock: {e}"))?
+        .clone();
+
+    chronacle_extraction::codex_service::redo_rule_entry(
+        &state_ref.db,
+        &llm,
+        &embed,
+        &id,
+        &objection,
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
