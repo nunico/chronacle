@@ -99,6 +99,22 @@ export async function installIpcMock(
             });
           case 'compile_collection':
             return Promise.resolve({ articles_compiled: 12, remaining_stale: 0 });
+          case 'get_rule_entries':
+            return Promise.resolve([
+              {
+                id: 'rule1',
+                name: 'Initiative',
+                category: 'mechanic',
+                body: 'Roll a d20 and add your Dexterity modifier to determine turn order.',
+                notes: null,
+                page_refs: [{ source_name: 'Core Rulebook', page_start: 12, page_end: 13 }],
+                stale: false,
+              },
+            ]);
+          case 'update_rule_notes':
+            return Promise.resolve(null);
+          case 'redo_rule_entry':
+            return Promise.resolve(null);
           default:
             console.warn(`Unhandled IPC mock: ${cmd}`);
             return Promise.resolve(null);
