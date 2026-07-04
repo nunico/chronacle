@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
+use crate::codex_service::compile::compile_targets_with_cap;
 use crate::codex_service::{compile_collection, compile_entity, CodexPhase, CompileProgress};
 use crate::entity_service::{self, EntityInput, EntityKind};
 use crate::extraction_service::test_support::{
-    setup_db_with_collection, MockEmbeddingProvider, MockLlm, MockVectorStore,
+    setup_db_with_collection, MockEmbeddingProvider, MockLlm, MockVectorStore, RecordingVectorStore,
 };
 use async_trait::async_trait;
 use chronacle_core::embedding::EmbeddingProvider;
@@ -299,5 +300,174 @@ async fn compile_entity_without_passages_returns_false_and_leaves_article() {
     assert!(
         !compiled,
         "no context → no article, no hallucinated compile"
+    );
+}
+
+#[tokio::test]
+async fn compile_targets_honestly_reports_remaining_past_cap() {
+    let (db, col_id) = setup_db_with_collection().await;
+    for name in ["Aaa", "Bbb", "Ccc"] {
+        entity_service::create(
+            &db,
+            None,
+            Some(&col_id),
+            EntityKind::Npc,
+            EntityInput {
+                name: name.to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    }
+    let (targets, remaining) = compile_targets_with_cap(&db, &col_id, 2).await.unwrap();
+    assert_eq!(targets.len(), 2, "cap must limit the batch size");
+    assert_eq!(
+        remaining, 1,
+        "remaining_stale must honestly report entities left after the cap"
+    );
+}
+
+#[tokio::test]
+async fn compile_with_empty_article_leaves_entity_stale() {
+    let (db, col_id) = setup_db_with_collection().await;
+    let node = entity_service::create(
+        &db,
+        None,
+        Some(&col_id),
+        EntityKind::Npc,
+        EntityInput {
+            name: "Mira".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    db.query("UPDATE type::thing('npc', $id) SET codex_stale = true")
+        .bind(("id", node.id.clone()))
+        .await
+        .unwrap();
+
+    let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+        response: "   ".into(),
+    });
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+    let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore {
+        results: vec![passage_hit("Mira, innkeeper of the Gilded Flagon…")],
+    });
+
+    let res = compile_collection(&db, &llm, &embed, &vs, &col_id, |_| {})
+        .await
+        .unwrap();
+    assert_eq!(
+        res.articles_compiled, 0,
+        "an empty LLM response must not count as a compiled article"
+    );
+
+    let got = entity_service::get_by_id(&db, &node.id, EntityKind::Npc)
+        .await
+        .unwrap();
+    assert_eq!(
+        got.codex_stale,
+        Some(true),
+        "entity must stay stale when the article is empty"
+    );
+    assert!(
+        got.codex_article.is_none(),
+        "an empty article must not be persisted"
+    );
+}
+
+#[tokio::test]
+async fn campaign_bound_compile_searches_full_subscription_set() {
+    let (db, owned_id) = setup_db_with_collection().await;
+    // Make the collection campaign-bound with a two-collection subscription set.
+    db.query(
+        "CREATE campaign:`cam1` SET name = 'C', system = 'x', \
+             created_at = time::now(), updated_at = time::now();
+         CREATE collection:`reg1` SET name = 'Shared', description = NULL, \
+             created_at = time::now(), updated_at = time::now();
+         UPDATE type::thing('collection', $owned) SET owner_campaign = campaign:`cam1`;
+         LET $own = type::thing('collection', $owned);
+         RELATE campaign:`cam1`->subscribes_to->$own SET created_at = time::now();
+         RELATE campaign:`cam1`->subscribes_to->collection:`reg1` SET created_at = time::now();",
+    )
+    .bind(("owned", owned_id.clone()))
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    entity_service::create(
+        &db,
+        None,
+        Some(&owned_id),
+        EntityKind::Npc,
+        EntityInput {
+            name: "Mira".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+        response: "Article.".into(),
+    });
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+    let recording = Arc::new(RecordingVectorStore {
+        results: vec![passage_hit("Mira…")],
+        calls: Default::default(),
+    });
+    let vs: Arc<dyn VectorStore> = recording.clone();
+
+    compile_collection(&db, &llm, &embed, &vs, &owned_id, |_| {})
+        .await
+        .unwrap();
+
+    let calls = recording.calls.lock().unwrap();
+    let ids = calls.first().expect("search was called");
+    let mut sorted = ids.clone();
+    sorted.sort();
+    let mut expected = vec![owned_id.clone(), "reg1".to_string()];
+    expected.sort();
+    assert_eq!(
+        sorted, expected,
+        "campaign-bound compile must search the owner's full subscription set"
+    );
+}
+
+#[tokio::test]
+async fn regular_compile_searches_only_itself() {
+    let (db, col_id) = setup_db_with_collection().await;
+    entity_service::create(
+        &db,
+        None,
+        Some(&col_id),
+        EntityKind::Npc,
+        EntityInput {
+            name: "Mira".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+        response: "Article.".into(),
+    });
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+    let recording = Arc::new(RecordingVectorStore {
+        results: vec![passage_hit("Mira…")],
+        calls: Default::default(),
+    });
+    let vs: Arc<dyn VectorStore> = recording.clone();
+    compile_collection(&db, &llm, &embed, &vs, &col_id, |_| {})
+        .await
+        .unwrap();
+    let calls = recording.calls.lock().unwrap();
+    assert_eq!(
+        calls.first().unwrap(),
+        &vec![col_id.clone()],
+        "regular compile must search only its own collection"
     );
 }

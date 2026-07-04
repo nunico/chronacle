@@ -51,6 +51,31 @@ impl VectorStore for MockVectorStore {
     }
 }
 
+/// A vector store that records the collection_ids of every search call.
+pub struct RecordingVectorStore {
+    pub results: Vec<SearchResult>,
+    pub calls: std::sync::Mutex<Vec<Vec<String>>>,
+}
+
+#[async_trait]
+impl VectorStore for RecordingVectorStore {
+    async fn upsert(&self, _s: &str, _c: &[IndexedChunk]) -> Result<(), VectorStoreError> {
+        Ok(())
+    }
+    async fn search(
+        &self,
+        _q: &[f32],
+        collection_ids: &[String],
+        _limit: u64,
+    ) -> Result<Vec<SearchResult>, VectorStoreError> {
+        self.calls.lock().unwrap().push(collection_ids.to_vec());
+        Ok(self.results.clone())
+    }
+    async fn delete_by_source(&self, _s: &str) -> Result<(), VectorStoreError> {
+        Ok(())
+    }
+}
+
 /// Returns `seed` for prompts that request relations and `profile` for profile prompts.
 pub struct BranchingLlm {
     pub seed: String,
