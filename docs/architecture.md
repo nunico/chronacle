@@ -829,6 +829,19 @@ Streamed progress events → Tauri events → frontend progress bar
 
 Entity notes and session notes → embedded → searchable (see [Notes indexing in Phase 2](#phase-2--campaign--notes)). `is_gm_only` is not yet modelled — it is deferred to Phase 3 as an AI-detected passage-level flag (see [GM-Secret Handling](#gm-secret-handling)).
 
+### Codex Compilation (ADR-009)
+
+Compilation is manual and staleness-driven: a per-collection "Compile" action
+turns stale entities (including pre-migration rows whose `codex_stale` is
+unset) into grounded `codex_article` markdown with `[Source: "…", p.N]`
+citations and `codex_sources` provenance, then re-embeds the entity over
+name + summary + notes + article. Provenance retrieval is scoped per the
+reference rules: a campaign-bound collection searches its owner campaign's
+full subscription set; a regular collection searches only itself. Runs are
+capped (`MAX_COMPILE_PER_RUN = 50`) and per-entity failures are logged and
+skipped, never aborting the run. Progress streams over the `codex-progress`
+event; `cancel_compile` aborts between entities.
+
 ### Query & Retrieval
 
 ```
