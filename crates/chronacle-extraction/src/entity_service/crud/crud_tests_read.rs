@@ -1,6 +1,6 @@
 use crate::entity_service::{EntityInput, EntityKind};
 
-use super::{create, find_by_name_and_collection, get_by_campaign, get_by_collection};
+use super::{create, find_by_name_and_collection, get_by_campaign, get_by_collection, get_by_id};
 
 async fn setup_db() -> surrealdb::Surreal<surrealdb::engine::local::Db> {
     let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
@@ -132,4 +132,28 @@ async fn find_by_name_and_collection_is_case_insensitive() {
         .await
         .unwrap();
     assert!(not_found.is_none());
+}
+
+#[tokio::test]
+async fn get_by_id_exposes_codex_fields() {
+    let db = setup_db().await;
+    let node = create(
+        &db,
+        Some("camp1"),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Mira".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    db.query("UPDATE type::thing('npc', $id) SET codex_article = 'An article.', codex_stale = true")
+        .bind(("id", node.id.clone()))
+        .await
+        .unwrap();
+    let got = get_by_id(&db, &node.id, EntityKind::Npc).await.unwrap();
+    assert_eq!(got.codex_article.as_deref(), Some("An article."));
+    assert_eq!(got.codex_stale, Some(true));
 }
