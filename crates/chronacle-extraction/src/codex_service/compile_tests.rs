@@ -203,6 +203,74 @@ async fn compile_emits_done_phase_with_counts() {
     let events = events.into_inner().unwrap();
     assert_eq!(events.last().unwrap().phase, CodexPhase::Done);
     assert_eq!(events.last().unwrap().compiled, 1);
+    assert!(
+        events.iter().any(|e| e.phase == CodexPhase::Embedding),
+        "compile must emit an Embedding phase event"
+    );
+}
+
+/// An LLM that fails on the first call and succeeds afterwards.
+struct FlakyLlm {
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait]
+impl LlmProvider for FlakyLlm {
+    fn provider_type(&self) -> &'static str {
+        "flaky"
+    }
+
+    async fn chat_stream(
+        &self,
+        _system_prompt: &str,
+        _messages: &[ChatMessage],
+    ) -> Result<tokio::sync::mpsc::Receiver<Result<String, LlmError>>, LlmError> {
+        let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if call == 0 {
+            return Err(LlmError::Connection("simulated transient failure".into()));
+        }
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        tokio::spawn(async move {
+            let _ = tx.send(Ok("Recovered article.".to_string())).await;
+        });
+        Ok(rx)
+    }
+}
+
+#[tokio::test]
+async fn compile_continues_past_one_failing_entity() {
+    let (db, col_id) = setup_db_with_collection().await;
+    // Two stale entities; names chosen so the failing one sorts first
+    // (compile order is kind then name).
+    for name in ["Aaa", "Bbb"] {
+        entity_service::create(
+            &db,
+            None,
+            Some(&col_id),
+            EntityKind::Npc,
+            EntityInput {
+                name: name.to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    }
+    let llm: Arc<dyn LlmProvider> = Arc::new(FlakyLlm {
+        calls: Default::default(),
+    });
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+    let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore {
+        results: vec![passage_hit("Both NPCs…")],
+    });
+
+    let res = compile_collection(&db, &llm, &embed, &vs, &col_id, |_| {})
+        .await
+        .expect("one flaky entity must not fail the run");
+    assert_eq!(
+        res.articles_compiled, 1,
+        "the non-failing entity still compiled"
+    );
 }
 
 #[tokio::test]
