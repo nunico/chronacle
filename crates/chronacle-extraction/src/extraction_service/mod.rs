@@ -98,7 +98,7 @@ const SEED_SEARCH_K: u64 = 12;
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 /// Drain the streaming LLM channel into a complete response string.
-async fn llm_complete(
+pub(crate) async fn llm_complete(
     llm: &dyn LlmProvider,
     system_prompt: &str,
     messages: &[ChatMessage],

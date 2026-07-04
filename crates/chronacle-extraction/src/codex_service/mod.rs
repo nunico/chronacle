@@ -5,9 +5,61 @@
 
 use surrealdb::Connection;
 
+mod compile;
+mod prompts;
 pub mod status;
 
+#[cfg(test)]
+mod compile_tests;
+
+// Re-exported for future callers (e.g. a later PR's per-field re-embed
+// trigger); not yet consumed outside `compile.rs` itself.
+#[allow(unused_imports)]
+pub(crate) use compile::embed_entity_with_article;
+pub use compile::{compile_collection, compile_entity};
 pub use status::{codex_status, CodexStatus};
+
+/// Errors from codex compilation.
+#[derive(Debug, thiserror::Error)]
+pub enum CodexError {
+    #[error("LLM error: {0}")]
+    Llm(String),
+    #[error("Database error: {0}")]
+    Db(String),
+    #[error("Embedding error: {0}")]
+    Embedding(String),
+}
+
+/// Compile progress phases (serde snake_case, mirrors ExtractionPhase).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodexPhase {
+    Resolving,
+    Compiling,
+    Embedding,
+    Done,
+    Empty,
+}
+
+/// Progress payload for the `codex-progress` Tauri event.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CompileProgress {
+    pub phase: CodexPhase,
+    pub detail: String,
+    pub compiled: usize,
+    pub total: usize,
+}
+
+/// Result of a collection compile run.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CompileResult {
+    pub articles_compiled: usize,
+    /// Entities still needing compile after the per-run cap.
+    pub remaining_stale: usize,
+}
+
+/// Per-run cap on compiled entities (cost control; mirrors MAX_ENRICH).
+pub const MAX_COMPILE_PER_RUN: usize = 50;
 
 /// Mark one entity's codex article as stale (needs recompilation).
 ///

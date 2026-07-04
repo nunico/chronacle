@@ -1,0 +1,235 @@
+use std::sync::Arc;
+
+use crate::codex_service::{compile_collection, compile_entity, CodexPhase, CompileProgress};
+use crate::entity_service::{self, EntityInput, EntityKind};
+use crate::extraction_service::test_support::{
+    setup_db_with_collection, MockEmbeddingProvider, MockLlm, MockVectorStore,
+};
+use async_trait::async_trait;
+use chronacle_core::embedding::EmbeddingProvider;
+use chronacle_core::llm::{ChatMessage, LlmError, LlmProvider};
+use chronacle_core::vector_store::{SearchResult, VectorStore};
+
+fn passage_hit(text: &str) -> SearchResult {
+    SearchResult {
+        chunk_id: "chunk:p1".into(),
+        source_id: "src1".into(),
+        source_name: "Core Rulebook".into(),
+        text: text.into(),
+        page_start: 12,
+        page_end: 13,
+        section_heading: "Factions".into(),
+        source_type: "lore".into(),
+        distance: 0.1,
+    }
+}
+
+/// Proves "nothing stale → no LLM cost": panics if the compiler ever invokes it.
+struct PanickingLlm;
+
+#[async_trait]
+impl LlmProvider for PanickingLlm {
+    fn provider_type(&self) -> &'static str {
+        "panicking"
+    }
+
+    async fn chat_stream(
+        &self,
+        _system_prompt: &str,
+        _messages: &[ChatMessage],
+    ) -> Result<tokio::sync::mpsc::Receiver<Result<String, LlmError>>, LlmError> {
+        panic!("compile_collection must not call the LLM when nothing is stale");
+    }
+}
+
+#[tokio::test]
+async fn compile_writes_article_provenance_and_clears_stale() {
+    let (db, col_id) = setup_db_with_collection().await;
+    let node = entity_service::create(
+        &db,
+        None,
+        Some(&col_id),
+        EntityKind::Npc,
+        EntityInput {
+            name: "Mira".into(),
+            summary: Some("An innkeeper.".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    db.query("UPDATE type::thing('npc', $id) SET codex_stale = true")
+        .bind(("id", node.id.clone()))
+        .await
+        .unwrap();
+
+    let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+        response: "Mira runs the Gilded Flagon. [Source: \"Core Rulebook\", p.12]".into(),
+    });
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+    let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore {
+        results: vec![passage_hit("Mira, innkeeper of the Gilded Flagon…")],
+    });
+
+    let res = compile_collection(&db, &llm, &embed, &vs, &col_id, |_| {})
+        .await
+        .unwrap();
+    assert_eq!(res.articles_compiled, 1);
+    assert_eq!(res.remaining_stale, 0);
+
+    let got = entity_service::get_by_id(&db, &node.id, EntityKind::Npc)
+        .await
+        .unwrap();
+    assert!(got
+        .codex_article
+        .as_deref()
+        .unwrap_or("")
+        .contains("Gilded Flagon"));
+    assert_eq!(got.codex_stale, Some(false));
+
+    #[derive(serde::Deserialize)]
+    struct C {
+        count: i64,
+    }
+    let mut resp = db
+        .query(
+            "SELECT count() FROM npc WHERE codex_sources[0].source_name = 'Core Rulebook' \
+               AND codex_sources[0].page_start = 12 GROUP ALL",
+        )
+        .await
+        .unwrap();
+    let rows: Vec<C> = resp.take(0).unwrap();
+    assert_eq!(
+        rows.first().map(|c| c.count).unwrap_or(0),
+        1,
+        "chunk provenance must persist"
+    );
+}
+
+#[tokio::test]
+async fn compile_skips_fresh_entities_and_makes_no_llm_calls() {
+    let (db, col_id) = setup_db_with_collection().await;
+    let node = entity_service::create(
+        &db,
+        None,
+        Some(&col_id),
+        EntityKind::Npc,
+        EntityInput {
+            name: "Mira".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    db.query("UPDATE type::thing('npc', $id) SET codex_stale = false, codex_article = 'done'")
+        .bind(("id", node.id.clone()))
+        .await
+        .unwrap();
+
+    let llm: Arc<dyn LlmProvider> = Arc::new(PanickingLlm);
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+    let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore { results: vec![] });
+
+    let res = compile_collection(&db, &llm, &embed, &vs, &col_id, |_| {})
+        .await
+        .unwrap();
+    assert_eq!(res.articles_compiled, 0);
+}
+
+#[tokio::test]
+async fn compile_unset_stale_legacy_entity_is_included() {
+    let (db, col_id) = setup_db_with_collection().await;
+    let node = entity_service::create(
+        &db,
+        None,
+        Some(&col_id),
+        EntityKind::Npc,
+        EntityInput {
+            name: "Old One".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    db.query("UPDATE type::thing('npc', $id) UNSET codex_stale")
+        .bind(("id", node.id.clone()))
+        .await
+        .unwrap();
+
+    let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+        response: "Ancient.".into(),
+    });
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+    let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore {
+        results: vec![passage_hit("The Old One…")],
+    });
+    let res = compile_collection(&db, &llm, &embed, &vs, &col_id, |_| {})
+        .await
+        .unwrap();
+    assert_eq!(
+        res.articles_compiled, 1,
+        "unset codex_stale must count as stale"
+    );
+}
+
+#[tokio::test]
+async fn compile_emits_done_phase_with_counts() {
+    let (db, col_id) = setup_db_with_collection().await;
+    entity_service::create(
+        &db,
+        None,
+        Some(&col_id),
+        EntityKind::Npc,
+        EntityInput {
+            name: "Mira".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+        response: "Article.".into(),
+    });
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+    let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore {
+        results: vec![passage_hit("Mira…")],
+    });
+    let events = std::sync::Mutex::new(Vec::<CompileProgress>::new());
+    compile_collection(&db, &llm, &embed, &vs, &col_id, |p| {
+        events.lock().unwrap().push(p);
+    })
+    .await
+    .unwrap();
+    let events = events.into_inner().unwrap();
+    assert_eq!(events.last().unwrap().phase, CodexPhase::Done);
+    assert_eq!(events.last().unwrap().compiled, 1);
+}
+
+#[tokio::test]
+async fn compile_entity_without_passages_returns_false_and_leaves_article() {
+    let (db, col_id) = setup_db_with_collection().await;
+    let node = entity_service::create(
+        &db,
+        None,
+        Some(&col_id),
+        EntityKind::Npc,
+        EntityInput {
+            name: "Ghost".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+        response: "unused".into(),
+    });
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+    let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore { results: vec![] });
+    let compiled = compile_entity(&db, &llm, &embed, &vs, "npc", &node.id)
+        .await
+        .unwrap();
+    assert!(
+        !compiled,
+        "no context → no article, no hallucinated compile"
+    );
+}
