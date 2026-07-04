@@ -239,6 +239,28 @@ pub async fn compile_rules<C: Connection>(
     collection_id: &str,
     on_progress: impl Fn(CompileProgress),
 ) -> Result<RulesCompileResult, CodexError> {
+    compile_rules_with_cap(
+        db,
+        llm,
+        embed,
+        collection_id,
+        MAX_RULE_BATCHES_PER_RUN,
+        on_progress,
+    )
+    .await
+}
+
+/// Same as [`compile_rules`] but with an explicit batch cap, so tests can pin
+/// cap-overflow behavior (`remaining_batches` honesty) without generating
+/// `MAX_RULE_BATCHES_PER_RUN + 1` batches worth of chunk text.
+pub(super) async fn compile_rules_with_cap<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    llm: &Arc<dyn LlmProvider>,
+    embed: &Arc<dyn EmbeddingProvider>,
+    collection_id: &str,
+    cap: usize,
+    on_progress: impl Fn(CompileProgress),
+) -> Result<RulesCompileResult, CodexError> {
     on_progress(CompileProgress {
         phase: CodexPhase::Resolving,
         detail: "Resolving rules content".to_string(),
@@ -264,11 +286,8 @@ pub async fn compile_rules<C: Connection>(
     let labeled: Vec<String> = chunks.iter().map(label_chunk).collect();
     let all_batches = batch_labeled_chunks(labeled);
     let total_batches = all_batches.len();
-    let remaining_batches = total_batches.saturating_sub(MAX_RULE_BATCHES_PER_RUN);
-    let batches: Vec<String> = all_batches
-        .into_iter()
-        .take(MAX_RULE_BATCHES_PER_RUN)
-        .collect();
+    let remaining_batches = total_batches.saturating_sub(cap);
+    let batches: Vec<String> = all_batches.into_iter().take(cap).collect();
     let total = batches.len();
 
     let mut created = 0usize;
