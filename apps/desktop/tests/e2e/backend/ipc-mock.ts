@@ -9,22 +9,32 @@ import type { Page } from '@playwright/test';
  *
  * Every invoke() is recorded into window.__ipcCalls so tests and BDD steps
  * can assert which commands were (not) sent.
+ *
+ * @param overrides - Optional map of command names to response values to override defaults
  */
-export async function installIpcMock(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    let _cbId = 0;
-    // @ts-expect-error -- injected by Tauri at runtime
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
-    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
-    // @ts-expect-error -- test-only call log
-    window.__ipcCalls = [] as Array<{ cmd: string; args?: Record<string, unknown> }>;
-    // @ts-expect-error -- injected by Tauri at runtime
-    window.__TAURI_INTERNALS__ = {
-      transformCallback: (_cb: unknown, _once?: boolean) => ++_cbId,
-      invoke: (cmd: string, args?: Record<string, unknown>) => {
-        // @ts-expect-error -- test-only call log
-        window.__ipcCalls.push({ cmd, args });
-        switch (cmd) {
+export async function installIpcMock(
+  page: Page,
+  overrides?: Record<string, unknown>,
+): Promise<void> {
+  await page.addInitScript(
+    ({ overridesArg }) => {
+      let _cbId = 0;
+      // @ts-expect-error -- injected by Tauri at runtime
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+      // @ts-expect-error -- test-only call log
+      window.__ipcCalls = [] as Array<{ cmd: string; args?: Record<string, unknown> }>;
+      // @ts-expect-error -- injected by Tauri at runtime
+      window.__TAURI_INTERNALS__ = {
+        transformCallback: (_cb: unknown, _once?: boolean) => ++_cbId,
+        invoke: (cmd: string, args?: Record<string, unknown>) => {
+          // @ts-expect-error -- test-only call log
+          window.__ipcCalls.push({ cmd, args });
+          // Check overrides first
+          if (overridesArg && cmd in overridesArg) {
+            return Promise.resolve(overridesArg[cmd as keyof typeof overridesArg]);
+          }
+          switch (cmd) {
           case 'plugin:event|listen':
             return Promise.resolve(0);
           case 'plugin:event|unlisten':
@@ -80,11 +90,22 @@ export async function installIpcMock(page: Page): Promise<void> {
             return Promise.resolve(null);
           case 'get_campaign_collections':
             return Promise.resolve([]);
+          case 'get_codex_status':
+            return Promise.resolve({
+              stale_entities: 12,
+              total_entities: 40,
+              rules_stale: 0,
+              rule_entries: 0,
+            });
+          case 'compile_collection':
+            return Promise.resolve({ articles_compiled: 12, remaining_stale: 0 });
           default:
             console.warn(`Unhandled IPC mock: ${cmd}`);
             return Promise.resolve(null);
-        }
-      },
-    };
-  });
+          }
+        },
+      };
+    },
+    { overridesArg: overrides },
+  );
 }
