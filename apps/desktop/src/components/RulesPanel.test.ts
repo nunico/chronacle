@@ -60,4 +60,21 @@ describe('RulesPanel', () => {
     await fireEvent.click(screen.getByText('Submit'));
     await waitFor(() => expect(m.redoRuleEntry).toHaveBeenCalledWith('r1', 'range is wrong'));
   });
+
+  it('shows an error message when loading entries fails, not the empty state', async () => {
+    m.getRuleEntries.mockRejectedValue(new Error('boom'));
+    render(RulesPanel, { props: { collectionId: 'c-1' } });
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(screen.getByText(/Failed to load rule entries/)).toBeTruthy();
+    expect(screen.queryByText('No rule entries compiled yet.')).toBeNull();
+  });
+
+  it('does not save notes on blur when the draft is unchanged', async () => {
+    m.getRuleEntries.mockResolvedValue([rule('r1', 'Initiative', 'mechanic')]);
+    render(RulesPanel, { props: { collectionId: 'c-1' } });
+    await fireEvent.click(await screen.findByText('Initiative'));
+    const notes = screen.getByLabelText('Table notes');
+    await fireEvent.blur(notes);
+    expect(m.updateRuleNotes).not.toHaveBeenCalled();
+  });
 });

@@ -34,11 +34,16 @@
   let notesDraft = $state<Record<string, string>>({});
   let redoOpenId = $state<string | null>(null);
   let objectionDraft = $state('');
+  let error = $state<string | null>(null);
+  let redoError = $state<string | null>(null);
 
   async function load() {
     loading = true;
     try {
       entries = await getRuleEntries(collectionId);
+      error = null;
+    } catch (e) {
+      error = String(e);
     } finally {
       loading = false;
     }
@@ -81,19 +86,26 @@
 
   async function handleNotesBlur(entry: RuleEntry) {
     const value = notesDraft[entry.id] ?? '';
+    if (value === (entry.notes ?? '')) return;
     await updateRuleNotes(entry.id, value.length > 0 ? value : null);
   }
 
   function openRedo(entry: RuleEntry) {
     redoOpenId = entry.id;
     objectionDraft = '';
+    redoError = null;
   }
 
   async function submitRedo(entry: RuleEntry) {
-    await redoRuleEntry(entry.id, objectionDraft);
-    redoOpenId = null;
-    objectionDraft = '';
-    await load();
+    try {
+      await redoRuleEntry(entry.id, objectionDraft);
+      redoOpenId = null;
+      objectionDraft = '';
+      redoError = null;
+      await load();
+    } catch (e) {
+      redoError = String(e);
+    }
   }
 </script>
 
@@ -110,6 +122,8 @@
 
   {#if loading}
     <p class="muted">Loading…</p>
+  {:else if error}
+    <p class="error" role="alert">Failed to load rule entries: {error}</p>
   {:else if entries.length === 0}
     <p class="muted">No rule entries compiled yet.</p>
   {:else if grouped.length === 0}
@@ -121,7 +135,11 @@
         <ul class="entry-list">
           {#each group.entries as entry (entry.id)}
             <li class="entry-item">
-              <button class="entry-name" onclick={() => toggleExpand(entry)}>
+              <button
+                class="entry-name"
+                aria-expanded={expandedId === entry.id}
+                onclick={() => toggleExpand(entry)}
+              >
                 {entry.name}
                 {#if entry.stale}
                   <span class="chip-stale">Stale</span>
@@ -157,6 +175,9 @@
                         aria-label="Objection"
                         bind:value={objectionDraft}
                       ></textarea>
+                      {#if redoError}
+                        <p class="error" role="alert">Failed to redo: {redoError}</p>
+                      {/if}
                       <div class="redo-actions">
                         <button type="button" onclick={() => submitRedo(entry)}>Submit</button>
                         <button
@@ -296,6 +317,11 @@
   }
   .muted {
     color: var(--fg-3);
+    font-size: 0.85rem;
+    padding: 16px;
+  }
+  .error {
+    color: var(--danger);
     font-size: 0.85rem;
     padding: 16px;
   }
