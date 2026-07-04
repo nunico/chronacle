@@ -98,10 +98,10 @@ async fn rules_chunks<C: Connection>(
 ) -> Result<Vec<ChunkRow>, CodexError> {
     let mut resp = db
         .query(
-            "SELECT text, page_start, page_end, source_type, \
+            "SELECT text, page_start, page_end, \
                  source.display_name AS source_name FROM chunk \
              WHERE collection = type::thing('collection', $cid) \
-                 AND source_type IN ['rules', 'supplement']",
+                 AND source.source_type IN ['rules', 'supplement']",
         )
         .bind(("cid", collection_id.to_owned()))
         .await
@@ -414,10 +414,10 @@ pub async fn redo_rule_entry<C: Connection>(
     let name_lower = entry.name.to_lowercase();
     let mut resp = db
         .query(
-            "SELECT text, page_start, page_end, source_type, \
+            "SELECT text, page_start, page_end, \
                  source.display_name AS source_name FROM chunk \
              WHERE collection = type::thing('collection', $cid) \
-                 AND source_type IN ['rules', 'supplement'] \
+                 AND source.source_type IN ['rules', 'supplement'] \
                  AND string::contains(string::lowercase(text), $needle)",
         )
         .bind(("cid", collection_id))
@@ -451,7 +451,8 @@ pub async fn redo_rule_entry<C: Connection>(
     let id = entry.id.id.to_raw();
     db.query(
         "UPDATE type::thing('rule_entry', $id) SET \
-             body = $body, category = $category, page_refs = $page_refs, \
+             body = $body, category = $category, \
+             page_refs = array::union(page_refs, $page_refs), \
              compiled_at = time::now(), stale = false, \
              sources = array::append(sources, { kind: 'objection', text: $objection, at: time::now() })",
     )

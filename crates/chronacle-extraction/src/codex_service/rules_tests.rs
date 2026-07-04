@@ -29,6 +29,12 @@ impl LlmProvider for PanickingLlm {
 }
 
 /// Seed a `rules`-typed source + chunk in `col_id` with the given text.
+///
+/// Mirrors production ingestion's write shape exactly: `chunk.source_type` is
+/// left as an empty string (see `chronacle-ingestion`'s pipeline, which never
+/// populates it) — the reliable signal is `source.source_type`, which the
+/// upload flow defaults to `"rules"` and the schema `ASSERT`s. Rules-compile
+/// queries must filter via the `chunk.source` link, not `chunk.source_type`.
 async fn seed_rules_chunk(
     db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
     col_id: &str,
@@ -46,7 +52,7 @@ async fn seed_rules_chunk(
              source_type='rules', page_count=10, indexed_at=time::now(), index_status='done', \
              embed_model='mock', collection=type::thing('collection',$cid);
          CREATE chunk SET id='{chunk_id}', text=$text, page_start=$ps, page_end=$pe, \
-             section_heading='Combat', source_type='rules', \
+             section_heading='Combat', source_type='', \
              source=type::thing('source','{source_id}'), \
              collection=type::thing('collection',$cid), \
              embedding=[{zeros}], embed_model='mock';"
@@ -292,6 +298,68 @@ async fn redo_rule_entry_stores_objection_and_regenerates() {
         .sources
         .iter()
         .any(|s| s["kind"] == "objection" && s["text"] == "the range is wrong"));
+}
+
+#[tokio::test]
+async fn redo_rule_entry_merges_page_refs_without_clobbering() {
+    let (db, col_id) = setup_db_with_collection().await;
+    seed_rules_chunk(
+        &db,
+        &col_id,
+        "chunk_rules_redo_pr",
+        "src_rules_redo_pr",
+        "Range increments determine ranged attack penalties.",
+        40,
+        40,
+    )
+    .await;
+
+    let mut resp = db
+        .query(
+            "CREATE rule_entry SET collection = type::thing('collection', $cid), \
+                 name = 'Range Increments Redo', category = 'mechanic', body = 'old range text', \
+                 notes = NONE, \
+                 page_refs = [{ source_name: 'Core Rules', page_start: 40, page_end: 40 }], \
+                 sources = [], compiled_at = time::now(), stale = false RETURN VALUE id",
+        )
+        .bind(("cid", col_id.clone()))
+        .await
+        .unwrap();
+    let ids: Vec<surrealdb::sql::Thing> = resp.take(0).unwrap();
+    let entry_id = ids.first().unwrap().id.to_raw();
+
+    // LLM's redo response returns no page_refs at all.
+    let llm: Arc<dyn LlmProvider> = Arc::new(MockLlm {
+        response: r#"{"entries":[{"name":"Range Increments Redo","category":"mechanic",
+            "body":"regenerated range text honoring the objection","page_refs":[]}]}"#
+            .into(),
+    });
+    let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
+
+    redo_rule_entry(&db, &llm, &embed, &entry_id, "the range is wrong")
+        .await
+        .unwrap();
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        body: String,
+        page_refs: Vec<serde_json::Value>,
+    }
+    let mut resp = db
+        .query("SELECT body, page_refs FROM type::thing('rule_entry', $id)")
+        .bind(("id", entry_id.clone()))
+        .await
+        .unwrap();
+    let rows: Vec<Row> = resp.take(0).unwrap();
+    let row = rows.first().unwrap();
+    assert!(row.body.contains("regenerated"));
+    assert_eq!(
+        row.page_refs.len(),
+        1,
+        "pre-existing page_refs must survive a redo whose LLM response has none, got {:?}",
+        row.page_refs
+    );
+    assert_eq!(row.page_refs[0]["page_start"], 40);
 }
 
 #[tokio::test]
