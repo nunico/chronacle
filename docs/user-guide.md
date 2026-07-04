@@ -219,6 +219,7 @@ When you switch campaigns, the chat history reloads to show only messages from t
 Click on any campaign (or "Global Sources") in the sidebar to see its PDFs.
 
 Each source card shows:
+
 - The **filename** and **display name**
 - The **index status** — `pending`, `indexing`, `done`, or `error`
 - The **page count**
@@ -243,6 +244,53 @@ The source list on the Campaigns page gives you a clear view of everything you'v
 - 🔴 **error** — Something went wrong during ingestion. The PDF might be scanned (image-only) or corrupted.
 
 If a source has an **error** status, try re-uploading it or check that the file is a text-based PDF.
+
+---
+
+## The Codex
+
+Once you've loaded a book or two, Chronacle can go one step further than just answering questions on demand: it can **read through your library ahead of time** and write up a tidy, browsable summary of everything in it — a bit like an index card box that someone has already sorted and labeled for you. This is called **compiling the Codex**, and it happens per **collection** (the shelf of books grouped together in your campaign manager, like "World Guide" or "Monster Manual").
+
+### What compiling does
+
+When you click **Compile** on a collection, Chronacle reads through the new or changed material in that collection and writes short, focused articles about the people, places, and rules it finds — each one with page references back to the book it came from. This is genuinely useful work for the AI to do, and like every other time Chronacle asks the AI a question, **it costs a little bit of usage** with whichever AI Provider you've set up (the same kind of cost as asking a question in chat).
+
+Because of that cost, Chronacle **never compiles automatically** — you decide when it's worth doing, usually after you've added a new book or made a batch of changes. If a collection has material waiting to be compiled (or re-compiled because something changed), you'll see a small badge like **"12 stale"** next to it. That number is just letting you know how much is waiting; nothing is out of date or broken, it simply hasn't been read yet. Click **Compile** whenever you're ready, and the badge will shrink as Chronacle works through it.
+
+### Articles vs. your own notes
+
+There are two very different kinds of writing living side by side in the Codex, and it's worth knowing which is which:
+
+- **Articles** are written entirely by the AI when you compile. They're a helpful starting summary, but they are **not yours** — every time you recompile, the article for something that changed gets rewritten from scratch, and any edits you'd made directly to an article's text would be lost.
+- **Notes** (and **table notes** — see below) are written entirely by **you**. Chronacle never touches them, never rewrites them, and never deletes them when you recompile. Anything you type in a notes field is permanently yours.
+
+Think of articles as a first draft the AI hands you, and notes as the margin where you write down the truth as it actually plays out at your table.
+
+### The Rules tab: seven kinds of rules
+
+Inside a collection, the **Rules tab** shows every rule the Codex has compiled, sorted into seven categories. These categories are just a way of grouping similar rules together so you can find what you need quickly:
+
+- **Mechanic** — a core rule for _how something works_, like how initiative is rolled or how advantage and disadvantage interact.
+- **Ability** — a specific thing a character can do, like a spell, feat, or class feature (e.g. "Rage", "Fireball").
+- **State** — a condition affecting a creature, like being "Poisoned" or "Prone."
+- **Procedure** — a step-by-step process the table follows together, like running a chase scene or a long rest.
+- **Resource** — something that gets **spent and regained**. Spell slots are a good example: you use them up during the day and get them back on a rest.
+- **Statistic** — a number that **other rules read or change**. Armor Class is a good example: nobody "spends" AC, but plenty of rules check it or modify it.
+- **Entry** — a catch-all for anything else worth remembering that doesn't fit neatly into the categories above.
+
+The **resource vs. statistic** distinction trips people up the most, so here it is side by side: a **resource** is a tank you draw down and refill (spell slots, hit dice, ki points); a **statistic** is a fixed or slow-changing number that the rules point at (Armor Class, Difficulty Class, a saving throw target). If you can "run out" of it, it's probably a resource. If other rules compare against it, it's probably a statistic.
+
+Click any rule's name to expand it and see its full write-up along with the page or pages it was compiled from, so you can always jump back to the source book if you want the exact wording.
+
+### Table notes
+
+Underneath every rule entry is a **table notes** box — a place for the house rules, clarifications, or reminders that are specific to _your_ table. Maybe you always round the damage of a certain spell up, or your group plays a condition slightly differently than written. Type it in the box, click away, and it's saved automatically — no save button to remember. As covered above, table notes are yours alone; recompiling the Codex will never touch them.
+
+### Redo with objections
+
+Sometimes the AI's write-up of a rule is wrong, incomplete, or just not how your table plays it. Rather than editing the article yourself (which would be overwritten the next time you compile), click **Redo with objections…** and tell the AI what's wrong in plain language — for example, "the range is wrong, it should be 60 feet, not 30." Chronacle sends that objection back to the AI and asks it to rewrite just that one entry.
+
+The best part: this is cumulative. Every objection you've ever raised about that entry is kept and honored on every future redo, so once you've corrected something, it stays corrected — even after later recompiles pull in new source material.
 
 ---
 
@@ -281,15 +329,15 @@ When the AI finds information in your rulebooks, it will tell you exactly where 
 
 > The Slow spell affects up to 6 creatures of your choice within a 40-foot cube. Each target must make a Wisdom saving throw or be slowed for the duration.
 >
-> *[Source: Player's Handbook, p. 277]*
+> _[Source: Player's Handbook, p. 277]_
 
 The citation includes the **book title** and the **page number**. If the information was found across multiple pages, you might see something like:
 
-> *[Source: Dungeon Master's Guide, pp. 45–47]*
+> _[Source: Dungeon Master's Guide, pp. 45–47]_
 
 Occasionally the response might mix information from multiple sources:
 
-> *[Sources: Player's Handbook, p. 192; Xanathar's Guide to Everything, p. 56]*
+> _[Sources: Player's Handbook, p. 192; Xanathar's Guide to Everything, p. 56]_
 
 ### What if the AI doesn't know the answer?
 
@@ -396,4 +444,4 @@ This glossary explains the technical terms used in this guide. If you see a word
 
 ---
 
-*Chronacle keeps your game running smoothly — so you can focus on what matters: telling great stories with your players.*
+_Chronacle keeps your game running smoothly — so you can focus on what matters: telling great stories with your players._
