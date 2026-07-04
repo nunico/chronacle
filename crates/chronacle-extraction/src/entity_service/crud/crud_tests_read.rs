@@ -149,10 +149,12 @@ async fn get_by_id_exposes_codex_fields() {
     )
     .await
     .unwrap();
-    db.query("UPDATE type::thing('npc', $id) SET codex_article = 'An article.', codex_stale = true")
-        .bind(("id", node.id.clone()))
-        .await
-        .unwrap();
+    db.query(
+        "UPDATE type::thing('npc', $id) SET codex_article = 'An article.', codex_stale = true",
+    )
+    .bind(("id", node.id.clone()))
+    .await
+    .unwrap();
     let got = get_by_id(&db, &node.id, EntityKind::Npc).await.unwrap();
     assert_eq!(got.codex_article.as_deref(), Some("An article."));
     assert_eq!(got.codex_stale, Some(true));
