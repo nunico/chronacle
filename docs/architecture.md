@@ -873,6 +873,17 @@ The MTREE KNN operator has two non-obvious constraints. Both are caught only at 
 
 2. **KNN does not compose with an `id IN (subquery)` filter.** AND-ing `embedding <|K|> $vec` with `id IN (SELECT VALUE out FROM …)` **silently returns zero rows**. A field comparison (`collection IN [...]`), a graph-traversal predicate (`<-in_collection<-collection CONTAINS type::thing('collection','id')`), or an explicit-id array (`id IN [type::thing(...)]`) all compose correctly. Collection-scoped entity retrieval in `agent_service::fetch_entity_context` uses the graph-traversal form for this reason; regression test: `fetch_entity_context_knn_over_collection_executes`.
 
+#### Prompt block order (ADR-009, B3)
+
+The system prompt assembles up to three context blocks, in a fixed order: **RULES →
+CODEX/ENTITIES → CHUNKS**. The RULES block (`COMPILED RULES`) is a top-5 KNN search
+over `rule_entry`, scoped to the active campaign's subscribed collections via an
+explicit collection array, budgeted at 4,000 characters total (1,200 per entry) so
+compiled rules never starve chunk evidence. As with entity retrieval, the collection
+scope filter must precede the KNN clause in `WHERE` — see SurrealQL KNN pitfalls above.
+When a campaign has no compiled rule entries the block is omitted and the prompt is
+byte-for-byte the pre-B3 CODEX/ENTITIES → CHUNKS shape (regression-tested).
+
 ### System Prompt
 
 ```
