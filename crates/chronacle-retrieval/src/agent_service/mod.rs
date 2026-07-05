@@ -11,6 +11,7 @@
 //!
 //! Submodules split the pipeline by concern:
 //! - [`context`] — collection resolution, entity/note gathering, RAG context block
+//! - [`rules_block`] — compiled rule-entry retrieval, rendered as the RULES prompt block
 //! - [`prompt`] — system-prompt assembly
 //! - [`citation`] — parsing `[Source: ...]` markers out of responses
 //! - [`persistence`] — writing chat messages (with citations) to the DB
@@ -88,6 +89,18 @@ pub async fn stream_response<C: surrealdb::Connection>(
         None => String::new(),
     };
 
+    let rules_context = match campaign_id {
+        Some(_) if !collection_ids.is_empty() => {
+            rules_block::fetch_rules_context(db, &collection_ids, &query_vector)
+                .await
+                .unwrap_or_else(|e| {
+                    eprintln!("rules context fetch failed: {e}");
+                    String::new()
+                })
+        }
+        _ => String::new(),
+    };
+
     // 4. Retrieve relevant chunks from the vector store.
     //
     // top_k = 15: chosen so a canonical enumeration chunk that ranks at
@@ -107,7 +120,7 @@ pub async fn stream_response<C: surrealdb::Connection>(
 
     // 5. Build context-augmented system prompt
     let context = context::build_context(&results);
-    let system_prompt = prompt::build_system_prompt(&context, &entity_context);
+    let system_prompt = prompt::build_system_prompt(&context, &entity_context, &rules_context);
 
     if std::env::var("CHRONACLE_RAG_DEBUG").is_ok() {
         let llm_type = llm_provider

@@ -3,14 +3,21 @@
 
 /// Build the system prompt for the GM assistant.
 ///
-/// Accepts separate RAG context (retrieved source passages) and entity context
-/// (campaign notes). Either or both may be empty — the prompt adapts to include
-/// only the relevant sections.
-pub(super) fn build_system_prompt(rag_context: &str, entity_context: &str) -> String {
+/// Accepts separate RAG context (retrieved source passages), entity context
+/// (campaign notes), and rules context (compiled rule entries). Any or all may
+/// be empty — the prompt adapts to include only the relevant sections. When
+/// present, the RULES block leads, followed by CAMPAIGN NOTES, followed by
+/// REFERENCE MATERIAL.
+pub(super) fn build_system_prompt(
+    rag_context: &str,
+    entity_context: &str,
+    rules_context: &str,
+) -> String {
     let has_rag = !rag_context.is_empty();
     let has_entities = !entity_context.is_empty();
+    let has_rules = !rules_context.is_empty();
 
-    if !has_rag && !has_entities {
+    if !has_rag && !has_entities && !has_rules {
         return "You are an expert Game Master assistant. \
             Answer the user's question to the best of your ability. \
             If you don't know the answer, say so — do not make up rules."
@@ -19,14 +26,18 @@ pub(super) fn build_system_prompt(rag_context: &str, entity_context: &str) -> St
 
     let mut prompt = String::from("You are an expert Game Master assistant.\n\n");
 
-    if has_rag {
-        prompt.push_str(&format!("REFERENCE MATERIAL:\n{rag_context}\n"));
+    if has_rules {
+        prompt.push_str(&format!("{rules_context}\n"));
     }
 
     if has_entities {
         prompt.push_str(&format!(
             "CAMPAIGN NOTES (GM's own records):\n{entity_context}\n"
         ));
+    }
+
+    if has_rag {
+        prompt.push_str(&format!("REFERENCE MATERIAL:\n{rag_context}\n"));
     }
 
     prompt.push_str("INSTRUCTIONS:\n");
@@ -79,6 +90,16 @@ pub(super) fn build_system_prompt(rag_context: &str, entity_context: &str) -> St
         );
     }
 
+    if has_rules {
+        prompt.push_str(
+            "- Claims taken from COMPILED RULES cite the book and page shown on the entry, \
+             using the same [Source: \"<source name>\", p.<page>, quote: \"<verbatim sentence>\"] \
+             format; quote the sentence from the entry body that supports the claim. \
+             Lines labeled \"GM table ruling\" are the GM's own house rulings — prefer them \
+             over book text when they conflict, and attribute them as the GM's ruling.\n",
+        );
+    }
+
     if has_entities {
         prompt.push_str(
             "- Every factual claim from CAMPAIGN NOTES must cite the entity using \
@@ -101,7 +122,7 @@ mod tests {
 
     #[test]
     fn test_system_prompt_without_context() {
-        let prompt = build_system_prompt("", "");
+        let prompt = build_system_prompt("", "", "");
         assert!(prompt.contains("Game Master assistant"));
         assert!(!prompt.contains("REFERENCE MATERIAL"));
     }
@@ -110,7 +131,7 @@ mod tests {
     fn test_system_prompt_with_context() {
         let ctx =
             "[0] Source: \"PHB.pdf\", p. 72 — \"Fighter Class Features\"\nAction Surge text.\n\n";
-        let prompt = build_system_prompt(ctx, "");
+        let prompt = build_system_prompt(ctx, "", "");
         assert!(prompt.contains("REFERENCE MATERIAL"));
         assert!(prompt.contains("PHB.pdf"));
         assert!(prompt.contains("[Source: \"<source name>\""));
@@ -130,7 +151,7 @@ mod tests {
     /// D" trap, (b) require enumeration questions to list every attributed item.
     #[test]
     fn test_system_prompt_guards_entity_scope_and_enumeration() {
-        let prompt = build_system_prompt("[0] Source: \"x.pdf\", p. 1 — \"\"\ntext\n\n", "");
+        let prompt = build_system_prompt("[0] Source: \"x.pdf\", p. 1 — \"\"\ntext\n\n", "", "");
         // Entity-scope rule must be present.
         assert!(
             prompt.contains("Entity scope is critical"),
@@ -156,7 +177,7 @@ mod tests {
     fn build_system_prompt_both_contexts_includes_both_sections() {
         let rag = "[0] Source: \"PHB\", p.1 — \"Intro\"\nSome rules.\n\n";
         let ent = "Campaign notes (your GM records):\n\n[npc] Aldric\n";
-        let prompt = build_system_prompt(rag, ent);
+        let prompt = build_system_prompt(rag, ent, "");
         assert!(prompt.contains("REFERENCE MATERIAL"), "missing RAG section");
         assert!(prompt.contains("CAMPAIGN NOTES"), "missing entity section");
         assert!(
@@ -172,7 +193,7 @@ mod tests {
     #[test]
     fn build_system_prompt_entity_only_omits_rag_section() {
         let ent = "Campaign notes (your GM records):\n\n[npc] Aldric\n";
-        let prompt = build_system_prompt("", ent);
+        let prompt = build_system_prompt("", ent, "");
         assert!(prompt.contains("CAMPAIGN NOTES"), "missing entity section");
         assert!(
             !prompt.contains("REFERENCE MATERIAL"),
@@ -192,7 +213,7 @@ mod tests {
     fn build_system_prompt_rag_only_regression() {
         // Regression: existing behaviour must be preserved when entity_context is empty.
         let rag = "[0] Source: \"PHB\", p.1 — \"Intro\"\nSome rules.\n\n";
-        let prompt = build_system_prompt(rag, "");
+        let prompt = build_system_prompt(rag, "", "");
         assert!(prompt.contains("REFERENCE MATERIAL"), "missing RAG section");
         assert!(
             !prompt.contains("CAMPAIGN NOTES"),
@@ -218,7 +239,7 @@ mod tests {
 
     #[test]
     fn build_system_prompt_neither_returns_fallback() {
-        let prompt = build_system_prompt("", "");
+        let prompt = build_system_prompt("", "", "");
         assert!(
             !prompt.contains("REFERENCE MATERIAL"),
             "unexpected RAG section"
@@ -230,6 +251,36 @@ mod tests {
         assert!(
             prompt.contains("Game Master assistant"),
             "missing base identity"
+        );
+    }
+
+    #[test]
+    fn rules_block_leads_and_carries_citation_instruction() {
+        let rules = "COMPILED RULES (distilled from your rulebooks):\n\n[mechanic] Initiative — PHB p.14\nRoll d20.\n\n";
+        let rag = "[0] Source: \"PHB\", p.1 — \"Intro\"\nSome rules.\n\n";
+        let ent = "Campaign notes (your GM records):\n\n[npc] Aldric\n";
+        let prompt = build_system_prompt(rag, ent, rules);
+        let i_rules = prompt.find("COMPILED RULES").expect("rules section");
+        let i_notes = prompt.find("CAMPAIGN NOTES").expect("notes section");
+        let i_rag = prompt.find("REFERENCE MATERIAL").expect("rag section");
+        assert!(
+            i_rules < i_notes && i_notes < i_rag,
+            "block order must be RULES → CAMPAIGN NOTES → REFERENCE MATERIAL"
+        );
+        assert!(
+            prompt.contains("COMPILED RULES cite the book and page"),
+            "rules claims must carry a citation instruction"
+        );
+    }
+
+    #[test]
+    fn no_rules_context_is_todays_behavior() {
+        let rag = "[0] Source: \"PHB\", p.1 — \"Intro\"\nSome rules.\n\n";
+        let with = build_system_prompt(rag, "", "");
+        assert!(!with.contains("COMPILED RULES"));
+        assert!(
+            with.contains("REFERENCE MATERIAL"),
+            "regression: rag-only unchanged"
         );
     }
 }
