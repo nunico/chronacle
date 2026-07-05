@@ -1,10 +1,8 @@
 //! RULES context block: KNN over compiled `rule_entry` rows scoped to the
 //! campaign's subscribed collections, rendered budget-capped for the prompt.
 //!
-//! `fetch_rules_context` is wired into `stream_response` and `prompt.rs` in a
-//! follow-up change (tranche-3 plan, PR B3a Task 2); until then nothing in
-//! `mod.rs` calls into this module outside of its own tests.
-#![allow(dead_code, reason = "wired into the pipeline in PR B3a Task 2")]
+//! `fetch_rules_context` is wired into `stream_response` (`mod.rs`) and its
+//! output is threaded through `prompt::build_system_prompt`.
 
 use serde::Deserialize;
 use surrealdb::Connection;
