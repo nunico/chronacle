@@ -26,6 +26,32 @@ async fn embed_after_save(state: &AppState, session: &Session) {
     }
 }
 
+/// Fire the C1 session-notes distillation in the background — best-effort:
+/// the save must never fail or block on the LLM.
+fn distill_after_save(state: &Arc<AppState>, session: &Session) {
+    if session.notes.trim().is_empty() {
+        return;
+    }
+    let llm = match state.llm_provider.read() {
+        Ok(guard) => guard.clone(),
+        Err(e) => {
+            eprintln!("session distill: provider lock poisoned: {e}");
+            return;
+        }
+    };
+    let db = state.db.clone();
+    let session_id = session.id.clone();
+    tokio::spawn(async move {
+        match chronacle_extraction::codex_service::distill_session_notes(&db, &llm, &session_id)
+            .await
+        {
+            Ok(n) if n > 0 => eprintln!("session distill: {n} proposal(s) created"),
+            Ok(_) => {}
+            Err(e) => eprintln!("session distill failed for {session_id}: {e}"),
+        }
+    });
+}
+
 #[tauri::command]
 pub async fn create_session(
     state: State<'_, Arc<AppState>>,
@@ -34,6 +60,7 @@ pub async fn create_session(
 ) -> Result<Session, SessionError> {
     let session = session_service::create(&state.db, &campaign_id, input).await?;
     embed_after_save(&state, &session).await;
+    distill_after_save(state.inner(), &session);
     Ok(session)
 }
 
@@ -61,6 +88,7 @@ pub async fn update_session(
 ) -> Result<Session, SessionError> {
     let session = session_service::update(&state.db, &id, input).await?;
     embed_after_save(&state, &session).await;
+    distill_after_save(state.inner(), &session);
     Ok(session)
 }
 

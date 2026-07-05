@@ -270,6 +270,11 @@ pub async fn run() {
             commands::get_rule_entries,
             commands::update_rule_notes,
             commands::redo_rule_entry,
+            commands::save_chat_to_codex,
+            commands::get_proposals,
+            commands::accept_proposal,
+            commands::reject_proposal,
+            commands::get_maintenance_counts,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");
