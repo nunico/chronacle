@@ -13,6 +13,7 @@
     reindexAllSources,
     getEntityCounts,
     getSessions,
+    getMaintenanceCounts,
     type Campaign,
     type Collection,
     type EmbeddingModelMismatch,
@@ -33,6 +34,7 @@
   import EntityGraph from '../components/EntityGraph.svelte';
   import SessionLogView from '../views/SessionLogView.svelte';
   import TimelineView from '../views/TimelineView.svelte';
+  import MaintenanceView from '../views/MaintenanceView.svelte';
   import { findCategory, type NoteCategoryId } from './note-categories';
   import type { EntityKind } from '../lib/commands';
   import {
@@ -74,6 +76,16 @@
   let activeCampaignId = $state<string | null>(null);
   let switcherOpen = $state(false);
   let railCounts = $state<Partial<Record<NoteCategoryId, number>>>({});
+  let maintenanceCount = $state(0);
+
+  async function refreshMaintenanceCount() {
+    try {
+      const counts = await getMaintenanceCounts();
+      maintenanceCount = counts.pending_proposals + counts.unresolved_findings;
+    } catch (e) {
+      console.error('Failed to load maintenance counts:', e);
+    }
+  }
 
   async function refreshRailCounts(campaignId: string | null) {
     if (!campaignId) {
@@ -234,6 +246,7 @@
     } catch (e) {
       console.error('mismatch check failed:', e);
     }
+    await refreshMaintenanceCount();
   });
 
   // Listen for the startup mismatch event. $effect handles unsubscribe on
@@ -330,6 +343,8 @@
     if (view === 'settings') return { title: 'Settings', sub: 'Provider, models, and re-indexing' };
     if (view === 'timeline')
       return { title: 'Timeline', sub: 'Your campaign in chronological and session order' };
+    if (view === 'maintenance')
+      return { title: 'Maintenance', sub: 'Codex proposals and lint findings' };
     const cat = findCategory(view.category);
     return { title: cat.label, sub: cat.sub };
   });
@@ -476,6 +491,7 @@
     {view}
     {activeCampaign}
     counts={railCounts}
+    {maintenanceCount}
     setView={(v) => (view = v)}
     onOpenSwitcher={() => (switcherOpen = true)}
     onOpenUpload={() => openFilePicker()}
@@ -577,6 +593,7 @@
         {activeCampaignId}
         onOpenUpload={() => openFilePicker()}
         focusNonce={chatFocusNonce}
+        onSavedToCodex={() => refreshMaintenanceCount()}
       />
     {:else if view === 'campaign'}
       <CampaignView
@@ -594,6 +611,8 @@
       <div class="no-campaign-msg">
         <p>Create or select a campaign to see its timeline.</p>
       </div>
+    {:else if view === 'maintenance'}
+      <MaintenanceView onCountsChanged={refreshMaintenanceCount} />
     {:else if typeof view === 'object' && view.category === 'sessions' && activeCampaignId}
       <SessionLogView campaignId={activeCampaignId} />
     {:else if typeof view === 'object' && view.category === 'sessions'}

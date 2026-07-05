@@ -33,6 +33,8 @@ const getEmbeddingModelMismatch = vi.fn();
 const reindexAllSources = vi.fn();
 const uploadSource = vi.fn();
 const createCollection = vi.fn();
+const getMaintenanceCounts = vi.fn();
+const getProposals = vi.fn();
 
 vi.mock('../lib/commands', () => ({
   getCampaigns: (...a: unknown[]) => getCampaigns(...a),
@@ -53,6 +55,12 @@ vi.mock('../lib/commands', () => ({
   updateEntity: vi.fn(),
   deleteEntity: vi.fn(),
   getEntityRelations: vi.fn().mockResolvedValue([]),
+  getMaintenanceCounts: (...a: unknown[]) => getMaintenanceCounts(...a),
+  getProposals: (...a: unknown[]) => getProposals(...a),
+  acceptProposal: vi.fn(),
+  rejectProposal: vi.fn(),
+  saveChatToCodex: vi.fn().mockResolvedValue(0),
+  getSources: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('../lib/events', () => ({
@@ -88,6 +96,8 @@ describe('Shell upload flow', () => {
       misc: 0,
     });
     getSessions.mockResolvedValue([]);
+    getMaintenanceCounts.mockResolvedValue({ pending_proposals: 0, unresolved_findings: 0 });
+    getProposals.mockResolvedValue([]);
   });
 
   it('shows real entity and session counts in the rail', async () => {
@@ -213,6 +223,25 @@ describe('Shell upload flow', () => {
       expect(screen.getByText('Ready!')).toBeTruthy();
     });
   });
+
+  it('rail shows Maintenance item with badge when counts are non-zero', async () => {
+    getMaintenanceCounts.mockResolvedValue({ pending_proposals: 3, unresolved_findings: 1 });
+    render(Shell);
+    const maintenanceItem = await screen.findByRole('button', { name: /Maintenance/i });
+    await waitFor(() => {
+      expect(maintenanceItem.textContent).toContain('4');
+    });
+  });
+
+  it('clicking Maintenance renders MaintenanceView', async () => {
+    getMaintenanceCounts.mockResolvedValue({ pending_proposals: 1, unresolved_findings: 0 });
+    render(Shell);
+    const maintenanceItem = await screen.findByRole('button', { name: /Maintenance/i });
+    await fireEvent.click(maintenanceItem);
+    await waitFor(() => {
+      expect(getProposals).toHaveBeenCalledWith('pending');
+    });
+  });
 });
 
 describe('Shell keyboard shortcuts', () => {
@@ -236,6 +265,8 @@ describe('Shell keyboard shortcuts', () => {
       misc: 0,
     });
     getSessions.mockResolvedValue([]);
+    getMaintenanceCounts.mockResolvedValue({ pending_proposals: 0, unresolved_findings: 0 });
+    getProposals.mockResolvedValue([]);
   });
 
   it('? opens the shortcuts help overlay and Escape closes it', async () => {

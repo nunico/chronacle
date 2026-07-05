@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import OracleView from './OracleView.svelte';
 import * as commands from '../lib/commands';
+import { toasts, clearToasts } from '../lib/toast.svelte';
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -16,6 +17,7 @@ vi.mock('../lib/commands', () => ({
   extractEntityByName: vi.fn().mockResolvedValue({ entities_created: 0, relations_created: 0 }),
   extractAllFromCampaign: vi.fn().mockResolvedValue({ entities_created: 0, relations_created: 0 }),
   cancelExtraction: vi.fn().mockResolvedValue(undefined),
+  saveChatToCodex: vi.fn().mockResolvedValue(0),
 }));
 
 const m = vi.mocked(commands);
@@ -31,9 +33,11 @@ const SAMPLE_SOURCE = {
 describe('OracleView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearToasts();
     m.getChatHistory.mockResolvedValue([]);
     m.chatSend.mockResolvedValue(undefined);
     m.getSources.mockResolvedValue([SAMPLE_SOURCE]);
+    m.saveChatToCodex.mockResolvedValue(0);
   });
 
   it('shows suggestion chips when the thread is empty', async () => {
@@ -69,6 +73,7 @@ describe('OracleView', () => {
     await waitFor(() => {
       expect(screen.getByText(/Yes, but at disadvantage/i)).toBeTruthy();
       expect(screen.getAllByRole('button', { name: /SRD 5\.2 p\.190/i }).length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: /Save to Codex/i })).toBeTruthy();
     });
   });
 
@@ -241,5 +246,31 @@ describe('OracleView', () => {
     expect(m.extractEntityByName).not.toHaveBeenCalled();
     expect(m.extractAllFromCampaign).not.toHaveBeenCalled();
     expect(m.chatSend).not.toHaveBeenCalled();
+  });
+
+  it('assistant message shows Save to Codex action', async () => {
+    m.getChatHistory.mockResolvedValue([{ role: 'assistant', content: 'The oracle speaks.' }]);
+    render(OracleView, {
+      props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn() },
+    });
+    expect(await screen.findByRole('button', { name: /Save to Codex/i })).toBeTruthy();
+  });
+
+  it('clicking Save to Codex invokes save_chat_to_codex with campaign id and content, then shows a toast', async () => {
+    m.getChatHistory.mockResolvedValue([{ role: 'assistant', content: 'The oracle speaks.' }]);
+    m.saveChatToCodex.mockResolvedValue(2);
+    const onSavedToCodex = vi.fn();
+    render(OracleView, {
+      props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn(), onSavedToCodex },
+    });
+    const btn = await screen.findByRole('button', { name: /Save to Codex/i });
+    await fireEvent.click(btn);
+    await waitFor(() => {
+      expect(m.saveChatToCodex).toHaveBeenCalledWith('camp-1', 'The oracle speaks.');
+    });
+    await waitFor(() => {
+      expect(toasts.some((t) => t.message.includes('2 proposal'))).toBe(true);
+    });
+    expect(onSavedToCodex).toHaveBeenCalledWith(2);
   });
 });
