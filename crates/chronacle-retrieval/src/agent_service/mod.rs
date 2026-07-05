@@ -19,6 +19,7 @@ mod citation;
 mod context;
 mod persistence;
 mod prompt;
+mod rules_block;
 
 pub use citation::Citation;
 pub use context::{fetch_entity_context, resolve_collection_ids};
