@@ -23,6 +23,24 @@ pub(super) fn notes_excerpt(notes: Option<&str>) -> Option<String> {
     }
 }
 
+/// Max characters of a codex article included per entity in the context block.
+pub(super) const ARTICLE_EXCERPT_LEN: usize = 600;
+
+/// Article excerpt for the context line, or `None` when absent/blank.
+pub(super) fn article_excerpt(article: Option<&str>) -> Option<String> {
+    let trimmed = article?.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= ARTICLE_EXCERPT_LEN {
+        Some(collapsed)
+    } else {
+        let cut: String = collapsed.chars().take(ARTICLE_EXCERPT_LEN).collect();
+        Some(format!("{cut}…"))
+    }
+}
+
 /// Format the fetched entity data into a context string for the LLM prompt.
 #[allow(clippy::too_many_arguments)] // one arg per entity table — the shape is fixed by the schema
 pub(super) fn format_entity_output(
@@ -55,7 +73,9 @@ pub(super) fn format_entity_output(
             if let Some(s) = &r.status {
                 out.push_str(&format!(" · Status: {s}"));
             }
-            if let Some(s) = &r.summary {
+            if let Some(a) = article_excerpt(r.codex_article.as_deref()) {
+                out.push_str(&format!(" · Codex: {a}"));
+            } else if let Some(s) = &r.summary {
                 if !s.trim().is_empty() {
                     out.push_str(&format!(" · {s}"));
                 }
@@ -78,7 +98,9 @@ pub(super) fn format_entity_output(
             out.push('\n');
             for r in rows {
                 out.push_str(&format!("[{kind}] {}", r.name));
-                if let Some(s) = &r.summary {
+                if let Some(a) = article_excerpt(r.codex_article.as_deref()) {
+                    out.push_str(&format!(" · Codex: {a}"));
+                } else if let Some(s) = &r.summary {
                     if !s.trim().is_empty() {
                         out.push_str(&format!(" · {s}"));
                     }
@@ -104,7 +126,9 @@ pub(super) fn format_entity_output(
                 }
                 _ => {}
             }
-            if let Some(s) = &r.summary {
+            if let Some(a) = article_excerpt(r.codex_article.as_deref()) {
+                out.push_str(&format!(" · Codex: {a}"));
+            } else if let Some(s) = &r.summary {
                 if !s.trim().is_empty() {
                     out.push_str(&format!(" · {s}"));
                 }
@@ -120,7 +144,9 @@ pub(super) fn format_entity_output(
         out.push('\n');
         for r in misc {
             out.push_str(&format!("[misc] {}", r.name));
-            if let Some(s) = &r.summary {
+            if let Some(a) = article_excerpt(r.codex_article.as_deref()) {
+                out.push_str(&format!(" · Codex: {a}"));
+            } else if let Some(s) = &r.summary {
                 if !s.trim().is_empty() {
                     out.push_str(&format!(" · {s}"));
                 }
@@ -156,7 +182,9 @@ pub(super) fn format_entity_output(
         out.push_str("\nCollection knowledge (from subscribed rulebooks):\n");
         for (kind, r) in col_entities {
             out.push_str(&format!("[{kind}] {}", r.name));
-            if let Some(s) = &r.summary {
+            if let Some(a) = article_excerpt(r.codex_article.as_deref()) {
+                out.push_str(&format!(" · Codex: {a}"));
+            } else if let Some(s) = &r.summary {
                 if !s.trim().is_empty() {
                     out.push_str(&format!(" · {s}"));
                 }

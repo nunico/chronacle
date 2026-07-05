@@ -20,14 +20,14 @@ pub async fn fetch_entity_context<C: Connection>(
 ) -> Result<String, AgentError> {
     // ── Campaign entities (always full scan) ─────────────────────────────────
     let mut resp = db
-        .query("SELECT name, summary, notes, player_name, character_class, character_level, status FROM player_character WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes FROM npc WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes FROM location WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes FROM faction WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes FROM creature WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes FROM item WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes, date_start, date_end FROM event WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes FROM misc WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, player_name, character_class, character_level, status, codex_article FROM player_character WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, codex_article FROM npc WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, codex_article FROM location WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, codex_article FROM faction WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, codex_article FROM creature WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, codex_article FROM item WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, date_start, date_end, codex_article FROM event WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, codex_article FROM misc WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
         .query("SELECT title, notes, date_played, session_number FROM session WHERE campaign = type::thing('campaign', $cid) ORDER BY session_number ASC")
         .bind(("cid", campaign_id.to_owned()))
         .await
@@ -85,14 +85,16 @@ pub async fn fetch_entity_context<C: Connection>(
                 // KNN pattern: the `<|K|>` operator must live in WHERE to activate
                 // the index; ordering is by the computed distance.
                 format!(
-                    "SELECT name, summary, notes, vector::distance::knn() AS distance \
+                    "SELECT name, summary, notes, codex_article, vector::distance::knn() AS distance \
                      FROM {table} \
                      WHERE embedding <|10|> [{vec_str}] AND ({col_filter}) \
                      ORDER BY distance ASC LIMIT 10"
                 )
             } else {
                 // Full scan fallback (no embedding provider / test paths).
-                format!("SELECT name, summary, notes FROM {table} WHERE {col_filter} LIMIT 50")
+                format!(
+                    "SELECT name, summary, notes, codex_article FROM {table} WHERE {col_filter} LIMIT 50"
+                )
             };
             let mut r = db
                 .query(sql)

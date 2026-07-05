@@ -227,3 +227,86 @@ async fn fetch_entity_context_knn_over_collection_executes() {
         "collection entity missing from KNN result: {result}"
     );
 }
+
+#[tokio::test]
+async fn entity_with_codex_article_contributes_excerpt_instead_of_summary() {
+    let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+        .await
+        .unwrap();
+    db.use_ns("test").use_db("test").await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
+    db.query(
+        "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+         created_at=time::now(), updated_at=time::now()",
+    )
+    .await
+    .unwrap();
+
+    // Article body longer than ARTICLE_EXCERPT_LEN (600) to pin truncation+ellipsis.
+    let article = "Compiled article text ".to_string() + &"lore ".repeat(200);
+
+    db.query(
+        "CREATE npc SET id='npc1', name='Aldric the Smith', \
+         summary='Old summary', notes=NULL, codex_article=$article, \
+         created_at=time::now(), updated_at=time::now(); \
+         LET $src = type::thing('campaign','camp1'); \
+         LET $dst = type::thing('npc','npc1'); \
+         RELATE $src->in_campaign->$dst SET created_at = time::now()",
+    )
+    .bind(("article", article))
+    .await
+    .unwrap();
+
+    let result = fetch_entity_context(&db, "camp1", &[], None).await.unwrap();
+    assert!(
+        result.contains("Codex: Compiled article text"),
+        "missing codex excerpt: {result}"
+    );
+    assert!(
+        !result.contains("Old summary"),
+        "summary should be suppressed when article present: {result}"
+    );
+
+    let excerpt_start = result.find("Codex: ").expect("codex marker missing") + "Codex: ".len();
+    let excerpt_line_end = result[excerpt_start..]
+        .find('\n')
+        .map(|i| excerpt_start + i)
+        .unwrap_or(result.len());
+    let excerpt = &result[excerpt_start..excerpt_line_end];
+    assert!(
+        excerpt.chars().count() <= super::format::ARTICLE_EXCERPT_LEN + 1,
+        "excerpt exceeds budget + ellipsis: {} chars",
+        excerpt.chars().count()
+    );
+}
+
+#[tokio::test]
+async fn entity_without_article_renders_exactly_as_before() {
+    let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+        .await
+        .unwrap();
+    db.use_ns("test").use_db("test").await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
+    db.query(
+        "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+         created_at=time::now(), updated_at=time::now()",
+    )
+    .await
+    .unwrap();
+    db.query(
+        "CREATE npc SET id='npc1', name='Aldric the Smith', \
+         summary='village blacksmith', notes=NULL, \
+         created_at=time::now(), updated_at=time::now(); \
+         LET $src = type::thing('campaign','camp1'); \
+         LET $dst = type::thing('npc','npc1'); \
+         RELATE $src->in_campaign->$dst SET created_at = time::now()",
+    )
+    .await
+    .unwrap();
+
+    let result = fetch_entity_context(&db, "camp1", &[], None).await.unwrap();
+    assert!(
+        result.contains("[npc] Aldric the Smith · village blacksmith"),
+        "regression: pre-B3b line format changed: {result}"
+    );
+}
