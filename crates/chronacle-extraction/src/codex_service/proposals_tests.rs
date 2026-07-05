@@ -341,13 +341,57 @@ async fn accept_new_entity_creates_it_in_the_proposal_collection() {
 }
 
 #[tokio::test]
+async fn distill_resolves_rule_entry_update_targets_by_name() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    db.query(
+        "CREATE rule_entry:`initiative` SET collection = collection:`own1`, name = 'Initiative', \
+             category = 'mechanic', body = 'old', compiled_at = time::now(), stale = true;",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    let llm: Arc<dyn chronacle_core::llm::LlmProvider> = Arc::new(MockLlm::with_response(
+        r#"{"proposals":[{"kind":"rule_entry_update","target_name":"Initiative",
+            "proposed_text":"new body","rationale":"r"}]}"#,
+    ));
+    let n = distill_chat_answer(&db, &llm, "camp1", "answer")
+        .await
+        .unwrap();
+    assert_eq!(n, 1, "rule_entry_update target must resolve by name");
+
+    let pending = list_proposals(&db, Some("pending")).await.unwrap();
+    assert_eq!(pending.len(), 1);
+    let target = pending[0].target.as_deref().unwrap();
+    assert!(
+        target.starts_with("rule_entry:"),
+        "expected rule_entry: target, got {target}"
+    );
+
+    // The proposal's collection must be the rule entry's own collection
+    // (own1), not resolved via `in_collection` edges (rule_entry has none).
+    #[derive(serde::Deserialize)]
+    struct ColRow {
+        collection: surrealdb::sql::Thing,
+    }
+    let mut cr = db
+        .query("SELECT collection FROM codex_proposal WHERE kind = 'rule_entry_update'")
+        .await
+        .unwrap();
+    let cols: Vec<ColRow> = cr.take(0).unwrap();
+    assert_eq!(
+        cols.first().unwrap().collection.id.to_raw(),
+        "own1",
+        "rule proposal collection must be the rule entry's own collection"
+    );
+}
+
+#[tokio::test]
 async fn accept_rule_entry_update_applies_body_provenance_and_reembeds() {
     let db = setup_db().await;
     seed_campaign(&db).await;
-    // `resolve_target` only resolves against `query_all_entity_names`, which
-    // is entity-table-only (ENTITY_TABLES) — rule_entry targets can never be
-    // resolved via the distillation path. This is a known limitation, not
-    // something this fix redesigns; the proposal row is created directly.
     db.query(
         "CREATE rule_entry:`initiative` SET collection = collection:`own1`, name = 'Initiative', \
              category = 'mechanic', body = 'old', compiled_at = time::now(), stale = true;

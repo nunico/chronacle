@@ -205,6 +205,67 @@ async fn known_entities<C: Connection>(
         .map_err(|e| CodexError::Db(e.to_string()))
 }
 
+/// Name → "rule_entry:<id>" list of rule entries across the campaign's
+/// subscribed collections (rule entries have no `in_campaign` edge, so this
+/// mirrors only the `subscribes_to` half of [`known_entities`]'s scope).
+async fn known_rule_entries<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    campaign_id: &str,
+) -> Result<Vec<(String, String)>, CodexError> {
+    #[derive(Deserialize)]
+    struct Row {
+        id: Thing,
+        name: String,
+    }
+    let mut resp = db
+        .query(
+            "SELECT id, name FROM rule_entry WHERE collection IN \
+                 (SELECT VALUE out FROM subscribes_to WHERE in = type::thing('campaign', $cid))",
+        )
+        .bind(("cid", campaign_id.to_owned()))
+        .await
+        .map_err(|e| CodexError::Db(e.to_string()))?;
+    let rows: Vec<Row> = resp.take(0).map_err(|e| CodexError::Db(e.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (format!("rule_entry:{}", r.id.id.to_raw()), r.name))
+        .collect())
+}
+
+/// The collection a rule entry belongs to (its own `collection` field, not
+/// an `in_collection` edge — rule entries don't have one).
+async fn rule_entry_collection_id<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    id: &str, // bare id
+) -> Result<Option<String>, CodexError> {
+    #[derive(Deserialize)]
+    struct Row {
+        collection: Thing,
+    }
+    let mut resp = db
+        .query("SELECT collection FROM type::thing('rule_entry', $id)")
+        .bind(("id", id.to_owned()))
+        .await
+        .map_err(|e| CodexError::Db(e.to_string()))?;
+    let rows: Vec<Row> = resp.take(0).map_err(|e| CodexError::Db(e.to_string()))?;
+    Ok(rows.into_iter().next().map(|r| r.collection.id.to_raw()))
+}
+
+/// Render the known-entities block for distillation prompts: entities first
+/// (labeled by table), then rule entries under a separate heading so the LLM
+/// knows which rules already exist and can target `rule_entry_update`.
+fn build_known_block(entities: &[(String, String)], rules: &[(String, String)]) -> String {
+    let mut lines: Vec<String> = entities
+        .iter()
+        .map(|(id, n)| format!("- {n} — {}", id.split(':').next().unwrap_or("?")))
+        .collect();
+    if !rules.is_empty() {
+        lines.push("Known rule entries:".to_string());
+        lines.extend(rules.iter().map(|(_, n)| format!("- {n} — rule")));
+    }
+    lines.join("\n")
+}
+
 fn resolve_target<'a>(
     known: &'a [(String, String)], // (full_id, name)
     name: &str,
@@ -225,6 +286,9 @@ async fn persist_drafts<C: Connection>(
 ) -> Result<usize, CodexError> {
     let known = known_entities(db, campaign_id).await?;
     let owned = owned_collection_id(db, campaign_id).await?;
+    // Rule list is cheap and shared across drafts; always fetch (avoids a
+    // second query per draft and keeps the common no-rule-draft path simple).
+    let known_rules = known_rule_entries(db, campaign_id).await?;
     let mut created = 0usize;
     for d in drafts {
         if created >= MAX_PROPOSALS_PER_DISTILL {
@@ -234,6 +298,7 @@ async fn persist_drafts<C: Connection>(
             continue;
         }
         let is_new = d.kind.starts_with("new_");
+        let is_rule = d.kind == "rule_entry_update";
         let target = if is_new {
             None
         } else {
@@ -244,7 +309,8 @@ async fn persist_drafts<C: Connection>(
                 );
                 continue;
             };
-            match resolve_target(&known, n) {
+            let lookup = if is_rule { &known_rules } else { &known };
+            match resolve_target(lookup, n) {
                 Some(t) => Some(t.to_string()),
                 None => {
                     eprintln!("codex: skipping proposal for unknown target '{n}'");
@@ -254,8 +320,15 @@ async fn persist_drafts<C: Connection>(
         };
         // Collection: the target's own collection when it has one; otherwise
         // the campaign's owned collection. No collection at all ⇒ skip (the
-        // schema requires one).
+        // schema requires one). Rule entries store `collection` directly
+        // (they have no `in_collection` edge), so they resolve separately.
         let collection = match &target {
+            Some(t) if is_rule => {
+                let (_, id) = t.split_once(':').unwrap_or((t, ""));
+                rule_entry_collection_id(db, id)
+                    .await?
+                    .or_else(|| owned.clone())
+            }
             Some(t) => entity_collection_id(db, t).await?.or_else(|| owned.clone()),
             None => owned.clone(),
         };
@@ -296,11 +369,8 @@ pub async fn distill_chat_answer<C: Connection>(
     answer: &str,
 ) -> Result<usize, CodexError> {
     let known = known_entities(db, campaign_id).await?;
-    let known_block = known
-        .iter()
-        .map(|(id, n)| format!("- {n} — {}", id.split(':').next().unwrap_or("?")))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let known_rules = known_rule_entries(db, campaign_id).await?;
+    let known_block = build_known_block(&known, &known_rules);
     let prompt = build_chat_distill_prompt(answer, &known_block);
     let messages = vec![ChatMessage {
         role: "user".to_string(),
@@ -379,11 +449,8 @@ pub async fn distill_session_notes<C: Connection>(
     }
 
     let known = known_entities(db, &campaign_id).await?;
-    let known_block = known
-        .iter()
-        .map(|(id, n)| format!("- {n} — {}", id.split(':').next().unwrap_or("?")))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let known_rules = known_rule_entries(db, &campaign_id).await?;
+    let known_block = build_known_block(&known, &known_rules);
     let prompt = build_session_distill_prompt(&session.notes, &known_block);
     let messages = vec![ChatMessage {
         role: "user".to_string(),
