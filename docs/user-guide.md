@@ -292,6 +292,16 @@ Sometimes the AI's write-up of a rule is wrong, incomplete, or just not how your
 
 The best part: this is cumulative. Every objection you've ever raised about that entry is kept and honored on every future redo, so once you've corrected something, it stays corrected — even after later recompiles pull in new source material.
 
+### Saving answers and session notes
+
+Compiling reads your rulebooks, but campaigns generate their own lore too — an NPC's backstory that came out mid-session, a new location the party stumbled into, a rule ruling you made on the fly. **Save to Codex** is how that kind of thing makes it into the Codex.
+
+Under any assistant answer in chat, click **Save to Codex** and Chronacle reads that answer and drafts one or more **proposals**: a new article, an update to an existing entity, a new rule entry, and so on. The same distillation happens automatically at the end of a session for your session notes, turning what happened at the table into proposed Codex updates without you having to write it up twice.
+
+Either way, **nothing changes in your Codex the moment you click Save**. Every proposal lands in your **Maintenance inbox** (the "Maintenance" item in the left rail) as pending, waiting for you to look at it. Open a proposal there and you'll see exactly what's being suggested — a side-by-side of the current text and the proposed text, plus the AI's reasoning for the change — and two buttons: **Accept**, which applies the change and folds it into the Codex, or **Reject**, which discards the suggestion and leaves everything exactly as it was.
+
+The number badge next to **Maintenance** in the rail tells you how many things are waiting on you — pending proposals plus anything else flagged for review. An empty inbox means the Codex fully reflects the choices you've made; a badge just means there's something to glance at whenever you have a moment, not that anything is broken or urgent.
+
 ---
 
 ## Asking Questions

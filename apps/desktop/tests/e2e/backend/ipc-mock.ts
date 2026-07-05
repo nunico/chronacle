@@ -115,6 +115,16 @@ export async function installIpcMock(
             return Promise.resolve(null);
           case 'redo_rule_entry':
             return Promise.resolve(null);
+          case 'save_chat_to_codex':
+            return Promise.resolve(0);
+          case 'get_proposals':
+            return Promise.resolve([]);
+          case 'get_maintenance_counts':
+            return Promise.resolve({ pending_proposals: 0, unresolved_findings: 0 });
+          case 'accept_proposal':
+            return Promise.resolve(null);
+          case 'reject_proposal':
+            return Promise.resolve(null);
           default:
             console.warn(`Unhandled IPC mock: ${cmd}`);
             return Promise.resolve(null);
