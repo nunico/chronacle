@@ -9,12 +9,14 @@
     | 'campaign'
     | 'settings'
     | 'timeline'
+    | 'maintenance'
     | { kind: 'notebook'; category: NoteCategoryId };
 
   let {
     view,
     activeCampaign,
     counts = {},
+    maintenanceCount = 0,
     setView,
     onOpenSwitcher,
     onOpenUpload,
@@ -22,6 +24,7 @@
     view: View;
     activeCampaign: Campaign | null;
     counts?: Partial<Record<NoteCategoryId, number>>;
+    maintenanceCount?: number;
     setView: (v: View) => void;
     onOpenSwitcher: () => void;
     onOpenUpload: () => void;
@@ -69,6 +72,17 @@
     >
       <Icon name="milestone" size={18} className="ic" />
       Timeline
+    </button>
+    <button
+      class="nav-item"
+      class:active={view === 'maintenance'}
+      onclick={() => setView('maintenance')}
+    >
+      <Icon name="inbox" size={18} className="ic" />
+      Maintenance
+      {#if maintenanceCount > 0}
+        <span class="ct badge">{maintenanceCount}</span>
+      {/if}
     </button>
   </nav>
 
@@ -230,6 +244,12 @@
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--fg-3);
+  }
+  .nav-item .ct.badge {
+    background: rgba(91, 120, 255, 0.25);
+    color: var(--fg-1);
+    border-radius: var(--r-full);
+    padding: 1px 7px;
   }
   .rail-scroll {
     flex: 1;

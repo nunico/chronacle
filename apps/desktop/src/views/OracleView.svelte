@@ -10,6 +10,7 @@
     extractEntityByName,
     extractAllFromCampaign,
     cancelExtraction,
+    saveChatToCodex,
     type CitationChunk,
     type ExtractionProgress,
   } from '../lib/commands';
@@ -22,17 +23,45 @@
   import { parseExtractionMessage } from './extraction-message';
   import { isNearBottom } from '../lib/scroll';
   import { clampPopoverPosition } from './popover-position';
+  import { showToast } from '../lib/toast.svelte';
 
   let {
     activeCampaignId,
     onOpenUpload,
     focusNonce = 0,
+    onSavedToCodex,
   }: {
     activeCampaignId: string | null;
     onOpenUpload: () => void;
     /// Bumped by the `/` shortcut to move focus into the chat box.
     focusNonce?: number;
+    /// Called after a successful Save-to-Codex distillation with the count created.
+    onSavedToCodex?: (count: number) => void;
   } = $props();
+
+  let savingToCodex = $state<number | null>(null);
+
+  async function saveToCodex(index: number, content: string) {
+    if (!activeCampaignId) {
+      messages = [...messages, { role: 'error', content: 'Select a campaign first.' }];
+      return;
+    }
+    savingToCodex = index;
+    try {
+      const n = await saveChatToCodex(activeCampaignId, content);
+      showToast(
+        n === 0
+          ? 'Nothing worth saving found.'
+          : `${n} proposal${n === 1 ? '' : 's'} created — review in Maintenance.`,
+        n === 0 ? 'info' : 'success',
+      );
+      onSavedToCodex?.(n);
+    } catch (e) {
+      showToast(`Save to Codex failed: ${String(e)}`, 'error');
+    } finally {
+      savingToCodex = null;
+    }
+  }
 
   let messages = $state<Array<{ role: string; content: string }>>([]);
   let input = $state('');
@@ -407,17 +436,39 @@
         </div>
       {:else if hasCitation(msg.content)}
         <RulingCard data={parseRuling(msg.content)} />
+        <div class="msg-actions">
+          <button
+            class="save-codex"
+            disabled={savingToCodex === i}
+            onclick={() => saveToCodex(i, msg.content)}
+            title="Distill this answer into codex proposals"
+          >
+            <Icon name="book-plus" size={13} /> Save to Codex
+          </button>
+        </div>
       {:else if msg.role === 'system'}
         <div class="msg">
           <div class="who-av eye-badge"><EyeMark size={28} /></div>
           <p class="system-note">{msg.content}</p>
         </div>
       {:else}
-        <div class="msg">
-          <div class="who-av eye-badge"><EyeMark size={28} /></div>
-          <div class="plain">
-            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-            {@html plainHtml(msg.content)}
+        <div class="msg-group">
+          <div class="msg">
+            <div class="who-av eye-badge"><EyeMark size={28} /></div>
+            <div class="plain">
+              <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+              {@html plainHtml(msg.content)}
+            </div>
+          </div>
+          <div class="msg-actions">
+            <button
+              class="save-codex"
+              disabled={savingToCodex === i}
+              onclick={() => saveToCodex(i, msg.content)}
+              title="Distill this answer into codex proposals"
+            >
+              <Icon name="book-plus" size={13} /> Save to Codex
+            </button>
           </div>
         </div>
       {/if}
@@ -578,6 +629,38 @@
   }
   .msg.user {
     justify-content: flex-end;
+  }
+  .msg-group {
+    margin: 14px 0;
+  }
+  .msg-group .msg {
+    margin: 0;
+  }
+  .msg-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin: 6px 0 0 48px;
+  }
+  .save-codex {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: var(--r-full);
+    color: var(--fg-3);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .save-codex:hover:not(:disabled) {
+    border-color: var(--line-glow);
+    color: var(--arcane-300);
+  }
+  .save-codex:disabled {
+    opacity: 0.6;
+    cursor: progress;
   }
   .msg.user .bubble {
     background: var(--bg-panel-2);
