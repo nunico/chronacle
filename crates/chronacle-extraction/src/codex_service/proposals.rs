@@ -506,6 +506,14 @@ pub async fn list_proposals<C: Connection>(
 /// Apply an accepted proposal to its target, append provenance, re-embed, and
 /// resolve the row. The ONLY path by which machine text reaches the user-owned
 /// `notes` field is the `entity_notes_update` arm below.
+///
+/// Re-embedding is best-effort and non-fatal: the target mutation and status
+/// flip to `accepted` are the source of truth. If re-embedding fails (e.g. the
+/// embedding provider is unavailable), the error is logged and the accept
+/// still succeeds — the stale embedding is refreshed on the next compile or
+/// edit. Failing the whole accept here would leave the proposal `pending`
+/// after its target was already mutated, and a retry would re-append the
+/// provenance entry (`array::append` is not idempotent), duplicating it.
 pub async fn accept_proposal<C: Connection>(
     db: &surrealdb::Surreal<C>,
     embed: &Arc<dyn chronacle_core::embedding::EmbeddingProvider>,
@@ -548,7 +556,9 @@ pub async fn accept_proposal<C: Connection>(
             .map_err(|e| format!("Failed to apply article update: {e}"))?
             .check()
             .map_err(|e| format!("Failed to apply article update: {e}"))?;
-            reembed_entity(db, embed, &t.tb, &t.id.to_raw()).await?;
+            if let Err(e) = reembed_entity(db, embed, &t.tb, &t.id.to_raw()).await {
+                eprintln!("codex: re-embed after accept failed: {e}");
+            }
         }
         "entity_notes_update" => {
             let t = row.target.as_ref().ok_or("notes update needs a target")?;
@@ -563,7 +573,9 @@ pub async fn accept_proposal<C: Connection>(
             .map_err(|e| format!("Failed to apply notes update: {e}"))?
             .check()
             .map_err(|e| format!("Failed to apply notes update: {e}"))?;
-            reembed_entity(db, embed, &t.tb, &t.id.to_raw()).await?;
+            if let Err(e) = reembed_entity(db, embed, &t.tb, &t.id.to_raw()).await {
+                eprintln!("codex: re-embed after accept failed: {e}");
+            }
         }
         "rule_entry_update" => {
             let t = row.target.as_ref().ok_or("rule update needs a target")?;
@@ -580,7 +592,9 @@ pub async fn accept_proposal<C: Connection>(
             .map_err(|e| format!("Failed to apply rule update: {e}"))?
             .check()
             .map_err(|e| format!("Failed to apply rule update: {e}"))?;
-            reembed_rule(db, embed, &t.id.to_raw()).await?;
+            if let Err(e) = reembed_rule(db, embed, &t.id.to_raw()).await {
+                eprintln!("codex: re-embed after accept failed: {e}");
+            }
         }
         "new_entity" => {
             let name = row.payload.name.clone().ok_or("new_entity needs a name")?;
@@ -597,9 +611,12 @@ pub async fn accept_proposal<C: Connection>(
                 summary: Some(row.payload.proposed_text.clone()),
                 ..Default::default()
             };
-            crate::entity_service::create(db, None, Some(&col), kind, input)
+            let node = crate::entity_service::create(db, None, Some(&col), kind, input)
                 .await
                 .map_err(|e| format!("Failed to create entity: {e}"))?;
+            if let Err(e) = super::compile::embed_entity_with_article(db, embed, &node).await {
+                eprintln!("codex: re-embed after accept failed: {e}");
+            }
         }
         "new_rule_entry" => {
             let name = row
@@ -633,7 +650,9 @@ pub async fn accept_proposal<C: Connection>(
                 .take(0)
                 .map_err(|e| format!("Failed to parse created rule entry: {e}"))?;
             if let Some(id) = ids.into_iter().next() {
-                reembed_rule(db, embed, &id.id.to_raw()).await?;
+                if let Err(e) = reembed_rule(db, embed, &id.id.to_raw()).await {
+                    eprintln!("codex: re-embed after accept failed: {e}");
+                }
             }
         }
         other => return Err(format!("unknown proposal kind '{other}'")),
@@ -645,6 +664,8 @@ pub async fn accept_proposal<C: Connection>(
     )
     .bind(("id", proposal_id.to_owned()))
     .await
+    .map_err(|e| format!("Failed to resolve proposal: {e}"))?
+    .check()
     .map_err(|e| format!("Failed to resolve proposal: {e}"))?;
     Ok(())
 }
@@ -678,12 +699,34 @@ pub async fn reject_proposal<C: Connection>(
     db: &surrealdb::Surreal<C>,
     proposal_id: &str,
 ) -> Result<(), String> {
+    #[derive(Deserialize)]
+    struct StatusRow {
+        status: String,
+    }
+    let mut resp = db
+        .query("SELECT status FROM type::thing('codex_proposal', $id)")
+        .bind(("id", proposal_id.to_owned()))
+        .await
+        .map_err(|e| format!("Failed to load proposal: {e}"))?;
+    let rows: Vec<StatusRow> = resp
+        .take(0)
+        .map_err(|e| format!("Failed to parse proposal: {e}"))?;
+    let row = rows
+        .into_iter()
+        .next()
+        .ok_or_else(|| format!("proposal {proposal_id} not found"))?;
+    if row.status != "pending" {
+        return Err(format!("proposal {proposal_id} is already {}", row.status));
+    }
+
     db.query(
         "UPDATE type::thing('codex_proposal', $id) SET status = 'rejected', \
              resolved_at = time::now()",
     )
     .bind(("id", proposal_id.to_owned()))
     .await
+    .map_err(|e| format!("Failed to reject proposal: {e}"))?
+    .check()
     .map_err(|e| format!("Failed to reject proposal: {e}"))?;
     Ok(())
 }
