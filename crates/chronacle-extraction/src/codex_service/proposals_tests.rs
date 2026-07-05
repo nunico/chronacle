@@ -320,6 +320,139 @@ async fn accept_new_entity_creates_it_in_the_proposal_collection() {
         .unwrap();
     let rows: Vec<Row> = r.take(0).unwrap();
     assert!(rows.iter().any(|l| l.name == "Vethara"), "{rows:?}");
+
+    #[derive(Debug, serde::Deserialize)]
+    struct EmbedRow {
+        embedding: Option<Vec<f32>>,
+    }
+    let mut er = db
+        .query("SELECT embedding FROM location WHERE name = 'Vethara'")
+        .await
+        .unwrap();
+    let embed_rows: Vec<EmbedRow> = er.take(0).unwrap();
+    assert!(
+        embed_rows
+            .into_iter()
+            .next()
+            .and_then(|r| r.embedding)
+            .is_some(),
+        "new_entity accept must embed the created entity"
+    );
+}
+
+#[tokio::test]
+async fn accept_rule_entry_update_applies_body_provenance_and_reembeds() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    // `resolve_target` only resolves against `query_all_entity_names`, which
+    // is entity-table-only (ENTITY_TABLES) — rule_entry targets can never be
+    // resolved via the distillation path. This is a known limitation, not
+    // something this fix redesigns; the proposal row is created directly.
+    db.query(
+        "CREATE rule_entry:`initiative` SET collection = collection:`own1`, name = 'Initiative', \
+             category = 'mechanic', body = 'old', compiled_at = time::now(), stale = true;
+         CREATE codex_proposal:`p1` SET kind = 'rule_entry_update', \
+             target = rule_entry:`initiative`, collection = collection:`own1`, campaign = NONE, \
+             payload = { proposed_text: 'new body text', rationale: 'r' }, \
+             origin = { kind: 'manual' }, status = 'pending'",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    let embed: Arc<dyn chronacle_core::embedding::EmbeddingProvider> =
+        Arc::new(MockEmbeddingProvider::new(768));
+    accept_proposal(&db, &embed, "p1").await.unwrap();
+
+    #[derive(serde::Deserialize)]
+    struct Rule {
+        body: String,
+        stale: bool,
+        embedding: Option<Vec<f32>>,
+    }
+    let mut r = db
+        .query("SELECT body, stale, embedding FROM rule_entry:`initiative`")
+        .await
+        .unwrap();
+    let rule: Option<Rule> = r.take(0).unwrap();
+    let rule = rule.unwrap();
+    assert_eq!(rule.body, "new body text");
+    assert!(!rule.stale);
+    assert!(rule.embedding.is_some(), "re-embedded after accept");
+
+    #[derive(serde::Deserialize)]
+    struct CountRow {
+        count: i64,
+    }
+    let mut sr = db
+        .query(
+            "SELECT count() FROM rule_entry:`initiative` \
+             WHERE sources[0].kind = 'proposal' GROUP ALL",
+        )
+        .await
+        .unwrap();
+    let provenance_count: Option<CountRow> = sr.take(0).unwrap();
+    assert_eq!(
+        provenance_count.map(|c| c.count).unwrap_or(0),
+        1,
+        "provenance appended"
+    );
+}
+
+#[tokio::test]
+async fn accept_new_rule_entry_creates_categorized_embedded_entry() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    let llm: Arc<dyn chronacle_core::llm::LlmProvider> = Arc::new(MockLlm::with_response(
+        r#"{"proposals":[{"kind":"new_rule_entry","target_name":"Flanking","category":"mechanic",
+            "proposed_text":"body text","rationale":"r"}]}"#,
+    ));
+    distill_chat_answer(&db, &llm, "camp1", "a").await.unwrap();
+    let id = list_proposals(&db, Some("pending")).await.unwrap()[0]
+        .id
+        .clone();
+    let embed: Arc<dyn chronacle_core::embedding::EmbeddingProvider> =
+        Arc::new(MockEmbeddingProvider::new(768));
+    accept_proposal(&db, &embed, &id).await.unwrap();
+
+    #[derive(serde::Deserialize)]
+    struct Rule {
+        category: String,
+        body: String,
+        embedding: Option<Vec<f32>>,
+    }
+    let mut r = db
+        .query(
+            "SELECT category, body, embedding FROM rule_entry \
+             WHERE collection = collection:`own1` AND name = 'Flanking'",
+        )
+        .await
+        .unwrap();
+    let rows: Vec<Rule> = r.take(0).unwrap();
+    let rule = rows.into_iter().next().expect("rule_entry created");
+    assert_eq!(rule.category, "mechanic");
+    assert_eq!(rule.body, "body text");
+    assert!(rule.embedding.is_some(), "re-embedded after accept");
+
+    #[derive(serde::Deserialize)]
+    struct CountRow {
+        count: i64,
+    }
+    let mut sr = db
+        .query(
+            "SELECT count() FROM rule_entry \
+             WHERE collection = collection:`own1` AND name = 'Flanking' \
+             AND sources[0].kind = 'proposal' GROUP ALL",
+        )
+        .await
+        .unwrap();
+    let provenance_count: Option<CountRow> = sr.take(0).unwrap();
+    assert_eq!(
+        provenance_count.map(|c| c.count).unwrap_or(0),
+        1,
+        "provenance recorded on creation"
+    );
 }
 
 #[tokio::test]
@@ -350,4 +483,8 @@ async fn reject_changes_nothing_and_resolves() {
         "reject must not touch the target"
     );
     assert_eq!(maintenance_counts(&db).await.unwrap().pending_proposals, 0);
+
+    // Rejecting an already-resolved proposal is refused, symmetric with accept.
+    let err = reject_proposal(&db, &id).await.unwrap_err();
+    assert!(err.contains("already"), "{err}");
 }
