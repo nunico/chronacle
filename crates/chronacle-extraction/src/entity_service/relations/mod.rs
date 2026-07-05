@@ -9,6 +9,7 @@ mod scope;
 pub use edge::{relate, relate_collapsing};
 pub use flat::get_entity_relations;
 pub use graph::get_entity_graph;
+pub(crate) use scope::check_scope;
 
 #[cfg(test)]
 #[path = "relations_tests.rs"]
