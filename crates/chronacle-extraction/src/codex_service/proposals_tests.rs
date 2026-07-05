@@ -151,4 +151,43 @@ async fn distill_session_notes_marks_mentions_stale_and_is_idempotent_on_resave(
         1,
         "idempotent re-save must not accumulate"
     );
+
+    // Clearing the notes and re-saving must purge the stale pending
+    // proposal rather than leaving it in the queue forever.
+    db.query("UPDATE session:`s1` SET notes = ''")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    let n3 = distill_session_notes(&db, &llm, "s1").await.unwrap();
+    assert_eq!(n3, 0, "empty notes create nothing");
+    let pending_cleared = list_proposals(&db, Some("pending")).await.unwrap();
+    assert!(
+        pending_cleared.is_empty(),
+        "clearing notes must purge this session's stale pending proposals"
+    );
+}
+
+#[tokio::test]
+async fn update_kind_with_missing_target_name_is_not_persisted_untargeted() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    let llm: Arc<dyn chronacle_core::llm::LlmProvider> = Arc::new(MockLlm::with_response(
+        r#"{"proposals":[
+            {"kind":"entity_article_update","proposed_text":"x","rationale":"r"}
+        ]}"#,
+    ));
+    let n = distill_chat_answer(&db, &llm, "camp1", "answer")
+        .await
+        .unwrap();
+    assert_eq!(
+        n, 0,
+        "update-kind draft without target_name must be skipped"
+    );
+
+    let pending = list_proposals(&db, Some("pending")).await.unwrap();
+    assert!(
+        pending.is_empty(),
+        "must not persist an untargeted update proposal"
+    );
 }

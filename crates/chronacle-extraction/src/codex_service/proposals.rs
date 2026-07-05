@@ -234,15 +234,23 @@ async fn persist_drafts<C: Connection>(
             continue;
         }
         let is_new = d.kind.starts_with("new_");
-        let target = match (&d.target_name, is_new) {
-            (Some(n), false) => match resolve_target(&known, n) {
+        let target = if is_new {
+            None
+        } else {
+            let Some(n) = &d.target_name else {
+                eprintln!(
+                    "codex: skipping '{}' proposal — missing target_name",
+                    d.kind
+                );
+                continue;
+            };
+            match resolve_target(&known, n) {
                 Some(t) => Some(t.to_string()),
                 None => {
                     eprintln!("codex: skipping proposal for unknown target '{n}'");
                     continue;
                 }
-            },
-            _ => None,
+            }
         };
         // Collection: the target's own collection when it has one; otherwise
         // the campaign's owned collection. No collection at all ⇒ skip (the
@@ -352,18 +360,23 @@ pub async fn distill_session_notes<C: Connection>(
         return Ok(0);
     };
     let campaign_id = campaign.id.to_raw();
-    if session.notes.trim().is_empty() {
-        return Ok(0);
-    }
 
     // Replace this session's previous pending proposals (idempotent re-save).
+    // Runs even when notes are now empty, so clearing notes purges stale
+    // pending proposals instead of leaving them in the queue forever.
     db.query(
         "DELETE codex_proposal WHERE status = 'pending' \
              AND origin.session = $sid AND origin.kind = 'session'",
     )
     .bind(("sid", session_id.to_owned()))
     .await
+    .map_err(|e| CodexError::Db(e.to_string()))?
+    .check()
     .map_err(|e| CodexError::Db(e.to_string()))?;
+
+    if session.notes.trim().is_empty() {
+        return Ok(0);
+    }
 
     let known = known_entities(db, &campaign_id).await?;
     let known_block = known
