@@ -77,10 +77,7 @@ export async function deleteSource(id: string): Promise<void> {
  * Send a chat message to the AI agent (streaming response is delivered
  * via the `chat-token` event).
  */
-export async function chatSend(
-  message: string,
-  campaignId: string | null,
-): Promise<void> {
+export async function chatSend(message: string, campaignId: string | null): Promise<void> {
   return invoke('chat_send', {
     request: { message, campaignId },
   });
@@ -232,10 +229,7 @@ export async function getCollections(): Promise<Collection[]> {
   return invoke<Collection[]>('get_collections');
 }
 
-export async function createCollection(
-  name: string,
-  description?: string,
-): Promise<Collection> {
+export async function createCollection(name: string, description?: string): Promise<Collection> {
   return invoke<Collection>('create_collection', {
     name,
     description: description ?? null,
@@ -292,11 +286,7 @@ export async function getCampaign(id: string): Promise<Campaign> {
   return invoke<Campaign>('get_campaign', { id });
 }
 
-export async function updateCampaign(
-  id: string,
-  name: string,
-  system: string,
-): Promise<Campaign> {
+export async function updateCampaign(id: string, name: string, system: string): Promise<Campaign> {
   return invoke<Campaign>('update_campaign', { id, name, system });
 }
 
@@ -745,4 +735,59 @@ export async function updateRuleNotes(id: string, notes: string | null): Promise
 /** Regenerate a single rule entry honoring a new GM objection. */
 export async function redoRuleEntry(id: string, objection: string): Promise<void> {
   return invoke('redo_rule_entry', { id, objection });
+}
+
+// ── Maintenance ──────────────────────────────────────────────────────────
+
+export interface ProposalPayload {
+  proposed_text: string;
+  rationale: string;
+  name: string | null;
+  entity_kind: string | null;
+  category: string | null;
+}
+
+/** Frontend-facing proposal DTO, enriched with the target's display name and
+ * the current text of the field the proposal would change (for diff preview). */
+export interface CodexProposal {
+  id: string;
+  kind: string;
+  target: string | null;
+  target_name: string | null;
+  current_text: string | null;
+  payload: ProposalPayload;
+  origin_kind: string;
+  status: string;
+  created_at: string;
+}
+
+/** Pending work counts for the Maintenance badge. */
+export interface MaintenanceCounts {
+  pending_proposals: number;
+  unresolved_findings: number;
+}
+
+/** Distill an assistant answer into pending codex proposals; returns the count created. */
+export async function saveChatToCodex(campaignId: string, content: string): Promise<number> {
+  return invoke<number>('save_chat_to_codex', { campaignId, content });
+}
+
+/** List codex proposals, optionally filtered by status ('pending', 'accepted', 'rejected'). */
+export async function getProposals(status?: string): Promise<CodexProposal[]> {
+  return invoke<CodexProposal[]>('get_proposals', { status: status ?? null });
+}
+
+/** Accept a proposal: applies the change, appends provenance, re-embeds. */
+export async function acceptProposal(id: string): Promise<void> {
+  return invoke('accept_proposal', { id });
+}
+
+/** Reject a proposal without applying it. */
+export async function rejectProposal(id: string): Promise<void> {
+  return invoke('reject_proposal', { id });
+}
+
+/** Pending proposals + unresolved lint findings, for the Maintenance badge. */
+export async function getMaintenanceCounts(): Promise<MaintenanceCounts> {
+  return invoke<MaintenanceCounts>('get_maintenance_counts');
 }
