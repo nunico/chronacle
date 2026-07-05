@@ -124,3 +124,57 @@ Source passages:
 {labeled_chunks}"#
     )
 }
+
+/// Build the prompt that distills a chat answer into targeted codex proposals.
+///
+/// `known_entities` are the in-scope entity names (with kinds) so the LLM can
+/// target existing records; anything else becomes a `new_entity` draft.
+pub(super) fn build_chat_distill_prompt(answer: &str, known_entities: &str) -> String {
+    format!(
+        r#"You are maintaining a TTRPG campaign codex. A cited answer was just given to the GM.
+Distill it into zero or more SMALL, TARGETED update proposals for the codex. Only propose changes
+that add durable knowledge — skip restatements of what the codex already implies, greetings, or
+speculation. Never invent facts not present in the answer.
+
+Proposal kinds:
+- entity_article_update: improve an existing entity's compiled article (target an entity below).
+- entity_notes_update: suggest an addition to the GM's own notes on an entity (rare; only for
+  table-decision-like facts).
+- new_entity: a person/place/faction/creature/item/event named in the answer but missing below.
+  Set entity_kind to one of: npc, location, faction, creature, item, event, misc.
+- rule_entry_update / new_rule_entry: only for rules content, with category one of:
+  mechanic, ability, state, procedure, resource, statistic, entry.
+
+Known entities (name — kind):
+{known_entities}
+
+Return ONLY JSON, no prose, no markdown fences:
+{{ "proposals": [ {{ "kind": "…", "target_name": "…", "entity_kind": null, "category": null,
+                   "proposed_text": "…", "rationale": "…" }} ] }}
+
+The answer:
+{answer}"#
+    )
+}
+
+/// Build the prompt that distills saved session notes into proposals and a
+/// mentioned-entity list (used to mark staleness).
+pub(super) fn build_session_distill_prompt(notes: &str, known_entities: &str) -> String {
+    format!(
+        r#"You are maintaining a TTRPG campaign codex. The GM just saved session notes.
+Extract durable knowledge: propose entity article updates for entities whose story moved, and
+new_entity drafts for people/places/things that appear in the notes but not in the known list.
+Also list EVERY known entity mentioned in the notes (exact names from the list).
+
+Known entities (name — kind):
+{known_entities}
+
+Return ONLY JSON, no prose, no markdown fences:
+{{ "proposals": [ {{ "kind": "entity_article_update|new_entity", "target_name": "…",
+                   "entity_kind": null, "proposed_text": "…", "rationale": "…" }} ],
+  "mentioned": [ "…" ] }}
+
+Session notes:
+{notes}"#
+    )
+}

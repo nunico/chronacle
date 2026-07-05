@@ -8,6 +8,8 @@ use thiserror::Error;
 mod edges;
 mod query;
 
+pub(crate) use query::query_all_entity_names;
+
 // ── Error type ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Error, Serialize)]

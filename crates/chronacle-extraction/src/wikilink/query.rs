@@ -7,7 +7,7 @@ use super::{EntityNameRow, EntityNotesRow, WikilinkError, WikilinkScope, ENTITY_
 ///
 /// **Collection scope**: entities reachable via `in_collection` edges from
 /// the collection only.
-pub(super) async fn query_all_entity_names<C: surrealdb::Connection>(
+pub(crate) async fn query_all_entity_names<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     scope: &WikilinkScope<'_>,
 ) -> Result<Vec<(String, String)>, WikilinkError> {

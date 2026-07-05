@@ -9,6 +9,15 @@ pub struct MockLlm {
     pub response: String,
 }
 
+impl MockLlm {
+    /// Build a mock LLM that always returns `response` from `chat_stream`.
+    pub fn with_response(response: &str) -> Self {
+        Self {
+            response: response.to_string(),
+        }
+    }
+}
+
 #[async_trait]
 impl LlmProvider for MockLlm {
     fn provider_type(&self) -> &'static str {
