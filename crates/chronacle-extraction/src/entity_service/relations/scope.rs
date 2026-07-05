@@ -78,7 +78,7 @@ async fn is_subscribed<C: surrealdb::Connection>(
 }
 
 /// Enforce the reference rules for a prospective `relates_to` edge.
-pub(super) async fn check_scope<C: surrealdb::Connection>(
+pub(crate) async fn check_scope<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     from_kind: &str,
     from_id: &str,
