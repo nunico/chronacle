@@ -1156,6 +1156,22 @@ A compiled layer — the **Codex** — sits between extraction and answering:
 - The `codex_service` lives in `chronacle-extraction` (same dependency
   shape as extraction); extracting a dedicated crate later is mechanical.
 
+### Write-back path (C1)
+
+Two producers create `codex_proposal` rows: the "Save to Codex" chat action
+(`save_chat_to_codex`, distilling an assistant answer) and the session-notes
+save hook (`distill_after_save`, firing best-effort in the background after
+`create_session`/`update_session` so a slow LLM call never blocks or fails
+the save). Neither producer mutates the compiled layer directly — proposals
+sit in `pending` until a GM calls `accept_proposal`, which applies the
+change, appends provenance, re-embeds the affected entity, and resolves the
+proposal, or `reject_proposal`, which discards it without side effects. An
+accepted `entity_notes_update` proposal is the **only** path by which
+machine-generated text reaches a user-owned field (`notes`); every other
+compiler output stays in machine-owned fields (`codex_article`, `rule_entry`
+body). Re-saving a session's notes replaces that session's previous pending
+proposals rather than accumulating duplicates.
+
 ---
 
 ## ADR-010: Campaign-owned collections

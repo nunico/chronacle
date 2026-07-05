@@ -191,8 +191,80 @@ pub async fn redo_rule_entry(
     .map_err(|e| e.to_string())
 }
 
+/// Distill an assistant chat answer into pending codex proposals
+/// ("Save to Codex"). Returns how many proposals were created.
+#[tauri::command]
+pub async fn save_chat_to_codex(
+    state: State<'_, Arc<AppState>>,
+    campaign_id: String,
+    content: String,
+) -> Result<usize, String> {
+    let state_ref = state.inner().clone();
+    let llm = state_ref
+        .llm_provider
+        .read()
+        .map_err(|e| format!("LLM lock: {e}"))?
+        .clone();
+    chronacle_extraction::codex_service::distill_chat_answer(
+        &state_ref.db,
+        &llm,
+        &campaign_id,
+        &content,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// List codex proposals, optionally filtered by status ('pending' etc.).
+#[tauri::command]
+pub async fn get_proposals(
+    state: State<'_, Arc<AppState>>,
+    status: Option<String>,
+) -> Result<Vec<chronacle_extraction::codex_service::CodexProposal>, String> {
+    chronacle_extraction::codex_service::list_proposals(&state.db, status.as_deref()).await
+}
+
+/// Accept a proposal: apply it, append provenance, re-embed, resolve.
+#[tauri::command]
+pub async fn accept_proposal(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
+    let state_ref = state.inner().clone();
+    let embed = state_ref
+        .embedding_provider
+        .read()
+        .map_err(|e| format!("Embed lock: {e}"))?
+        .clone();
+    chronacle_extraction::codex_service::accept_proposal(&state_ref.db, &embed, &id).await
+}
+
+/// Reject a proposal without applying it.
+#[tauri::command]
+pub async fn reject_proposal(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
+    chronacle_extraction::codex_service::reject_proposal(&state.db, &id).await
+}
+
+/// Pending proposals + unresolved lint findings (sidebar badge).
+#[tauri::command]
+pub async fn get_maintenance_counts(
+    state: State<'_, Arc<AppState>>,
+) -> Result<chronacle_extraction::codex_service::MaintenanceCounts, String> {
+    chronacle_extraction::codex_service::maintenance_counts(&state.db).await
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// Smoke test: all new proposal command functions are referenced so the
+    /// compiler verifies their signatures, imports, and return types.
+    #[test]
+    fn proposal_commands_module_compiles() {
+        let _ = save_chat_to_codex as fn(_, _, _) -> _;
+        let _ = get_proposals as fn(_, _) -> _;
+        let _ = accept_proposal as fn(_, _) -> _;
+        let _ = reject_proposal as fn(_, _) -> _;
+        let _ = get_maintenance_counts as fn(_) -> _;
+    }
+
     #[tokio::test]
     async fn cancel_compile_aborts_registered_task_and_empties_slot() {
         let slot: tokio::sync::Mutex<Option<tokio::task::AbortHandle>> =
