@@ -502,3 +502,258 @@ pub async fn list_proposals<C: Connection>(
     }
     Ok(out)
 }
+
+/// Apply an accepted proposal to its target, append provenance, re-embed, and
+/// resolve the row. The ONLY path by which machine text reaches the user-owned
+/// `notes` field is the `entity_notes_update` arm below.
+pub async fn accept_proposal<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    embed: &Arc<dyn chronacle_core::embedding::EmbeddingProvider>,
+    proposal_id: &str,
+) -> Result<(), String> {
+    let mut resp = db
+        .query(
+            "SELECT id, kind, target, payload, origin, status, created_at \
+             FROM type::thing('codex_proposal', $id)",
+        )
+        .bind(("id", proposal_id.to_owned()))
+        .await
+        .map_err(|e| format!("Failed to load proposal: {e}"))?;
+    let rows: Vec<ProposalRow> = resp
+        .take(0)
+        .map_err(|e| format!("Failed to parse proposal: {e}"))?;
+    let row = rows
+        .into_iter()
+        .next()
+        .ok_or_else(|| format!("proposal {proposal_id} not found"))?;
+    if row.status != "pending" {
+        return Err(format!("proposal {proposal_id} is already {}", row.status));
+    }
+    let text = row.payload.proposed_text.clone();
+
+    match row.kind.as_str() {
+        "entity_article_update" => {
+            let t = row.target.as_ref().ok_or("article update needs a target")?;
+            db.query(
+                "UPDATE type::thing($t, $i) SET codex_article = $text, \
+                     codex_compiled_at = time::now(), codex_stale = false, \
+                     codex_sources = array::append(codex_sources, \
+                         { kind: 'proposal', proposal: type::thing('codex_proposal', $pid) })",
+            )
+            .bind(("t", t.tb.clone()))
+            .bind(("i", t.id.to_raw()))
+            .bind(("text", text))
+            .bind(("pid", proposal_id.to_owned()))
+            .await
+            .map_err(|e| format!("Failed to apply article update: {e}"))?
+            .check()
+            .map_err(|e| format!("Failed to apply article update: {e}"))?;
+            reembed_entity(db, embed, &t.tb, &t.id.to_raw()).await?;
+        }
+        "entity_notes_update" => {
+            let t = row.target.as_ref().ok_or("notes update needs a target")?;
+            db.query(
+                "UPDATE type::thing($t, $i) SET notes = $text, codex_stale = true, \
+                     updated_at = time::now()",
+            )
+            .bind(("t", t.tb.clone()))
+            .bind(("i", t.id.to_raw()))
+            .bind(("text", text))
+            .await
+            .map_err(|e| format!("Failed to apply notes update: {e}"))?
+            .check()
+            .map_err(|e| format!("Failed to apply notes update: {e}"))?;
+            reembed_entity(db, embed, &t.tb, &t.id.to_raw()).await?;
+        }
+        "rule_entry_update" => {
+            let t = row.target.as_ref().ok_or("rule update needs a target")?;
+            db.query(
+                "UPDATE type::thing('rule_entry', $i) SET body = $text, \
+                     compiled_at = time::now(), stale = false, \
+                     sources = array::append(sources, \
+                         { kind: 'proposal', proposal: type::thing('codex_proposal', $pid) })",
+            )
+            .bind(("i", t.id.to_raw()))
+            .bind(("text", text))
+            .bind(("pid", proposal_id.to_owned()))
+            .await
+            .map_err(|e| format!("Failed to apply rule update: {e}"))?
+            .check()
+            .map_err(|e| format!("Failed to apply rule update: {e}"))?;
+            reembed_rule(db, embed, &t.id.to_raw()).await?;
+        }
+        "new_entity" => {
+            let name = row.payload.name.clone().ok_or("new_entity needs a name")?;
+            let kind_str = row
+                .payload
+                .entity_kind
+                .clone()
+                .unwrap_or_else(|| "misc".into());
+            let kind = crate::entity_service::EntityKind::from_table(&kind_str)
+                .unwrap_or(crate::entity_service::EntityKind::Misc);
+            let col = proposal_collection(db, proposal_id).await?;
+            let input = crate::entity_service::EntityInput {
+                name,
+                summary: Some(row.payload.proposed_text.clone()),
+                ..Default::default()
+            };
+            crate::entity_service::create(db, None, Some(&col), kind, input)
+                .await
+                .map_err(|e| format!("Failed to create entity: {e}"))?;
+        }
+        "new_rule_entry" => {
+            let name = row
+                .payload
+                .name
+                .clone()
+                .ok_or("new_rule_entry needs a name")?;
+            let category = row
+                .payload
+                .category
+                .clone()
+                .filter(|c| super::RULE_CATEGORIES.contains(&c.as_str()))
+                .unwrap_or_else(|| "entry".into());
+            let col = proposal_collection(db, proposal_id).await?;
+            let mut resp = db
+                .query(
+                    "CREATE rule_entry SET collection = type::thing('collection', $cid), \
+                         name = $name, category = $category, body = $body, \
+                         compiled_at = time::now(), stale = false, \
+                         sources = [{ kind: 'proposal', proposal: type::thing('codex_proposal', $pid) }] \
+                         RETURN VALUE id",
+                )
+                .bind(("cid", col))
+                .bind(("name", name))
+                .bind(("category", category))
+                .bind(("body", row.payload.proposed_text.clone()))
+                .bind(("pid", proposal_id.to_owned()))
+                .await
+                .map_err(|e| format!("Failed to create rule entry: {e}"))?;
+            let ids: Vec<Thing> = resp
+                .take(0)
+                .map_err(|e| format!("Failed to parse created rule entry: {e}"))?;
+            if let Some(id) = ids.into_iter().next() {
+                reembed_rule(db, embed, &id.id.to_raw()).await?;
+            }
+        }
+        other => return Err(format!("unknown proposal kind '{other}'")),
+    }
+
+    db.query(
+        "UPDATE type::thing('codex_proposal', $id) SET status = 'accepted', \
+             resolved_at = time::now()",
+    )
+    .bind(("id", proposal_id.to_owned()))
+    .await
+    .map_err(|e| format!("Failed to resolve proposal: {e}"))?;
+    Ok(())
+}
+
+/// Read back a proposal's required collection id (bare id).
+async fn proposal_collection<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    proposal_id: &str,
+) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct ColRow {
+        collection: Thing,
+    }
+    let mut cr = db
+        .query("SELECT collection FROM type::thing('codex_proposal', $id)")
+        .bind(("id", proposal_id.to_owned()))
+        .await
+        .map_err(|e| format!("Failed to read proposal collection: {e}"))?;
+    let col: Option<ColRow> = cr
+        .take(0)
+        .map_err(|e| format!("Failed to parse proposal collection: {e}"))?;
+    Ok(col
+        .ok_or("proposal has no collection")?
+        .collection
+        .id
+        .to_raw())
+}
+
+/// Resolve a proposal without applying it.
+pub async fn reject_proposal<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    proposal_id: &str,
+) -> Result<(), String> {
+    db.query(
+        "UPDATE type::thing('codex_proposal', $id) SET status = 'rejected', \
+             resolved_at = time::now()",
+    )
+    .bind(("id", proposal_id.to_owned()))
+    .await
+    .map_err(|e| format!("Failed to reject proposal: {e}"))?;
+    Ok(())
+}
+
+/// Pending proposals + unresolved lint findings (Maintenance badge).
+pub async fn maintenance_counts<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+) -> Result<MaintenanceCounts, String> {
+    #[derive(Deserialize)]
+    struct Counts {
+        proposals: usize,
+        findings: usize,
+    }
+    let mut resp = db
+        .query(
+            "RETURN { proposals: array::len((SELECT VALUE id FROM codex_proposal WHERE status = 'pending')), \
+                      findings: array::len((SELECT VALUE id FROM lint_finding WHERE resolved_at = NONE)) };",
+        )
+        .await
+        .map_err(|e| format!("Failed to count maintenance items: {e}"))?;
+    let row: Option<Counts> = resp
+        .take(0)
+        .map_err(|e| format!("Failed to parse maintenance counts: {e}"))?;
+    let row = row.ok_or("maintenance count query returned nothing")?;
+    Ok(MaintenanceCounts {
+        pending_proposals: row.proposals,
+        unresolved_findings: row.findings,
+    })
+}
+
+/// Re-embed one entity (name + summary + notes + article) after an accept.
+async fn reembed_entity<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    embed: &Arc<dyn chronacle_core::embedding::EmbeddingProvider>,
+    table: &str,
+    id: &str,
+) -> Result<(), String> {
+    let kind = crate::entity_service::EntityKind::from_table(table).map_err(|e| e.to_string())?;
+    let node = crate::entity_service::get_by_id(db, id, kind)
+        .await
+        .map_err(|e| e.to_string())?;
+    super::compile::embed_entity_with_article(db, embed, &node)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Re-embed one rule entry after an accept.
+async fn reembed_rule<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    embed: &Arc<dyn chronacle_core::embedding::EmbeddingProvider>,
+    id: &str,
+) -> Result<(), String> {
+    #[derive(Deserialize)]
+    struct Row {
+        name: String,
+        category: String,
+        body: String,
+    }
+    let mut resp = db
+        .query("SELECT name, category, body FROM type::thing('rule_entry', $id)")
+        .bind(("id", id.to_owned()))
+        .await
+        .map_err(|e| format!("Failed to load rule entry: {e}"))?;
+    let row: Option<Row> = resp
+        .take(0)
+        .map_err(|e| format!("Failed to parse rule entry: {e}"))?;
+    let Some(row) = row else {
+        return Ok(());
+    };
+    super::rules::embed_rule_entry(db, embed, id, &row.name, &row.category, &row.body)
+        .await
+        .map_err(|e| e.to_string())
+}

@@ -6,7 +6,7 @@ use surrealdb::engine::local::{Db, Mem};
 use surrealdb::Surreal;
 
 use super::proposals::*;
-use crate::extraction_service::test_support::MockLlm;
+use crate::extraction_service::test_support::{MockEmbeddingProvider, MockLlm};
 
 async fn setup_db() -> Surreal<Db> {
     let db = Surreal::new::<Mem>(()).await.unwrap();
@@ -190,4 +190,164 @@ async fn update_kind_with_missing_target_name_is_not_persisted_untargeted() {
         pending.is_empty(),
         "must not persist an untargeted update proposal"
     );
+}
+
+#[tokio::test]
+async fn accept_article_update_applies_text_provenance_and_resolves() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    let llm: Arc<dyn chronacle_core::llm::LlmProvider> = Arc::new(MockLlm::with_response(
+        r#"{"proposals":[{"kind":"entity_article_update","target_name":"Mira",
+            "proposed_text":"Mira, sage of Vethara.","rationale":"r"}]}"#,
+    ));
+    distill_chat_answer(&db, &llm, "camp1", "answer")
+        .await
+        .unwrap();
+    let id = list_proposals(&db, Some("pending")).await.unwrap()[0]
+        .id
+        .clone();
+
+    let embed: Arc<dyn chronacle_core::embedding::EmbeddingProvider> =
+        Arc::new(MockEmbeddingProvider::new(768));
+    accept_proposal(&db, &embed, &id).await.unwrap();
+
+    // `codex_sources` entries embed a record link (`proposal: type::thing(...)`)
+    // which surrealdb cannot deserialize into `serde_json::Value` directly, so
+    // the provenance check below runs in SurrealQL instead (mirrors
+    // compile_tests.rs's `codex_sources[0].source_name` pattern).
+    #[derive(serde::Deserialize)]
+    struct Npc {
+        codex_article: Option<String>,
+        codex_stale: Option<bool>,
+    }
+    let mut r = db
+        .query("SELECT codex_article, codex_stale FROM npc:`mira`")
+        .await
+        .unwrap();
+    let npc: Option<Npc> = r.take(0).unwrap();
+    let npc = npc.unwrap();
+    assert_eq!(npc.codex_article.as_deref(), Some("Mira, sage of Vethara."));
+    assert_eq!(
+        npc.codex_stale,
+        Some(false),
+        "direct article write is not stale"
+    );
+
+    #[derive(serde::Deserialize)]
+    struct CountRow {
+        count: i64,
+    }
+    let mut sr = db
+        .query(
+            "SELECT count() FROM npc:`mira` \
+             WHERE codex_sources[0].kind = 'proposal' GROUP ALL",
+        )
+        .await
+        .unwrap();
+    let provenance_count: Option<CountRow> = sr.take(0).unwrap();
+    assert_eq!(
+        provenance_count.map(|c| c.count).unwrap_or(0),
+        1,
+        "provenance appended"
+    );
+
+    let pending = list_proposals(&db, Some("pending")).await.unwrap();
+    assert!(pending.is_empty());
+    let accepted = list_proposals(&db, Some("accepted")).await.unwrap();
+    assert_eq!(accepted.len(), 1);
+}
+
+#[tokio::test]
+async fn accept_notes_update_is_the_only_machine_path_into_notes_and_marks_stale() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    let llm: Arc<dyn chronacle_core::llm::LlmProvider> = Arc::new(MockLlm::with_response(
+        r#"{"proposals":[{"kind":"entity_notes_update","target_name":"Mira",
+            "proposed_text":"Party owes Mira a favor.","rationale":"r"}]}"#,
+    ));
+    distill_chat_answer(&db, &llm, "camp1", "a").await.unwrap();
+    let id = list_proposals(&db, Some("pending")).await.unwrap()[0]
+        .id
+        .clone();
+    let embed: Arc<dyn chronacle_core::embedding::EmbeddingProvider> =
+        Arc::new(MockEmbeddingProvider::new(768));
+    accept_proposal(&db, &embed, &id).await.unwrap();
+
+    #[derive(serde::Deserialize)]
+    struct Npc {
+        notes: Option<String>,
+        codex_stale: Option<bool>,
+    }
+    let mut r = db
+        .query("SELECT notes, codex_stale FROM npc:`mira`")
+        .await
+        .unwrap();
+    let npc: Option<Npc> = r.take(0).unwrap();
+    let npc = npc.unwrap();
+    assert_eq!(npc.notes.as_deref(), Some("Party owes Mira a favor."));
+    assert_eq!(
+        npc.codex_stale,
+        Some(true),
+        "notes edit marks the article stale"
+    );
+}
+
+#[tokio::test]
+async fn accept_new_entity_creates_it_in_the_proposal_collection() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    let llm: Arc<dyn chronacle_core::llm::LlmProvider> = Arc::new(MockLlm::with_response(
+        r#"{"proposals":[{"kind":"new_entity","target_name":"Vethara","entity_kind":"location",
+            "proposed_text":"A mountain city.","rationale":"r"}]}"#,
+    ));
+    distill_chat_answer(&db, &llm, "camp1", "a").await.unwrap();
+    let id = list_proposals(&db, Some("pending")).await.unwrap()[0]
+        .id
+        .clone();
+    let embed: Arc<dyn chronacle_core::embedding::EmbeddingProvider> =
+        Arc::new(MockEmbeddingProvider::new(768));
+    accept_proposal(&db, &embed, &id).await.unwrap();
+
+    #[derive(Debug, serde::Deserialize)]
+    struct Row {
+        name: String,
+    }
+    let mut r = db
+        .query(
+            "SELECT name FROM location WHERE <-in_collection<-collection CONTAINS collection:`own1`",
+        )
+        .await
+        .unwrap();
+    let rows: Vec<Row> = r.take(0).unwrap();
+    assert!(rows.iter().any(|l| l.name == "Vethara"), "{rows:?}");
+}
+
+#[tokio::test]
+async fn reject_changes_nothing_and_resolves() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    let llm: Arc<dyn chronacle_core::llm::LlmProvider> = Arc::new(MockLlm::with_response(
+        r#"{"proposals":[{"kind":"entity_article_update","target_name":"Mira",
+            "proposed_text":"X","rationale":"r"}]}"#,
+    ));
+    distill_chat_answer(&db, &llm, "camp1", "a").await.unwrap();
+    let id = list_proposals(&db, Some("pending")).await.unwrap()[0]
+        .id
+        .clone();
+    reject_proposal(&db, &id).await.unwrap();
+
+    #[derive(serde::Deserialize)]
+    struct Npc {
+        codex_article: Option<String>,
+    }
+    let mut r = db
+        .query("SELECT codex_article FROM npc:`mira`")
+        .await
+        .unwrap();
+    let npc: Option<Npc> = r.take(0).unwrap();
+    assert!(
+        npc.unwrap().codex_article.is_none(),
+        "reject must not touch the target"
+    );
+    assert_eq!(maintenance_counts(&db).await.unwrap().pending_proposals, 0);
 }
