@@ -24,8 +24,9 @@ mod rules_tests;
 pub(crate) use compile::embed_entity_with_article;
 pub use compile::{compile_collection, compile_entity};
 pub use proposals::{
-    distill_chat_answer, distill_session_notes, list_proposals, CodexProposal, MaintenanceCounts,
-    ProposalPayload, MAX_PROPOSALS_PER_DISTILL,
+    accept_proposal, distill_chat_answer, distill_session_notes, list_proposals,
+    maintenance_counts, reject_proposal, CodexProposal, MaintenanceCounts, ProposalPayload,
+    MAX_PROPOSALS_PER_DISTILL,
 };
 pub use rules::{compile_rules, list_rule_entries, redo_rule_entry, update_rule_notes};
 pub use status::{codex_status, CodexStatus};

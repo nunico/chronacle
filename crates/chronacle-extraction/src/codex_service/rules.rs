@@ -131,7 +131,7 @@ fn batch_labeled_chunks(labeled: Vec<String>) -> Vec<String> {
 
 /// Embed `name (category): body`; zero-length-vector no-op like
 /// `compile::embed_entity_with_article` (guards mock/unavailable providers).
-async fn embed_rule_entry<C: Connection>(
+pub(super) async fn embed_rule_entry<C: Connection>(
     db: &surrealdb::Surreal<C>,
     embed: &Arc<dyn EmbeddingProvider>,
     entry_id: &str,
