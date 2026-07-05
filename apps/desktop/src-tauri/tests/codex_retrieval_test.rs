@@ -137,6 +137,72 @@ async fn rules_question_gets_rules_block_before_chunks() {
 }
 
 #[tokio::test]
+async fn compiled_article_excerpt_appears_in_codex_block_between_rules_and_chunks() {
+    let db = seed_campaign_with_rules_and_chunks().await;
+
+    // A compiled entity article, subscribed via the collection so it's picked
+    // up by the collection-entity KNN branch of `fetch_entity_context`.
+    db.query(
+        "CREATE npc:`n1` SET name='Aldric the Smith', summary='village blacksmith', \
+             notes=NULL, codex_article='Compiled lore about Aldric the Smith.', \
+             embedding=$vec, embed_model='mock', \
+             created_at=time::now(), updated_at=time::now(); \
+         RELATE collection:`ca`->in_collection->npc:`n1` SET created_at=time::now();",
+    )
+    .bind(("vec", vec![0.0_f32; 768]))
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    let embedding_provider: RwLock<Arc<dyn EmbeddingProvider>> =
+        RwLock::new(Arc::new(MockEmbeddingProvider::new(768)));
+    let vector_store: Arc<dyn VectorStore> = Arc::new(SurrealDbVector::new(db.clone()));
+
+    let recorded_prompt = Arc::new(Mutex::new(None));
+    let llm_provider: RwLock<Arc<dyn LlmProvider>> = RwLock::new(Arc::new(RecordingLlmProvider {
+        recorded_prompt: recorded_prompt.clone(),
+    }));
+
+    let mut rx = stream_response(
+        &db,
+        &embedding_provider,
+        &vector_store,
+        &llm_provider,
+        "Tell me about Aldric the Smith.",
+        Some("camp1"),
+    )
+    .await
+    .expect("stream_response should succeed");
+
+    while rx.recv().await.is_some() {}
+
+    let prompt = recorded_prompt
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("recording mock LLM should have captured the system prompt");
+
+    let i_rules = prompt
+        .find("COMPILED RULES")
+        .expect("prompt should contain the COMPILED RULES section");
+    let i_codex = prompt
+        .find("Codex: ")
+        .expect("prompt should contain a Codex excerpt line");
+    let i_ref = prompt
+        .find("REFERENCE MATERIAL")
+        .expect("prompt should contain the REFERENCE MATERIAL section");
+    assert!(
+        i_rules < i_codex,
+        "COMPILED RULES must appear before the Codex excerpt: {prompt}"
+    );
+    assert!(
+        i_codex < i_ref,
+        "the Codex excerpt must appear before REFERENCE MATERIAL: {prompt}"
+    );
+}
+
+#[tokio::test]
 async fn campaign_with_no_compiled_content_behaves_exactly_as_today() {
     let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
         .await
