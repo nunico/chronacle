@@ -273,4 +273,17 @@ describe('OracleView', () => {
     });
     expect(onSavedToCodex).toHaveBeenCalledWith(2);
   });
+
+  it('does not show Save to Codex on a user message or an error message', async () => {
+    m.getChatHistory.mockResolvedValue([
+      { role: 'user', content: 'How does cover work?' },
+      { role: 'error', content: 'Something went wrong.' },
+    ]);
+    render(OracleView, {
+      props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn() },
+    });
+    await screen.findByText('How does cover work?');
+    await screen.findByText('Something went wrong.');
+    expect(screen.queryByRole('button', { name: /Save to Codex/i })).toBeNull();
+  });
 });
