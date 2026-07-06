@@ -103,6 +103,48 @@ async fn broken_wikilink_is_found_and_clears_when_entity_exists() {
 }
 
 #[tokio::test]
+async fn broken_wikilink_found_in_codex_article() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    db.query(
+        "CREATE npc:`mira` SET name='Mira', summary='A sage', notes=NONE, \
+             codex_article='Mira once traveled with [[Ghostfell]].', \
+             created_at=time::now(), updated_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`mira` SET created_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    run_lint_campaign(&db, "camp1").await.unwrap();
+    assert_eq!(kind_count(&db, "broken_wikilink").await, 1);
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        payload: serde_json::Value,
+    }
+    let mut resp = db
+        .query("SELECT payload FROM lint_finding WHERE kind = 'broken_wikilink'")
+        .await
+        .unwrap();
+    let rows: Vec<Row> = resp.take(0).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].payload.get("link_text").and_then(|v| v.as_str()),
+        Some("Ghostfell")
+    );
+
+    // Idempotent re-run: no second finding for the same broken link.
+    let summary = run_lint_campaign(&db, "camp1").await.unwrap();
+    assert_eq!(
+        summary.new_findings, 0,
+        "no new broken_wikilink finding on repeat run"
+    );
+    assert_eq!(kind_count(&db, "broken_wikilink").await, 1);
+}
+
+#[tokio::test]
 async fn duplicate_entity_flags_same_named_pairs_in_scope() {
     let db = setup_db().await;
     seed_campaign(&db).await;

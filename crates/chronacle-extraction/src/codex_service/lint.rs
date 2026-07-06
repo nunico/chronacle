@@ -160,11 +160,13 @@ async fn lint_broken_wikilinks<C: Connection>(
             continue;
         }
         let id_array = inline_id_array(table, ids);
-        let query = format!("SELECT id, notes FROM {table} WHERE id IN {id_array}");
+        let query = format!("SELECT id, notes, codex_article FROM {table} WHERE id IN {id_array}");
         #[derive(Deserialize)]
         struct Row {
             id: Thing,
             notes: Option<String>,
+            #[serde(default)]
+            codex_article: Option<String>,
         }
         let mut resp = db
             .query(query)
@@ -175,42 +177,53 @@ async fn lint_broken_wikilinks<C: Connection>(
             .map_err(|e| format!("Failed to parse notes for lint: {e}"))?;
 
         for row in rows {
-            let Some(notes) = row.notes else { continue };
-            if notes.is_empty() {
-                continue;
-            }
             let full_id = format!("{}:{}", row.id.tb, row.id.id.to_raw());
-            for cap in WIKILINK_RE.captures_iter(&notes) {
-                let link_text = cap[1].trim().to_string();
-                if link_text.is_empty() {
+            // Scan both fields — compiled articles carry their own
+            // [[wikilinks]] independent of the source notes — but dedup on
+            // (entity, link_text) so the same broken link found in both
+            // yields a single finding.
+            let texts = [row.notes, row.codex_article];
+            let mut seen_links: Vec<String> = Vec::new();
+            for text in texts.into_iter().flatten() {
+                if text.is_empty() {
                     continue;
                 }
-                let lower = link_text.to_lowercase();
-                let resolved = entities
-                    .iter()
-                    .any(|(_, name)| name.to_lowercase() == lower);
-                if resolved {
-                    continue;
+                for cap in WIKILINK_RE.captures_iter(&text) {
+                    let link_text = cap[1].trim().to_string();
+                    if link_text.is_empty() {
+                        continue;
+                    }
+                    let lower = link_text.to_lowercase();
+                    if seen_links.iter().any(|l| l == &lower) {
+                        continue;
+                    }
+                    let resolved = entities
+                        .iter()
+                        .any(|(_, name)| name.to_lowercase() == lower);
+                    if resolved {
+                        continue;
+                    }
+                    seen_links.push(lower);
+                    if finding_exists_2(
+                        db,
+                        "broken_wikilink",
+                        "entity",
+                        &full_id,
+                        "link_text",
+                        &link_text,
+                    )
+                    .await?
+                    {
+                        continue;
+                    }
+                    record_lint(
+                        db,
+                        "broken_wikilink",
+                        json!({ "entity": full_id, "link_text": link_text }),
+                    )
+                    .await?;
+                    new_findings += 1;
                 }
-                if finding_exists_2(
-                    db,
-                    "broken_wikilink",
-                    "entity",
-                    &full_id,
-                    "link_text",
-                    &link_text,
-                )
-                .await?
-                {
-                    continue;
-                }
-                record_lint(
-                    db,
-                    "broken_wikilink",
-                    json!({ "entity": full_id, "link_text": link_text }),
-                )
-                .await?;
-                new_findings += 1;
             }
         }
     }
