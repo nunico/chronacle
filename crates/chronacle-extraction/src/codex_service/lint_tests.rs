@@ -145,6 +145,33 @@ async fn broken_wikilink_found_in_codex_article() {
 }
 
 #[tokio::test]
+async fn broken_wikilink_deduped_across_notes_and_codex_article() {
+    // The same broken link appearing in BOTH the user notes and the compiled
+    // codex_article on one entity must yield exactly one finding in a single
+    // run — the per-entity `seen_links` set suppresses the cross-field repeat.
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    db.query(
+        "CREATE npc:`mira` SET name='Mira', summary='A sage', \
+             notes='See [[Ghostfell]] for context.', \
+             codex_article='Mira once traveled with [[Ghostfell]].', \
+             created_at=time::now(), updated_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`mira` SET created_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    let summary = run_lint_campaign(&db, "camp1").await.unwrap();
+    assert_eq!(
+        summary.new_findings, 1,
+        "one finding despite the link appearing in both fields"
+    );
+    assert_eq!(kind_count(&db, "broken_wikilink").await, 1);
+}
+
+#[tokio::test]
 async fn duplicate_entity_flags_same_named_pairs_in_scope() {
     let db = setup_db().await;
     seed_campaign(&db).await;
