@@ -314,7 +314,12 @@
                     </button>
                   </div>
                 {:else if kind === 'duplicate_entity'}
-                  <p class="finding-detail">Possible duplicate entities</p>
+                  <p class="finding-detail">
+                    Possible duplicate:
+                    <strong>{entityRef(f.payload.a)?.id ?? String(f.payload.a)}</strong>
+                    and
+                    <strong>{entityRef(f.payload.b)?.id ?? String(f.payload.b)}</strong>
+                  </p>
                   <div class="finding-actions">
                     <button
                       type="button"
