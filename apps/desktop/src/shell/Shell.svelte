@@ -612,7 +612,11 @@
         <p>Create or select a campaign to see its timeline.</p>
       </div>
     {:else if view === 'maintenance'}
-      <MaintenanceView onCountsChanged={refreshMaintenanceCount} />
+      <MaintenanceView
+        onCountsChanged={refreshMaintenanceCount}
+        {activeCampaignId}
+        onOpenEntity={(id, kind) => openEntity(id, kind as EntityKind)}
+      />
     {:else if typeof view === 'object' && view.category === 'sessions' && activeCampaignId}
       <SessionLogView campaignId={activeCampaignId} />
     {:else if typeof view === 'object' && view.category === 'sessions'}

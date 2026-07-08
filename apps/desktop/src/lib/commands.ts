@@ -791,3 +791,37 @@ export async function rejectProposal(id: string): Promise<void> {
 export async function getMaintenanceCounts(): Promise<MaintenanceCounts> {
   return invoke<MaintenanceCounts>('get_maintenance_counts');
 }
+
+/** Result of a manual "Check campaign" lint pass. */
+export interface LintSummary {
+  new_findings: number;
+  unresolved_total: number;
+}
+
+/** One unresolved lint finding; `payload` is kind-shaped (see the detector that produced it). */
+export interface LintFinding {
+  id: string;
+  kind: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+/** Run the manual lint pass over a campaign's full scope ("Check campaign"). */
+export async function runLint(campaignId: string): Promise<LintSummary> {
+  return invoke<LintSummary>('run_lint', { campaignId });
+}
+
+/** List unresolved lint findings for the Maintenance inbox. */
+export async function getLintFindings(): Promise<LintFinding[]> {
+  return invoke<LintFinding[]>('get_lint_findings');
+}
+
+/** Mark one lint finding resolved. */
+export async function resolveLintFinding(id: string): Promise<void> {
+  return invoke('resolve_lint_finding', { id });
+}
+
+/** Delete one `relates_to` edge by its full record id (Maintenance resolve action). */
+export async function deleteRelation(edgeId: string): Promise<void> {
+  return invoke('delete_relation', { edgeId });
+}
