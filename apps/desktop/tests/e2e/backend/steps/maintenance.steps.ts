@@ -108,3 +108,75 @@ Then('the reject command is sent for that proposal', async ({ page }) => {
   const rejectCall = calls.find((c) => c.cmd === 'reject_proposal' && c.args?.id === 'prop2');
   expect(rejectCall).toBeDefined();
 });
+
+Given(
+  'the maintenance inbox has a broken-wikilink finding for {string}',
+  async ({ page }, linkText: string) => {
+    const bareLinkText = linkText.replace(/^\[\[/, '').replace(/\]\]$/, '');
+    await installIpcMock(page, {
+      get_proposals: [],
+      get_lint_findings: [
+        {
+          id: 'lint1',
+          kind: 'broken_wikilink',
+          payload: { entity: 'npc:mira', link_text: bareLinkText },
+          created_at: '2026-07-06T00:00:00Z',
+        },
+      ],
+      get_maintenance_counts: { pending_proposals: 0, unresolved_findings: 1 },
+      resolve_lint_finding: null,
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: /Maintenance/ }).click();
+  },
+);
+
+Given(
+  'the maintenance inbox has a duplicate-entity finding for {string}',
+  async ({ page }, name: string) => {
+    await installIpcMock(page, {
+      get_proposals: [],
+      get_lint_findings: [
+        {
+          id: 'lint2',
+          kind: 'duplicate_entity',
+          payload: { a: `npc:${name}`, b: `npc:${name}-2`, similarity: 1.0 },
+          created_at: '2026-07-06T00:00:00Z',
+        },
+      ],
+      get_maintenance_counts: { pending_proposals: 0, unresolved_findings: 1 },
+      resolve_lint_finding: null,
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: /Maintenance/ }).click();
+  },
+);
+
+When('the GM opens the findings tab', async ({ page }) => {
+  await page.getByRole('tab', { name: /Findings/ }).click();
+});
+
+Then(
+  'the finding {string} is listed with {string}',
+  async ({ page }, kindLabel: string, detail: string) => {
+    const group = page.locator('.finding-group', { hasText: kindLabel });
+    await expect(group).toBeVisible();
+    await expect(group).toContainText(detail);
+  },
+);
+
+Then('the finding {string} is listed', async ({ page }, kindLabel: string) => {
+  await expect(page.locator('.finding-group', { hasText: kindLabel })).toBeVisible();
+});
+
+When('the GM marks the finding resolved', async ({ page }) => {
+  await page.getByRole('button', { name: 'Mark resolved' }).first().click();
+});
+
+Then('the resolve command is sent for that finding', async ({ page }) => {
+  const calls = await getIpcCalls(page);
+  const resolveCall = calls.find(
+    (c) => c.cmd === 'resolve_lint_finding' && c.args?.id === 'lint1',
+  );
+  expect(resolveCall).toBeDefined();
+});
