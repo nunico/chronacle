@@ -17,3 +17,15 @@ Feature: Codex write-back review
     Then the accept command is sent for that proposal
     When the GM rejects the remaining proposal
     Then the reject command is sent for that proposal
+
+  Scenario: A broken wikilink surfaces as a finding the GM can act on
+    Given the maintenance inbox has a broken-wikilink finding for "[[Nonexistent]]"
+    When the GM opens the findings tab
+    Then the finding "Broken wikilink" is listed with "Nonexistent"
+    When the GM marks the finding resolved
+    Then the resolve command is sent for that finding
+
+  Scenario: Same-named entities surface as a possible duplicate
+    Given the maintenance inbox has a duplicate-entity finding for "Korim"
+    When the GM opens the findings tab
+    Then the finding "Possible duplicate" is listed

@@ -1172,6 +1172,11 @@ compiler output stays in machine-owned fields (`codex_article`, `rule_entry`
 body). Re-saving a session's notes replaces that session's previous pending
 proposals rather than accumulating duplicates.
 
+**Status update:** the B3 (retrieval block ordering) and C series (write-back
+review queue, pure-Rust lint detectors, Maintenance inbox proposals + findings
+UI) have landed. LLM-driven contradiction detection and entity-merge for
+`duplicate_entity` findings remain deferred to a later phase.
+
 ---
 
 ## ADR-010: Campaign-owned collections

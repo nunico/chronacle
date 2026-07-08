@@ -302,6 +302,20 @@ Either way, **nothing changes in your Codex the moment you click Save**. Every p
 
 The number badge next to **Maintenance** in the rail tells you how many things are waiting on you — pending proposals plus anything else flagged for review. An empty inbox means the Codex fully reflects the choices you've made; a badge just means there's something to glance at whenever you have a moment, not that anything is broken or urgent.
 
+### Keeping the codex healthy
+
+Proposals aren't the only thing that shows up in the Maintenance inbox. As your Codex grows — more articles, more entities, more cross-references between them — small inconsistencies naturally creep in, the same way they would in a hand-kept campaign binder. The **Findings** tab (next to Proposals, inside Maintenance) is where Chronacle surfaces those for you to look at, grouped by kind:
+
+- **Broken wikilink** — an article links to another entity by name (like `[[Korim]]`), but nothing with that name exists in the Codex anymore. Maybe it was renamed, deleted, or was never created. Click **Open entity** to jump to the article containing the broken link and fix the wording yourself, or **Mark resolved** if it's a false alarm (say, the linked thing genuinely doesn't need its own entity).
+- **Possible duplicate** — two entities look like they might be the same thing (near-identical names, most often). Chronacle doesn't merge them for you — merging is a judgment call only you can make safely — but it flags the pair so you can look and decide. Use **Open A** / **Open B** to compare the two articles side by side, then **Mark resolved** once you've either cleaned one up, renamed one to tell them apart, or confirmed they really are two different things.
+- **Stale article** — an article was compiled from source material that's since changed (a book was re-ingested, or new pages were added to a collection) and hasn't been recompiled since. Click **Compile** to bring it up to date in place — this behaves exactly like compiling from the collection's Rules tab — or **Mark resolved** if you'd rather leave the older version as-is for now.
+- **Scope violation** — a link crosses a boundary it shouldn't, most often a campaign-specific entity referencing something that belongs to a different campaign (or the reverse). Click **Delete edge** to remove just that cross-reference without touching either article, or **Mark resolved** if the link is intentional.
+- **Orphaned edge** — a relationship between two entities survived after one side of it was deleted, leaving a dangling reference pointing at nothing. There's nothing to open here; **Mark resolved** clears it once you've confirmed it's safe to drop.
+
+Findings don't appear out of nowhere — they're written when you compile, when proposals are accepted, and whenever you click **Check campaign** (visible at the top of the Findings tab), which runs a fresh pass over your active campaign's Codex and reports how many new findings turned up alongside how many are still open. None of this happens automatically in the background, so a quiet Findings tab doesn't mean everything is perfect — it means nothing has been checked recently. Run **Check campaign** any time you want a fresh read, especially after a big batch of edits or compiles.
+
+Findings are advisory, not enforcement: nothing in Chronacle blocks you from leaving them unresolved, and an unresolved finding never breaks retrieval or chat. Think of the Findings tab the way you'd think of a proofreader's margin notes — worth a look, never a gate.
+
 ---
 
 ## Asking Questions
