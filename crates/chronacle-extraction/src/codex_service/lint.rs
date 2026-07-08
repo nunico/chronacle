@@ -487,6 +487,8 @@ pub async fn resolve_lint_finding<C: Connection>(
     db.query("UPDATE type::thing('lint_finding', $id) SET resolved_at = time::now()")
         .bind(("id", finding_id.to_owned()))
         .await
+        .map_err(|e| format!("Failed to resolve finding: {e}"))?
+        .check()
         .map_err(|e| format!("Failed to resolve finding: {e}"))?;
     Ok(())
 }

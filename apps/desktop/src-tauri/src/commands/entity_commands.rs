@@ -181,6 +181,8 @@ async fn delete_relation_impl<C: surrealdb::Connection>(
     db.query("DELETE type::thing('relates_to', $id)")
         .bind(("id", raw.to_string()))
         .await
+        .map_err(|e| format!("Failed to delete relation: {e}"))?
+        .check()
         .map_err(|e| format!("Failed to delete relation: {e}"))?;
     Ok(())
 }
