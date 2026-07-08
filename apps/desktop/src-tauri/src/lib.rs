@@ -253,6 +253,7 @@ pub async fn run() {
             commands::get_events_timeline,
             commands::get_entity_graph,
             commands::get_entity_relations,
+            commands::delete_relation,
             commands::create_session,
             commands::get_sessions,
             commands::get_session,
@@ -275,6 +276,9 @@ pub async fn run() {
             commands::accept_proposal,
             commands::reject_proposal,
             commands::get_maintenance_counts,
+            commands::run_lint,
+            commands::get_lint_findings,
+            commands::resolve_lint_finding,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");

@@ -137,6 +137,11 @@ DEFINE INDEX OVERWRITE codex_proposal_status_idx ON TABLE codex_proposal COLUMNS
 -- (no schema change — kind vocabulary documented here)
 --   * "scope_violation"  — payload = { edge: option, from, to,
 --                                       from_collection, to_collection }
---   * "broken_wikilink"  — payload = { entity, link_text }          (C2)
---   * "stale_article"    — payload = { entity, reason }             (C2)
---   * "duplicate_entity" — payload = { a, b, similarity }           (C2)
+--                                       produced by the C2a manual lint pass
+--                                       (codex_service::lint::run_lint_campaign)
+--   * "broken_wikilink"  — payload = { entity, link_text }
+--                                       produced by the C2a manual lint pass
+--   * "stale_article"    — payload = { entity, reason }
+--                                       produced by the C2a manual lint pass
+--   * "duplicate_entity" — payload = { a, b, similarity }
+--                                       produced by the C2a manual lint pass

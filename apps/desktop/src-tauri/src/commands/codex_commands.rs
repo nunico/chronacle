@@ -250,6 +250,32 @@ pub async fn get_maintenance_counts(
     chronacle_extraction::codex_service::maintenance_counts(&state.db).await
 }
 
+/// Run the manual lint pass over a campaign's full scope ("Check campaign").
+#[tauri::command]
+pub async fn run_lint(
+    state: State<'_, Arc<AppState>>,
+    campaign_id: String,
+) -> Result<chronacle_extraction::codex_service::LintSummary, String> {
+    chronacle_extraction::codex_service::run_lint_campaign(&state.db, &campaign_id).await
+}
+
+/// Unresolved lint findings for the Maintenance inbox.
+#[tauri::command]
+pub async fn get_lint_findings(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<chronacle_extraction::codex_service::LintFinding>, String> {
+    chronacle_extraction::codex_service::list_lint_findings(&state.db).await
+}
+
+/// Mark one lint finding resolved.
+#[tauri::command]
+pub async fn resolve_lint_finding(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<(), String> {
+    chronacle_extraction::codex_service::resolve_lint_finding(&state.db, &id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +289,9 @@ mod tests {
         let _ = accept_proposal as fn(_, _) -> _;
         let _ = reject_proposal as fn(_, _) -> _;
         let _ = get_maintenance_counts as fn(_) -> _;
+        let _ = run_lint as fn(_, _) -> _;
+        let _ = get_lint_findings as fn(_) -> _;
+        let _ = resolve_lint_finding as fn(_, _) -> _;
     }
 
     #[tokio::test]
