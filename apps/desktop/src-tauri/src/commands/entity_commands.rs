@@ -166,6 +166,34 @@ pub async fn get_entity_relations(
     entity_service::get_entity_relations(&state.db, &id, k.table_name()).await
 }
 
+/// Core logic for [`delete_relation`], split out so it can be exercised
+/// directly against a bare connection in tests without constructing a Tauri
+/// `State`.
+///
+/// `edge_id` arrives as the full record string "relates_to:<id>" (the form the
+/// scope_violation lint payload stores); strip the table prefix so type::thing
+/// rebuilds the correct Thing.
+async fn delete_relation_impl<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    edge_id: &str,
+) -> Result<(), String> {
+    let raw = edge_id.strip_prefix("relates_to:").unwrap_or(edge_id);
+    db.query("DELETE type::thing('relates_to', $id)")
+        .bind(("id", raw.to_string()))
+        .await
+        .map_err(|e| format!("Failed to delete relation: {e}"))?;
+    Ok(())
+}
+
+/// Delete one `relates_to` edge by its record id (Maintenance resolve action).
+#[tauri::command]
+pub async fn delete_relation(
+    state: State<'_, Arc<AppState>>,
+    edge_id: String,
+) -> Result<(), String> {
+    delete_relation_impl(&state.db, &edge_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +225,71 @@ mod tests {
     fn relate_entities_rejects_invalid_from_kind() {
         let err = parse_kind("goblin").unwrap_err();
         assert!(matches!(err, EntityError::InvalidKind { .. }));
+    }
+
+    /// Proves the scope-violation resolve round-trip: the lint detector stores
+    /// the edge as the *full* record string `relates_to:<id>` (see
+    /// `codex_service::lint::lint_scope_violations`), and `delete_relation`
+    /// must strip that table prefix before rebuilding the `Thing`, or the
+    /// delete silently matches nothing.
+    #[tokio::test]
+    async fn delete_relation_removes_edge_given_full_record_string() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        chronacle_db::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE npc:`a` SET name = 'A', created_at = time::now(), updated_at = time::now();
+             CREATE npc:`b` SET name = 'B', created_at = time::now(), updated_at = time::now();",
+        )
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+
+        entity_service::relate(&db, "a", "npc", "b", "npc", "member_of", None)
+            .await
+            .unwrap();
+
+        #[derive(serde::Deserialize)]
+        struct EdgeRow {
+            id: surrealdb::sql::Thing,
+        }
+        let mut resp = db
+            .query("SELECT id FROM relates_to")
+            .await
+            .unwrap()
+            .check()
+            .unwrap();
+        let rows: Vec<EdgeRow> = resp.take(0).unwrap();
+        assert_eq!(rows.len(), 1, "expected exactly one edge before delete");
+
+        // Mirror the exact payload format lint_scope_violations records:
+        // "relates_to:<raw id>", the FULL record string, not a bare id.
+        let edge_id = format!("relates_to:{}", rows[0].id.id.to_raw());
+
+        delete_relation_impl(&db, &edge_id).await.unwrap();
+
+        let mut resp = db
+            .query("SELECT id FROM relates_to")
+            .await
+            .unwrap()
+            .check()
+            .unwrap();
+        let rows_after: Vec<EdgeRow> = resp.take(0).unwrap();
+        assert_eq!(
+            rows_after.len(),
+            0,
+            "edge should be deleted when given the full 'relates_to:<id>' string"
+        );
+    }
+
+    /// Smoke test: `delete_relation` command function is referenced so the
+    /// compiler verifies its signature, imports, and return type.
+    #[test]
+    fn delete_relation_command_compiles() {
+        let _ = delete_relation as fn(_, _) -> _;
     }
 }
