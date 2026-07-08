@@ -165,10 +165,6 @@ Then(
   },
 );
 
-Then('the finding {string} is listed', async ({ page }, kindLabel: string) => {
-  await expect(page.locator('.finding-group', { hasText: kindLabel })).toBeVisible();
-});
-
 When('the GM marks the finding resolved', async ({ page }) => {
   await page.getByRole('button', { name: 'Mark resolved' }).first().click();
 });

@@ -28,4 +28,4 @@ Feature: Codex write-back review
   Scenario: Same-named entities surface as a possible duplicate
     Given the maintenance inbox has a duplicate-entity finding for "Korim"
     When the GM opens the findings tab
-    Then the finding "Possible duplicate" is listed
+    Then the finding "Possible duplicate" is listed with "Korim"
