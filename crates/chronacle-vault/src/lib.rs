@@ -5,6 +5,8 @@
 //! future S3 / WebDAV backend needs no change here. **This crate must never
 //! depend on `std::fs`, `tokio::fs`, or `notify`.**
 
+pub mod frontmatter;
+
 /// Errors surfaced by the vault engine.
 #[derive(Debug, thiserror::Error)]
 pub enum VaultError {
