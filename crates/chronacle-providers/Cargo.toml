@@ -21,6 +21,7 @@ futures-util.workspace = true
 fastembed.workspace = true
 dirs-next.workspace = true
 tokio.workspace = true
+notify = "8"
 
 [dev-dependencies]
 chronacle-db = { path = "../chronacle-db" }

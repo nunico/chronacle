@@ -5,9 +5,15 @@
 pub mod blob_store;
 pub mod embedding;
 pub mod llm;
+pub mod vault;
 pub mod vector_store;
 
 pub use blob_store::BlobStore;
 pub use embedding::{EmbeddingError, EmbeddingProvider};
 pub use llm::{ChatMessage, LlmError, LlmProvider};
+pub use vault::{
+    EntityRecord, NoopOutbound, RuleEntryRecord, RulePageRef, SessionRecord, VaultEvent, VaultKey,
+    VaultMetadata, VaultOutbound, VaultRecord, VaultRecordError, VaultRecordStore, VaultRef,
+    VaultScope, VaultStore, VaultStoreError, VaultWatcher,
+};
 pub use vector_store::{IndexedChunk, SearchResult, VectorStore};
