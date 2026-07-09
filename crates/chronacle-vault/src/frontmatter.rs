@@ -4,11 +4,21 @@
 //! `Vex: The Unbound` would otherwise emit invalid YAML, and one named
 //! `[[Iron Tower]]` would parse as a nested list. `aliases` and `title` are
 //! Obsidian-meaningful keys, not private serialisation keys.
+//!
+//! Every frontmatter field is a single-line scalar by construction —
+//! `render()` runs each one through [`chronacle_core::sanitize_scalar`]
+//! before quoting. Multi-line content (`summary`, `notes`, `codex_article`)
+//! lives in the file body as raw Markdown, never in frontmatter. If a
+//! multi-line frontmatter field is ever added, it must use a YAML block
+//! scalar (`|`), never a quoted string with escapes.
 
-use chronacle_core::RulePageRef;
+use chronacle_core::{sanitize_scalar, RulePageRef};
 use serde::{Deserialize, Serialize};
 
 /// The closed frontmatter vocabulary. Field order here is emission order.
+///
+/// Derives `Serialize` for a future `to_value` use case even though
+/// `render()` below hand-rolls emission rather than routing through it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Frontmatter {
     /// Stable record identity, e.g. `"npc:abc123"`. Never derived from the path.
@@ -54,33 +64,25 @@ pub enum FrontmatterError {
     Yaml(String),
 }
 
-/// Wrap a scalar in double quotes, escaping backslashes, quotes, and control
-/// characters into YAML double-quoted escape sequences.
+/// Wrap a scalar in double quotes, escaping only backslashes and quotes.
 ///
-/// A naive `s.replace('\\', ..).replace('"', ..)` chain looks correct but is
-/// not: it leaves raw control characters (e.g. a literal `\n` byte) inside
-/// the quoted scalar. YAML 1.2 folds a raw newline inside a double-quoted
-/// scalar into a space on parse, and drops other raw C0 controls outright —
-/// so a `name` with an embedded newline or bell character silently changes
-/// value on the next round-trip through this on-disk format. Building the
-/// escaped string in a single pass over `chars()` lets us also handle the
-/// full C0 control range (`U+0000`-`U+001F`) and `U+007F`, which `.replace`
-/// cannot express and which a chain of calls would re-scan the string for
-/// anyway. Escaping order still matters within the loop: backslash is
-/// escaped as soon as it's seen, before any subsequent character's escape
-/// could otherwise collide with it.
+/// This is sufficient — and provably safe — because every caller runs the
+/// value through [`sanitize_scalar`] first, which removes every control
+/// character that would otherwise need a YAML escape sequence. The
+/// `debug_assert!` below enforces that coupling rather than assuming it: if
+/// a caller ever forgets to sanitize first, debug builds fail loudly instead
+/// of silently emitting a byte that YAML would fold or drop on the next
+/// parse.
 fn quote(s: &str) -> String {
+    debug_assert!(
+        !s.chars().any(char::is_control),
+        "quote() received an unsanitized scalar with a control character: {s:?}"
+    );
     let mut escaped = String::with_capacity(s.len() + 2);
     for c in s.chars() {
         match c {
             '\\' => escaped.push_str("\\\\"),
             '"' => escaped.push_str("\\\""),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            c if c.is_ascii_control() => {
-                escaped.push_str(&format!("\\x{:02x}", c as u32));
-            }
             c => escaped.push(c),
         }
     }
@@ -100,53 +102,71 @@ fn quote(s: &str) -> String {
 pub fn render(fm: &Frontmatter) -> String {
     let mut out = String::from("---\n");
 
-    out.push_str(&format!("id: {}\n", quote(&fm.id)));
+    out.push_str(&format!("id: {}\n", quote(&sanitize_scalar(&fm.id))));
     if let Some(name) = &fm.name {
-        out.push_str(&format!("name: {}\n", quote(name)));
+        out.push_str(&format!("name: {}\n", quote(&sanitize_scalar(name))));
     }
     if let Some(title) = &fm.title {
-        out.push_str(&format!("title: {}\n", quote(title)));
+        out.push_str(&format!("title: {}\n", quote(&sanitize_scalar(title))));
     }
     if !fm.aliases.is_empty() {
         let items = fm
             .aliases
             .iter()
-            .map(|a| quote(a))
+            .map(|a| quote(&sanitize_scalar(a)))
             .collect::<Vec<_>>()
             .join(", ");
         out.push_str(&format!("aliases: [{items}]\n"));
     }
     if let Some(kind) = &fm.kind {
-        out.push_str(&format!("type: {}\n", quote(kind)));
+        out.push_str(&format!("type: {}\n", quote(&sanitize_scalar(kind))));
     }
     if let Some(campaign) = &fm.campaign {
-        out.push_str(&format!("campaign: {}\n", quote(campaign)));
+        out.push_str(&format!(
+            "campaign: {}\n",
+            quote(&sanitize_scalar(campaign))
+        ));
     }
     if let Some(collection) = &fm.collection {
-        out.push_str(&format!("collection: {}\n", quote(collection)));
+        out.push_str(&format!(
+            "collection: {}\n",
+            quote(&sanitize_scalar(collection))
+        ));
     }
     if let Some(category) = &fm.category {
-        out.push_str(&format!("category: {}\n", quote(category)));
+        out.push_str(&format!(
+            "category: {}\n",
+            quote(&sanitize_scalar(category))
+        ));
     }
     if let Some(session_number) = fm.session_number {
         out.push_str(&format!("session_number: {session_number}\n"));
     }
     if let Some(date_played) = &fm.date_played {
-        out.push_str(&format!("date_played: {}\n", quote(date_played)));
+        out.push_str(&format!(
+            "date_played: {}\n",
+            quote(&sanitize_scalar(date_played))
+        ));
     }
     if !fm.page_refs.is_empty() {
         out.push_str("page_refs:\n");
         for page_ref in &fm.page_refs {
             out.push_str(&format!(
                 "  - {{ source_name: {}, page_start: {}, page_end: {} }}\n",
-                quote(&page_ref.source_name),
+                quote(&sanitize_scalar(&page_ref.source_name)),
                 page_ref.page_start,
                 page_ref.page_end
             ));
         }
     }
-    out.push_str(&format!("created_at: {}\n", quote(&fm.created_at)));
-    out.push_str(&format!("updated_at: {}\n", quote(&fm.updated_at)));
+    out.push_str(&format!(
+        "created_at: {}\n",
+        quote(&sanitize_scalar(&fm.created_at))
+    ));
+    out.push_str(&format!(
+        "updated_at: {}\n",
+        quote(&sanitize_scalar(&fm.updated_at))
+    ));
 
     out.push_str("---\n");
     out
@@ -164,17 +184,61 @@ pub fn parse(file: &str) -> Result<(Frontmatter, String), FrontmatterError> {
     let (yaml, body) = rest.split_at(end);
     let body = &body["\n---\n".len()..];
 
-    let fm: Frontmatter = yaml_serde::from_str(yaml).map_err(|e| {
-        let msg = e.to_string();
-        if msg.contains("missing field `id`") {
-            FrontmatterError::MissingId
-        } else {
-            FrontmatterError::Yaml(msg)
-        }
-    })?;
-    if fm.id.trim().is_empty() {
-        return Err(FrontmatterError::MissingId);
+    // Deserialize through a shadow struct with `id: Option<String>` rather
+    // than matching on the deserializer's error text: a `yaml_serde` version
+    // bump that rewords its "missing field" message would otherwise silently
+    // turn `MissingId` into an opaque `Yaml(..)`, changing caller-visible
+    // behaviour with no compile-time signal.
+    #[derive(Deserialize)]
+    struct ShadowFrontmatter {
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        aliases: Vec<String>,
+        #[serde(rename = "type", default)]
+        kind: Option<String>,
+        #[serde(default)]
+        campaign: Option<String>,
+        #[serde(default)]
+        collection: Option<String>,
+        #[serde(default)]
+        category: Option<String>,
+        #[serde(default)]
+        session_number: Option<i64>,
+        #[serde(default)]
+        date_played: Option<String>,
+        #[serde(default)]
+        page_refs: Vec<RulePageRef>,
+        created_at: String,
+        updated_at: String,
     }
+
+    let shadow: ShadowFrontmatter =
+        yaml_serde::from_str(yaml).map_err(|e| FrontmatterError::Yaml(e.to_string()))?;
+    let id = shadow
+        .id
+        .filter(|id| !id.trim().is_empty())
+        .ok_or(FrontmatterError::MissingId)?;
+
+    let fm = Frontmatter {
+        id,
+        name: shadow.name,
+        title: shadow.title,
+        aliases: shadow.aliases,
+        kind: shadow.kind,
+        campaign: shadow.campaign,
+        collection: shadow.collection,
+        category: shadow.category,
+        session_number: shadow.session_number,
+        date_played: shadow.date_played,
+        page_refs: shadow.page_refs,
+        created_at: shadow.created_at,
+        updated_at: shadow.updated_at,
+    };
     Ok((fm, body.to_owned()))
 }
 
@@ -260,7 +324,15 @@ mod tests {
 
     #[test]
     fn parse_rejects_frontmatter_with_no_id() {
-        let file = "---\nname: \"x\"\n---\nbody\n";
+        // Other required fields present, so this isolates the id check
+        // itself rather than falling through to a generic Yaml error.
+        let file = "---\nname: \"x\"\ncreated_at: \"a\"\nupdated_at: \"b\"\n---\nbody\n";
+        assert!(matches!(parse(file), Err(FrontmatterError::MissingId)));
+    }
+
+    #[test]
+    fn parse_rejects_frontmatter_with_a_blank_id() {
+        let file = "---\nid: \"   \"\ncreated_at: \"a\"\nupdated_at: \"b\"\n---\nbody\n";
         assert!(matches!(parse(file), Err(FrontmatterError::MissingId)));
     }
 
@@ -283,7 +355,11 @@ mod tests {
     }
 
     #[test]
-    fn quote_round_trips_hostile_names() {
+    fn quote_round_trips_hostile_names_to_their_sanitized_form() {
+        // Deliberately changed expectation: hostile inputs no longer survive
+        // a round-trip verbatim. Control characters have no semantic value
+        // in a single-line field, so render() sanitizes before quoting;
+        // the round-trip now lands on the *sanitized* form, not the original.
         let names = [
             "Foo\nBar",
             "Tab\there",
@@ -302,8 +378,43 @@ mod tests {
             let (back, _) = parse(&file).unwrap_or_else(|e| panic!("reparse {name:?}: {e}"));
             assert_eq!(
                 back.name.as_deref(),
-                Some(name),
+                Some(sanitize_scalar(name).as_str()),
                 "round-trip failed for {name:?}"
+            );
+
+            // render is a fixed point: render(parse(render(fm))) == render(fm).
+            let refile = format!("{}\nbody\n", render(&back));
+            assert_eq!(refile, file, "render is not a fixed point for {name:?}");
+        }
+    }
+
+    #[test]
+    fn every_rendered_frontmatter_line_is_single_line() {
+        let mut fm = entity_fm();
+        fm.name = Some("Hostile\nName\twith\u{7}control".into());
+        fm.title = Some("Hostile\nTitle".into());
+        fm.aliases = vec!["Hostile\nAlias".into()];
+        fm.page_refs = vec![RulePageRef {
+            source_name: "Hostile\nSource".into(),
+            page_start: 1,
+            page_end: 2,
+        }];
+
+        let out = render(&fm);
+        let yaml = out
+            .strip_prefix("---\n")
+            .and_then(|rest| rest.strip_suffix("---\n"))
+            .expect("well-fenced output");
+
+        for line in yaml.lines() {
+            // Every line must either be a top-level `key: value` line or a
+            // `  - { ... }` list item — never a bare continuation of a value
+            // that spilled onto its own line.
+            let is_key_value = line.contains(':') && !line.starts_with(' ');
+            let is_list_item = line.starts_with("  - ");
+            assert!(
+                is_key_value || is_list_item,
+                "found a value that spilled onto a continuation line: {line:?}\nfull output:\n{out}"
             );
         }
     }
