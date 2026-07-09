@@ -92,6 +92,7 @@ pub fn split_body(body: &str) -> BodyParts {
 fn extract_leading_summary(text: &str) -> (String, Option<String>) {
     // Find the start of the first non-blank line.
     let mut offset = 0usize;
+    let mut found_heading = false;
     for line in text.split_inclusive('\n') {
         if line.trim().is_empty() {
             offset += line.len();
@@ -100,7 +101,14 @@ fn extract_leading_summary(text: &str) -> (String, Option<String>) {
         if line.trim_end_matches('\n') != SUMMARY_HEADING {
             return (text.to_owned(), None);
         }
+        found_heading = true;
         break;
+    }
+    // The text is empty or entirely blank lines: no heading was found, so
+    // there is nothing to extract. Made explicit rather than relying on the
+    // loop falling through with `offset` still valid.
+    if !found_heading {
+        return (text.to_owned(), None);
     }
     // `offset` now points at the start of the SUMMARY_HEADING line.
     let heading_line_len = text[offset..]
@@ -167,6 +175,9 @@ pub fn render_body(parts: &BodyParts) -> String {
     }
     if let Some(notes) = &parts.notes {
         sections.push(format!("{NOTES_HEADING}\n\n{notes}"));
+    }
+    if sections.is_empty() {
+        return String::new();
     }
     format!("\n{}\n", sections.join("\n\n"))
 }
@@ -268,6 +279,27 @@ mod tests {
         assert!(!out.contains(SUMMARY_HEADING));
         assert!(!out.contains(FENCE_START));
         assert!(out.contains("N."));
+    }
+
+    #[test]
+    fn split_body_handles_an_empty_body() {
+        let parts = split_body("");
+        assert_eq!(parts.summary, None);
+        assert_eq!(parts.fenced, None);
+        assert_eq!(parts.notes, None);
+    }
+
+    #[test]
+    fn split_body_handles_a_whitespace_only_body() {
+        let parts = split_body("   \n\n  \n");
+        assert_eq!(parts.summary, None);
+        assert_eq!(parts.fenced, None);
+        assert_eq!(parts.notes, None);
+    }
+
+    #[test]
+    fn render_body_on_all_none_parts_is_empty() {
+        assert_eq!(render_body(&BodyParts::default()), "");
     }
 
     #[test]
