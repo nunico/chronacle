@@ -26,7 +26,7 @@ change.
 
 ## What ADR-008 got wrong
 
-Four provisions of ADR-008 are unimplementable or undesirable as written. Each
+Five provisions of ADR-008 are unimplementable or undesirable as written. Each
 is corrected below and amended in the ADR on D0.
 
 1. **`entity` table with an `entity_type` field.** There is no `entity` table.
@@ -47,12 +47,21 @@ is corrected below and amended in the ADR on D0.
    passage-level and AI-detected in Phase 3. The setting has nothing to filter.
 4. **"File I/O uses `tokio::fs` directly… No `FileStore` abstraction is
    needed."** This contradicts the standing "traits for all external deps"
-   constraint, and — more concretely — makes the conflict window untestable.
+   constraint, and — more concretely — leaves I/O failure and crash-recovery
+   paths unreachable in tests.
+5. **Timestamp-driven sync ("last-write-wins on `updated_at` vs. file mtime",
+   "delta under 5 seconds → conflict").** `codex_service::compile.rs:220-224`
+   updates `codex_article` without touching `updated_at`, so a recompiled
+   article would never re-export. And a timestamp delta cannot distinguish a
+   stale file from a divergently-edited one. Replaced by a stored content-hash
+   merge base.
 
 ## Decisions locked during design review
 
 - **Scope: full bidirectional.** Outbound + inbound + conflict + soft-delete,
-  in one tranche (12 PRs).
+  in one tranche (14 PRs).
+- **Sync is content-hash based, not timestamp based.** A stored `synced_hash`
+  per record is the merge base; no clock is consulted.
 - **Layout mirrors ownership.** Two roots, `campaigns/` and `collections/`.
 - **One file per record**, with an HTML-comment-fenced compiler-owned block.
 - **Identity is the frontmatter `id`.** Paths are derived, never authoritative.
@@ -87,7 +96,19 @@ Each record maps to exactly one key, derivable from its owning edge.
 ```
 
 Everything outside `campaigns/*/…` and `collections/*/…` is **unmanaged and
-ignored** — the vault root, `.obsidian/`, and `*.conflict.*.md`.
+ignored** — the vault root, `.obsidian/`, and `*.conflict.*.md`. That exclusion
+applies on the **watcher path as well as reconcile**: a `.conflict.*.md` file
+has no `id` and sits in a managed folder, so without it the file would fall
+straight into the id-less-create path and spawn a duplicate record.
+
+**Scope folders take the same slug + id-suffix rule as files.** `campaign.name`
+has no unique index (`001_base_schema.surql:9-13`), so two campaigns can share a
+name and would otherwise collide at the folder level. Renaming a campaign or
+collection re-keys every file beneath it: the drain writes the new tree and
+deletes the old under a single guard set. Inbound, the folder slug is **never**
+parsed back into a scope — the id-less create path resolves its owning campaign
+or collection from the reconcile scan's `slug → scope id` map, and ignores the
+file if that lookup is ambiguous or absent.
 
 ## Identity
 
@@ -167,14 +188,39 @@ numeric filename keeps `sessions/` chronologically sorted while `title` drives
 Obsidian's display and linking. **No fence** — a session has only `notes`, so
 the whole body is GM-owned.
 
+### Body grammar
+
+Outbound renders the body **from the record**, so any GM prose the parser does
+not recognise would be destroyed on the next write — and the next write can be
+triggered by a compile the GM never asked for. The grammar is therefore
+**lossless by construction**:
+
+- The fenced block maps to `codex_article` (or `rule_entry.body`).
+- A leading `## Summary` section, if present, maps to `summary`.
+- **Everything else in the body maps to `notes`, verbatim** — including
+  unrecognised headings, prose above the first heading, and a deleted
+  `## Notes` heading.
+
+So `## Notes` is a rendering convention, not a parsing requirement. A GM who
+adds `## Ideas` keeps it: it round-trips through `notes`. Nothing outside the
+fence is ever dropped. This is deliberately coarser than heading-scoped field
+mapping, which is the single most likely source of D1a/D5a rework.
+
 ### Ownership
 
-| Field                                       | Owner    | Inbound                           |
+| Field / key                                 | Owner    | Inbound                           |
 | ------------------------------------------- | -------- | --------------------------------- |
-| `notes`, `summary`, session body            | GM       | applied                           |
+| `notes` (all non-fence, non-summary body)   | GM       | applied                           |
+| `summary`, session body                     | GM       | applied                           |
 | `name` / `title`                            | GM       | applied; triggers outbound re-key |
 | `codex_article`, `rule_entry.body` (fenced) | compiler | **ignored**                       |
 | `page_refs`, `sources`, `id`, `type`        | compiler | **ignored**                       |
+| `aliases`, `campaign`, `collection`         | derived  | **ignored** (re-rendered)         |
+| `created_at`, `updated_at`                  | database | **ignored**                       |
+
+An `aliases` edit is plausible in an Obsidian workflow, so it is worth being
+explicit: it is regenerated from `name` on every outbound write and never read
+back.
 
 **Fence and body comparison is normalized** — trim, CRLF→LF — before deciding
 anything differs. A byte-exact compare manufactures a conflict every time an
@@ -253,9 +299,23 @@ onto an mpsc channel. A background **drain task** coalesces repeats (compiling
    for no benefit.
 3. `VaultStore::write`.
 
-The inbound watcher drops the next event matching a live guard. **Both halves
-of that handshake live inside the drain task** — which is why the trigger does
-not belong in the services.
+**Both halves of that handshake live inside the drain task** — which is why the
+trigger does not belong in the services.
+
+Guard semantics matter, because one `write()` commonly emits several events
+(`Create` + `Modify`, or `Modify(Data)` + `Modify(Metadata)`), and a guard whose
+event never arrives would otherwise live forever:
+
+- The inbound handler **re-reads the key and hashes its content**, then drops
+  the event if the hash matches a live guard. It does not match on key alone.
+- Guards are **not consumed on first match** — a single write's trailing events
+  must all be dropped. They expire on a TTL (30s), or when the key's content
+  hash is observed to differ.
+- Because matching is content-based, a stale guard cannot mask a genuine later
+  edit: different content, different hash.
+- **The frontmatter `id` write-back on inbound create is itself a file write**
+  and must be issued under a guard, or it re-triggers the watcher as an inbound
+  modify.
 
 Producers to wire: `entity_service`, `session_service`,
 `codex_service::compile_collection`, the rules pipeline, and the accepted-
@@ -265,18 +325,57 @@ silently miss the compiler — the content the vault most needs to mirror.
 An inbound change to `name` re-keys the file: the drain performs
 `write(new) + delete(old)` under a guard covering **both** keys.
 
-### Reconcile
+### Reconcile — bidirectional, hash-based
 
-Scans the vault into an `id → key` map, then for every record: write if the
-key is absent or its `mtime` predates `updated_at`. Runs on startup, on
-`vault_sync_path` change, and on explicit "Sync now".
+**Reconcile is not timestamp-based, and it is not outbound-only.** Both
+properties are load-bearing; the reasons are worth stating because the obvious
+design fails.
 
-**Reconcile skips `vault_deleted = TRUE` records.** Without this, reconcile
-resurrects every file the GM deleted, silently undoing soft-delete on the next
-launch.
+`updated_at` cannot drive sync. `codex_service::compile.rs:220-224` writes
+`codex_article`, `codex_compiled_at`, `codex_stale`, and `codex_sources` — and
+never touches `updated_at`. A reconcile comparing `mtime` against `updated_at`
+would therefore never re-export a recompiled article, leaving the vault
+permanently stale in exactly the producer that matters most.
+
+Timestamps also cannot distinguish _"the file is a stale copy of the DB"_ from
+_"the file holds unapplied divergent edits."_ That distinction needs a **base**
+to compare both sides against.
+
+So the engine stores a **last-synced content hash per record** in a
+`vault_sync_state` table (`record`, `key`, `synced_hash`, `synced_at`), and
+sync becomes an ordinary three-way merge:
+
+| `db_hash` vs base | `file_hash` vs base | Action                    |
+| ----------------- | ------------------- | ------------------------- |
+| same              | same                | no-op                     |
+| changed           | same                | **export** (outbound)     |
+| same              | changed             | **apply** (inbound)       |
+| changed           | changed             | **conflict**              |
+| —                 | file absent         | soft-delete (see Inbound) |
+| no base           | file absent         | export (first write)      |
+
+`db_hash` is the hash of the record rendered to markdown; `file_hash` is the
+hash of the file's normalized content. Both sides are compared to
+`synced_hash`. **No clock is consulted.** `mtime` survives only as an
+optimisation — a file whose `mtime` is unchanged since `synced_at` need not be
+read and hashed.
+
+This makes reconcile inherently **bidirectional**: it applies inbound edits made
+while the app was closed, and it is the _only_ inbound path for a backend
+running with `watcher = None`. Reconcile runs on startup, on `vault_sync_path`
+change, and on explicit "Sync now".
+
+**Reconcile skips soft-deleted records.** Queries use the `vault_deleted != true`
+form — never `= false`. A `DEFINE FIELD … DEFAULT false` migration does not
+backfill existing rows, so records written before `003_vault_sync.surql` carry
+no `vault_deleted` value at all and would silently fail a `= false` filter.
+(This repo has been bitten by a silently-wrong SurrealDB filter before; see the
+`count()` + `GROUP ALL` case.)
 
 A dropped `enqueue()` degrades to _"the file updates on next reconcile"_ —
-never to _"the file is permanently wrong."_
+never to _"the file is permanently wrong."_ That claim is now true, because
+reconcile compares content, not timestamps that a producer might forget to
+bump.
 
 ## Inbound
 
@@ -300,30 +399,64 @@ frontmatter.
 | Anything unmanaged                  | Ignored.                                                                                                                                                                                                          |
 
 Inbound record creation needs an embedding and a wikilink re-sync. Both happen
-inside `SurrealVaultRecordStore::create` on the domain side, where
-`entity_service` already lives — the engine stays ignorant of embeddings,
-SurrealQL, and files simultaneously.
+inside `SurrealVaultRecordStore::create`, which lives in `chronacle-domain` and
+delegates to `entity_service` — which lives in **`chronacle-extraction`**, not
+in domain. `chronacle-domain/Cargo.toml:14` already depends on
+`chronacle-extraction`, so no cycle arises. `SurrealVaultRecordStore` is
+constructed with `Arc<dyn EmbeddingProvider>` injected, and calls extraction's
+entity-create plus the wikilink back-scan (`wikilink::backfill`). The engine
+stays ignorant of embeddings, SurrealQL, and files simultaneously.
 
 ### Soft delete
 
 `vault_deleted` is added to the **eight entity tables and `session`** (not to a
-nonexistent `entity` table), in a new `003_vault_sync.surql`. Migrations are
-`DEFINE`-only and re-run every boot, so this is
-`DEFINE FIELD OVERWRITE vault_deleted ON TABLE <t> TYPE bool DEFAULT false` ×9
-— never a `REMOVE`, which once wiped every relationship edge on restart.
+nonexistent `entity` table), in a new `003_vault_sync.surql`, alongside the
+`vault_sync_state` table. Migrations are `DEFINE`-only and re-run every boot, so
+this is `DEFINE FIELD OVERWRITE vault_deleted ON TABLE <t> TYPE bool DEFAULT false`
+×9 — never a `REMOVE`, which once wiped every relationship edge on restart.
+
+`DEFAULT false` **does not backfill existing rows.** Records created before this
+migration carry no `vault_deleted` value, so a `WHERE vault_deleted = false`
+filter silently omits every pre-existing entity. All queries use
+`vault_deleted != true`. D2b ships a test asserting a row created before the
+migration is treated as not-deleted.
+
+`vault_sync_state` is `SCHEMAFULL` with typed fields (`record`, `key`,
+`synced_hash`, `synced_at`) — no `FLEXIBLE` object, no `serde_json::Value`
+binding on writes. The same applies to the `vault_type_mismatch` payload written
+into `lint_finding.payload`, which **is** `FLEXIBLE` (`002_wiki_layer.surql:33`):
+it is written from a typed struct, following the existing lint-finding pattern.
 
 "Restore" flips the flag and re-exports. "Confirm delete" hard-deletes the
 record.
 
+**A soft-deleted record is excluded everywhere except the Maintenance view's
+pending-deletions list** — entity lists, RAG retrieval, wikilink resolution,
+codex compile inputs, and lint passes all filter it out. Otherwise a "deleted"
+entity keeps answering questions and getting recompiled while its file stays
+absent, and the app and vault disagree about what exists.
+
+Every one of those read paths needs the `vault_deleted != true` filter, across
+`chronacle-extraction` (entity, codex, lint), `chronacle-retrieval`, and
+`chronacle-domain`. This is a cross-crate change and is budgeted into D5c, not
+a footnote to it.
+
+A `codex_proposal` targeting a soft-deleted record is left pending; accepting it
+is rejected with an error rather than resurrecting the record implicitly.
+
 ## Conflict
 
-On an inbound modify, compare `mtime` against the record's `updated_at`:
+**A conflict is `db_hash ≠ base ∧ file_hash ≠ base`.** No time window is
+involved. ADR-008's "delta under 5 seconds" rule is superseded: it both
+under-detects (a file edited offline, then a record edited in-app an hour
+later, silently loses the file's edit) and over-detects (every outbound write
+leaves `mtime ≈ updated_at`, so a GM edit three seconds after an export
+manufactures a spurious conflict).
 
-- File newer by ≥ 5s → apply inbound.
-- DB newer by ≥ 5s → the file is stale; outbound rewrites it.
-- **Within 5s either way → conflict.** The file's version is copied to
-  `<slug>.conflict.<ts>.md`, the DB version is written to the canonical key,
-  and a conflict card surfaces in the Maintenance view. Nothing is discarded.
+On conflict: the file's version is copied to `<slug>.conflict.<ts>.md`, the DB
+version is written to the canonical key, `synced_hash` is updated to the DB
+render, and a conflict card surfaces in the Maintenance view. Nothing is
+discarded.
 
 **The conflict file has its `id` demoted to `conflict_of:` and its `aliases` /
 `title` stripped.** A verbatim copy would carry a duplicate `id` — poisoning
@@ -369,9 +502,12 @@ _unreachable_ through a real filesystem and trivially constructible through a
 mock.
 
 - **`chronacle-vault` engine — pure unit tests, no DB, no disk.**
-  `MockVaultStore` + `MockVaultRecordStore` (`mockall`). The conflict window is
-  constructed by declaring `metadata().mtime = updated_at + 3s`. The
-  `Remove`-but-file-still-exists decomposition is a scripted event sequence.
+  `MockVaultStore` + `MockVaultRecordStore` (`mockall`). The three-way decision
+  table is exhaustively table-driven over `(base, db_hash, file_hash)` — every
+  row of it, including the crash-recovery `db_hash == file_hash ≠ base` case,
+  reachable without a clock or a disk. The `Remove`-but-file-still-exists
+  decomposition is a scripted event sequence; I/O failure mid-write is
+  `MockVaultStore` returning `Err`.
 - **`LocalFsVaultStore` — integration tests** against `tempfile::TempDir`. The
   only place real filesystem semantics are exercised; it is a thin adapter.
 - **`NotifyWatcher` — integration tests** with a real temp dir, asserting
@@ -430,13 +566,33 @@ Transferred verbatim into `apps/desktop/tests/e2e/features/` during planning.
   `Create` with the same `id`), then `vault_deleted` remains `FALSE`.
 - Given a soft-deleted record, when the GM chooses "Restore", then
   `vault_deleted` becomes `FALSE` and the file is re-exported.
+- Given a soft-deleted entity, when the GM asks the agent a question it would
+  have answered, then it is absent from retrieval, from wikilink resolution, and
+  from compile inputs.
+- Given an entity row created before `003_vault_sync.surql` ran, when reconcile
+  runs, then it is treated as not-deleted and exported.
+
+**D5a — inbound reconcile (no watcher)**
+
+- Given a vault file edited while Chronacle was closed, when the app starts and
+  reconcile runs, then the edit is applied to `notes` — with no watcher event
+  ever fired.
+- Given a vault configured with `watcher = None`, when the GM clicks "Sync now"
+  after editing a file, then the edit is applied.
+- Given a collection recompiled such that `codex_article` changed but
+  `updated_at` did not, when reconcile runs, then the file is re-exported.
+- Given a `.conflict.<ts>.md` file modified in a managed folder, when the
+  watcher fires, then no record is created from it.
 
 **D6 — conflict**
 
-- Given a record modified in Chronacle and its file modified in the vault
-  within 5 seconds, then a `<slug>.conflict.<ts>.md` is written containing the
-  file's version, the canonical key holds the database version, and a conflict
-  card appears.
+- Given a record modified in Chronacle and its file modified in the vault, both
+  since the last sync, then a `<slug>.conflict.<ts>.md` is written containing
+  the file's version, the canonical key holds the database version, and a
+  conflict card appears — regardless of how far apart the two edits occurred.
+- Given a record and its file whose contents are identical but whose
+  `synced_hash` is stale (simulating a crash after write), when reconcile runs,
+  then no conflict is raised and the base is adopted.
 - Given a conflict file, then its frontmatter carries `conflict_of` and no
   `id`, `aliases`, or `title`.
 - Given a conflict file present in the vault, when reconcile runs, then it is
@@ -455,28 +611,42 @@ tests first), green CI before merge.
 inbound work sits on a proven base rather than being debugged simultaneously
 with export.
 
-| PR  | Branch                    | Content                                                                                              |
-| --- | ------------------------- | ---------------------------------------------------------------------------------------------------- |
-| D0  | `chore/d0-vault-crate`    | New crate + core traits/DTOs; deps; ADR-008 amendment; architecture tables                           |
-| D1a | `feat/d1a-frontmatter`    | Frontmatter render/parse (always-quote, `aliases`/`title`), fence render/extract, normalized compare |
-| D1b | `feat/d1b-key-mapping`    | Record ↔ key mapping, slug + collision suffix, managed-folder gating, `id → key` scan                |
-| D2a | `feat/d2a-fs-store`       | `LocalFsVaultStore` + TempDir integration tests                                                      |
-| D2b | `feat/d2b-record-store`   | `SurrealVaultRecordStore`; `vault_deleted` migration ×8 entity tables + `session`                    |
-| D3a | `feat/d3a-reconcile`      | Full reconcile (outbound); skips `vault_deleted`; `set_vault_sync_path` + `sync_now` commands        |
-| D3b | `feat/d3b-settings-ui`    | Settings UI: vault path picker, "Sync now", progress events                                          |
-| D4a | `feat/d4a-outbound-queue` | `VaultOutbound` + drain task + `pending_write` guard + coalescing; wire producers                    |
-| D5a | `feat/d5a-watcher`        | `NotifyWatcher` + debounce; inbound modify → GM-owned fields only; loop-guard verification           |
-| D5b | `feat/d5b-inbound-create` | id-less create + relocation; `vault_type_mismatch` lint finding                                      |
-| D5c | `feat/d5c-soft-delete`    | `Remove` → id rescan → `vault_deleted`; restore-or-confirm UI                                        |
-| D6  | `feat/d6-conflict`        | 5s window; `.conflict.<ts>.md` with `id` demoted, `aliases`/`title` stripped; conflict card          |
-| D7  | `docs/d7-user-guide`      | GM-facing vault guide; ADR-008 → Accepted                                                            |
+| PR  | Branch                    | Content                                                                                                                                             |
+| --- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D0  | `chore/d0-vault-crate`    | New crate + core traits/DTOs; deps; ADR-008 amendment; architecture tables; AGENTS.md setting-key fix                                               |
+| D1a | `feat/d1a-frontmatter`    | Frontmatter render/parse (always-quote, `aliases`/`title`), fence render/extract, body grammar, normalized compare                                  |
+| D1b | `feat/d1b-key-mapping`    | Record ↔ key mapping, slug + collision suffix (files _and_ scope folders), managed-folder gating, `id → key` scan                                   |
+| D2a | `feat/d2a-fs-store`       | `LocalFsVaultStore` + TempDir integration tests                                                                                                     |
+| D2b | `feat/d2b-record-store`   | `SurrealVaultRecordStore`; `003_vault_sync.surql` (`vault_deleted` ×9 + `vault_sync_state`); pre-migration-row test                                 |
+| D3a | `feat/d3a-reconcile`      | Three-way reconcile, **export direction only** (apply/conflict → no-op + log); `vault_sync_state` base; `set_vault_sync_path` + `sync_now` commands |
+| D3b | `feat/d3b-settings-ui`    | Settings UI: vault path picker, "Sync now", progress events                                                                                         |
+| D4a | `feat/d4a-outbound-queue` | `VaultOutbound` + drain task + `pending_write` guard (content-hash, TTL) + coalescing                                                               |
+| D4b | `feat/d4b-wire-producers` | Wire producers: `entity_service`, `codex_service`, rules pipeline, proposal-accept, `session_service`                                               |
+| D5a | `feat/d5a-inbound`        | `NotifyWatcher` + debounce; **reconcile apply direction**; inbound modify → GM-owned fields; loop-guard verification                                |
+| D5b | `feat/d5b-inbound-create` | id-less create (guarded `id` write-back) + relocation; `vault_type_mismatch` lint finding                                                           |
+| D5c | `feat/d5c-soft-delete`    | `Remove` → id rescan → `vault_deleted`; `!= true` filters across extraction/retrieval/domain; restore-or-confirm UI                                 |
+| D6  | `feat/d6-conflict`        | Conflict materialisation: `.conflict.<ts>.md` with `id` demoted, `aliases`/`title` stripped; conflict card                                          |
+| D7  | `docs/d7-user-guide`      | GM-facing vault guide; ADR-008 → Accepted                                                                                                           |
 
-Dependency chain: D0 → D1a → D1b → {D2a, D2b} → D3a → D3b → D4a → D5a →
+Dependency chain: D0 → D1a → D1b → {D2a, D2b} → D3a → D3b → D4a → D4b → D5a →
 {D5b, D5c} → D6 → D7. D2a and D2b are independent of each other; D5b and D5c
 are independent of each other.
 
+Two sequencing constraints, both about shipping a safe intermediate state:
+
+- **D3a implements the full three-way decision but acts only on `export`.** The
+  `apply` and `conflict` branches log and no-op. Outbound lands, goes green, and
+  is releasable before any inbound path exists — while the decision table it will
+  later depend on is already under test.
+- **D5a therefore never applies a file over divergent DB state.** It turns on the
+  `apply` branch, which the base hash already protects; a conflict is skipped and
+  left for D6 to materialise into a `.conflict` file and a card. A release cut
+  between D5a and D6 loses no data — it merely defers conflicts.
+
 D5a is the riskiest PR (loop prevention), which is why D4a's `pending_write`
-guard is proven by outbound tests before a watcher can trip it.
+guard is proven by outbound tests before a watcher can trip it. D4a and D4b are
+split because wiring five producers across three crates would otherwise push the
+slice past the ~800-line budget.
 
 ## Risks & tradeoffs
 
@@ -484,6 +654,12 @@ guard is proven by outbound tests before a watcher can trip it.
   write → watch → write cycle. Mitigated by proving the guard in D4a's outbound
   tests before D5a introduces a watcher, and by content-hashing the guard so a
   no-op rewrite is idempotent rather than self-triggering.
+- **`vault_sync_state` can drift** if the app is killed between a
+  `VaultStore::write` and the `synced_hash` update. The failure is benign and
+  self-correcting: the next reconcile sees `db_hash ≠ base ∧ file_hash ≠ base`
+  and would raise a conflict whose two sides are identical. Reconcile therefore
+  short-circuits `db_hash == file_hash` to "no-op, adopt as base" **before**
+  evaluating the conflict branch. D3a tests this crash-recovery path explicitly.
 - **Debounce tuning is platform-dependent.** 100 ms per ADR-008. Editors that
   write-then-rename may need coalescing across the pair; the `Remove` id-rescan
   makes this safe regardless.
