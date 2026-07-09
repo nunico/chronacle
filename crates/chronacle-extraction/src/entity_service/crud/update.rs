@@ -20,7 +20,8 @@ pub async fn update<C: surrealdb::Connection>(
     kind: EntityKind,
     input: EntityInput,
 ) -> Result<GraphNode, EntityError> {
-    if input.name.trim().is_empty() {
+    let sanitized_name = chronacle_core::sanitize_scalar(&input.name);
+    if sanitized_name.is_empty() {
         return Err(EntityError::Validation {
             field: "name".to_string(),
             message: "Name is required".to_string(),
@@ -52,7 +53,7 @@ pub async fn update<C: surrealdb::Connection>(
         .query(update_sql)
         .bind(("table", table))
         .bind(("id", id.to_owned()))
-        .bind(("name", input.name.trim().to_owned()))
+        .bind(("name", sanitized_name))
         // Nullable fields: bind explicit NULL (not NONE) on `None`. SCHEMAFULL
         // `string | NULL` / `int | NULL` fields reject NONE — binding
         // `Option::None` directly would silently abort the UPDATE.

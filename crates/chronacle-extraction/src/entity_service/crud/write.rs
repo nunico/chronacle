@@ -12,7 +12,8 @@ pub async fn create<C: surrealdb::Connection>(
     kind: EntityKind,
     input: EntityInput,
 ) -> Result<GraphNode, EntityError> {
-    if input.name.trim().is_empty() {
+    let sanitized_name = chronacle_core::sanitize_scalar(&input.name);
+    if sanitized_name.is_empty() {
         return Err(EntityError::Validation {
             field: "name".to_string(),
             message: "Name is required".to_string(),
@@ -44,7 +45,7 @@ pub async fn create<C: surrealdb::Connection>(
     )
     .bind(("table", table))
     .bind(("id", id.clone()))
-    .bind(("name", input.name.trim().to_owned()))
+    .bind(("name", sanitized_name))
     .bind(("summary", input.summary))
     .bind(("notes", input.notes))
     .bind(("date_start", input.date_start))
