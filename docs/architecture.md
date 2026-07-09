@@ -510,107 +510,148 @@ All CI steps are defined as reusable composite actions so they're runnable local
 
 **Status:** Proposed
 
+> **Amendment (D0, 2026-07-09).** This ADR was originally written against a data
+> model and a filesystem-only storage view that no longer hold. The Decision
+> below is amended to match the codebase as built and the approved design in
+> [`docs/superpowers/specs/2026-07-09-codex-vault-sync-design.md`](superpowers/specs/2026-07-09-codex-vault-sync-design.md).
+> Five provisions changed; each is called out inline as **Amended:**. Status
+> stays `Proposed` and moves to `Accepted` on D7, once the inbound path exists.
+
 ### Context
 
 GMs want to reuse and edit their campaign notes in other tools, particularly Obsidian, with changes flowing in both directions — edits made in Obsidian appear in Chronacle and vice versa. Notes are stored as Markdown strings in SurrealDB (`entity.notes`, `session.notes`).
 
 ### Decision
 
-Introduce a **`VaultSyncService`** that keeps a user-configured directory of `.md` files in bidirectional sync with SQLite. The user can point the sync target at any existing folder, including a live Obsidian vault.
+Introduce a **`VaultSyncService`** that keeps a user-configured directory of `.md` files in bidirectional sync with the SurrealDB store. The user can point the sync target at any existing folder, including a live Obsidian vault.
 
-**Vault directory layout:**
+**Amended: two roots, mirroring ownership — not one campaign-rooted tree.** Entities belong to _either_ a campaign _or_ a collection, exclusively (the `in_campaign` / `in_collection` edges each carry a `UNIQUE` index on `out`, `crates/chronacle-db/src/schema/001_base_schema.surql:211-223`), and collections are shared across campaigns via `subscribes_to`. A single campaign-rooted tree would duplicate every shared-collection entity into each subscribing campaign's folder — with no unambiguous write-back target — and `rule_entry` (collection-scoped) would have no home in it at all. The vault therefore has two roots, `campaigns/` and `collections/`:
 
-```
+```text
 <vault_root>/
-  <campaign-slug>/
-    sessions/
-      001-the-awakening.md
-      002-shadows-of-the-keep.md
-    entities/
-      npc/
-        seraphina-aldric.md
-      location/
-        the-iron-tower.md
-      faction/
-      creature/
-      item/
-      event/
-      player_character/
-      misc/
+  campaigns/
+    shadows-of-valdris/
+      sessions/
+        001-the-awakening.md
+      entities/
+        npc/seraphina-aldric.md
+        location/the-iron-tower.md
+  collections/
+    dnd-5e-core/
+      entities/
+        creature/goblin.md
+      rules/
+        grappling.md
 ```
+
+Everything outside `campaigns/*/…` and `collections/*/…` is unmanaged and ignored — the vault root, `.obsidian/`, and `*.conflict.*.md` — on the watcher path as well as during reconcile.
 
 **File format — YAML frontmatter + Markdown body:**
 
 ```markdown
 ---
-id: "ent_abc123"
+id: "npc:abc123"
 name: "Seraphina Aldric"
+title: "Seraphina Aldric"
+aliases: ["Seraphina Aldric"]
 type: "npc"
 campaign: "Shadows of Valdris"
-is_gm_only: false
 created_at: "2026-05-28T14:00:00Z"
-updated_at: "2026-05-28T18:32:00Z"
+updated_at: "2026-07-09T18:32:00Z"
 ---
 
-Seraphina is the half-elven archivist of the Iron Tower...
+## Summary
+
+Half-elven archivist of the Iron Tower.
+
+<!-- chronacle:codex-article start -- compiled; edits are not applied -->
+
+Seraphina is the half-elven archivist of the [[The Iron Tower]]...
+
+<!-- chronacle:codex-article end -->
+
+## Notes
+
+GM notes here.
 ```
 
-Session files include `session_number`, `title`, and `date_played` in frontmatter. The `id` field is the stable link between a file and its DB row; it must not be removed or changed by the user.
+The frontmatter `id` is the sole identity and the stable link between a file and its DB row; it must not be removed or changed by the user. `aliases` and `title` are emitted so Obsidian's own `[[wikilink]]` resolver — which matches on `name`, not slug — resolves compiled links. All string scalars are emitted quoted, unconditionally. The compiler-owned `codex_article` lives inside an HTML-comment fence; everything else in the body is GM-owned. Session files instead carry `session_number`, `title`, `date_played`, and `aliases`, and have no fence.
 
-**Sync behaviour — Chronacle → vault (outbound):**
+**Amended: no `entity` table — eight per-type tables.** There is no `entity` table with an `entity_type` field. The schema has eight per-type tables (`npc`, `location`, `faction`, `creature`, `item`, `event`, `player_character`, `misc`; `001_base_schema.surql:115-205`). A type change moves a record between tables and produces a new record id, which is why identity is the frontmatter `id` and paths are always derived, never authoritative. A folder move to a different type is reconciled back to the canonical key and raises a `vault_type_mismatch` lint finding rather than retyping across tables.
 
-| Event                    | Action                                                                                 |
-| ------------------------ | -------------------------------------------------------------------------------------- |
-| Note saved in Chronacle  | Write / overwrite the `.md` file; suppress the inbound file-watch event for that write |
-| Entity / session deleted | Delete the `.md` file                                                                  |
-| Entity / session renamed | Delete old file, write new file with updated slug                                      |
-| Campaign renamed         | Rename the campaign slug folder                                                        |
-| Vault path configured    | Full reconcile pass: write any file missing or older than `updated_at`                 |
+**Amended: `is_gm_only` is not in the frontmatter, and `vault_include_gm_only` is not a setting.** The manual `is_gm_only` flag was built and reverted. GM-secret content is passage-level and AI-detected in Phase 3, alongside player-safe export; `vault_include_gm_only` returns with it. Neither appears in the vault format or the `setting` table now.
 
-**Sync behaviour — vault → Chronacle (inbound):**
+**Amended: sync is content-hash based, not timestamp based.** The engine stores a last-synced content hash per record (`synced_hash`) in a `vault_sync_state` table as a three-way merge base, and consults no clock:
 
-| Event                                                                            | Action                                                                                                                            |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `.md` file modified                                                              | Parse frontmatter; if `id` matches a known entity/session, update `notes` + `name` in SurrealDB and re-index in SurrealDB         |
-| `.md` file created (no `id` in frontmatter, inside a known campaign/type folder) | Create new entity or session in SurrealDB; write back the assigned `id` into the frontmatter                                      |
-| `.md` file deleted                                                               | Soft-delete: mark `vault_deleted = TRUE` on the record in SurrealDB; surface a "restore or confirm delete" prompt in Chronacle UI |
-| `.md` file moved within vault                                                    | If destination folder maps to a different entity type, update `entity_type` in SurrealDB; slug is cosmetic only                   |
-| `.md` file with unknown `id` or outside campaign folders                         | Ignored — not managed by Chronacle                                                                                                |
+| `db_hash` vs base | `file_hash` vs base | Action                    |
+| ----------------- | ------------------- | ------------------------- |
+| same              | same                | no-op                     |
+| changed           | same                | export (outbound)         |
+| same              | changed             | apply (inbound)           |
+| changed           | changed             | conflict                  |
+| —                 | file absent         | soft-delete (see Inbound) |
+| no base           | file absent         | export (first write)      |
 
-**Conflict resolution (both sides modified before sync could propagate):**
+`db_hash` is the hash of the record rendered to markdown; `file_hash` is the hash of the file's normalized content (trim, CRLF→LF); both are compared to `synced_hash`. `mtime` survives only as an optimisation — a file whose `mtime` is unchanged since `synced_at` need not be re-read. This replaces the original "last-write-wins on `updated_at` vs. file mtime" and "delta under 5 seconds → conflict" rules for two concrete reasons:
 
-- Last-write-wins based on `updated_at` (SurrealDB) vs. file mtime.
-- If the delta is under 5 seconds (simultaneous edit), Chronacle surfaces a conflict card in the UI showing both versions; the GM picks one or merges manually.
-- The losing version is written to `<file>.conflict.<timestamp>.md` in the same folder so no content is ever silently discarded.
+1. `crates/chronacle-extraction/src/codex_service/compile.rs:220-224` writes `codex_article` (and `codex_compiled_at`, `codex_stale`, `codex_sources`) **without ever touching `updated_at`**. An `mtime`-vs-`updated_at` reconcile would therefore never re-export a recompiled article, leaving the vault permanently stale in exactly the producer that matters most.
+2. A timestamp delta cannot distinguish "the file is a stale copy of the DB" from "the file holds unapplied divergent edits." That distinction requires a base to compare both sides against.
 
-**`is_gm_only` notes:** Written to the vault by default (the vault is on the GM's own machine). The `vault_include_gm_only` setting (default `true`) lets the GM opt out when sharing their vault.
+Reconcile runs on startup, on `vault_sync_path` change, and on explicit "Sync now"; it is the only inbound path for a backend running with `watcher = None`.
 
-**Loop-prevention:** Outbound writes set an in-memory `pending_write` guard (keyed by file path + content hash) that causes the file-watcher to skip the next inbound event for that path, preventing write → watch → write cycles.
+**Conflict resolution.** A conflict is precisely `db_hash != base ∧ file_hash != base` — no time window is involved. On conflict the file's version is copied to `<slug>.conflict.<ts>.md` (with its `id` demoted to `conflict_of:` and its `aliases` / `title` stripped, so it neither poisons the `id → key` map nor hijacks Obsidian's link graph), the DB version is written to the canonical key, `synced_hash` is advanced, and a conflict card surfaces in the Maintenance view. Nothing is discarded.
+
+**Inbound.** Every watcher event re-reads the affected key and re-derives truth from frontmatter (watcher events are hints, not facts). A `Modify` with a known `id` applies GM-owned fields only. A `Create` with a known `id` is a relocation. A `Create` with no `id` in a managed folder creates a record and writes the assigned `id` back into the frontmatter (itself a guarded write). A `Remove` first rescans the vault for the `id` — only if it is absent everywhere does it soft-delete (`vault_deleted = TRUE`) and raise a restore-or-confirm card; this makes editor atomic-save (`Remove` + `Create`) safe. Anything unmanaged is ignored.
+
+**Loop-prevention:** outbound writes record a `pending_write` guard keyed by `(key, hash(content))`. The inbound handler re-reads the key, hashes its content, and drops the event when the hash matches a live guard. Guards are content-based (not key-only), are not consumed on first match — a single write's trailing events must all be dropped — and expire on a TTL (30s) or when the key's content is observed to differ.
+
+### Architecture — ports, not `tokio::fs`
+
+**Amended: file I/O goes through a `VaultStore` port, not `tokio::fs` directly.** The original "no `FileStore` abstraction is needed" note contradicted the standing "traits for all external deps" constraint and left I/O-failure and crash-recovery paths unreachable in tests. The sync engine lives in a new backend-agnostic crate, `chronacle-vault`, that operates on keys and content and depends only on four ports defined in `chronacle-core` (`crates/chronacle-core/src/vault.rs`):
+
+- **`VaultStore`** — keyed blob I/O: `read` / `write` / `delete` / `list(prefix)` / `metadata`. Key-addressed, not path-addressed (S3 has no `rename` and no directories, so a rename is `write(new) + delete(old)`). Concrete `LocalFsVaultStore` (`tokio::fs`) lives in `chronacle-providers`.
+- **`VaultWatcher`** — yields `VaultEvent`s; optional per backend (`Option<Arc<dyn VaultWatcher>>`, `None` means reconcile-only). Concrete `NotifyWatcher` (`notify`) lives in `chronacle-providers`.
+- **`VaultOutbound`** — one method, `enqueue(VaultRef)`; producers depend on this and nothing else vault-shaped, so the compiler never learns what a file is. A `NoopOutbound` keeps producers `Option`-free when sync is disabled.
+- **`VaultRecordStore`** — record access plus the persisted merge-base hash (`get_synced_hash` / `set_synced_hash` / `clear_synced_hash`). `list_all` excludes soft-deleted rows via `vault_deleted != true`. Concrete `SurrealVaultRecordStore` lives in `chronacle-domain`.
+
+Because the engine reaches storage, watching, records, and outbound only through these ports, a future S3, WebDAV, or HTTP backend needs no engine change — only a new `VaultStore` (plus a `PollingWatcher` or `None`). Reconcile is the correctness guarantee; the watcher is only a latency optimisation, so a backend with no change feed is still correct.
 
 ### Implementation
 
-- `VaultSyncService` holds `vault_root: Option<PathBuf>` and a `notify::RecommendedWatcher` that watches the vault directory recursively.
-- **Outbound:** `async fn on_note_saved(&self, event: NoteEvent) -> Result<()>` — called by entity/session service layers after every successful DB write.
-- **Inbound:** the `notify` watcher emits events into a debounced channel (100 ms); a background task drains the channel, parses changed files, and calls the entity/session service to apply updates.
+- `VaultSyncService` (in `chronacle-vault`) performs reconcile, drain, and conflict resolution over the ports above. It holds no `PathBuf` and no watcher handle directly.
+- **Outbound:** services call `VaultOutbound::enqueue(VaultRef)` after a successful write — fire-and-forget onto an mpsc channel. A background drain task coalesces repeats (compiling 200 entities enqueues 200 refs; each key is written once), renders each record, records the `pending_write` guard, then calls `VaultStore::write`. Producers to wire: `entity_service`, `session_service`, `codex_service::compile_collection`, the rules pipeline, and the accepted-`codex_proposal` path.
+- **Inbound:** the `notify` watcher emits `VaultEvent`s into a debounced channel (100 ms); a background task drains it and reconciles each affected key by re-reading frontmatter.
 - Vault path is persisted in the `setting` table under `vault_sync_path`; set via a Tauri IPC command.
-- A `vault_deleted` field is added to `entity` and `session` records to track soft-deletes from the vault.
-- The service is tested by writing files to a temp directory and driving the watcher directly — no `FileStore` abstraction needed (mock at the `VaultSyncService` boundary instead).
+- The engine is tested with `MockVaultStore` + `MockVaultRecordStore`; the three-way decision table is exhaustively table-driven over `(base, db_hash, file_hash)` with no clock and no disk. `LocalFsVaultStore` and `NotifyWatcher` carry their own `tempfile::TempDir` integration tests.
 
 ### New migration required
 
+A new `003_vault_sync.surql` adds `vault_deleted` to the **eight entity tables and `session`** (there is no `entity` table to attach it to) plus the `vault_sync_state` table. Migrations are `DEFINE`-only and re-run every boot, so this uses `OVERWRITE` and never `REMOVE`:
+
 ```surql
--- Add vault_deleted field to entity and session tables
-DEFINE FIELD vault_deleted ON entity TYPE bool DEFAULT false;
-DEFINE FIELD vault_deleted ON session TYPE bool DEFAULT false;
+-- vault_deleted ×9: npc, location, faction, creature, item, event,
+-- player_character, misc, session
+DEFINE FIELD OVERWRITE vault_deleted ON TABLE npc TYPE bool DEFAULT false;
+-- … repeated for location, faction, creature, item, event,
+-- player_character, misc, session …
+
+DEFINE TABLE OVERWRITE vault_sync_state SCHEMAFULL;
+DEFINE FIELD OVERWRITE record ON vault_sync_state TYPE record;
+DEFINE FIELD OVERWRITE key ON vault_sync_state TYPE string;
+DEFINE FIELD OVERWRITE synced_hash ON vault_sync_state TYPE string;
+DEFINE FIELD OVERWRITE synced_at ON vault_sync_state TYPE datetime;
 ```
+
+`DEFAULT false` does not backfill existing rows, so records written before this migration carry no `vault_deleted` value. Every read path therefore filters with `vault_deleted != true`, never `= false` (a `= false` filter silently omits pre-existing rows — the repo has been bitten by a silently-wrong SurrealDB filter before).
 
 ### Consequences
 
 - The `notify` crate is added to approved crates (see Crate & Tool Summary); it uses OS-native APIs (`inotify`, FSEvents, ReadDirectoryChangesW) with no polling overhead.
-- `serde_yaml` is added for frontmatter parsing and serialisation.
+- `yaml_serde` is added for frontmatter parsing and serialisation (see Crate & Tool Summary for why not `serde_yaml` / `serde_yml`).
 - Inbound changes trigger SurrealDB re-indexing of the updated note, so vault-edited notes remain searchable without any manual action in Chronacle.
 - Deletions from the vault are intentionally non-destructive (soft-delete + UI prompt) to prevent accidental data loss from a misplaced `rm`.
-- **Implementation note:** File I/O uses `tokio::fs` directly, tested by writing to a temp directory. No `FileStore` abstraction is needed — the `VaultSyncService` trait itself provides the test boundary.
+- A soft-deleted record is excluded everywhere except the Maintenance view's pending-deletions list — entity lists, RAG retrieval, wikilink resolution, and codex compile inputs all filter it out.
+- File I/O goes through the `VaultStore` port, so I/O-failure and crash-recovery paths are reachable in tests, and a future remote backend needs no engine change.
 
 ---
 
@@ -1062,50 +1103,51 @@ Goal: Deploy backend as a server; access from mobile.
 
 These are first-party library crates in the Cargo workspace. They are not external dependencies and do not require an ADR to modify; changes are governed by the crate boundary rules in ADR-005.
 
-| Crate                  | Responsibility                                                                                                    |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `chronacle-core`       | Dependency traits (`LlmProvider`, `VectorStore`, `BlobStore`, `EmbeddingProvider`) + DTOs and error types         |
-| `chronacle-db`         | SurrealQL schema (`.surql` files) + `run_migrations`                                                              |
-| `chronacle-providers`  | Concrete impls: `SurrealDbVector`, `LocalFileStore`, fastembed/OpenAI/Mock embedding, OpenAI/Anthropic/Ollama LLM |
-| `chronacle-ingestion`  | PDF extraction (`pdfium-render`), chunker, text normalizer, ingestion pipeline                                    |
-| `chronacle-extraction` | Entity CRUD/relations, wikilink resolution, LLM-driven entity extraction                                          |
-| `chronacle-retrieval`  | RAG agent service: retrieval, context assembly, cited-answer generation                                           |
-| `chronacle-domain`     | Campaign, session, collection, and custom-provider CRUD services                                                  |
+| Crate                  | Responsibility                                                                                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `chronacle-core`       | Dependency traits (`LlmProvider`, `VectorStore`, `BlobStore`, `EmbeddingProvider`) + DTOs and error types                                                          |
+| `chronacle-db`         | SurrealQL schema (`.surql` files) + `run_migrations`                                                                                                               |
+| `chronacle-providers`  | Concrete impls: `SurrealDbVector`, `LocalFileStore`, fastembed/OpenAI/Mock embedding, OpenAI/Anthropic/Ollama LLM                                                  |
+| `chronacle-ingestion`  | PDF extraction (`pdfium-render`), chunker, text normalizer, ingestion pipeline                                                                                     |
+| `chronacle-extraction` | Entity CRUD/relations, wikilink resolution, LLM-driven entity extraction                                                                                           |
+| `chronacle-retrieval`  | RAG agent service: retrieval, context assembly, cited-answer generation                                                                                            |
+| `chronacle-domain`     | Campaign, session, collection, and custom-provider CRUD services                                                                                                   |
+| `chronacle-vault`      | Markdown vault sync engine (ADR-008): rendering, key mapping, three-way reconcile. Backend-agnostic — reaches storage and records only via `chronacle-core` ports. |
 
 ### Rust Crates
 
-| Purpose                                               | Crate                                                        |
-| ----------------------------------------------------- | ------------------------------------------------------------ |
-| Desktop app framework                                 | `tauri` 2.x                                                  |
-| Unified store (relational + vector + graph)           | `surrealdb` (embedded, `kv-rocksdb` feature)                 |
-| PDF text extraction                                   | `pdfium-render`                                              |
-| Local embeddings                                      | `fastembed` (ONNX Runtime via `ort-load-dynamic`)            |
-| Native-lib fetch at build time (pdfium, ONNX Runtime) | `reqwest` (blocking) + `flate2` + `tar` + `zip` (build-deps) |
-| OpenAI LLM                                            | `async-openai`                                               |
-| HTTP client (Anthropic, Ollama)                       | `reqwest`                                                    |
-| Async runtime                                         | `tokio`                                                      |
-| Serialisation                                         | `serde` + `serde_json`                                       |
-| Unique IDs                                            | `uuid`                                                       |
-| Mocking in tests                                      | `mockall`                                                    |
-| YAML frontmatter (vault sync)                         | `serde_yaml`                                                 |
-| Filesystem watcher (vault sync)                       | `notify`                                                     |
-| Coverage                                              | `cargo-llvm-cov`                                             |
-| Audit                                                 | `cargo-audit`, `cargo-deny`                                  |
+| Purpose                                               | Crate                                                                                                                  |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Desktop app framework                                 | `tauri` 2.x                                                                                                            |
+| Unified store (relational + vector + graph)           | `surrealdb` (embedded, `kv-rocksdb` feature)                                                                           |
+| PDF text extraction                                   | `pdfium-render`                                                                                                        |
+| Local embeddings                                      | `fastembed` (ONNX Runtime via `ort-load-dynamic`)                                                                      |
+| Native-lib fetch at build time (pdfium, ONNX Runtime) | `reqwest` (blocking) + `flate2` + `tar` + `zip` (build-deps)                                                           |
+| OpenAI LLM                                            | `async-openai`                                                                                                         |
+| HTTP client (Anthropic, Ollama)                       | `reqwest`                                                                                                              |
+| Async runtime                                         | `tokio`                                                                                                                |
+| Serialisation                                         | `serde` + `serde_json`                                                                                                 |
+| Unique IDs                                            | `uuid`                                                                                                                 |
+| Mocking in tests                                      | `mockall`                                                                                                              |
+| YAML frontmatter (vault sync)                         | `yaml_serde` (the YAML org's maintained successor; `serde_yaml` is archived and `serde_yml` carries RUSTSEC-2025-0068) |
+| Filesystem watcher (vault sync)                       | `notify`                                                                                                               |
+| Coverage                                              | `cargo-llvm-cov`                                                                                                       |
+| Audit                                                 | `cargo-audit`, `cargo-deny`                                                                                            |
 
 ### Frontend / Tooling
 
-| Purpose                | Tool                                                                    |
-| ---------------------- | ----------------------------------------------------------------------- |
-| Framework              | Svelte 5 + TypeScript                                                   |
-| Build                  | Vite                                                                    |
-| Unit / component tests | Vitest + `@testing-library/svelte`                                      |
-| API mocking in tests   | `msw` (Mock Service Worker) — intercepts Tauri IPC calls in the WebView |
-| E2E tests              | Playwright                                                              |
+| Purpose                | Tool                                                                         |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| Framework              | Svelte 5 + TypeScript                                                        |
+| Build                  | Vite                                                                         |
+| Unit / component tests | Vitest + `@testing-library/svelte`                                           |
+| API mocking in tests   | `msw` (Mock Service Worker) — intercepts Tauri IPC calls in the WebView      |
+| E2E tests              | Playwright                                                                   |
 | BDD acceptance specs   | `playwright-bdd` + `@cucumber/cucumber` (Gherkin `.feature` files) — ADR-011 |
-| Linting                | ESLint + `@typescript-eslint` + `eslint-plugin-svelte`                  |
-| Formatting             | Prettier + `prettier-plugin-svelte`                                     |
-| Pre-commit hooks       | lefthook                                                                |
-| Graph layout           | `d3-force` (entity relationship graph, Phase 3)                         |
+| Linting                | ESLint + `@typescript-eslint` + `eslint-plugin-svelte`                       |
+| Formatting             | Prettier + `prettier-plugin-svelte`                                          |
+| Pre-commit hooks       | lefthook                                                                     |
+| Graph layout           | `d3-force` (entity relationship graph, Phase 3)                              |
 
 ---
 
@@ -1184,14 +1226,14 @@ UI) have landed. LLM-driven contradiction detection and entity-merge for
 **Status:** Accepted (PR-A1a).
 
 Companion ADR-009 (Compiled World Model — The Codex), accepted in PR-A2a,
-introduces the codex and rules aggregates that live *inside* an owned
+introduces the codex and rules aggregates that live _inside_ an owned
 collection. ADR-010 is scoped to the collection-ownership plumbing only.
 
 ### Context
 
 Chronacle historically treats collections as flat, shareable groups of source
 material — a collection can be subscribed to by any number of campaigns.
-There is no place to store material that belongs *only* to one campaign
+There is no place to store material that belongs _only_ to one campaign
 (session-derived NPCs, the party's home town, table-specific factions).
 Users have worked around this by creating an ad-hoc "MyCampaign notes"
 regular collection and remembering never to subscribe another campaign to
@@ -1199,7 +1241,7 @@ it.
 
 The LLM Wiki layer (A2 onward) needs a durable, per-campaign home for
 compiled wiki entries and rules. Rather than invent a new aggregate outside
-the collection model, we mark specific collections as *owned* by a campaign.
+the collection model, we mark specific collections as _owned_ by a campaign.
 
 ### Decision
 
@@ -1225,7 +1267,7 @@ Deleting a campaign requires an explicit choice about its owned collection:
   disk are deliberately left in place — filesystem cleanup is the caller's
   responsibility (source-command layer).
 - **`OnOwnedCollection::ConvertToRegular`** — keep the collection, clear its
-  `owner_campaign` field, and delete every `relates_to` edge whose *both*
+  `owner_campaign` field, and delete every `relates_to` edge whose _both_
   endpoints are inside the collection. Each dropped edge is recorded as a
   `lint_finding` row with `kind = "orphaned_edge"` so nothing is silently
   lost.
@@ -1307,11 +1349,11 @@ all future feature development**:
 
 ### Options Considered
 
-| Option                                        | Verdict                                                                                     |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `playwright-bdd` + `@cucumber/cucumber`       | **Chosen** — real Gherkin, one test runner, existing CI job unchanged                        |
-| Standalone `@cucumber/cucumber` runner        | Rejected — second test runner with its own config, reporting, and CI wiring to keep in sync |
-| Prose-only BDD in specs (status quo)          | Rejected — not executable; scenarios drift from implementation silently                     |
+| Option                                  | Verdict                                                                                     |
+| --------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `playwright-bdd` + `@cucumber/cucumber` | **Chosen** — real Gherkin, one test runner, existing CI job unchanged                       |
+| Standalone `@cucumber/cucumber` runner  | Rejected — second test runner with its own config, reporting, and CI wiring to keep in sync |
+| Prose-only BDD in specs (status quo)    | Rejected — not executable; scenarios drift from implementation silently                     |
 
 ### Consequences
 
