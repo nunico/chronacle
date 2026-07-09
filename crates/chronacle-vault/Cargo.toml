@@ -1,5 +1,5 @@
 [package]
-name = "chronacle-core"
+name = "chronacle-vault"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -7,18 +7,18 @@ license.workspace = true
 publish = false
 
 [lib]
-name = "chronacle_core"
-
-[features]
-mocks = ["dep:mockall"]
+name = "chronacle_vault"
 
 [dependencies]
+chronacle-core = { path = "../chronacle-core" }
 serde.workspace = true
-serde_json.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-mockall = { workspace = true, optional = true }
+yaml_serde = "0.10"
 
 [dev-dependencies]
+chronacle-core = { path = "../chronacle-core", features = ["mocks"] }
 mockall.workspace = true
+pretty_assertions.workspace = true
+tokio.workspace = true
