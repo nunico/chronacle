@@ -1,4 +1,4 @@
-use crate::entity_service::{EntityInput, EntityKind};
+use crate::entity_service::{EntityError, EntityInput, EntityKind};
 
 use super::{count_by_campaign, create};
 
@@ -133,4 +133,25 @@ async fn create_with_collection_id_populates_collection_via_edge() {
     .unwrap();
     assert!(node.campaign_id.is_none());
     assert_eq!(node.collection_id.as_deref(), Some("col1"));
+}
+
+#[tokio::test]
+async fn a_name_of_only_whitespace_is_rejected() {
+    let db = setup_db().await;
+    let err = create(
+        &db,
+        None,
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "\n\t".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(err, EntityError::Validation { ref field, .. } if field == "name"),
+        "got {err:?}"
+    );
 }
