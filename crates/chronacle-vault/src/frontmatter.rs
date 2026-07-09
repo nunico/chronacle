@@ -54,12 +54,36 @@ pub enum FrontmatterError {
     Yaml(String),
 }
 
-/// Wrap a scalar in double quotes, escaping embedded backslashes and quotes.
+/// Wrap a scalar in double quotes, escaping backslashes, quotes, and control
+/// characters into YAML double-quoted escape sequences.
 ///
-/// Escaping order matters: backslashes must be escaped before quotes, or a
-/// `\"` produced by the quote-escape step would itself get re-escaped.
+/// A naive `s.replace('\\', ..).replace('"', ..)` chain looks correct but is
+/// not: it leaves raw control characters (e.g. a literal `\n` byte) inside
+/// the quoted scalar. YAML 1.2 folds a raw newline inside a double-quoted
+/// scalar into a space on parse, and drops other raw C0 controls outright —
+/// so a `name` with an embedded newline or bell character silently changes
+/// value on the next round-trip through this on-disk format. Building the
+/// escaped string in a single pass over `chars()` lets us also handle the
+/// full C0 control range (`U+0000`-`U+001F`) and `U+007F`, which `.replace`
+/// cannot express and which a chain of calls would re-scan the string for
+/// anyway. Escaping order still matters within the loop: backslash is
+/// escaped as soon as it's seen, before any subsequent character's escape
+/// could otherwise collide with it.
 fn quote(s: &str) -> String {
-    let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+    let mut escaped = String::with_capacity(s.len() + 2);
+    for c in s.chars() {
+        match c {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            c if c.is_ascii_control() => {
+                escaped.push_str(&format!("\\x{:02x}", c as u32));
+            }
+            c => escaped.push(c),
+        }
+    }
     format!("\"{escaped}\"")
 }
 
@@ -256,5 +280,31 @@ mod tests {
         let file = format!("{}\nbody\n", render(&fm));
         let (back, _) = parse(&file).expect("parse");
         assert_eq!(back.aliases, vec!["A".to_string(), "B".to_string()]);
+    }
+
+    #[test]
+    fn quote_round_trips_hostile_names() {
+        let names = [
+            "Foo\nBar",
+            "Tab\there",
+            "Bell\u{7}x",
+            "Vex: The Unbound",
+            "[[Iron Tower]]",
+            "Quote\"inside",
+            "Back\\slash",
+            "Séraphina 日本語 🗡",
+            "\u{7f}del",
+        ];
+        for name in names {
+            let mut fm = entity_fm();
+            fm.name = Some(name.to_string());
+            let file = format!("{}\nbody\n", render(&fm));
+            let (back, _) = parse(&file).unwrap_or_else(|e| panic!("reparse {name:?}: {e}"));
+            assert_eq!(
+                back.name.as_deref(),
+                Some(name),
+                "round-trip failed for {name:?}"
+            );
+        }
     }
 }
