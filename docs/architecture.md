@@ -548,7 +548,7 @@ Everything outside `campaigns/*/…` and `collections/*/…` is unmanaged and ig
 
 **File format — YAML frontmatter + Markdown body:**
 
-```markdown
+```text
 ---
 id: "npc:abc123"
 name: "Seraphina Aldric"
@@ -565,9 +565,7 @@ updated_at: "2026-07-09T18:32:00Z"
 Half-elven archivist of the Iron Tower.
 
 <!-- chronacle:codex-article start -- compiled; edits are not applied -->
-
 Seraphina is the half-elven archivist of the [[The Iron Tower]]...
-
 <!-- chronacle:codex-article end -->
 
 ## Notes
@@ -821,7 +819,7 @@ DEFINE TABLE setting SCHEMAFULL;
 DEFINE FIELD value ON setting TYPE string;
 -- Keys: llm_provider, llm_model, llm_api_key (encrypted at rest),
 --       llm_base_url, embedding_backend, active_campaign_id,
---       vault_sync_path, vault_include_gm_only
+--       vault_sync_path
 ```
 
 **Note on timestamps:** All datetime fields use SurrealDB's `datetime` type (RFC 3339 / ISO 8601). This avoids the ambiguity of Unix epoch integers (seconds vs milliseconds) and is forward-compatible with SurrealDB Cloud. The vault sync frontmatter uses the same format.
@@ -1062,7 +1060,7 @@ Goal: Production quality, power-user features.
 - [ ] Source enable/disable toggle per query
 - [ ] Searchable chat history (full-text search on `message.content`)
 - [ ] Export: session summary → markdown / PDF
-- [ ] Markdown vault sync (ADR-008): bidirectional `.md` sync with a user-configured folder (Obsidian-compatible); inbound file-watch via `notify`; conflict detection with `.conflict.<ts>.md` preservation; soft-delete on vault file removal; `vault_include_gm_only` toggle; startup reconcile pass
+- [ ] Markdown vault sync (ADR-008): bidirectional `.md` sync with a user-configured folder (Obsidian-compatible); inbound file-watch via `notify`; content-hash-based conflict detection (`synced_hash` merge base) with `.conflict.<ts>.md` preservation; soft-delete on vault file removal; startup reconcile pass
 - [ ] **`/extract-all` rework:** replace the brute-force full-sweep extraction placeholder with a smarter, incremental approach (scope/cost-aware; avoid re-extracting unchanged sources).
 - [ ] **Cross-encoder reranking:** only if Phase 1 retrieval recall@5 measured below 70%. If above 85%, skip.
 - [ ] Campaign rename UI (update slug, vault folder name)
