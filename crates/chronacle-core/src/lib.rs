@@ -5,12 +5,14 @@
 pub mod blob_store;
 pub mod embedding;
 pub mod llm;
+pub mod text;
 pub mod vault;
 pub mod vector_store;
 
 pub use blob_store::BlobStore;
 pub use embedding::{EmbeddingError, EmbeddingProvider};
 pub use llm::{ChatMessage, LlmError, LlmProvider};
+pub use text::sanitize_scalar;
 pub use vault::{
     EntityRecord, NoopOutbound, RuleEntryRecord, RulePageRef, SessionRecord, VaultEvent, VaultKey,
     VaultMetadata, VaultOutbound, VaultRecord, VaultRecordError, VaultRecordStore, VaultRef,
