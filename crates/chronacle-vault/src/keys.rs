@@ -118,26 +118,42 @@ pub fn key_for(record: &VaultRecord, collides: bool) -> VaultKey {
     }
 }
 
-/// `true` only for keys inside the two managed roots that are real, non-conflict
-/// markdown files with at least a folder and a filename.
+/// `true` only for keys matching exactly one of the four managed shapes:
+///
+/// - `campaigns/<slug>/entities/<type>/<file>.md`
+/// - `campaigns/<slug>/sessions/<file>.md`
+/// - `collections/<slug>/entities/<type>/<file>.md`
+/// - `collections/<slug>/rules/<file>.md`
+///
+/// `<type>` must be a member of [`ENTITY_TYPES`]; `<slug>` and `<file>` must be
+/// non-empty and contain no further `/`; the key must end in a lowercase
+/// `.md`; and a `*.conflict.*.md` (or `*.conflict.md`) file is unmanaged.
+/// Everything else — including anything outside `campaigns/*/…` and
+/// `collections/*/…`, shallower paths, unknown section or type folders, and
+/// mismatched root/section pairings (rules are collection-only, sessions are
+/// campaign-only) — is unmanaged. This is the gate that keeps a stray vault
+/// file from being mistaken for a record to inbound-sync.
 pub fn is_managed(key: &str) -> bool {
+    if key.starts_with('/') || !key.ends_with(".md") {
+        return false;
+    }
     let segments: Vec<&str> = key.split('/').collect();
-    if segments.len() < 2 {
+    if segments.iter().any(|s| s.is_empty() || *s == "..") {
         return false;
     }
-    if !(key.starts_with("campaigns/") || key.starts_with("collections/")) {
-        return false;
-    }
-    if !key.ends_with(".md") {
-        return false;
-    }
-    let filename = segments.last().copied().unwrap_or("");
+    let filename = *segments.last().unwrap_or(&"");
     if let Some(stem) = filename.strip_suffix(".md") {
         if stem.contains(".conflict.") || stem.ends_with(".conflict") {
             return false;
         }
     }
-    true
+    match segments.as_slice() {
+        ["campaigns", _slug, "entities", ty, _file] => ENTITY_TYPES.contains(ty),
+        ["campaigns", _slug, "sessions", _file] => true,
+        ["collections", _slug, "entities", ty, _file] => ENTITY_TYPES.contains(ty),
+        ["collections", _slug, "rules", _file] => true,
+        _ => false,
+    }
 }
 
 /// Returns the segment after `entities/` in `key`, if it is a recognised
@@ -307,6 +323,101 @@ mod tests {
         assert!(!is_managed(".obsidian/workspace.json"));
         assert!(!is_managed("campaigns/x/entities/npc/a.conflict.123.md"));
         assert!(!is_managed("Templates/entity.md"));
+    }
+
+    #[test]
+    fn is_managed_accepts_only_the_four_exact_shapes() {
+        // managed
+        assert!(is_managed("campaigns/c/entities/npc/a.md"));
+        assert!(is_managed("campaigns/c/sessions/001-a.md"));
+        assert!(is_managed("collections/k/entities/creature/g.md"));
+        assert!(is_managed("collections/k/rules/g.md"));
+
+        // unmanaged
+        assert!(!is_managed("a.md"), "vault root");
+        assert!(!is_managed("campaigns"), "no file");
+        assert!(!is_managed("campaigns/"), "no file, trailing slash");
+        assert!(!is_managed("campaigns/c.md"), "too shallow");
+        assert!(
+            !is_managed("campaigns/x/entities/wizard/a.md"),
+            "type not in ENTITY_TYPES"
+        );
+        assert!(
+            !is_managed("campaigns/x/notes/a.md"),
+            "unknown section folder"
+        );
+        assert!(
+            !is_managed("campaigns/x/rules/g.md"),
+            "rules are collection-scoped"
+        );
+        assert!(
+            !is_managed("collections/k/sessions/1.md"),
+            "sessions are campaign-scoped"
+        );
+        assert!(!is_managed("campaigns/c/entities/npc/a.conflict.123.md"));
+        assert!(!is_managed("collections/k/rules/g.conflict.1.md"));
+        assert!(!is_managed("campaigns/c/entities/npc/a.txt"));
+        assert!(
+            !is_managed("campaigns/c/entities/npc/a.MD"),
+            "case-sensitive"
+        );
+        assert!(!is_managed(".obsidian/workspace.json"));
+        assert!(!is_managed("Templates/entity.md"));
+        assert!(!is_managed("notcampaigns/c/entities/npc/a.md"));
+        assert!(!is_managed("campaigns//entities/npc/a.md"), "empty segment");
+        assert!(
+            !is_managed("campaigns/c/entities/npc/../../../etc/passwd.md"),
+            ".. segment"
+        );
+    }
+
+    #[test]
+    fn key_for_always_produces_a_managed_key() {
+        let scopes = [campaign(), collection()];
+        for scope in scopes {
+            let entity = npc("Test", "t1", scope.clone());
+            for collides in [false, true] {
+                let k = key_for(&entity, collides);
+                assert!(is_managed(&k), "entity key {k} should be managed");
+            }
+        }
+
+        let session = VaultRecord::Session(SessionRecord {
+            vref: VaultRef {
+                table: "session".into(),
+                id: "s1".into(),
+            },
+            session_number: 1,
+            title: "The Awakening".into(),
+            date_played: "2026-01-01".into(),
+            notes: String::new(),
+            campaign: campaign(),
+            created_at: "x".into(),
+            updated_at: "y".into(),
+        });
+        for collides in [false, true] {
+            let k = key_for(&session, collides);
+            assert!(is_managed(&k), "session key {k} should be managed");
+        }
+
+        let rule = VaultRecord::RuleEntry(RuleEntryRecord {
+            vref: VaultRef {
+                table: "rule_entry".into(),
+                id: "r1".into(),
+            },
+            name: "Grappling".into(),
+            category: "procedure".into(),
+            body: String::new(),
+            notes: None,
+            page_refs: vec![],
+            collection: collection(),
+            created_at: "x".into(),
+            updated_at: "y".into(),
+        });
+        for collides in [false, true] {
+            let k = key_for(&rule, collides);
+            assert!(is_managed(&k), "rule key {k} should be managed");
+        }
     }
 
     #[test]
