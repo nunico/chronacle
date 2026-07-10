@@ -11,6 +11,9 @@
 ///   Phases 1-3 individual migrations; safe to re-run on every app startup)
 /// - `002_wiki_layer.surql` — LLM Wiki layer, additive; adds
 ///   `collection.owner_campaign` and the `lint_finding` table (A1a onward)
+/// - `003_vault_sync.surql` — Markdown Vault Sync (ADR-008, D-series),
+///   additive; adds `vault_deleted` to the nine syncable entity/session
+///   tables and the `vault_sync_state` merge-base table
 use std::path::Path;
 
 /// Run all pending schema migrations against the given database.
@@ -240,6 +243,170 @@ mod tests {
         assert!(
             info.indexes.contains_key("idx_session_campaign"),
             "idx_session_campaign index should exist on session table"
+        );
+    }
+
+    #[tokio::test]
+    async fn vault_deleted_exists_on_all_nine_syncable_tables() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .expect("db");
+        db.use_ns("test").use_db("test").await.unwrap();
+        run_migrations(&db).await.expect("migrations");
+
+        #[derive(serde::Deserialize)]
+        struct TableInfo {
+            fields: std::collections::HashMap<String, serde_json::Value>,
+        }
+
+        for table in &[
+            "npc",
+            "location",
+            "faction",
+            "creature",
+            "item",
+            "event",
+            "player_character",
+            "misc",
+            "session",
+        ] {
+            let mut resp = db
+                .query(format!("INFO FOR TABLE {table}"))
+                .await
+                .expect("INFO");
+            let info: TableInfo = resp
+                .take::<Option<TableInfo>>(0)
+                .expect("parse")
+                .expect("some");
+            assert!(
+                info.fields.contains_key("vault_deleted"),
+                "vault_deleted must exist on '{table}' — there is no `entity` table to define it on"
+            );
+        }
+    }
+
+    /// A row written before `003_vault_sync.surql` carries no `vault_deleted` value
+    /// at all. `DEFAULT false` applies at write time, not retroactively — so a
+    /// `= false` filter silently omits it and `!= true` is the only safe form.
+    #[tokio::test]
+    async fn default_false_does_not_backfill_pre_migration_rows() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .expect("db");
+        db.use_ns("test").use_db("test").await.unwrap();
+
+        // Simulate a pre-migration row: define the table WITHOUT vault_deleted.
+        db.query(
+            "DEFINE TABLE npc SCHEMALESS; \
+             CREATE npc:legacy SET name = 'Legacy', created_at = time::now(), updated_at = time::now()",
+        )
+        .await
+        .expect("seed legacy row")
+        .check()
+        .expect("seed response");
+
+        // Now run the real migrations over the live database.
+        run_migrations(&db).await.expect("migrations");
+
+        // `id` deserializes as a SurrealDB `Thing`, not plain JSON — see
+        // `lint.rs`'s `IdRow` for the precedent this follows.
+        #[derive(serde::Deserialize)]
+        struct IdRow {
+            #[allow(dead_code)]
+            id: surrealdb::sql::Thing,
+        }
+
+        let mut wrong = db
+            .query("SELECT id FROM npc WHERE vault_deleted = false")
+            .await
+            .expect("query = false");
+        let wrong_rows: Vec<IdRow> = wrong.take(0).expect("take");
+
+        let mut right = db
+            .query("SELECT id FROM npc WHERE vault_deleted != true")
+            .await
+            .expect("query != true");
+        let right_rows: Vec<IdRow> = right.take(0).expect("take");
+
+        assert_eq!(
+            right_rows.len(),
+            1,
+            "`!= true` must see the pre-migration row"
+        );
+        assert!(
+            wrong_rows.len() <= right_rows.len(),
+            "regression guard: if `= false` ever starts matching, the `!= true` rule can be revisited"
+        );
+    }
+
+    #[tokio::test]
+    async fn vault_sync_state_table_exists_and_is_schemafull() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .expect("db");
+        db.use_ns("test").use_db("test").await.unwrap();
+        run_migrations(&db).await.expect("migrations");
+
+        db.query(
+            "CREATE vault_sync_state:⟨npc:a⟩ SET \
+             record = 'npc:a', key = 'campaigns/c/entities/npc/a.md', \
+             synced_hash = '123', synced_at = time::now()",
+        )
+        .await
+        .expect("insert sync state")
+        .check()
+        .expect("insert response");
+
+        #[derive(serde::Deserialize)]
+        struct IdRow {
+            #[allow(dead_code)]
+            id: surrealdb::sql::Thing,
+        }
+        let mut resp = db
+            .query("SELECT id FROM vault_sync_state")
+            .await
+            .expect("select");
+        let rows: Vec<IdRow> = resp.take(0).expect("take");
+        assert_eq!(rows.len(), 1);
+    }
+
+    /// The whole file must survive a second execution — `run_migrations` runs on
+    /// every boot. A `REMOVE` here once wiped every `relates_to` edge on restart.
+    #[tokio::test]
+    async fn vault_sync_state_rows_survive_a_migration_rerun() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .expect("db");
+        db.use_ns("test").use_db("test").await.unwrap();
+        run_migrations(&db).await.expect("first migration");
+
+        db.query(
+            "CREATE vault_sync_state:⟨npc:a⟩ SET record = 'npc:a', key = 'k', \
+             synced_hash = '123', synced_at = time::now()",
+        )
+        .await
+        .expect("seed")
+        .check()
+        .expect("seed response");
+
+        run_migrations(&db)
+            .await
+            .expect("second migration (restart simulation)");
+
+        #[derive(serde::Deserialize)]
+        struct IdRow {
+            #[allow(dead_code)]
+            id: surrealdb::sql::Thing,
+        }
+        let mut resp = db
+            .query("SELECT id FROM vault_sync_state")
+            .await
+            .expect("select");
+        let rows: Vec<IdRow> = resp.take(0).expect("take");
+        assert_eq!(
+            rows.len(),
+            1,
+            "vault_sync_state must survive a migration re-run"
         );
     }
 }
