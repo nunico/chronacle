@@ -390,15 +390,60 @@ mod tests {
 
     /// The `!= true` rule: a row created before the migration has no
     /// `vault_deleted` value, and a `= false` filter would silently drop it.
+    ///
+    /// A genuinely unset field only arises on a *pre-migration* row: one created
+    /// before `003_vault_sync.surql` defines `vault_deleted`, so the field's
+    /// `DEFAULT false` never applies (DEFAULT is a write-time default, not a
+    /// backfill). `UPDATE ... SET vault_deleted = NONE` cannot reproduce this —
+    /// the `TYPE bool` constraint rejects NONE (the statement fails *inside* an
+    /// otherwise-Ok response) and the field stays `false`. So this test seeds the
+    /// row BEFORE running migrations, then asserts the precondition — the field is
+    /// truly absent, not `false` — before exercising `list_all`.
     #[tokio::test]
     async fn list_all_includes_a_record_whose_vault_deleted_is_unset() {
-        let db = db().await;
-        seed_campaign_npc(&db).await;
-        db.query("UPDATE npc:n1 SET vault_deleted = NONE")
+        let db = surrealdb::engine::any::connect("mem://")
             .await
-            .expect("unset");
-        let store = SurrealVaultRecordStore::new(db);
+            .expect("mem db");
+        db.use_ns("test").use_db("test").await.unwrap();
 
+        // Seed before migrations: `npc` is schemaless here, so the row carries no
+        // `vault_deleted` value at all.
+        db.query(
+            "CREATE campaign:c1 SET name = 'Shadows of Valdris', system = '5e', \
+                 created_at = time::now(), updated_at = time::now(); \
+             CREATE npc:n1 SET name = 'Seraphina Aldric', summary = 'Archivist', \
+                 notes = 'GM notes', codex_article = 'Compiled.', \
+                 created_at = time::now(), updated_at = time::now(); \
+             RELATE campaign:c1->in_campaign->npc:n1;",
+        )
+        .await
+        .expect("seed")
+        .check()
+        .expect("seed response");
+        chronacle_db::run_migrations(&db).await.expect("migrations");
+
+        // Precondition: the pre-migration row's `vault_deleted` is genuinely
+        // absent, not `false`. Without this, the assertion below would pass even
+        // if the row were `false` (already covered by the sibling test) — so this
+        // guard is what makes the unset case provable.
+        #[derive(serde::Deserialize)]
+        struct Row {
+            vault_deleted: Option<bool>,
+        }
+        let mut sel = db
+            .query("SELECT vault_deleted FROM npc:n1")
+            .await
+            .expect("select field")
+            .check()
+            .expect("select response");
+        let rows: Vec<Row> = sel.take(0).expect("take");
+        assert_eq!(rows.len(), 1, "the seeded row must exist");
+        assert!(
+            rows[0].vault_deleted.is_none(),
+            "precondition: vault_deleted must be genuinely unset, not false"
+        );
+
+        let store = SurrealVaultRecordStore::new(db);
         let records = store.list_all().await.expect("list_all");
         assert_eq!(
             records.len(),
