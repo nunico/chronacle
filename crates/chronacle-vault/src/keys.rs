@@ -19,13 +19,48 @@ pub const ENTITY_TYPES: [&str; 8] = [
     "misc",
 ];
 
-/// Lowercase, ASCII, hyphen-separated. Never empty — falls back to `"untitled"`.
+/// Windows reserved device names (case-insensitive, with or without an
+/// extension — `con.md` is rejected exactly like `con`). Chronacle's CI
+/// builds and ships for Windows (the tauri e2e matrix runs ubuntu, windows,
+/// and macos), and a campaign or entity named e.g. "Con" would otherwise
+/// produce a `campaigns/con/` directory that Windows refuses to create.
+const RESERVED: [&str; 22] = [
+    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
+    "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+];
+
+/// Lowercase, Unicode-aware, hyphen-separated. Never empty — falls back to
+/// `"untitled"` — and never a Windows-reserved device name.
+///
+/// Any letter or digit of any script survives (`char::is_alphanumeric`);
+/// everything else — punctuation, symbols, whitespace, control characters,
+/// path separators (`/`, `\`, `:`) — becomes a separator, runs of which
+/// collapse to a single `-` with leading/trailing ones trimmed. This is a
+/// TTRPG app whose users write fantasy names full of diacritics ("Höhle",
+/// "Séraphina", "日本語"); the vault is exactly what the GM looks at in
+/// Obsidian, so an ASCII-only slug would mangle most of those names. A
+/// `char` can lowercase to more than one `char` (e.g. `İ`), hence pushing
+/// the whole `to_lowercase()` iterator rather than a single mapped char.
+///
+/// macOS normalizes Unicode filenames to NFD where Linux/Windows keep NFC;
+/// that is harmless here because reconcile matches records to files via the
+/// frontmatter `id` (see [`VaultIndex`]), never via the path — do not
+/// "fix" this by normalizing the slug.
+///
+/// After slugging, a result that collides case-insensitively with a
+/// [`RESERVED`] Windows device name gets a `-x` suffix (`con` → `con-x`);
+/// this only fires on an exact match, so `Contact` and `company` are left
+/// alone. A trailing `.` or space (also rejected by Windows at the end of a
+/// path component) is stripped; separator collapsing already prevents a
+/// trailing `-`.
 pub fn slug(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     let mut prev_dash = true; // suppresses a leading dash
     for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
+        if ch.is_alphanumeric() {
+            for lower in ch.to_lowercase() {
+                out.push(lower);
+            }
             prev_dash = false;
         } else if !prev_dash {
             out.push('-');
@@ -36,10 +71,15 @@ pub fn slug(name: &str) -> String {
         out.pop();
     }
     if out.is_empty() {
-        "untitled".to_owned()
-    } else {
-        out
+        out = "untitled".to_owned();
     }
+    if RESERVED.iter().any(|r| out.eq_ignore_ascii_case(r)) {
+        out.push_str("-x");
+    }
+    while out.ends_with('.') || out.ends_with(' ') {
+        out.pop();
+    }
+    out
 }
 
 /// Strips a `table:` prefix from a thing string. A string with no colon is
@@ -226,6 +266,49 @@ mod tests {
     }
 
     #[test]
+    fn slug_is_unicode_aware() {
+        assert_eq!(slug("Höhle des Drachen"), "höhle-des-drachen");
+        assert_eq!(slug("Nußbaum"), "nußbaum");
+        assert_eq!(slug("Séraphina Aldric"), "séraphina-aldric");
+        assert_eq!(slug("日本語"), "日本語");
+        assert_eq!(slug("🗡"), "untitled", "emoji alone is not alphanumeric");
+    }
+
+    #[test]
+    fn slug_still_handles_ascii_cases() {
+        assert_eq!(slug("Seraphina Aldric"), "seraphina-aldric");
+        assert_eq!(slug("Vex: The Unbound!"), "vex-the-unbound");
+        assert_eq!(slug("A  --  B"), "a-b");
+        assert_eq!(slug("???"), "untitled");
+    }
+
+    #[test]
+    fn slug_never_lets_a_path_separator_or_control_char_survive() {
+        let s = slug("a/b\\c:d\u{0}e");
+        assert!(!s.contains('/'), "got {s}");
+        assert!(!s.contains('\\'), "got {s}");
+        assert!(!s.contains(':'), "got {s}");
+        assert!(!s.chars().any(|c| c.is_control()), "got {s}");
+    }
+
+    #[test]
+    fn slug_escapes_windows_reserved_device_names() {
+        assert_eq!(slug("Con"), "con-x");
+        assert_eq!(slug("AUX"), "aux-x");
+        assert_eq!(slug("com1"), "com1-x");
+        assert_eq!(slug("nul"), "nul-x");
+        assert_eq!(slug("LPT9"), "lpt9-x");
+        // A name that merely starts with a reserved word is not reserved.
+        assert_eq!(slug("Contact"), "contact");
+        assert_eq!(slug("company"), "company");
+    }
+
+    #[test]
+    fn slug_strips_a_trailing_dot() {
+        assert_eq!(slug("name."), "name");
+    }
+
+    #[test]
     fn scope_folder_roots_campaigns_and_collections_separately() {
         assert_eq!(scope_folder(&campaign()), "campaigns/shadows-of-valdris");
         assert_eq!(scope_folder(&collection()), "collections/d-d-5e-core");
@@ -376,6 +459,16 @@ mod tests {
         let scopes = [campaign(), collection()];
         for scope in scopes {
             let entity = npc("Test", "t1", scope.clone());
+            for collides in [false, true] {
+                let k = key_for(&entity, collides);
+                assert!(is_managed(&k), "entity key {k} should be managed");
+            }
+        }
+
+        // A Windows-reserved-name entity and a diacritic-heavy entity must
+        // both still land on a managed key.
+        for name in ["Con", "Höhle des Drachen"] {
+            let entity = npc(name, "t2", campaign());
             for collides in [false, true] {
                 let k = key_for(&entity, collides);
                 assert!(is_managed(&k), "entity key {k} should be managed");
