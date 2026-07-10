@@ -189,7 +189,7 @@ pub fn slug(name: &str) -> String;                       // lowercase, ascii, `-
 pub fn scope_folder(scope: &VaultScope) -> String;       // "campaigns/<slug>" | "collections/<slug>"
 pub fn scope_folder_disambiguated(scope: &VaultScope, collides: bool) -> String;
 pub fn key_for(record: &VaultRecord, collides: bool) -> VaultKey;
-pub fn is_managed(key: &str) -> bool;                    // false for root, .obsidian/, *.conflict.*.md
+pub fn is_managed(key: &str) -> bool;                    // true only for the four shapes: campaigns/<slug>/entities/<type>/<file>.md, campaigns/<slug>/sessions/<file>.md, collections/<slug>/entities/<type>/<file>.md, collections/<slug>/rules/<file>.md
 pub fn entity_type_of(key: &str) -> Option<&str>;        // the segment after `entities/`
 /// id → key map built by scanning the vault. Identity is the frontmatter `id`.
 pub struct VaultIndex { /* .. */ }
@@ -1252,7 +1252,7 @@ Then:
   - `Session` → `{scope_folder}/sessions/{session_number:03}-{slug(title)}{suffix}.md`
   - `RuleEntry` → `{scope_folder}/rules/{slug(name)}{suffix}.md`
   - where `suffix` is `-{raw_id}` when `collides`, else empty.
-- `pub fn is_managed(key: &str) -> bool` — `true` only when the key has ≥ 2 segments, starts with `campaigns/` or `collections/`, ends with `.md`, and does **not** match `*.conflict.*.md`. (The conflict exclusion matters on the watcher path in tranche 5, but the predicate lives here.)
+- `pub fn is_managed(key: &str) -> bool` — `true` only for the four exact shapes `campaigns/<slug>/entities/<type>/<file>.md`, `campaigns/<slug>/sessions/<file>.md`, `collections/<slug>/entities/<type>/<file>.md`, and `collections/<slug>/rules/<file>.md`, where `<type>` is a member of `ENTITY_TYPES` and `<slug>`/`<file>` are non-empty, `/`-free segments; and does **not** match `*.conflict.*.md`. (The conflict exclusion matters on the watcher path in tranche 5, but the predicate lives here.)
 - `pub fn entity_type_of(key: &str) -> Option<&str>` — returns the segment after `entities/` when it is in `ENTITY_TYPES`.
 
 - [ ] **Step 5: Register and run**
