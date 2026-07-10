@@ -123,6 +123,7 @@ async fn measure_recall_at_5() {
         chat_task: tokio::sync::Mutex::new(None),
         extract_task: tokio::sync::Mutex::new(None),
         compile_task: tokio::sync::Mutex::new(None),
+        vault: tokio::sync::RwLock::new(None),
     });
 
     let fixtures = [

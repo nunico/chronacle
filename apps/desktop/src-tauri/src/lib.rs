@@ -27,6 +27,21 @@ pub struct AppState {
     pub extract_task: tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
     /// Abort handle for the in-flight codex compile task, if any (see `cancel_compile`).
     pub compile_task: tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
+    /// Vault sync engine. `None` until `vault_sync_path` is configured.
+    pub vault: tokio::sync::RwLock<Option<Arc<chronacle_vault::reconcile::VaultSyncService>>>,
+}
+
+/// Construct the vault sync engine over a filesystem root.
+fn build_vault_service(
+    db: surrealdb::Surreal<surrealdb::engine::any::Any>,
+    root: &str,
+) -> Arc<chronacle_vault::reconcile::VaultSyncService> {
+    Arc::new(chronacle_vault::reconcile::VaultSyncService::new(
+        Arc::new(chronacle_providers::vault_store::LocalFsVaultStore::new(
+            root,
+        )),
+        Arc::new(chronacle_domain::vault_record_store::SurrealVaultRecordStore::new(db)),
+    ))
 }
 
 /// Locate the bundled pdfium dynamic library.
@@ -148,6 +163,14 @@ pub async fn run() {
         chronacle_ingestion::pdf_extractor::PdfiumExtractor::new(pdfium_library_path()),
     );
 
+    // Build the vault sync engine now if a vault root is already configured,
+    // reading the setting before `db` is moved into `AppState` below.
+    let vault_settings = read_settings_map(&db).await;
+    let vault = vault_settings
+        .get("vault_sync_path")
+        .filter(|p| !p.is_empty())
+        .map(|path| build_vault_service(db.clone(), path));
+
     let state = Arc::new(AppState {
         db,
         llm_provider: RwLock::new(llm_provider),
@@ -158,6 +181,7 @@ pub async fn run() {
         chat_task: tokio::sync::Mutex::new(None),
         extract_task: tokio::sync::Mutex::new(None),
         compile_task: tokio::sync::Mutex::new(None),
+        vault: tokio::sync::RwLock::new(vault),
     });
 
     tauri::Builder::default()
@@ -279,6 +303,9 @@ pub async fn run() {
             commands::run_lint,
             commands::get_lint_findings,
             commands::resolve_lint_finding,
+            commands::get_vault_path,
+            commands::set_vault_path,
+            commands::vault_sync_now,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");

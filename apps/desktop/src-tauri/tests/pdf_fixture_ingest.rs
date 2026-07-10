@@ -85,6 +85,7 @@ async fn make_state(
         chat_task: tokio::sync::Mutex::new(None),
         extract_task: tokio::sync::Mutex::new(None),
         compile_task: tokio::sync::Mutex::new(None),
+        vault: tokio::sync::RwLock::new(None),
     });
     (state, embedding_provider, vector_store)
 }
