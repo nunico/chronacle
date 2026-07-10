@@ -18,4 +18,6 @@ pub use vault::{
     VaultMetadata, VaultOutbound, VaultRecord, VaultRecordError, VaultRecordStore, VaultRef,
     VaultScope, VaultStore, VaultStoreError, VaultWatcher,
 };
+#[cfg(any(test, feature = "mocks"))]
+pub use vault::{MockVaultRecordStore, MockVaultStore, MockVaultWatcher};
 pub use vector_store::{IndexedChunk, SearchResult, VectorStore};

@@ -427,3 +427,147 @@ mod tests {
         assert_eq!(entity_type_of("campaigns/x/sessions/001-a.md"), None);
     }
 }
+
+/// `id → key` map built by scanning the vault and reading frontmatter.
+///
+/// Reconcile matches records to files through this map. It never computes an
+/// expected slug: filenames derive from `name`, which is neither unique
+/// (two NPCs called "Guard") nor stable (a rename would orphan the file).
+#[derive(Debug, Default)]
+pub struct VaultIndex {
+    by_ref: std::collections::HashMap<chronacle_core::VaultRef, VaultKey>,
+}
+
+impl VaultIndex {
+    /// Read every managed `.md` under the vault root and index it by `id`.
+    ///
+    /// Files with no frontmatter, or unparsable frontmatter, are skipped —
+    /// they are tranche-5 create candidates, not errors.
+    pub async fn scan(store: &dyn chronacle_core::VaultStore) -> Result<Self, crate::VaultError> {
+        let mut by_ref = std::collections::HashMap::new();
+        for key in store.list("").await? {
+            if !is_managed(&key) {
+                continue;
+            }
+            let content = store.read(&key).await?;
+            let Ok((fm, _)) = crate::frontmatter::parse(&content) else {
+                continue;
+            };
+            let Some(vref) = chronacle_core::VaultRef::parse(&fm.id) else {
+                continue;
+            };
+            by_ref.insert(vref, key);
+        }
+        Ok(Self { by_ref })
+    }
+
+    /// The key currently holding this record, if any.
+    pub fn key_of(&self, vref: &chronacle_core::VaultRef) -> Option<&VaultKey> {
+        self.by_ref.get(vref)
+    }
+
+    /// Whether the vault holds a file for this record.
+    pub fn contains(&self, vref: &chronacle_core::VaultRef) -> bool {
+        self.by_ref.contains_key(vref)
+    }
+
+    /// Number of indexed records.
+    pub fn len(&self) -> usize {
+        self.by_ref.len()
+    }
+
+    /// Whether the index is empty.
+    pub fn is_empty(&self) -> bool {
+        self.by_ref.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod index_tests {
+    use super::*;
+    use chronacle_core::{MockVaultStore, VaultRef};
+    use mockall::predicate::eq;
+
+    fn file_with_id(id: &str) -> String {
+        format!("---\nid: \"{id}\"\ncreated_at: \"x\"\nupdated_at: \"y\"\n---\n\nbody\n")
+    }
+
+    #[tokio::test]
+    async fn scan_maps_ids_to_keys_regardless_of_filename() {
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| {
+            Ok(vec![
+                "campaigns/c/entities/npc/renamed-by-the-gm.md".to_string()
+            ])
+        });
+        store
+            .expect_read()
+            .with(eq("campaigns/c/entities/npc/renamed-by-the-gm.md"))
+            .returning(|_| Ok(file_with_id("npc:abc123")));
+
+        let idx = VaultIndex::scan(&store).await.expect("scan");
+        let vref = VaultRef {
+            table: "npc".into(),
+            id: "abc123".into(),
+        };
+        assert_eq!(
+            idx.key_of(&vref).map(String::as_str),
+            Some("campaigns/c/entities/npc/renamed-by-the-gm.md"),
+            "identity is the frontmatter id, not the slug"
+        );
+    }
+
+    #[tokio::test]
+    async fn scan_ignores_unmanaged_keys() {
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| {
+            Ok(vec![
+                "Templates/entity.md".to_string(),
+                ".obsidian/workspace.json".to_string(),
+                "campaigns/c/entities/npc/a.conflict.9.md".to_string(),
+            ])
+        });
+        // read() must never be called for an unmanaged key.
+        store.expect_read().never();
+
+        let idx = VaultIndex::scan(&store).await.expect("scan");
+        assert_eq!(idx.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn scan_skips_a_managed_file_with_no_frontmatter() {
+        let mut store = MockVaultStore::new();
+        store
+            .expect_list()
+            .returning(|_| Ok(vec!["campaigns/c/entities/npc/new.md".to_string()]));
+        store
+            .expect_read()
+            .returning(|_| Ok("just prose, no frontmatter\n".to_string()));
+
+        // An id-less file is a tranche-5 create candidate, not an index entry,
+        // and must not abort the scan.
+        let idx = VaultIndex::scan(&store)
+            .await
+            .expect("scan must tolerate id-less files");
+        assert_eq!(idx.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn scan_records_the_slug_to_scope_map() {
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| {
+            Ok(vec![
+                "campaigns/shadows-of-valdris/entities/npc/a.md".to_string()
+            ])
+        });
+        store
+            .expect_read()
+            .returning(|_| Ok(file_with_id("npc:a1")));
+
+        let idx = VaultIndex::scan(&store).await.expect("scan");
+        assert!(idx.contains(&VaultRef {
+            table: "npc".into(),
+            id: "a1".into()
+        }));
+    }
+}
