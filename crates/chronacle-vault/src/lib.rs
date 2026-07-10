@@ -6,6 +6,7 @@
 //! depend on `std::fs`, `tokio::fs`, or `notify`.**
 
 pub mod frontmatter;
+pub mod keys;
 pub mod markdown;
 
 /// Errors surfaced by the vault engine.
