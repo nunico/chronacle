@@ -185,7 +185,7 @@ pub fn normalize(s: &str) -> String;
 
 // crates/chronacle-vault/src/keys.rs                                       (D1b)
 pub const ENTITY_TYPES: [&str; 8];                       // the eight per-type tables
-pub fn slug(name: &str) -> String;                       // lowercase, ascii, `-` separated; never empty
+pub fn slug(name: &str) -> String;                       // lowercase, Unicode-aware, `-` separated; never empty or Windows-reserved
 pub fn scope_folder(scope: &VaultScope) -> String;       // "campaigns/<slug>" | "collections/<slug>"
 pub fn scope_folder_disambiguated(scope: &VaultScope, collides: bool) -> String;
 pub fn key_for(record: &VaultRecord, collides: bool) -> VaultKey;

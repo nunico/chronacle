@@ -128,6 +128,13 @@ Consequences:
   not.)
 - **Slug collisions take a deterministic `id`-derived suffix:** `guard.md`,
   `guard-4f2a1c.md`.
+- **Slugs are Unicode-aware, not ASCII-only.** Letters and digits of any
+  script survive (`Höhle des Drachen` → `höhle-des-drachen`, `日本語` →
+  `日本語`); punctuation and symbols become `-`. A result that reduces to
+  empty falls back to `untitled`. A slug that collides case-insensitively
+  with a Windows reserved device name (`CON`, `PRN`, `AUX`, `NUL`,
+  `COM1`–`COM9`, `LPT1`–`LPT9`) takes a `-x` suffix, since `campaigns/con/`
+  cannot be created on Windows.
 - **A `Remove` event never directly soft-deletes.** See "Inbound".
 - **A `Create` event bearing a known `id` is a relocation**, not a new record.
 
