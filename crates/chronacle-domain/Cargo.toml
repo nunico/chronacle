@@ -10,6 +10,7 @@ publish = false
 name = "chronacle_domain"
 
 [dependencies]
+async-trait.workspace = true
 chronacle-core = { path = "../chronacle-core" }
 chronacle-extraction = { path = "../chronacle-extraction" }
 surrealdb.workspace = true
