@@ -9,6 +9,7 @@ pub mod decide;
 pub mod frontmatter;
 pub mod keys;
 pub mod markdown;
+pub mod reconcile;
 pub mod render;
 
 /// Errors surfaced by the vault engine.
