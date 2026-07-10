@@ -14,6 +14,7 @@ dependencies = [
  "chronacle-ingestion",
  "chronacle-providers",
  "chronacle-retrieval",
+ "chronacle-vault",
  "dirs-next",
  "fastembed",
  "flate2",

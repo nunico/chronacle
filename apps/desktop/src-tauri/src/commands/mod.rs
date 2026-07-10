@@ -39,3 +39,6 @@ pub use custom_provider_commands::*;
 
 pub mod codex_commands;
 pub use codex_commands::*;
+
+pub mod vault_commands;
+pub use vault_commands::*;
