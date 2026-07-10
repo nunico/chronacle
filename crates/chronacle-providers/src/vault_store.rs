@@ -24,10 +24,17 @@ impl LocalFsVaultStore {
     /// Resolve a key to an absolute path, refusing anything that escapes the root.
     fn resolve(&self, key: &str) -> Result<PathBuf, VaultStoreError> {
         let rel = Path::new(key);
+        // `RootDir`/`Prefix` are checked explicitly, not just via `is_absolute()`:
+        // on Windows a rooted-but-driveless path like `/etc/passwd` is NOT
+        // `is_absolute()`, yet `root.join("/etc/passwd")` still discards the root
+        // (→ `C:\etc\passwd`), escaping the vault. Rejecting `RootDir` closes that.
         if rel.is_absolute()
-            || rel
-                .components()
-                .any(|c| matches!(c, Component::ParentDir | Component::Prefix(_)))
+            || rel.components().any(|c| {
+                matches!(
+                    c,
+                    Component::RootDir | Component::ParentDir | Component::Prefix(_)
+                )
+            })
         {
             return Err(VaultStoreError::InvalidKey(key.to_owned()));
         }
@@ -276,6 +283,14 @@ mod tests {
         ));
         assert!(matches!(
             store.read("campaigns/../../etc/passwd").await,
+            Err(VaultStoreError::InvalidKey(_))
+        ));
+        // A rooted key must be rejected on EVERY platform. On Unix `is_absolute()`
+        // catches it; on Windows a driveless `/…` is not `is_absolute()`, so the
+        // explicit `Component::RootDir` guard is what stops `root.join()` from
+        // escaping the vault. Pin the invariant, not the Unix-incidental path.
+        assert!(matches!(
+            store.read("/etc/passwd").await,
             Err(VaultStoreError::InvalidKey(_))
         ));
     }
