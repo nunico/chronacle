@@ -56,6 +56,7 @@ async fn multiple_wikilinks_all_returned() {
         None,
         EntityKind::Npc,
         make_npc("Torvin"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -65,6 +66,7 @@ async fn multiple_wikilinks_all_returned() {
         None,
         EntityKind::Location,
         make_npc("Ironhold"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -74,6 +76,7 @@ async fn multiple_wikilinks_all_returned() {
         None,
         EntityKind::Npc,
         make_npc("SourceNPC"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -103,6 +106,7 @@ async fn session_source_skips_relates_to_edges_but_returns_ids() {
         None,
         EntityKind::Npc,
         make_npc("Torvin"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -139,6 +143,7 @@ async fn repeated_call_same_notes_produces_single_edge() {
         None,
         EntityKind::Npc,
         make_npc("Torvin"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -148,6 +153,7 @@ async fn repeated_call_same_notes_produces_single_edge() {
         None,
         EntityKind::Npc,
         make_npc("SourceNPC"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();

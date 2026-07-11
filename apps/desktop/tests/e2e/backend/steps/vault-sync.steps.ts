@@ -64,3 +64,113 @@ Then('the set vault path command was sent with null', async ({ page }) => {
   const call = calls.find((c) => c.cmd === 'set_vault_path');
   expect(call?.args?.vaultPath).toBeNull();
 });
+
+// ── D4b: producer-dispatch scenarios ─────────────────────────────────────────
+
+/** A minimal `GraphNode` for the entity list mock. */
+function entityNode(name: string): Record<string, unknown> {
+  return {
+    id: 'npc1',
+    kind: 'npc',
+    campaign_id: 'camp1',
+    name,
+    summary: null,
+    notes: 'Original notes.',
+    created_at: null,
+    updated_at: null,
+    date_start: null,
+    date_end: null,
+    is_ongoing: null,
+    sequence_index: null,
+    era: null,
+    duration_label: null,
+    session_id: null,
+    player_name: null,
+    character_class: null,
+    character_level: null,
+    status: null,
+    codex_article: null,
+    codex_stale: null,
+    codex_compiled_at: null,
+  };
+}
+
+Given(
+  'a vault is configured at {string} and an entity {string}',
+  async ({ page }, _path: string, name: string) => {
+    const node = entityNode(name);
+    await installIpcMock(page, {
+      get_vault_path: '/Users/gm/Vault',
+      get_entities: [node],
+      get_entity_counts: { npc: 1 },
+      get_entity_relations: [],
+      // Echo the edited input straight back so the UI settles after save.
+      update_entity: node,
+    });
+  },
+);
+
+/** Open the NPCs manager and edit the one seeded entity. */
+async function openEntityEditForm(page: import('@playwright/test').Page): Promise<void> {
+  await page.goto('/');
+  // The rail button's accessible name includes its icon and count, so match on
+  // the "NPCs" label as a substring.
+  await page.getByRole('button', { name: 'NPCs' }).click();
+  await page.locator('button.entity-name').first().click();
+  await expect(page.locator('form[aria-label="entity form"]')).toBeVisible();
+}
+
+When('the GM edits that entity\'s notes to {string}', async ({ page }, notes: string) => {
+  await openEntityEditForm(page);
+  await page.locator('#ef-notes').fill(notes);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+});
+
+When('the GM renames that entity to {string}', async ({ page }, newName: string) => {
+  await openEntityEditForm(page);
+  await page.locator('#ef-name').fill(newName);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+});
+
+Then('an update entity command was sent with notes {string}', async ({ page }, notes: string) => {
+  const calls = await getIpcCalls(page);
+  const call = calls.find((c) => c.cmd === 'update_entity');
+  expect(call, 'update_entity must be dispatched').toBeDefined();
+  const input = call?.args?.input as Record<string, unknown> | undefined;
+  expect(input?.notes).toBe(notes);
+});
+
+Then('an update entity command was sent with name {string}', async ({ page }, name: string) => {
+  const calls = await getIpcCalls(page);
+  const call = calls.find((c) => c.cmd === 'update_entity');
+  expect(call, 'update_entity must be dispatched').toBeDefined();
+  const input = call?.args?.input as Record<string, unknown> | undefined;
+  expect(input?.name).toBe(name);
+});
+
+Given(
+  'a vault is configured at {string} and a compiled collection {string}',
+  async ({ page }, _path: string, name: string) => {
+    await installIpcMock(page, {
+      get_vault_path: '/Users/gm/Vault',
+      get_collections: [{ id: 'col1', name, description: null }],
+      get_campaign_collections: [{ id: 'col1', name, description: null }],
+      get_codex_status: { stale_entities: 3, total_entities: 10, rules_stale: 0, rule_entries: 0 },
+      compile_collection: { articles_compiled: 3, remaining_stale: 0 },
+    });
+  },
+);
+
+When('the GM recompiles the collection', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('button[title="Manage campaign and source collections"]').click();
+  await page.getByText('Manage campaigns').click();
+  const coll = page.locator('.coll', { hasText: 'World Guide' });
+  await coll.locator('button[aria-label*="Compile"]').click();
+});
+
+Then('exactly one compile collection command was sent', async ({ page }) => {
+  const calls = await getIpcCalls(page);
+  const compiles = calls.filter((c) => c.cmd === 'compile_collection');
+  expect(compiles).toHaveLength(1);
+});

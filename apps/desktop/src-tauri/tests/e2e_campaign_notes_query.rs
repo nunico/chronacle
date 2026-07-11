@@ -39,6 +39,7 @@ async fn campaign_npc_and_event_both_appear_in_agent_context() {
             notes: Some("Secretly guards the Sunstone.".to_string()),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -56,6 +57,7 @@ async fn campaign_npc_and_event_both_appear_in_agent_context() {
             sequence_index: Some(1),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();

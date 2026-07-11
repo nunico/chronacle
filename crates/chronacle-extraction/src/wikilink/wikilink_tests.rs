@@ -101,6 +101,7 @@ async fn case_insensitive_match_returns_entity_id() {
         None,
         EntityKind::Npc,
         make_npc("torvin"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -111,6 +112,7 @@ async fn case_insensitive_match_returns_entity_id() {
         None,
         EntityKind::Npc,
         make_npc("SourceNPC"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -138,6 +140,7 @@ async fn stale_relates_to_edge_deleted_on_second_call() {
         None,
         EntityKind::Npc,
         make_npc("Torvin"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -147,6 +150,7 @@ async fn stale_relates_to_edge_deleted_on_second_call() {
         None,
         EntityKind::Npc,
         make_npc("SourceNPC"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -204,6 +208,7 @@ async fn mentioned_edge_skipped_when_higher_tier_edge_exists() {
         None,
         EntityKind::Npc,
         make_npc("Torvin"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -213,6 +218,7 @@ async fn mentioned_edge_skipped_when_higher_tier_edge_exists() {
         None,
         EntityKind::Npc,
         make_npc("SourceNPC"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();

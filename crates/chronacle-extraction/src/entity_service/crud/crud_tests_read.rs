@@ -29,12 +29,26 @@ async fn get_by_campaign_returns_only_campaign_entities() {
     )
     .await
     .unwrap();
-    create(&db, Some("camp1"), None, EntityKind::Npc, input("Torvin"))
-        .await
-        .unwrap();
-    create(&db, None, Some("col1"), EntityKind::Npc, input("Goblin"))
-        .await
-        .unwrap();
+    create(
+        &db,
+        Some("camp1"),
+        None,
+        EntityKind::Npc,
+        input("Torvin"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
+    create(
+        &db,
+        None,
+        Some("col1"),
+        EntityKind::Npc,
+        input("Goblin"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     let results = get_by_campaign(&db, "camp1", EntityKind::Npc)
         .await
         .unwrap();
@@ -65,15 +79,36 @@ async fn get_by_campaign_includes_subscribed_collection_entities() {
     )
     .await
     .unwrap();
-    create(&db, Some("camp1"), None, EntityKind::Npc, input("Torvin"))
-        .await
-        .unwrap();
-    create(&db, None, Some("col1"), EntityKind::Npc, input("Goblin"))
-        .await
-        .unwrap();
-    create(&db, None, Some("col2"), EntityKind::Npc, input("Lich"))
-        .await
-        .unwrap();
+    create(
+        &db,
+        Some("camp1"),
+        None,
+        EntityKind::Npc,
+        input("Torvin"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
+    create(
+        &db,
+        None,
+        Some("col1"),
+        EntityKind::Npc,
+        input("Goblin"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
+    create(
+        &db,
+        None,
+        Some("col2"),
+        EntityKind::Npc,
+        input("Lich"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     let results = get_by_campaign(&db, "camp1", EntityKind::Npc)
         .await
         .unwrap();
@@ -92,12 +127,26 @@ async fn get_by_collection_returns_only_collection_entities() {
     )
     .await
     .unwrap();
-    create(&db, Some("camp1"), None, EntityKind::Npc, input("Torvin"))
-        .await
-        .unwrap();
-    create(&db, None, Some("col1"), EntityKind::Npc, input("Goblin"))
-        .await
-        .unwrap();
+    create(
+        &db,
+        Some("camp1"),
+        None,
+        EntityKind::Npc,
+        input("Torvin"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
+    create(
+        &db,
+        None,
+        Some("col1"),
+        EntityKind::Npc,
+        input("Goblin"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     let results = get_by_collection(&db, "col1", EntityKind::Npc)
         .await
         .unwrap();
@@ -120,6 +169,7 @@ async fn find_by_name_and_collection_is_case_insensitive() {
         Some("col1"),
         EntityKind::Npc,
         input("The Iron Fist"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -146,6 +196,7 @@ async fn get_by_id_exposes_codex_fields() {
             name: "Mira".to_string(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();

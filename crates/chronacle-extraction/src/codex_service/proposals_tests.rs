@@ -209,7 +209,9 @@ async fn accept_article_update_applies_text_provenance_and_resolves() {
 
     let embed: Arc<dyn chronacle_core::embedding::EmbeddingProvider> =
         Arc::new(MockEmbeddingProvider::new(768));
-    accept_proposal(&db, &embed, &id).await.unwrap();
+    accept_proposal(&db, &embed, &id, &chronacle_core::NoopOutbound)
+        .await
+        .unwrap();
 
     // `codex_sources` entries embed a record link (`proposal: type::thing(...)`)
     // which surrealdb cannot deserialize into `serde_json::Value` directly, so
@@ -271,7 +273,9 @@ async fn accept_notes_update_is_the_only_machine_path_into_notes_and_marks_stale
         .clone();
     let embed: Arc<dyn chronacle_core::embedding::EmbeddingProvider> =
         Arc::new(MockEmbeddingProvider::new(768));
-    accept_proposal(&db, &embed, &id).await.unwrap();
+    accept_proposal(&db, &embed, &id, &chronacle_core::NoopOutbound)
+        .await
+        .unwrap();
 
     #[derive(serde::Deserialize)]
     struct Npc {
@@ -306,7 +310,9 @@ async fn accept_new_entity_creates_it_in_the_proposal_collection() {
         .clone();
     let embed: Arc<dyn chronacle_core::embedding::EmbeddingProvider> =
         Arc::new(MockEmbeddingProvider::new(768));
-    accept_proposal(&db, &embed, &id).await.unwrap();
+    accept_proposal(&db, &embed, &id, &chronacle_core::NoopOutbound)
+        .await
+        .unwrap();
 
     #[derive(Debug, serde::Deserialize)]
     struct Row {
@@ -407,7 +413,9 @@ async fn accept_rule_entry_update_applies_body_provenance_and_reembeds() {
 
     let embed: Arc<dyn chronacle_core::embedding::EmbeddingProvider> =
         Arc::new(MockEmbeddingProvider::new(768));
-    accept_proposal(&db, &embed, "p1").await.unwrap();
+    accept_proposal(&db, &embed, "p1", &chronacle_core::NoopOutbound)
+        .await
+        .unwrap();
 
     #[derive(serde::Deserialize)]
     struct Rule {
@@ -458,7 +466,9 @@ async fn accept_new_rule_entry_creates_categorized_embedded_entry() {
         .clone();
     let embed: Arc<dyn chronacle_core::embedding::EmbeddingProvider> =
         Arc::new(MockEmbeddingProvider::new(768));
-    accept_proposal(&db, &embed, &id).await.unwrap();
+    accept_proposal(&db, &embed, &id, &chronacle_core::NoopOutbound)
+        .await
+        .unwrap();
 
     #[derive(serde::Deserialize)]
     struct Rule {

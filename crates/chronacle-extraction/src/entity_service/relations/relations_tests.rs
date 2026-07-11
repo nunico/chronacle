@@ -131,6 +131,7 @@ async fn setup_pair<C: surrealdb::Connection>(db: &surrealdb::Surreal<C>) -> (St
             name: "Hegemony".to_string(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -143,6 +144,7 @@ async fn setup_pair<C: surrealdb::Connection>(db: &surrealdb::Surreal<C>) -> (St
             name: "Syndicate".to_string(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();

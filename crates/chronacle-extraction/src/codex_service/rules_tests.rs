@@ -89,9 +89,16 @@ async fn rules_compile_creates_entries_with_categories_and_page_refs() {
     });
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
 
-    let res = compile_rules(&db, &llm, &embed, &col_id, |_| {})
-        .await
-        .unwrap();
+    let res = compile_rules(
+        &db,
+        &llm,
+        &embed,
+        &col_id,
+        |_| {},
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     assert_eq!(res.entries_created, 1);
     assert_eq!(res.entries_updated, 0);
     assert_eq!(res.remaining_batches, 0);
@@ -132,9 +139,16 @@ async fn rules_compile_skips_lore_only_sources() {
     let llm: Arc<dyn LlmProvider> = Arc::new(PanickingLlm);
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
 
-    let res = compile_rules(&db, &llm, &embed, &col_id, |_| {})
-        .await
-        .unwrap();
+    let res = compile_rules(
+        &db,
+        &llm,
+        &embed,
+        &col_id,
+        |_| {},
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     assert_eq!(res.entries_created, 0);
     assert_eq!(res.entries_updated, 0);
 }
@@ -173,9 +187,16 @@ async fn rules_recompile_merges_by_name_preserving_notes() {
     });
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
 
-    let res = compile_rules(&db, &llm, &embed, &col_id, |_| {})
-        .await
-        .unwrap();
+    let res = compile_rules(
+        &db,
+        &llm,
+        &embed,
+        &col_id,
+        |_| {},
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     assert_eq!(res.entries_created, 0);
     assert_eq!(res.entries_updated, 1);
 
@@ -220,9 +241,16 @@ async fn invalid_llm_category_falls_back_to_entry() {
     });
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
 
-    compile_rules(&db, &llm, &embed, &col_id, |_| {})
-        .await
-        .unwrap();
+    compile_rules(
+        &db,
+        &llm,
+        &embed,
+        &col_id,
+        |_| {},
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
 
     #[derive(serde::Deserialize)]
     struct Row {
@@ -385,9 +413,16 @@ async fn rules_recompile_preserves_stored_objections_in_sources() {
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
 
     // First compile: creates the entry.
-    let res = compile_rules(&db, &llm, &embed, &col_id, |_| {})
-        .await
-        .unwrap();
+    let res = compile_rules(
+        &db,
+        &llm,
+        &embed,
+        &col_id,
+        |_| {},
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     assert_eq!(res.entries_created, 1);
 
     #[derive(serde::Deserialize)]
@@ -418,9 +453,16 @@ async fn rules_recompile_preserves_stored_objections_in_sources() {
     .unwrap();
 
     // Recompile with the same rule (same name+category) re-emitted by the LLM.
-    let res = compile_rules(&db, &llm, &embed, &col_id, |_| {})
-        .await
-        .unwrap();
+    let res = compile_rules(
+        &db,
+        &llm,
+        &embed,
+        &col_id,
+        |_| {},
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     assert_eq!(res.entries_created, 0, "must update, not duplicate");
     assert_eq!(res.entries_updated, 1);
 
@@ -513,9 +555,17 @@ async fn rules_compile_honors_batch_cap_and_reports_honest_remainder() {
     let llm_dyn: Arc<dyn LlmProvider> = llm.clone();
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
 
-    let res = compile_rules_with_cap(&db, &llm_dyn, &embed, &col_id, 1, |_| {})
-        .await
-        .unwrap();
+    let res = compile_rules_with_cap(
+        &db,
+        &llm_dyn,
+        &embed,
+        &col_id,
+        1,
+        |_| {},
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         llm.calls.load(Ordering::SeqCst),

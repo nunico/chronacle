@@ -35,9 +35,14 @@ async fn create_session_returns_session_with_correct_fields() {
     let db = setup_db().await;
     let campaign_id = create_test_campaign(&db).await.id;
 
-    let session = create(&db, &campaign_id, make_input(1, "The Beginning"))
-        .await
-        .unwrap();
+    let session = create(
+        &db,
+        &campaign_id,
+        make_input(1, "The Beginning"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(session.session_number, 1);
     assert_eq!(session.title, "The Beginning");
@@ -64,6 +69,7 @@ async fn create_session_requires_nonempty_title() {
             date_played: "2026-06-05".to_string(),
             notes: String::new(),
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap_err();
@@ -91,6 +97,7 @@ async fn create_session_requires_positive_session_number() {
                 date_played: "2026-06-05".to_string(),
                 notes: String::new(),
             },
+            &chronacle_core::NoopOutbound,
         )
         .await
         .unwrap_err();
@@ -110,15 +117,30 @@ async fn get_all_sessions_ordered_by_session_number() {
     let campaign_id = create_test_campaign(&db).await.id;
 
     // Insert out of order
-    create(&db, &campaign_id, make_input(3, "Third"))
-        .await
-        .unwrap();
-    create(&db, &campaign_id, make_input(1, "First"))
-        .await
-        .unwrap();
-    create(&db, &campaign_id, make_input(2, "Second"))
-        .await
-        .unwrap();
+    create(
+        &db,
+        &campaign_id,
+        make_input(3, "Third"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
+    create(
+        &db,
+        &campaign_id,
+        make_input(1, "First"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
+    create(
+        &db,
+        &campaign_id,
+        make_input(2, "Second"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
 
     let sessions = get_all(&db, &campaign_id).await.unwrap();
 
@@ -136,9 +158,14 @@ async fn get_session_by_id_returns_correct_session() {
     let db = setup_db().await;
     let campaign_id = create_test_campaign(&db).await.id;
 
-    let created = create(&db, &campaign_id, make_input(1, "Session One"))
-        .await
-        .unwrap();
+    let created = create(
+        &db,
+        &campaign_id,
+        make_input(1, "Session One"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
 
     let fetched = get_by_id(&db, &created.id).await.unwrap();
 
@@ -168,9 +195,14 @@ async fn update_session_changes_fields_and_updates_timestamp() {
     let db = setup_db().await;
     let campaign_id = create_test_campaign(&db).await.id;
 
-    let created = create(&db, &campaign_id, make_input(1, "Old Title"))
-        .await
-        .unwrap();
+    let created = create(
+        &db,
+        &campaign_id,
+        make_input(1, "Old Title"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
 
     // Grab original timestamp for comparison — it's an ISO-8601 string.
     let original_updated_at = created.updated_at.clone();
@@ -187,6 +219,7 @@ async fn update_session_changes_fields_and_updates_timestamp() {
             date_played: "2026-07-01".to_string(),
             notes: "Updated notes".to_string(),
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -209,9 +242,14 @@ async fn delete_session_removes_record() {
     let db = setup_db().await;
     let campaign_id = create_test_campaign(&db).await.id;
 
-    let session = create(&db, &campaign_id, make_input(1, "To Be Deleted"))
-        .await
-        .unwrap();
+    let session = create(
+        &db,
+        &campaign_id,
+        make_input(1, "To Be Deleted"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
 
     delete(&db, &session.id).await.unwrap();
 
@@ -232,9 +270,14 @@ async fn get_session_entities_returns_linked_events() {
     let campaign = create_test_campaign(&db).await;
 
     // Create a session
-    let session = create(&db, &campaign.id, make_input(1, "Test Session"))
-        .await
-        .unwrap();
+    let session = create(
+        &db,
+        &campaign.id,
+        make_input(1, "Test Session"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
 
     // Create an event linked to the campaign (session FK added below)
     let event = create_entity(
@@ -258,6 +301,7 @@ async fn get_session_entities_returns_linked_events() {
             character_level: None,
             status: None,
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -292,9 +336,14 @@ async fn update_session_rejects_zero_session_number() {
     let campaign_id = create_test_campaign(&db).await.id;
 
     // Create a valid session first.
-    let created = create(&db, &campaign_id, make_input(1, "Original Title"))
-        .await
-        .unwrap();
+    let created = create(
+        &db,
+        &campaign_id,
+        make_input(1, "Original Title"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
 
     // Attempt to update with session_number = 0.
     let err = update(
@@ -306,6 +355,7 @@ async fn update_session_rejects_zero_session_number() {
             date_played: "2026-06-05".to_string(),
             notes: String::new(),
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap_err();
@@ -325,6 +375,7 @@ async fn update_session_rejects_zero_session_number() {
             date_played: "2026-06-05".to_string(),
             notes: String::new(),
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap_err();

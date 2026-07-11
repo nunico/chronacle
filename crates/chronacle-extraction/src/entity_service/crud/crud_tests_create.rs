@@ -24,18 +24,33 @@ async fn count_by_campaign_returns_per_kind_counts() {
         name: name.to_string(),
         ..Default::default()
     };
-    create(&db, Some("camp1"), None, EntityKind::Npc, input("Torvin"))
-        .await
-        .unwrap();
-    create(&db, Some("camp1"), None, EntityKind::Npc, input("Mira"))
-        .await
-        .unwrap();
+    create(
+        &db,
+        Some("camp1"),
+        None,
+        EntityKind::Npc,
+        input("Torvin"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
+    create(
+        &db,
+        Some("camp1"),
+        None,
+        EntityKind::Npc,
+        input("Mira"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     create(
         &db,
         Some("camp1"),
         None,
         EntityKind::Location,
         input("Docks"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -66,6 +81,7 @@ async fn count_by_campaign_does_not_count_other_campaigns() {
             name: "Elsewhere".to_string(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -91,6 +107,7 @@ async fn create_with_campaign_id_populates_campaign_via_edge() {
             name: "Torvin".to_string(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -128,6 +145,7 @@ async fn create_with_collection_id_populates_collection_via_edge() {
             name: "Goblin".to_string(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -147,6 +165,7 @@ async fn a_name_of_only_whitespace_is_rejected() {
             name: "\n\t".to_string(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap_err();

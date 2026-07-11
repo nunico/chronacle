@@ -37,9 +37,16 @@ fn npc_input(name: &str) -> EntityInput {
 #[tokio::test]
 async fn create_npc_returns_node_with_correct_kind() {
     let db = setup_db().await;
-    let node = create(&db, None, None, EntityKind::Npc, npc_input("Torvin"))
-        .await
-        .unwrap();
+    let node = create(
+        &db,
+        None,
+        None,
+        EntityKind::Npc,
+        npc_input("Torvin"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     assert_eq!(node.kind, "npc");
     assert_eq!(node.name, "Torvin");
     assert_eq!(node.summary.as_deref(), Some("A shady merchant"));
@@ -66,9 +73,16 @@ async fn create_event_stores_temporal_fields() {
         character_level: None,
         status: None,
     };
-    let node = create(&db, None, None, EntityKind::Event, input)
-        .await
-        .unwrap();
+    let node = create(
+        &db,
+        None,
+        None,
+        EntityKind::Event,
+        input,
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     assert_eq!(node.kind, "event");
     assert_eq!(node.date_start.as_deref(), Some("Year 312"));
     assert_eq!(node.sequence_index, Some(42));
@@ -94,9 +108,16 @@ async fn create_player_character_stores_pc_fields() {
         character_level: Some(7),
         status: Some("active".to_string()),
     };
-    let node = create(&db, None, None, EntityKind::PlayerCharacter, input)
-        .await
-        .unwrap();
+    let node = create(
+        &db,
+        None,
+        None,
+        EntityKind::PlayerCharacter,
+        input,
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     assert_eq!(node.kind, "player_character");
     assert_eq!(node.player_name.as_deref(), Some("Alice"));
     assert_eq!(node.character_level, Some(7));
@@ -127,6 +148,7 @@ async fn get_by_id_returns_created_node() {
             character_level: None,
             status: None,
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -161,12 +183,20 @@ async fn get_by_campaign_returns_only_matching_entities() {
         None,
         EntityKind::Npc,
         npc_input("Nym"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
-    let _n2 = create(&db, None, None, EntityKind::Npc, npc_input("Orphan NPC"))
-        .await
-        .unwrap();
+    let _n2 = create(
+        &db,
+        None,
+        None,
+        EntityKind::Npc,
+        npc_input("Orphan NPC"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
 
     let results = get_by_campaign(&db, &campaign.id, EntityKind::Npc)
         .await
@@ -194,9 +224,16 @@ async fn create_with_empty_name_returns_validation_error() {
         character_level: None,
         status: None,
     };
-    let err = create(&db, None, None, EntityKind::Npc, input)
-        .await
-        .unwrap_err();
+    let err = create(
+        &db,
+        None,
+        None,
+        EntityKind::Npc,
+        input,
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap_err();
     assert!(matches!(err, EntityError::Validation { ref field, .. } if field == "name"));
 }
 
@@ -215,6 +252,7 @@ async fn get_by_campaign_excludes_other_campaign_entities() {
         None,
         EntityKind::Npc,
         npc_input("Belongs to C1"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -224,6 +262,7 @@ async fn get_by_campaign_excludes_other_campaign_entities() {
         None,
         EntityKind::Npc,
         npc_input("Belongs to C2"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -235,9 +274,16 @@ async fn get_by_campaign_excludes_other_campaign_entities() {
 #[tokio::test]
 async fn get_by_id_with_wrong_kind_returns_not_found() {
     let db = setup_db().await;
-    let node = create(&db, None, None, EntityKind::Npc, npc_input("Torvin"))
-        .await
-        .unwrap();
+    let node = create(
+        &db,
+        None,
+        None,
+        EntityKind::Npc,
+        npc_input("Torvin"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     let err = get_by_id(&db, &node.id, EntityKind::Location)
         .await
         .unwrap_err();
@@ -247,9 +293,16 @@ async fn get_by_id_with_wrong_kind_returns_not_found() {
 #[tokio::test]
 async fn update_changes_name_and_notes() {
     let db = setup_db().await;
-    let created = create(&db, None, None, EntityKind::Npc, npc_input("Old Name"))
-        .await
-        .unwrap();
+    let created = create(
+        &db,
+        None,
+        None,
+        EntityKind::Npc,
+        npc_input("Old Name"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
 
     let updated_input = EntityInput {
         name: "New Name".to_string(),
@@ -267,9 +320,15 @@ async fn update_changes_name_and_notes() {
         character_level: None,
         status: None,
     };
-    let updated = update(&db, &created.id, EntityKind::Npc, updated_input)
-        .await
-        .unwrap();
+    let updated = update(
+        &db,
+        &created.id,
+        EntityKind::Npc,
+        updated_input,
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     assert_eq!(updated.id, created.id);
     assert_eq!(updated.name, "New Name");
     assert_eq!(updated.notes.as_deref(), Some("Some notes"));
@@ -298,6 +357,7 @@ async fn update_not_found_returns_error() {
             character_level: None,
             status: None,
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap_err();
@@ -328,6 +388,7 @@ async fn delete_removes_node() {
             character_level: None,
             status: None,
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -343,9 +404,16 @@ async fn delete_removes_node() {
 #[tokio::test]
 async fn update_with_empty_name_returns_validation_error() {
     let db = setup_db().await;
-    let created = create(&db, None, None, EntityKind::Npc, npc_input("Valid"))
-        .await
-        .unwrap();
+    let created = create(
+        &db,
+        None,
+        None,
+        EntityKind::Npc,
+        npc_input("Valid"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     let err = update(
         &db,
         &created.id,
@@ -366,6 +434,7 @@ async fn update_with_empty_name_returns_validation_error() {
             character_level: None,
             status: None,
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap_err();
@@ -376,9 +445,16 @@ async fn update_with_empty_name_returns_validation_error() {
 async fn relate_creates_edge_traversable_in_both_directions() {
     let db = setup_db().await;
 
-    let npc = create(&db, None, None, EntityKind::Npc, npc_input("Varek"))
-        .await
-        .unwrap();
+    let npc = create(
+        &db,
+        None,
+        None,
+        EntityKind::Npc,
+        npc_input("Varek"),
+        &chronacle_core::NoopOutbound,
+    )
+    .await
+    .unwrap();
     let loc = create(
         &db,
         None,
@@ -400,6 +476,7 @@ async fn relate_creates_edge_traversable_in_both_directions() {
             character_level: None,
             status: None,
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -439,6 +516,7 @@ async fn create_event_with_session_id_stores_session_link() {
             date_played: "2026-06-05".to_string(),
             notes: String::new(),
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -465,6 +543,7 @@ async fn create_event_with_session_id_stores_session_link() {
             status: None,
             session_id: Some(session.id.clone()),
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -527,6 +606,7 @@ async fn create_entity_with_wikilink_creates_relates_to_edge() {
         None,
         EntityKind::Npc,
         npc_input("Torvin"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -538,6 +618,7 @@ async fn create_entity_with_wikilink_creates_relates_to_edge() {
         None,
         EntityKind::Location,
         location_input("The Tavern", Some("[[Torvin]] frequents this place")),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -573,6 +654,7 @@ async fn update_entity_notes_updates_wikilink_edges() {
         None,
         EntityKind::Npc,
         npc_input("Torvin"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -584,6 +666,7 @@ async fn update_entity_notes_updates_wikilink_edges() {
         None,
         EntityKind::Location,
         location_input("The Tavern", Some("[[Torvin]] frequents this place")),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -607,6 +690,7 @@ async fn update_entity_notes_updates_wikilink_edges() {
         &source.id,
         EntityKind::Location,
         location_input("The Tavern", Some("A quiet empty place.")),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -639,6 +723,7 @@ async fn update_entity_to_empty_notes_removes_wikilink_edges() {
         None,
         EntityKind::Npc,
         npc_input("Torvin"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -650,6 +735,7 @@ async fn update_entity_to_empty_notes_removes_wikilink_edges() {
         None,
         EntityKind::Location,
         location_input("The Tavern", Some("[[Torvin]] lives here")),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -673,6 +759,7 @@ async fn update_entity_to_empty_notes_removes_wikilink_edges() {
         &source.id,
         EntityKind::Location,
         location_input("The Tavern", Some("")),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -719,6 +806,7 @@ async fn get_events_timeline_orders_by_sequence_index_nulls_last() {
             None,
             EntityKind::Event,
             event(name, seq),
+            &chronacle_core::NoopOutbound,
         )
         .await
         .unwrap();
@@ -756,6 +844,7 @@ async fn get_entity_graph_returns_center_neighbors_and_edges() {
             name: "Varin".into(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -769,6 +858,7 @@ async fn get_entity_graph_returns_center_neighbors_and_edges() {
             name: "The Keep".into(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -782,6 +872,7 @@ async fn get_entity_graph_returns_center_neighbors_and_edges() {
             name: "The Pact".into(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -840,6 +931,7 @@ async fn get_entity_graph_isolated_entity_returns_just_itself() {
             name: "Hermit".into(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -864,6 +956,7 @@ async fn get_entity_graph_dedupes_node_with_multiple_edges_to_same_neighbor() {
             name: "Serafine".into(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -878,6 +971,7 @@ async fn get_entity_graph_dedupes_node_with_multiple_edges_to_same_neighbor() {
             name: "The Iron Tower".into(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -947,6 +1041,7 @@ async fn forward_reference_wikilink_reconciled_on_new_entity_create() {
             notes: Some("Will ally with [[Brother Bram]].".into()),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -969,6 +1064,7 @@ async fn forward_reference_wikilink_reconciled_on_new_entity_create() {
             name: "Brother Bram".into(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -1011,6 +1107,7 @@ async fn forward_reference_reconciliation_no_false_positive() {
             notes: Some("Wanders the forest alone.".into()),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -1025,6 +1122,7 @@ async fn forward_reference_reconciliation_no_false_positive() {
             name: "Ghost".into(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -1063,6 +1161,7 @@ async fn get_entity_relations_returns_both_directions_with_correct_fields() {
             name: "Center".into(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -1076,6 +1175,7 @@ async fn get_entity_relations_returns_both_directions_with_correct_fields() {
             name: "The Vault".into(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -1089,6 +1189,7 @@ async fn get_entity_relations_returns_both_directions_with_correct_fields() {
             name: "Iron Legion".into(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -1167,6 +1268,7 @@ async fn relate_twice_same_triple_produces_exactly_one_edge() {
         None,
         EntityKind::Npc,
         npc_input("Aldric"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -1180,6 +1282,7 @@ async fn relate_twice_same_triple_produces_exactly_one_edge() {
             name: "Blackstone Keep".into(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -1236,6 +1339,7 @@ async fn resync_all_wikilinks_regenerates_edges_from_existing_notes() {
             name: "Bram".into(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -1250,6 +1354,7 @@ async fn resync_all_wikilinks_regenerates_edges_from_existing_notes() {
             notes: Some("Always travels with [[Bram]].".into()),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();

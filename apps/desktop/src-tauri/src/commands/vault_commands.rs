@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::{build_vault_service, services::settings_service, AppState};
+use crate::{build_vault_service, services::settings_service, spawn_outbound, AppState};
 use chronacle_vault::reconcile::ReconcileReport;
 use serde::Serialize;
 use tauri::State;
@@ -56,11 +56,18 @@ pub async fn set_vault_path(
             settings_service::upsert(&state.db, "vault_sync_path", &path).await?;
             let svc = build_vault_service(state.db.clone(), &path);
             svc.reconcile().await.map_err(|e| e.to_string())?;
+            // Rebuild the queue and respawn the drain before publishing either
+            // handle, so no producer can enqueue onto a channel with no drain.
+            let new_outbound = spawn_outbound(Arc::clone(&svc));
             *state.vault.write().await = Some(svc);
+            // Dropping the old producer here closes its channel; the old
+            // drain loop drains whatever was already queued, then ends.
+            *state.outbound.write().await = new_outbound;
         }
         _ => {
             settings_service::upsert(&state.db, "vault_sync_path", "").await?;
             *state.vault.write().await = None;
+            *state.outbound.write().await = Arc::new(chronacle_core::NoopOutbound);
         }
     }
     Ok(())

@@ -72,6 +72,7 @@ async fn duplicate_wikilink_in_notes_produces_single_edge() {
         None,
         EntityKind::Npc,
         make_npc("Torvin"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -81,6 +82,7 @@ async fn duplicate_wikilink_in_notes_produces_single_edge() {
         None,
         EntityKind::Npc,
         make_npc("SourceNPC"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -125,6 +127,7 @@ async fn collection_scope_resolves_same_collection_entities() {
         Some(&col_id),
         EntityKind::Npc,
         make_npc("Goblin"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -136,6 +139,7 @@ async fn collection_scope_resolves_same_collection_entities() {
         None,
         EntityKind::Npc,
         make_npc("Goblin"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -145,6 +149,7 @@ async fn collection_scope_resolves_same_collection_entities() {
         Some(&col_id),
         EntityKind::Npc,
         make_npc("SourceNPC"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -186,6 +191,7 @@ async fn campaign_scope_resolves_subscribed_collection_entities() {
         Some(&col_id),
         EntityKind::Npc,
         make_npc("Dungeon Master"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -196,6 +202,7 @@ async fn campaign_scope_resolves_subscribed_collection_entities() {
         None,
         EntityKind::Npc,
         make_npc("Player"),
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();

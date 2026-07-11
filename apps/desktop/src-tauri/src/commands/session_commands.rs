@@ -58,7 +58,9 @@ pub async fn create_session(
     campaign_id: String,
     input: SessionInput,
 ) -> Result<Session, SessionError> {
-    let session = session_service::create(&state.db, &campaign_id, input).await?;
+    let outbound = state.outbound.read().await.clone();
+    let session =
+        session_service::create(&state.db, &campaign_id, input, outbound.as_ref()).await?;
     embed_after_save(&state, &session).await;
     distill_after_save(state.inner(), &session);
     Ok(session)
@@ -86,7 +88,8 @@ pub async fn update_session(
     id: String,
     input: SessionInput,
 ) -> Result<Session, SessionError> {
-    let session = session_service::update(&state.db, &id, input).await?;
+    let outbound = state.outbound.read().await.clone();
+    let session = session_service::update(&state.db, &id, input, outbound.as_ref()).await?;
     embed_after_save(&state, &session).await;
     distill_after_save(state.inner(), &session);
     Ok(session)
