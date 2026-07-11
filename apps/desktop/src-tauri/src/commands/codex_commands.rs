@@ -63,9 +63,11 @@ pub async fn compile_collection(
             &vector_store,
             &task_collection,
             move |p| emit_progress(&article_app, &p),
-            outbound.as_ref(),
         )
         .await?;
+        for r in &articles.compiled_refs {
+            outbound.enqueue(r.clone());
+        }
 
         let rules = chronacle_extraction::codex_service::compile_rules(
             &task_state.db,
@@ -73,9 +75,11 @@ pub async fn compile_collection(
             &embed,
             &task_collection,
             move |p| emit_progress(&app, &p),
-            outbound.as_ref(),
         )
         .await?;
+        for r in &rules.compiled_refs {
+            outbound.enqueue(r.clone());
+        }
 
         Ok((articles, rules))
     });
@@ -117,17 +121,23 @@ pub async fn compile_entity(
     let vector_store = state_ref.vector_store.clone();
     let outbound = state_ref.outbound.read().await.clone();
 
-    chronacle_extraction::codex_service::compile_entity(
+    let compiled = chronacle_extraction::codex_service::compile_entity(
         &state_ref.db,
         &llm,
         &embed,
         &vector_store,
         &kind,
         &id,
-        outbound.as_ref(),
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    if compiled {
+        outbound.enqueue(chronacle_core::VaultRef {
+            table: kind.clone(),
+            id: id.clone(),
+        });
+    }
+    Ok(compiled)
 }
 
 /// Codex staleness status for a collection (drives the UI badges).
@@ -239,13 +249,12 @@ pub async fn accept_proposal(state: State<'_, Arc<AppState>>, id: String) -> Res
         .map_err(|e| format!("Embed lock: {e}"))?
         .clone();
     let outbound = state_ref.outbound.read().await.clone();
-    chronacle_extraction::codex_service::accept_proposal(
-        &state_ref.db,
-        &embed,
-        &id,
-        outbound.as_ref(),
-    )
-    .await
+    let refs =
+        chronacle_extraction::codex_service::accept_proposal(&state_ref.db, &embed, &id).await?;
+    for r in refs {
+        outbound.enqueue(r);
+    }
+    Ok(())
 }
 
 /// Reject a proposal without applying it.

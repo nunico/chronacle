@@ -56,7 +56,6 @@ async fn compile_writes_article_provenance_and_clears_stale() {
             summary: Some("An innkeeper.".into()),
             ..Default::default()
         },
-        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -73,17 +72,9 @@ async fn compile_writes_article_provenance_and_clears_stale() {
         results: vec![passage_hit("Mira, innkeeper of the Gilded Flagon…")],
     });
 
-    let res = compile_collection(
-        &db,
-        &llm,
-        &embed,
-        &vs,
-        &col_id,
-        |_| {},
-        &chronacle_core::NoopOutbound,
-    )
-    .await
-    .unwrap();
+    let res = compile_collection(&db, &llm, &embed, &vs, &col_id, |_| {})
+        .await
+        .unwrap();
     assert_eq!(res.articles_compiled, 1);
     assert_eq!(res.remaining_stale, 0);
 
@@ -128,7 +119,6 @@ async fn compile_skips_fresh_entities_and_makes_no_llm_calls() {
             name: "Mira".into(),
             ..Default::default()
         },
-        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -141,17 +131,9 @@ async fn compile_skips_fresh_entities_and_makes_no_llm_calls() {
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
     let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore { results: vec![] });
 
-    let res = compile_collection(
-        &db,
-        &llm,
-        &embed,
-        &vs,
-        &col_id,
-        |_| {},
-        &chronacle_core::NoopOutbound,
-    )
-    .await
-    .unwrap();
+    let res = compile_collection(&db, &llm, &embed, &vs, &col_id, |_| {})
+        .await
+        .unwrap();
     assert_eq!(res.articles_compiled, 0);
 }
 
@@ -167,7 +149,6 @@ async fn compile_unset_stale_legacy_entity_is_included() {
             name: "Old One".into(),
             ..Default::default()
         },
-        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -183,17 +164,9 @@ async fn compile_unset_stale_legacy_entity_is_included() {
     let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore {
         results: vec![passage_hit("The Old One…")],
     });
-    let res = compile_collection(
-        &db,
-        &llm,
-        &embed,
-        &vs,
-        &col_id,
-        |_| {},
-        &chronacle_core::NoopOutbound,
-    )
-    .await
-    .unwrap();
+    let res = compile_collection(&db, &llm, &embed, &vs, &col_id, |_| {})
+        .await
+        .unwrap();
     assert_eq!(
         res.articles_compiled, 1,
         "unset codex_stale must count as stale"
@@ -212,7 +185,6 @@ async fn compile_emits_done_phase_with_counts() {
             name: "Mira".into(),
             ..Default::default()
         },
-        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -224,17 +196,9 @@ async fn compile_emits_done_phase_with_counts() {
         results: vec![passage_hit("Mira…")],
     });
     let events = std::sync::Mutex::new(Vec::<CompileProgress>::new());
-    compile_collection(
-        &db,
-        &llm,
-        &embed,
-        &vs,
-        &col_id,
-        |p| {
-            events.lock().unwrap().push(p);
-        },
-        &chronacle_core::NoopOutbound,
-    )
+    let _ = compile_collection(&db, &llm, &embed, &vs, &col_id, |p| {
+        events.lock().unwrap().push(p);
+    })
     .await
     .unwrap();
     let events = events.into_inner().unwrap();
@@ -289,7 +253,6 @@ async fn compile_continues_past_one_failing_entity() {
                 name: name.to_string(),
                 ..Default::default()
             },
-            &chronacle_core::NoopOutbound,
         )
         .await
         .unwrap();
@@ -302,17 +265,9 @@ async fn compile_continues_past_one_failing_entity() {
         results: vec![passage_hit("Both NPCs…")],
     });
 
-    let res = compile_collection(
-        &db,
-        &llm,
-        &embed,
-        &vs,
-        &col_id,
-        |_| {},
-        &chronacle_core::NoopOutbound,
-    )
-    .await
-    .expect("one flaky entity must not fail the run");
+    let res = compile_collection(&db, &llm, &embed, &vs, &col_id, |_| {})
+        .await
+        .expect("one flaky entity must not fail the run");
     assert_eq!(
         res.articles_compiled, 1,
         "the non-failing entity still compiled"
@@ -331,7 +286,6 @@ async fn compile_entity_without_passages_returns_false_and_leaves_article() {
             name: "Ghost".into(),
             ..Default::default()
         },
-        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -340,17 +294,9 @@ async fn compile_entity_without_passages_returns_false_and_leaves_article() {
     });
     let embed: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider::new(768));
     let vs: Arc<dyn VectorStore> = Arc::new(MockVectorStore { results: vec![] });
-    let compiled = compile_entity(
-        &db,
-        &llm,
-        &embed,
-        &vs,
-        "npc",
-        &node.id,
-        &chronacle_core::NoopOutbound,
-    )
-    .await
-    .unwrap();
+    let compiled = compile_entity(&db, &llm, &embed, &vs, "npc", &node.id)
+        .await
+        .unwrap();
     assert!(
         !compiled,
         "no context → no article, no hallucinated compile"
@@ -370,7 +316,6 @@ async fn compile_targets_honestly_reports_remaining_past_cap() {
                 name: name.to_string(),
                 ..Default::default()
             },
-            &chronacle_core::NoopOutbound,
         )
         .await
         .unwrap();
@@ -395,7 +340,6 @@ async fn compile_with_empty_article_leaves_entity_stale() {
             name: "Mira".into(),
             ..Default::default()
         },
-        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -412,17 +356,9 @@ async fn compile_with_empty_article_leaves_entity_stale() {
         results: vec![passage_hit("Mira, innkeeper of the Gilded Flagon…")],
     });
 
-    let res = compile_collection(
-        &db,
-        &llm,
-        &embed,
-        &vs,
-        &col_id,
-        |_| {},
-        &chronacle_core::NoopOutbound,
-    )
-    .await
-    .unwrap();
+    let res = compile_collection(&db, &llm, &embed, &vs, &col_id, |_| {})
+        .await
+        .unwrap();
     assert_eq!(
         res.articles_compiled, 0,
         "an empty LLM response must not count as a compiled article"
@@ -471,7 +407,6 @@ async fn campaign_bound_compile_searches_full_subscription_set() {
             name: "Mira".into(),
             ..Default::default()
         },
-        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -486,17 +421,9 @@ async fn campaign_bound_compile_searches_full_subscription_set() {
     });
     let vs: Arc<dyn VectorStore> = recording.clone();
 
-    compile_collection(
-        &db,
-        &llm,
-        &embed,
-        &vs,
-        &owned_id,
-        |_| {},
-        &chronacle_core::NoopOutbound,
-    )
-    .await
-    .unwrap();
+    let _ = compile_collection(&db, &llm, &embed, &vs, &owned_id, |_| {})
+        .await
+        .unwrap();
 
     let calls = recording.calls.lock().unwrap();
     let ids = calls.first().expect("search was called");
@@ -522,7 +449,6 @@ async fn regular_compile_searches_only_itself() {
             name: "Mira".into(),
             ..Default::default()
         },
-        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -535,17 +461,9 @@ async fn regular_compile_searches_only_itself() {
         calls: Default::default(),
     });
     let vs: Arc<dyn VectorStore> = recording.clone();
-    compile_collection(
-        &db,
-        &llm,
-        &embed,
-        &vs,
-        &col_id,
-        |_| {},
-        &chronacle_core::NoopOutbound,
-    )
-    .await
-    .unwrap();
+    let _ = compile_collection(&db, &llm, &embed, &vs, &col_id, |_| {})
+        .await
+        .unwrap();
     let calls = recording.calls.lock().unwrap();
     assert_eq!(
         calls.first().unwrap(),

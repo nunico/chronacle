@@ -130,7 +130,6 @@ async fn compile_one<C: Connection>(
     vector_store: &Arc<dyn VectorStore>,
     node: &GraphNode,
     scope: &[String],
-    outbound: &dyn chronacle_core::VaultOutbound,
 ) -> Result<bool, CodexError> {
     let query_text =
         entity_service::embed_text(&node.name, node.summary.as_deref(), node.notes.as_deref());
@@ -233,11 +232,6 @@ async fn compile_one<C: Connection>(
     .check()
     .map_err(|e| CodexError::Db(e.to_string()))?;
 
-    outbound.enqueue(chronacle_core::VaultRef {
-        table: node.kind.clone(),
-        id: node.id.clone(),
-    });
-
     let updated = GraphNode {
         codex_article: Some(article.clone()),
         codex_stale: Some(false),
@@ -257,7 +251,6 @@ pub async fn compile_collection<C: Connection>(
     vector_store: &Arc<dyn VectorStore>,
     collection_id: &str,
     on_progress: impl Fn(CompileProgress),
-    outbound: &dyn chronacle_core::VaultOutbound,
 ) -> Result<CompileResult, CodexError> {
     on_progress(CompileProgress {
         phase: CodexPhase::Resolving,
@@ -279,10 +272,12 @@ pub async fn compile_collection<C: Connection>(
         return Ok(CompileResult {
             articles_compiled: 0,
             remaining_stale: remaining,
+            compiled_refs: Vec::new(),
         });
     }
 
     let mut compiled = 0usize;
+    let mut compiled_refs = Vec::new();
     for node in &targets {
         on_progress(CompileProgress {
             phase: CodexPhase::Compiling,
@@ -291,9 +286,13 @@ pub async fn compile_collection<C: Connection>(
             total,
         });
         // Best-effort: a failed compile must not abort the whole run.
-        match compile_one(db, llm, embed, vector_store, node, &scope, outbound).await {
+        match compile_one(db, llm, embed, vector_store, node, &scope).await {
             Ok(true) => {
                 compiled += 1;
+                compiled_refs.push(chronacle_core::VaultRef {
+                    table: node.kind.clone(),
+                    id: node.id.clone(),
+                });
                 on_progress(CompileProgress {
                     phase: CodexPhase::Embedding,
                     detail: format!("Embedding {}", node.name),
@@ -321,6 +320,7 @@ pub async fn compile_collection<C: Connection>(
     Ok(CompileResult {
         articles_compiled: compiled,
         remaining_stale: remaining,
+        compiled_refs,
     })
 }
 
@@ -332,7 +332,6 @@ pub async fn compile_entity<C: Connection>(
     vector_store: &Arc<dyn VectorStore>,
     kind: &str,
     id: &str,
-    outbound: &dyn chronacle_core::VaultOutbound,
 ) -> Result<bool, CodexError> {
     let entity_kind = EntityKind::from_table(kind).map_err(|e| CodexError::Db(e.to_string()))?;
     let node = entity_service::get_by_id(db, id, entity_kind)
@@ -347,7 +346,7 @@ pub async fn compile_entity<C: Connection>(
         Vec::new()
     };
 
-    compile_one(db, llm, embed, vector_store, &node, &scope, outbound).await
+    compile_one(db, llm, embed, vector_store, &node, &scope).await
 }
 
 /// Embed name + summary + notes + article; zero-length-vector no-op like
