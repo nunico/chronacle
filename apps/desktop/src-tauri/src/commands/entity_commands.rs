@@ -94,7 +94,16 @@ pub async fn create_entity(
     input: EntityInput,
 ) -> Result<GraphNode, EntityError> {
     let k = parse_kind(&kind)?;
-    let node = entity_service::create(&state.db, Some(&campaign_id), None, k, input).await?;
+    let outbound = state.outbound.read().await.clone();
+    let node = entity_service::create(
+        &state.db,
+        Some(&campaign_id),
+        None,
+        k,
+        input,
+        outbound.as_ref(),
+    )
+    .await?;
     embed_after_save(&state, &node).await;
     Ok(node)
 }
@@ -107,7 +116,8 @@ pub async fn update_entity(
     input: EntityInput,
 ) -> Result<GraphNode, EntityError> {
     let k = parse_kind(&kind)?;
-    let node = entity_service::update(&state.db, &id, k, input).await?;
+    let outbound = state.outbound.read().await.clone();
+    let node = entity_service::update(&state.db, &id, k, input, outbound.as_ref()).await?;
     embed_after_save(&state, &node).await;
     Ok(node)
 }

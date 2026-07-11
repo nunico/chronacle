@@ -238,6 +238,7 @@ pub async fn compile_rules<C: Connection>(
     embed: &Arc<dyn EmbeddingProvider>,
     collection_id: &str,
     on_progress: impl Fn(CompileProgress),
+    outbound: &dyn chronacle_core::VaultOutbound,
 ) -> Result<RulesCompileResult, CodexError> {
     compile_rules_with_cap(
         db,
@@ -246,6 +247,7 @@ pub async fn compile_rules<C: Connection>(
         collection_id,
         MAX_RULE_BATCHES_PER_RUN,
         on_progress,
+        outbound,
     )
     .await
 }
@@ -260,6 +262,7 @@ pub(super) async fn compile_rules_with_cap<C: Connection>(
     collection_id: &str,
     cap: usize,
     on_progress: impl Fn(CompileProgress),
+    outbound: &dyn chronacle_core::VaultOutbound,
 ) -> Result<RulesCompileResult, CodexError> {
     on_progress(CompileProgress {
         phase: CodexPhase::Resolving,
@@ -325,6 +328,10 @@ pub(super) async fn compile_rules_with_cap<C: Connection>(
                     } else {
                         created += 1;
                     }
+                    outbound.enqueue(chronacle_core::VaultRef {
+                        table: "rule_entry".into(),
+                        id: id.clone(),
+                    });
                     if let Err(e) = embed_rule_entry(
                         db,
                         embed,

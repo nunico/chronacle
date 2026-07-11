@@ -31,6 +31,7 @@ async fn update_clears_nullable_fields_to_null_not_none() {
             notes: Some("Old notes.".to_string()),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -47,6 +48,7 @@ async fn update_clears_nullable_fields_to_null_not_none() {
             notes: None,
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .expect("update should not error when clearing nullable fields");
@@ -77,6 +79,7 @@ async fn update_clears_nullable_event_fields() {
             is_ongoing: Some(true),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -93,6 +96,7 @@ async fn update_clears_nullable_event_fields() {
             is_ongoing: Some(false),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .expect("clearing nullable event fields should not error");
@@ -113,6 +117,7 @@ async fn update_marks_codex_stale() {
             name: "Mira".to_string(),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -126,6 +131,7 @@ async fn update_marks_codex_stale() {
             notes: Some("She now runs the Gilded Flagon.".to_string()),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();

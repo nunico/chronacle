@@ -44,6 +44,7 @@ pub async fn compile_collection(
     let app = app_handle.clone();
     let task_state = state_ref.clone();
     let task_collection = collection_id.clone();
+    let outbound = state_ref.outbound.read().await.clone();
 
     let task: tokio::task::JoinHandle<
         Result<
@@ -62,6 +63,7 @@ pub async fn compile_collection(
             &vector_store,
             &task_collection,
             move |p| emit_progress(&article_app, &p),
+            outbound.as_ref(),
         )
         .await?;
 
@@ -71,6 +73,7 @@ pub async fn compile_collection(
             &embed,
             &task_collection,
             move |p| emit_progress(&app, &p),
+            outbound.as_ref(),
         )
         .await?;
 
@@ -112,6 +115,7 @@ pub async fn compile_entity(
         .map_err(|e| format!("Embed lock: {e}"))?
         .clone();
     let vector_store = state_ref.vector_store.clone();
+    let outbound = state_ref.outbound.read().await.clone();
 
     chronacle_extraction::codex_service::compile_entity(
         &state_ref.db,
@@ -120,6 +124,7 @@ pub async fn compile_entity(
         &vector_store,
         &kind,
         &id,
+        outbound.as_ref(),
     )
     .await
     .map_err(|e| e.to_string())
@@ -233,7 +238,14 @@ pub async fn accept_proposal(state: State<'_, Arc<AppState>>, id: String) -> Res
         .read()
         .map_err(|e| format!("Embed lock: {e}"))?
         .clone();
-    chronacle_extraction::codex_service::accept_proposal(&state_ref.db, &embed, &id).await
+    let outbound = state_ref.outbound.read().await.clone();
+    chronacle_extraction::codex_service::accept_proposal(
+        &state_ref.db,
+        &embed,
+        &id,
+        outbound.as_ref(),
+    )
+    .await
 }
 
 /// Reject a proposal without applying it.

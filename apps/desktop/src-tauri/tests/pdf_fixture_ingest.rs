@@ -86,6 +86,7 @@ async fn make_state(
         extract_task: tokio::sync::Mutex::new(None),
         compile_task: tokio::sync::Mutex::new(None),
         vault: tokio::sync::RwLock::new(None),
+        outbound: tokio::sync::RwLock::new(std::sync::Arc::new(chronacle_core::NoopOutbound)),
     });
     (state, embedding_provider, vector_store)
 }

@@ -107,6 +107,7 @@ async fn embed_node_populates_embedding_and_model() {
             notes: Some("Guards the Sunstone beneath the Iron Tower.".to_string()),
             ..Default::default()
         },
+        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();

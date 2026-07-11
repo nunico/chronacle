@@ -339,6 +339,7 @@ async fn test_full_ingest_and_query_cycle() {
         extract_task: tokio::sync::Mutex::new(None),
         compile_task: tokio::sync::Mutex::new(None),
         vault: tokio::sync::RwLock::new(None),
+        outbound: tokio::sync::RwLock::new(std::sync::Arc::new(chronacle_core::NoopOutbound)),
     });
 
     // Create a collection so the source record can reference it
@@ -738,6 +739,7 @@ async fn ingestion_failure_marks_source_failed_and_cleans_chunks() {
         extract_task: tokio::sync::Mutex::new(None),
         compile_task: tokio::sync::Mutex::new(None),
         vault: tokio::sync::RwLock::new(None),
+        outbound: tokio::sync::RwLock::new(std::sync::Arc::new(chronacle_core::NoopOutbound)),
     });
 
     // Set up source + collection

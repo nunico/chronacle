@@ -585,6 +585,7 @@ pub async fn accept_proposal<C: Connection>(
     db: &surrealdb::Surreal<C>,
     embed: &Arc<dyn chronacle_core::embedding::EmbeddingProvider>,
     proposal_id: &str,
+    outbound: &dyn chronacle_core::VaultOutbound,
 ) -> Result<(), String> {
     let mut resp = db
         .query(
@@ -623,6 +624,10 @@ pub async fn accept_proposal<C: Connection>(
             .map_err(|e| format!("Failed to apply article update: {e}"))?
             .check()
             .map_err(|e| format!("Failed to apply article update: {e}"))?;
+            outbound.enqueue(chronacle_core::VaultRef {
+                table: t.tb.clone(),
+                id: t.id.to_raw(),
+            });
             if let Err(e) = reembed_entity(db, embed, &t.tb, &t.id.to_raw()).await {
                 eprintln!("codex: re-embed after accept failed: {e}");
             }
@@ -640,6 +645,10 @@ pub async fn accept_proposal<C: Connection>(
             .map_err(|e| format!("Failed to apply notes update: {e}"))?
             .check()
             .map_err(|e| format!("Failed to apply notes update: {e}"))?;
+            outbound.enqueue(chronacle_core::VaultRef {
+                table: t.tb.clone(),
+                id: t.id.to_raw(),
+            });
             if let Err(e) = reembed_entity(db, embed, &t.tb, &t.id.to_raw()).await {
                 eprintln!("codex: re-embed after accept failed: {e}");
             }
@@ -659,6 +668,10 @@ pub async fn accept_proposal<C: Connection>(
             .map_err(|e| format!("Failed to apply rule update: {e}"))?
             .check()
             .map_err(|e| format!("Failed to apply rule update: {e}"))?;
+            outbound.enqueue(chronacle_core::VaultRef {
+                table: "rule_entry".into(),
+                id: t.id.to_raw(),
+            });
             if let Err(e) = reembed_rule(db, embed, &t.id.to_raw()).await {
                 eprintln!("codex: re-embed after accept failed: {e}");
             }
@@ -678,7 +691,7 @@ pub async fn accept_proposal<C: Connection>(
                 summary: Some(row.payload.proposed_text.clone()),
                 ..Default::default()
             };
-            let node = crate::entity_service::create(db, None, Some(&col), kind, input)
+            let node = crate::entity_service::create(db, None, Some(&col), kind, input, outbound)
                 .await
                 .map_err(|e| format!("Failed to create entity: {e}"))?;
             if let Err(e) = super::compile::embed_entity_with_article(db, embed, &node).await {
@@ -717,7 +730,12 @@ pub async fn accept_proposal<C: Connection>(
                 .take(0)
                 .map_err(|e| format!("Failed to parse created rule entry: {e}"))?;
             if let Some(id) = ids.into_iter().next() {
-                if let Err(e) = reembed_rule(db, embed, &id.id.to_raw()).await {
+                let bare_id = id.id.to_raw();
+                outbound.enqueue(chronacle_core::VaultRef {
+                    table: "rule_entry".into(),
+                    id: bare_id.clone(),
+                });
+                if let Err(e) = reembed_rule(db, embed, &bare_id).await {
                     eprintln!("codex: re-embed after accept failed: {e}");
                 }
             }

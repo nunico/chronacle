@@ -29,6 +29,10 @@ pub struct AppState {
     pub compile_task: tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
     /// Vault sync engine. `None` until `vault_sync_path` is configured.
     pub vault: tokio::sync::RwLock<Option<Arc<chronacle_vault::reconcile::VaultSyncService>>>,
+    /// Producer handle the five record producers enqueue onto. Falls back to
+    /// `NoopOutbound` whenever no vault is configured — producers never branch
+    /// on `Option`, see `chronacle_core::VaultOutbound`.
+    pub outbound: tokio::sync::RwLock<Arc<dyn chronacle_core::VaultOutbound>>,
 }
 
 /// Construct the vault sync engine over a filesystem root.
@@ -42,6 +46,19 @@ fn build_vault_service(
         )),
         Arc::new(chronacle_domain::vault_record_store::SurrealVaultRecordStore::new(db)),
     ))
+}
+
+/// Build a fresh outbound queue producer and spawn its drain loop against
+/// `svc`. The old producer (if any) is dropped by the caller replacing
+/// `AppState.outbound`; dropping it closes its channel, so the old drain loop
+/// ends as soon as it drains whatever was already queued — never abruptly.
+pub(crate) fn spawn_outbound(
+    svc: Arc<chronacle_vault::reconcile::VaultSyncService>,
+) -> Arc<dyn chronacle_core::VaultOutbound> {
+    let (producer, rx) = chronacle_vault::outbound::QueueOutbound::new();
+    let pending = Arc::new(chronacle_vault::outbound::PendingWrites::default());
+    tauri::async_runtime::spawn(chronacle_vault::outbound::drain_loop(rx, svc, pending));
+    Arc::new(producer)
 }
 
 /// Locate the bundled pdfium dynamic library.
@@ -170,6 +187,10 @@ pub async fn run() {
         .get("vault_sync_path")
         .filter(|p| !p.is_empty())
         .map(|path| build_vault_service(db.clone(), path));
+    let outbound: Arc<dyn chronacle_core::VaultOutbound> = match &vault {
+        Some(svc) => spawn_outbound(Arc::clone(svc)),
+        None => Arc::new(chronacle_core::NoopOutbound),
+    };
 
     let state = Arc::new(AppState {
         db,
@@ -182,6 +203,7 @@ pub async fn run() {
         extract_task: tokio::sync::Mutex::new(None),
         compile_task: tokio::sync::Mutex::new(None),
         vault: tokio::sync::RwLock::new(vault),
+        outbound: tokio::sync::RwLock::new(outbound),
     });
 
     tauri::Builder::default()

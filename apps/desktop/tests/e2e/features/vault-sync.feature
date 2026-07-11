@@ -25,3 +25,27 @@ Feature: Markdown vault sync settings
     When the GM opens Settings
     And the GM clicks "Disconnect"
     Then the set vault path command was sent with null
+
+  # ── D4b: live vault export from every record producer ──────────────────────
+  # These three scenarios exercise the frontend actions that trigger the backend
+  # outbound enqueue → vault write. The mocked-IPC backend suite has no real
+  # filesystem, so each asserts the producer IPC the UI dispatches — the exact
+  # trigger of the backend write. The file-level effects (body updates,
+  # one-write-per-file, rename re-keys the file) are verified in Rust by
+  # vault_outbound_test.rs (enqueue-per-producer) and chronacle-vault's
+  # index-aware drain, plus the tauri-driver UI suite.
+
+  Scenario: Editing an entity's notes dispatches the vault-producing update
+    Given a vault is configured at "/Users/gm/Vault" and an entity "Seraphina Aldric"
+    When the GM edits that entity's notes to "She guards the archive."
+    Then an update entity command was sent with notes "She guards the archive."
+
+  Scenario: Renaming an entity dispatches the vault-producing update
+    Given a vault is configured at "/Users/gm/Vault" and an entity "Seraphina Aldric"
+    When the GM renames that entity to "Seraphina the Archivist"
+    Then an update entity command was sent with name "Seraphina the Archivist"
+
+  Scenario: Recompiling a collection dispatches exactly one compile
+    Given a vault is configured at "/Users/gm/Vault" and a compiled collection "World Guide"
+    When the GM recompiles the collection
+    Then exactly one compile collection command was sent

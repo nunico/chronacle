@@ -124,6 +124,7 @@ async fn measure_recall_at_5() {
         extract_task: tokio::sync::Mutex::new(None),
         compile_task: tokio::sync::Mutex::new(None),
         vault: tokio::sync::RwLock::new(None),
+        outbound: tokio::sync::RwLock::new(std::sync::Arc::new(chronacle_core::NoopOutbound)),
     });
 
     let fixtures = [
