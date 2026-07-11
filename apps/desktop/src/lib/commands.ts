@@ -825,3 +825,31 @@ export async function resolveLintFinding(id: string): Promise<void> {
 export async function deleteRelation(edgeId: string): Promise<void> {
   return invoke('delete_relation', { edgeId });
 }
+
+// ── Vault Sync ──────────────────────────────────────────────────────────
+
+/** Wire shape of the reconcile report — snake_case matches the Rust struct. */
+export interface ReconcileReport {
+  exported: number;
+  unchanged: number;
+  adopted: number;
+  deferred_apply: number;
+  deferred_conflict: number;
+  deferred_delete: number;
+  failed: number;
+}
+
+/** The configured vault root, or null when vault sync is off. */
+export function getVaultPath(): Promise<string | null> {
+  return invoke('get_vault_path');
+}
+
+/** Set or clear the vault root. Setting a path runs a full reconcile. */
+export function setVaultPath(vaultPath: string | null): Promise<void> {
+  return invoke('set_vault_path', { vaultPath });
+}
+
+/** Run a full reconcile now. */
+export function vaultSyncNow(): Promise<ReconcileReport> {
+  return invoke('vault_sync_now');
+}

@@ -28,6 +28,17 @@ vi.mock('../lib/commands', () => ({
   removeProviderModel: vi.fn().mockResolvedValue(undefined),
   reindexAllSources: vi.fn().mockResolvedValue(0),
   resyncWikilinks: vi.fn().mockResolvedValue(0),
+  getVaultPath: vi.fn().mockResolvedValue(null),
+  setVaultPath: vi.fn().mockResolvedValue(undefined),
+  vaultSyncNow: vi.fn().mockResolvedValue({
+    exported: 0,
+    unchanged: 0,
+    adopted: 0,
+    deferred_apply: 0,
+    deferred_conflict: 0,
+    deferred_delete: 0,
+    failed: 0,
+  }),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({

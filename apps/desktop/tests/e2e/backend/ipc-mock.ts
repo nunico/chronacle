@@ -125,6 +125,20 @@ export async function installIpcMock(
             return Promise.resolve(null);
           case 'reject_proposal':
             return Promise.resolve(null);
+          case 'get_vault_path':
+            return Promise.resolve(null);
+          case 'set_vault_path':
+            return Promise.resolve(null);
+          case 'vault_sync_now':
+            return Promise.resolve({
+              exported: 0,
+              unchanged: 0,
+              adopted: 0,
+              deferred_apply: 0,
+              deferred_conflict: 0,
+              deferred_delete: 0,
+              failed: 0,
+            });
           default:
             console.warn(`Unhandled IPC mock: ${cmd}`);
             return Promise.resolve(null);

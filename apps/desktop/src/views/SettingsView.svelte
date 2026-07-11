@@ -19,6 +19,7 @@
   } from '../lib/commands';
   import { listen } from '@tauri-apps/api/event';
   import { SvelteMap } from 'svelte/reactivity';
+  import VaultSyncSettings from '../components/VaultSyncSettings.svelte';
 
   let providerType = $state('openai');
   let apiKey = $state('');
@@ -690,6 +691,8 @@
       uses more LLM calls. Capped at 20 related entities per extraction.
     </p>
   </section>
+
+  <VaultSyncSettings />
 </div>
 
 <style>
