@@ -128,18 +128,62 @@ impl VaultSyncService {
         Ok(report)
     }
 
-    /// Export a single record — the drain path D4a's outbound queue calls.
+    /// Export a single record, using `index` to find a file the GM already
+    /// renamed in the vault instead of blindly writing the computed slug.
     ///
     /// A missing record (deleted between enqueue and drain) is not an error.
-    pub async fn export_one(&self, vref: &VaultRef) -> Result<(), VaultError> {
+    /// When `pending` is given, the write guard is armed *before* the write so
+    /// a watcher event racing the write still matches it (Tranche 5).
+    async fn export_one_using(
+        &self,
+        vref: &VaultRef,
+        index: &crate::keys::VaultIndex,
+        pending: Option<&crate::outbound::PendingWrites>,
+    ) -> Result<(), VaultError> {
         let Some(record) = self.records.load(vref).await? else {
             return Ok(());
         };
         let rendered = render_record(&record);
         let db = content_hash(&rendered);
-        let key = key_for(&record, false);
+        // Index wins: a file the GM renamed keeps its name. Fall back to the
+        // computed slug (unsuffixed — collision suffixing is reconcile's job) only
+        // when the vault holds no file for this id yet.
+        let key = index
+            .key_of(vref)
+            .cloned()
+            .unwrap_or_else(|| key_for(&record, false));
+        if let Some(p) = pending {
+            p.arm(&key, db); // arm BEFORE the write so a watcher event matches
+        }
         self.store.write(&key, &rendered).await?;
         self.records.set_synced_hash(vref, &key, db).await?;
+        Ok(())
+    }
+
+    /// Export a single record — the single-ref path.
+    ///
+    /// Scans the vault index so a renamed file keeps its name.
+    pub async fn export_one(&self, vref: &VaultRef) -> Result<(), VaultError> {
+        let index = crate::keys::VaultIndex::scan(self.store.as_ref()).await?;
+        self.export_one_using(vref, &index, None).await
+    }
+
+    /// Export a batch of refs — the drain path D4a's outbound queue calls.
+    ///
+    /// One index scan for the whole batch (not per ref — the compile case
+    /// enqueues ~200 distinct refs). A failing ref is logged and skipped;
+    /// reconcile is the correctness guarantee, this is a latency optimisation.
+    pub async fn export_refs(
+        &self,
+        refs: &std::collections::HashSet<VaultRef>,
+        pending: &crate::outbound::PendingWrites,
+    ) -> Result<(), VaultError> {
+        let index = crate::keys::VaultIndex::scan(self.store.as_ref()).await?;
+        for vref in refs {
+            if let Err(e) = self.export_one_using(vref, &index, Some(pending)).await {
+                eprintln!("vault: export of {} failed: {e}", vref.to_thing());
+            }
+        }
         Ok(())
     }
 }
@@ -429,6 +473,8 @@ mod tests {
     #[tokio::test]
     async fn export_one_is_a_noop_when_the_record_is_gone() {
         let mut store = MockVaultStore::new();
+        // export_one now scans the index first (empty vault → no existing file).
+        store.expect_list().returning(|_| Ok(vec![]));
         store.expect_write().never();
 
         let mut records = MockVaultRecordStore::new();
@@ -448,6 +494,9 @@ mod tests {
     #[tokio::test]
     async fn export_one_writes_the_record_and_sets_the_base() {
         let mut store = MockVaultStore::new();
+        // Empty vault → index has no entry for this ref → falls back to the
+        // computed slug.
+        store.expect_list().returning(|_| Ok(vec![]));
         store
             .expect_write()
             .withf(|k, _| k == KEY)
@@ -470,5 +519,51 @@ mod tests {
             id: "n1".into(),
         };
         svc.export_one(&vref).await.expect("export_one");
+    }
+
+    /// The export path must be index-aware: a file the GM renamed in the
+    /// vault keeps its name — the drain must not create a stray duplicate at
+    /// the computed slug. This is the test that proves the D4a fix.
+    #[tokio::test]
+    async fn export_refs_writes_to_the_existing_renamed_key() {
+        const RENAMED_KEY: &str = "campaigns/sov/entities/npc/renamed.md";
+
+        let record = npc(Some("A."));
+        let rendered_for_index = crate::render::render_record(&record);
+
+        let mut store = MockVaultStore::new();
+        store
+            .expect_list()
+            .returning(|_| Ok(vec![RENAMED_KEY.to_string()]));
+        store
+            .expect_read()
+            .withf(|k| k == RENAMED_KEY)
+            .returning(move |_| Ok(rendered_for_index.clone()));
+        store
+            .expect_write()
+            .withf(|k, _| k == RENAMED_KEY)
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_load()
+            .returning(|_| Ok(Some(npc(Some("A.")))));
+        records
+            .expect_set_synced_hash()
+            .withf(|_, k, _| k == RENAMED_KEY)
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records));
+        let vref = VaultRef {
+            table: "npc".into(),
+            id: "n1".into(),
+        };
+        let mut refs = std::collections::HashSet::new();
+        refs.insert(vref);
+
+        let pending = crate::outbound::PendingWrites::default();
+        svc.export_refs(&refs, &pending).await.expect("export_refs");
     }
 }
