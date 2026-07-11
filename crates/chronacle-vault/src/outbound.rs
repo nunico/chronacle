@@ -112,7 +112,12 @@ pub async fn drain_loop(
         while let Ok(next) = rx.try_recv() {
             batch.insert(next);
         }
-        let _ = svc.export_refs(&batch, &pending).await;
+        // `export_refs` already logs and continues on a per-ref failure; its
+        // only `Err` is a whole-batch `VaultIndex::scan` I/O failure. Log that
+        // rather than swallowing it — the batch silently exported nothing.
+        if let Err(e) = svc.export_refs(&batch, &pending).await {
+            eprintln!("vault: drain batch failed to scan the vault index: {e}");
+        }
         pending.sweep();
     }
 }
