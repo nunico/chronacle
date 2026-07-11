@@ -204,7 +204,6 @@ async fn extract_cross_link_collection_to_campaign_is_skipped() {
             name: "Campaign NPC".to_string(),
             ..Default::default()
         },
-        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -232,7 +231,6 @@ async fn extraction_marks_touched_entities_stale() {
             name: "The Iron Fist".to_string(),
             ..Default::default()
         },
-        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -282,7 +280,6 @@ async fn scope_violation_during_extraction_is_linted_not_fatal() {
             name: "A".to_string(),
             ..Default::default()
         },
-        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();
@@ -295,7 +292,6 @@ async fn scope_violation_during_extraction_is_linted_not_fatal() {
             name: "B".to_string(),
             ..Default::default()
         },
-        &chronacle_core::NoopOutbound,
     )
     .await
     .unwrap();

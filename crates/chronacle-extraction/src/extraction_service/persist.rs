@@ -73,9 +73,6 @@ pub(super) async fn persist_batch<C: Connection>(
                     character_level: None,
                     status: None,
                 },
-                // Bulk ingestion is not one of the five live-sync producers;
-                // the vault picks up new entities on the next reconcile.
-                &chronacle_core::NoopOutbound,
             )
             .await
             .map_err(|e| ExtractionError::Db(e.to_string()))?;
@@ -131,9 +128,6 @@ pub(super) async fn persist_batch<C: Connection>(
                         character_level: None,
                         status: None,
                     },
-                    // Bulk ingestion is not one of the five live-sync producers;
-                    // the vault picks up new entities on the next reconcile.
-                    &chronacle_core::NoopOutbound,
                 )
                 .await
                 .map_err(|e| ExtractionError::Db(e.to_string()))?;

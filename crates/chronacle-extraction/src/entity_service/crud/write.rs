@@ -11,7 +11,6 @@ pub async fn create<C: surrealdb::Connection>(
     collection_id: Option<&str>,
     kind: EntityKind,
     input: EntityInput,
-    outbound: &dyn chronacle_core::VaultOutbound,
 ) -> Result<GraphNode, EntityError> {
     let sanitized_name = chronacle_core::sanitize_scalar(&input.name);
     if sanitized_name.is_empty() {
@@ -179,11 +178,6 @@ pub async fn create<C: surrealdb::Connection>(
         codex_stale: rec.codex_stale,
         codex_compiled_at: rec.codex_compiled_at.map(|d| d.to_string()),
     };
-
-    outbound.enqueue(chronacle_core::VaultRef {
-        table: node.kind.clone(),
-        id: node.id.clone(),
-    });
 
     // Sync wikilinks (fire-and-forget: ignore errors so failures never block saves).
     if let Some(notes) = &notes_for_wikilinks {

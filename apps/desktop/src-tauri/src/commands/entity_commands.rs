@@ -95,15 +95,11 @@ pub async fn create_entity(
 ) -> Result<GraphNode, EntityError> {
     let k = parse_kind(&kind)?;
     let outbound = state.outbound.read().await.clone();
-    let node = entity_service::create(
-        &state.db,
-        Some(&campaign_id),
-        None,
-        k,
-        input,
-        outbound.as_ref(),
-    )
-    .await?;
+    let node = entity_service::create(&state.db, Some(&campaign_id), None, k, input).await?;
+    outbound.enqueue(chronacle_core::VaultRef {
+        table: node.kind.clone(),
+        id: node.id.clone(),
+    });
     embed_after_save(&state, &node).await;
     Ok(node)
 }
@@ -117,7 +113,11 @@ pub async fn update_entity(
 ) -> Result<GraphNode, EntityError> {
     let k = parse_kind(&kind)?;
     let outbound = state.outbound.read().await.clone();
-    let node = entity_service::update(&state.db, &id, k, input, outbound.as_ref()).await?;
+    let node = entity_service::update(&state.db, &id, k, input).await?;
+    outbound.enqueue(chronacle_core::VaultRef {
+        table: node.kind.clone(),
+        id: node.id.clone(),
+    });
     embed_after_save(&state, &node).await;
     Ok(node)
 }

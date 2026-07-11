@@ -238,7 +238,6 @@ pub async fn compile_rules<C: Connection>(
     embed: &Arc<dyn EmbeddingProvider>,
     collection_id: &str,
     on_progress: impl Fn(CompileProgress),
-    outbound: &dyn chronacle_core::VaultOutbound,
 ) -> Result<RulesCompileResult, CodexError> {
     compile_rules_with_cap(
         db,
@@ -247,7 +246,6 @@ pub async fn compile_rules<C: Connection>(
         collection_id,
         MAX_RULE_BATCHES_PER_RUN,
         on_progress,
-        outbound,
     )
     .await
 }
@@ -262,7 +260,6 @@ pub(super) async fn compile_rules_with_cap<C: Connection>(
     collection_id: &str,
     cap: usize,
     on_progress: impl Fn(CompileProgress),
-    outbound: &dyn chronacle_core::VaultOutbound,
 ) -> Result<RulesCompileResult, CodexError> {
     on_progress(CompileProgress {
         phase: CodexPhase::Resolving,
@@ -283,6 +280,7 @@ pub(super) async fn compile_rules_with_cap<C: Connection>(
             entries_created: 0,
             entries_updated: 0,
             remaining_batches: 0,
+            compiled_refs: Vec::new(),
         });
     }
 
@@ -295,6 +293,7 @@ pub(super) async fn compile_rules_with_cap<C: Connection>(
 
     let mut created = 0usize;
     let mut updated = 0usize;
+    let mut compiled_refs = Vec::new();
     for (i, batch) in batches.iter().enumerate() {
         on_progress(CompileProgress {
             phase: CodexPhase::Compiling,
@@ -328,7 +327,7 @@ pub(super) async fn compile_rules_with_cap<C: Connection>(
                     } else {
                         created += 1;
                     }
-                    outbound.enqueue(chronacle_core::VaultRef {
+                    compiled_refs.push(chronacle_core::VaultRef {
                         table: "rule_entry".into(),
                         id: id.clone(),
                     });
@@ -363,6 +362,7 @@ pub(super) async fn compile_rules_with_cap<C: Connection>(
         entries_created: created,
         entries_updated: updated,
         remaining_batches,
+        compiled_refs,
     })
 }
 

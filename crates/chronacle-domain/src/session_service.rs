@@ -78,7 +78,6 @@ pub async fn create<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     campaign_id: &str,
     input: SessionInput,
-    outbound: &dyn chronacle_core::VaultOutbound,
 ) -> Result<Session, SessionError> {
     if input.title.trim().is_empty() {
         return Err(SessionError::Validation {
@@ -128,11 +127,6 @@ pub async fn create<C: surrealdb::Connection>(
             .ok_or_else(|| SessionError::Database {
                 message: "No record returned after create".to_string(),
             })?;
-
-    outbound.enqueue(chronacle_core::VaultRef {
-        table: "session".into(),
-        id: id.clone(),
-    });
 
     // Resolve wikilinks — failure must not block the save.
     // Awaited synchronously: wikilink resolution is fast in practice (entity
@@ -203,7 +197,6 @@ pub async fn update<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     id: &str,
     input: SessionInput,
-    outbound: &dyn chronacle_core::VaultOutbound,
 ) -> Result<Session, SessionError> {
     if input.title.trim().is_empty() {
         return Err(SessionError::Validation {
@@ -245,11 +238,6 @@ pub async fn update<C: surrealdb::Connection>(
         .into_iter()
         .next()
         .ok_or_else(|| SessionError::NotFound { id: id.to_string() })?;
-
-    outbound.enqueue(chronacle_core::VaultRef {
-        table: "session".into(),
-        id: id.to_owned(),
-    });
 
     // Extract campaign_id from the record before converting it into a Session.
     let campaign_id_for_wikilinks = record
@@ -396,7 +384,6 @@ mod tests {
                 date_played: "2026-06-05".to_string(),
                 notes: "The party met in the tavern and took the job.".to_string(),
             },
-            &chronacle_core::NoopOutbound,
         )
         .await
         .unwrap();

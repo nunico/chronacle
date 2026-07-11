@@ -59,8 +59,11 @@ pub async fn create_session(
     input: SessionInput,
 ) -> Result<Session, SessionError> {
     let outbound = state.outbound.read().await.clone();
-    let session =
-        session_service::create(&state.db, &campaign_id, input, outbound.as_ref()).await?;
+    let session = session_service::create(&state.db, &campaign_id, input).await?;
+    outbound.enqueue(chronacle_core::VaultRef {
+        table: "session".into(),
+        id: session.id.clone(),
+    });
     embed_after_save(&state, &session).await;
     distill_after_save(state.inner(), &session);
     Ok(session)
@@ -89,7 +92,11 @@ pub async fn update_session(
     input: SessionInput,
 ) -> Result<Session, SessionError> {
     let outbound = state.outbound.read().await.clone();
-    let session = session_service::update(&state.db, &id, input, outbound.as_ref()).await?;
+    let session = session_service::update(&state.db, &id, input).await?;
+    outbound.enqueue(chronacle_core::VaultRef {
+        table: "session".into(),
+        id: session.id.clone(),
+    });
     embed_after_save(&state, &session).await;
     distill_after_save(state.inner(), &session);
     Ok(session)

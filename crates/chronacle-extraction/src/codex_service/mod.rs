@@ -71,12 +71,16 @@ pub struct CompileProgress {
 
 /// Result of a collection compile run.
 #[derive(Debug, Clone, serde::Serialize)]
+#[must_use]
 pub struct CompileResult {
     pub articles_compiled: usize,
     /// Entities still needing compile after the per-run cap. Counts entities
     /// still flagged stale after the cap; entities skipped mid-run for lack
     /// of passages are not re-counted here — the next run picks them up.
     pub remaining_stale: usize,
+    /// `VaultRef`s of entities compiled this run, for the caller to enqueue.
+    #[serde(skip)]
+    pub compiled_refs: Vec<chronacle_core::VaultRef>,
 }
 
 /// Per-run cap on compiled entities (cost control; mirrors MAX_ENRICH).
@@ -84,11 +88,15 @@ pub const MAX_COMPILE_PER_RUN: usize = 50;
 
 /// Result of a rules-compile run.
 #[derive(Debug, Clone, serde::Serialize)]
+#[must_use]
 pub struct RulesCompileResult {
     pub entries_created: usize,
     pub entries_updated: usize,
     /// Batches left over after the per-run cap; the next run picks them up.
     pub remaining_batches: usize,
+    /// `VaultRef`s of rule entries compiled this run, for the caller to enqueue.
+    #[serde(skip)]
+    pub compiled_refs: Vec<chronacle_core::VaultRef>,
 }
 
 /// Per-run cap on labeled-chunk batches sent to the LLM (cost control).
