@@ -176,8 +176,20 @@ pub enum VaultScope {
 
 /// GM-owned fields an inbound vault edit may update.
 ///
-/// Deliberately narrow: never `name`, never a compiled article/body. `None`
-/// means "leave unchanged"; `Some("")` clears the field.
+/// Deliberately narrow: never `name`, never a compiled article/body.
+///
+/// `GmParts` is built by parsing an *entire* vault file
+/// (`markdown::split_body`), so it always describes the COMPLETE desired
+/// state of these fields, not a diff. `None` means the corresponding section
+/// is absent from the file — the GM deleted it — and `apply_gm_parts` CLEARS
+/// the field in the database (`NULL` for entities/rule entries, `""` for a
+/// session's non-nullable `notes`). `Some(s)` sets the field to `s`
+/// (`Some("")` is indistinguishable from `None` for a session's `notes`).
+///
+/// There is no "leave unchanged" state. Never construct a `GmParts` from
+/// anything other than a full parse of the file's current content — a
+/// partially-populated value would silently delete data the GM never
+/// touched.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GmParts {
     /// Entities only. Ignored for sessions and rule entries.
@@ -233,6 +245,9 @@ pub trait VaultRecordStore: Send + Sync {
     async fn list_synced(&self) -> Result<Vec<SyncedRow>, VaultRecordError>;
     /// Apply GM-owned fields inbound. Entities: summary + notes (+ wikilink
     /// resync, codex_stale). Sessions and rule entries: notes only.
+    ///
+    /// `parts` must describe the complete desired state — see the `GmParts`
+    /// doc comment. A `None` field is written as a clear/delete, not skipped.
     async fn apply_gm_parts(
         &self,
         vref: &VaultRef,
