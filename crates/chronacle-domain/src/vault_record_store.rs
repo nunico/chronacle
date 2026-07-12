@@ -271,6 +271,16 @@ impl VaultRecordStore for SurrealVaultRecordStore {
             .map_err(backend_err)?;
         Ok(())
     }
+
+    async fn clear_all_synced(&self) -> Result<(), VaultRecordError> {
+        self.db
+            .query("DELETE vault_sync_state")
+            .await
+            .map_err(backend_err)?
+            .check()
+            .map_err(backend_err)?;
+        Ok(())
+    }
 }
 
 impl SurrealVaultRecordStore {
@@ -508,6 +518,24 @@ mod tests {
         assert_eq!(store.get_synced_hash(&vref).await.expect("get"), Some(42));
 
         store.clear_synced_hash(&vref).await.expect("clear");
+        assert_eq!(store.get_synced_hash(&vref).await.expect("get"), None);
+    }
+
+    #[tokio::test]
+    async fn clear_all_synced_wipes_every_sync_state_row() {
+        let db = db().await;
+        seed_campaign_npc(&db).await;
+        let store = SurrealVaultRecordStore::new(db);
+        let vref = VaultRef {
+            table: "npc".into(),
+            id: "n1".into(),
+        };
+        store
+            .set_synced_hash(&vref, "campaigns/c/entities/npc/a.md", 42)
+            .await
+            .expect("set");
+
+        store.clear_all_synced().await.expect("clear all");
         assert_eq!(store.get_synced_hash(&vref).await.expect("get"), None);
     }
 

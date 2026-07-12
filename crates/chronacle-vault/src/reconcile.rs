@@ -38,6 +38,7 @@ pub struct ReconcileReport {
 pub struct VaultSyncService {
     store: Arc<dyn VaultStore>,
     records: Arc<dyn VaultRecordStore>,
+    pending: Arc<crate::outbound::PendingWrites>,
 }
 
 /// The stable identity carried by every `VaultRecord` variant.
@@ -50,9 +51,28 @@ fn vref_of(record: &VaultRecord) -> &VaultRef {
 }
 
 impl VaultSyncService {
-    /// Construct the engine over a storage backend and a record backend.
-    pub fn new(store: Arc<dyn VaultStore>, records: Arc<dyn VaultRecordStore>) -> Self {
-        Self { store, records }
+    /// Construct the engine over a storage backend, a record backend, and the
+    /// shared write-loop guard (also consulted by the watcher, E6).
+    pub fn new(
+        store: Arc<dyn VaultStore>,
+        records: Arc<dyn VaultRecordStore>,
+        pending: Arc<crate::outbound::PendingWrites>,
+    ) -> Self {
+        Self {
+            store,
+            records,
+            pending,
+        }
+    }
+
+    /// Expire stale write guards. The drain loop calls this after each batch.
+    pub fn sweep_pending(&self) {
+        self.pending.sweep();
+    }
+
+    /// Wipe every persisted merge base — fresh baseline for a new vault dir.
+    pub async fn clear_all_bases(&self) -> Result<(), VaultError> {
+        Ok(self.records.clear_all_synced().await?)
     }
 
     /// Run one export-direction reconcile pass over every syncable record.
@@ -100,17 +120,20 @@ impl VaultSyncService {
                     self.records.set_synced_hash(vref, &key, db).await?;
                     report.adopted += 1;
                 }
-                SyncAction::Export => match self.store.write(&key, &rendered).await {
-                    Ok(()) => {
-                        self.records.set_synced_hash(vref, &key, db).await?;
-                        report.exported += 1;
+                SyncAction::Export => {
+                    self.pending.arm(&key, db);
+                    match self.store.write(&key, &rendered).await {
+                        Ok(()) => {
+                            self.records.set_synced_hash(vref, &key, db).await?;
+                            report.exported += 1;
+                        }
+                        Err(e) => {
+                            eprintln!("vault: failed to write {key}: {e}");
+                            report.failed += 1;
+                            continue;
+                        }
                     }
-                    Err(e) => {
-                        eprintln!("vault: failed to write {key}: {e}");
-                        report.failed += 1;
-                        continue;
-                    }
-                },
+                }
                 action @ (SyncAction::Apply | SyncAction::Conflict | SyncAction::SoftDelete) => {
                     eprintln!(
                         "vault: inbound action deferred to tranche 5: {action:?} for {vref:?}"
@@ -132,13 +155,12 @@ impl VaultSyncService {
     /// renamed in the vault instead of blindly writing the computed slug.
     ///
     /// A missing record (deleted between enqueue and drain) is not an error.
-    /// When `pending` is given, the write guard is armed *before* the write so
-    /// a watcher event racing the write still matches it (Tranche 5).
+    /// The write guard is armed *before* the write so a watcher event racing
+    /// the write still matches it (Tranche 5).
     async fn export_one_using(
         &self,
         vref: &VaultRef,
         index: &crate::keys::VaultIndex,
-        pending: Option<&crate::outbound::PendingWrites>,
     ) -> Result<(), VaultError> {
         let Some(record) = self.records.load(vref).await? else {
             return Ok(());
@@ -152,9 +174,7 @@ impl VaultSyncService {
             .key_of(vref)
             .cloned()
             .unwrap_or_else(|| key_for(&record, false));
-        if let Some(p) = pending {
-            p.arm(&key, db); // arm BEFORE the write so a watcher event matches
-        }
+        self.pending.arm(&key, db); // arm BEFORE the write so a watcher event matches
         self.store.write(&key, &rendered).await?;
         self.records.set_synced_hash(vref, &key, db).await?;
         Ok(())
@@ -165,7 +185,7 @@ impl VaultSyncService {
     /// Scans the vault index so a renamed file keeps its name.
     pub async fn export_one(&self, vref: &VaultRef) -> Result<(), VaultError> {
         let index = crate::keys::VaultIndex::scan(self.store.as_ref()).await?;
-        self.export_one_using(vref, &index, None).await
+        self.export_one_using(vref, &index).await
     }
 
     /// Export a batch of refs — the drain path D4a's outbound queue calls.
@@ -176,11 +196,10 @@ impl VaultSyncService {
     pub async fn export_refs(
         &self,
         refs: &std::collections::HashSet<VaultRef>,
-        pending: &crate::outbound::PendingWrites,
     ) -> Result<(), VaultError> {
         let index = crate::keys::VaultIndex::scan(self.store.as_ref()).await?;
         for vref in refs {
-            if let Err(e) = self.export_one_using(vref, &index, Some(pending)).await {
+            if let Err(e) = self.export_one_using(vref, &index).await {
                 eprintln!("vault: export of {} failed: {e}", vref.to_thing());
             }
         }
@@ -237,7 +256,11 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
-        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records));
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
         let report = svc.reconcile().await.expect("reconcile");
         assert_eq!(report.exported, 1);
     }
@@ -262,7 +285,11 @@ mod tests {
             .returning(move |_| Ok(Some(h)));
         records.expect_set_synced_hash().never();
 
-        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records));
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
         let report = svc.reconcile().await.expect("reconcile");
         assert_eq!(report.unchanged, 1);
         assert_eq!(report.exported, 0);
@@ -293,7 +320,11 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
-        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records));
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
         assert_eq!(svc.reconcile().await.expect("reconcile").exported, 1);
     }
 
@@ -320,7 +351,11 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
-        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records));
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
         let report = svc.reconcile().await.expect("reconcile");
         assert_eq!(report.adopted, 1);
         assert_eq!(
@@ -352,7 +387,11 @@ mod tests {
         });
         records.expect_set_synced_hash().never();
 
-        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records));
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
         let report = svc.reconcile().await.expect("reconcile");
         assert_eq!(report.deferred_apply, 1);
         assert_eq!(report.exported, 0);
@@ -373,7 +412,11 @@ mod tests {
             .returning(|_| Ok(Some(123))); // we wrote it once
         records.expect_set_synced_hash().never();
 
-        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records));
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
         let report = svc.reconcile().await.expect("reconcile");
         assert_eq!(report.deferred_delete, 1);
         assert_eq!(
@@ -433,7 +476,11 @@ mod tests {
         records.expect_get_synced_hash().returning(|_| Ok(None));
         records.expect_set_synced_hash().returning(|_, _, _| Ok(()));
 
-        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records));
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
         svc.reconcile().await.expect("reconcile");
 
         let keys = written.lock().unwrap().clone();
@@ -456,7 +503,11 @@ mod tests {
         records.expect_get_synced_hash().returning(|_| Ok(None));
         records.expect_set_synced_hash().never(); // never claim a base we did not write
 
-        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records));
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
         let report = svc
             .reconcile()
             .await
@@ -481,7 +532,11 @@ mod tests {
         records.expect_load().returning(|_| Ok(None));
         records.expect_set_synced_hash().never();
 
-        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records));
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
         let vref = VaultRef {
             table: "npc".into(),
             id: "gone".into(),
@@ -513,7 +568,11 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
-        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records));
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
         let vref = VaultRef {
             table: "npc".into(),
             id: "n1".into(),
@@ -555,7 +614,11 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
-        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records));
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
         let vref = VaultRef {
             table: "npc".into(),
             id: "n1".into(),
@@ -563,7 +626,6 @@ mod tests {
         let mut refs = std::collections::HashSet::new();
         refs.insert(vref);
 
-        let pending = crate::outbound::PendingWrites::default();
-        svc.export_refs(&refs, &pending).await.expect("export_refs");
+        svc.export_refs(&refs).await.expect("export_refs");
     }
 }

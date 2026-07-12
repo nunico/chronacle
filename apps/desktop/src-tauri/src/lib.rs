@@ -35,17 +35,23 @@ pub struct AppState {
     pub outbound: tokio::sync::RwLock<Arc<dyn chronacle_core::VaultOutbound>>,
 }
 
-/// Construct the vault sync engine over a filesystem root.
+/// Construct the vault sync engine and its shared write guard.
 fn build_vault_service(
     db: surrealdb::Surreal<surrealdb::engine::any::Any>,
     root: &str,
-) -> Arc<chronacle_vault::reconcile::VaultSyncService> {
-    Arc::new(chronacle_vault::reconcile::VaultSyncService::new(
+) -> (
+    Arc<chronacle_vault::reconcile::VaultSyncService>,
+    Arc<chronacle_vault::outbound::PendingWrites>,
+) {
+    let pending = Arc::new(chronacle_vault::outbound::PendingWrites::default());
+    let svc = Arc::new(chronacle_vault::reconcile::VaultSyncService::new(
         Arc::new(chronacle_providers::vault_store::LocalFsVaultStore::new(
             root,
         )),
         Arc::new(chronacle_domain::vault_record_store::SurrealVaultRecordStore::new(db)),
-    ))
+        Arc::clone(&pending),
+    ));
+    (svc, pending)
 }
 
 /// Build a fresh outbound queue producer and spawn its drain loop against
@@ -56,8 +62,7 @@ pub(crate) fn spawn_outbound(
     svc: Arc<chronacle_vault::reconcile::VaultSyncService>,
 ) -> Arc<dyn chronacle_core::VaultOutbound> {
     let (producer, rx) = chronacle_vault::outbound::QueueOutbound::new();
-    let pending = Arc::new(chronacle_vault::outbound::PendingWrites::default());
-    tauri::async_runtime::spawn(chronacle_vault::outbound::drain_loop(rx, svc, pending));
+    tauri::async_runtime::spawn(chronacle_vault::outbound::drain_loop(rx, svc));
     Arc::new(producer)
 }
 
@@ -186,7 +191,10 @@ pub async fn run() {
     let vault = vault_settings
         .get("vault_sync_path")
         .filter(|p| !p.is_empty())
-        .map(|path| build_vault_service(db.clone(), path));
+        .map(|path| {
+            let (svc, _pending) = build_vault_service(db.clone(), path);
+            svc
+        });
     let outbound: Arc<dyn chronacle_core::VaultOutbound> = match &vault {
         Some(svc) => spawn_outbound(Arc::clone(svc)),
         None => Arc::new(chronacle_core::NoopOutbound),

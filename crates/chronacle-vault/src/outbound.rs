@@ -104,7 +104,6 @@ where
 pub async fn drain_loop(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<VaultRef>,
     svc: Arc<crate::reconcile::VaultSyncService>,
-    pending: Arc<PendingWrites>,
 ) {
     while let Some(first) = rx.recv().await {
         let mut batch = HashSet::new();
@@ -115,10 +114,10 @@ pub async fn drain_loop(
         // `export_refs` already logs and continues on a per-ref failure; its
         // only `Err` is a whole-batch `VaultIndex::scan` I/O failure. Log that
         // rather than swallowing it — the batch silently exported nothing.
-        if let Err(e) = svc.export_refs(&batch, &pending).await {
+        if let Err(e) = svc.export_refs(&batch).await {
             eprintln!("vault: drain batch failed to scan the vault index: {e}");
         }
-        pending.sweep();
+        svc.sweep_pending();
     }
 }
 
