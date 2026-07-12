@@ -137,7 +137,18 @@ impl VaultSyncService {
             // the Apply/invalid path can inspect (and never resurrect) it.
             let file_exists = existing_key.is_some() || index.has_key(&key);
             let file_content = if file_exists {
-                Some(self.store.read(&key).await?)
+                // Per-record: an unreadable file must not abort the run, or one
+                // bad file blocks every other record from ever syncing. Skipping
+                // is safe — a record with no decision is neither written nor
+                // deleted, and the next pass retries it.
+                match self.store.read(&key).await {
+                    Ok(content) => Some(content),
+                    Err(e) => {
+                        eprintln!("vault: read of {key} failed: {e}");
+                        report.failed += 1;
+                        continue;
+                    }
+                }
             } else {
                 None
             };
@@ -758,6 +769,74 @@ mod tests {
         );
         let report = svc.reconcile().await.expect("reconcile");
         assert_eq!(report.swept, 1, "row cleared either way");
+    }
+
+    /// A file that cannot be read is a per-record failure, not a run-ending one.
+    /// Propagating it would let a single unreadable file block every other
+    /// record in the vault from ever syncing again.
+    #[tokio::test]
+    async fn reconcile_continues_past_a_file_it_cannot_read() {
+        const BAD: &str = "campaigns/sov/entities/npc/bad.md";
+
+        let bad = VaultRecord::Entity(EntityRecord {
+            vref: VaultRef {
+                table: "npc".into(),
+                id: "bad".into(),
+            },
+            name: "Bad".into(),
+            summary: None,
+            notes: None,
+            codex_article: None,
+            scope: VaultScope::Campaign {
+                id: "campaign:c1".into(),
+                name: "SoV".into(),
+            },
+            created_at: "x".into(),
+            updated_at: "y".into(),
+        });
+        let good = npc(Some("A.")); // exports to KEY; no file on disk yet
+
+        let mut store = MockVaultStore::new();
+        // Only the bad record has a file on disk, and reading it fails.
+        store.expect_list().returning(|_| Ok(vec![BAD.to_string()]));
+        store.expect_read().returning(|k| {
+            if k == BAD {
+                Err(VaultStoreError::Io("permission denied".into()))
+            } else {
+                Ok(String::new())
+            }
+        });
+        // The healthy record must still be exported.
+        store
+            .expect_write()
+            .withf(|k, _| k == KEY)
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_list_all()
+            .returning(move || Ok(vec![bad.clone(), good.clone()]));
+        records.expect_list_synced().returning(|| Ok(vec![]));
+        records
+            .expect_set_synced_hash()
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let report = svc
+            .reconcile()
+            .await
+            .expect("an unreadable file must not fail the run");
+        assert_eq!(report.failed, 1, "the unreadable file is counted");
+        assert_eq!(
+            report.exported, 1,
+            "the healthy record must still sync past the bad one"
+        );
     }
 
     #[tokio::test]
