@@ -257,7 +257,30 @@ impl VaultSyncService {
                                     report.resolved += 1;
                                     report.applied_refs.push(vref.clone());
                                 }
-                                Ok(false) => report.invalid += 1,
+                                Ok(false) => {
+                                    // The GM deleted the sidecar to resolve, but
+                                    // their own file has unparsable frontmatter,
+                                    // so `apply_inbound` refused to touch the DB
+                                    // or the file. Re-write the sidecar with the
+                                    // DB's current render so the "nothing is
+                                    // lost, and you can see it" guarantee holds:
+                                    // this converges the broken-resolution case
+                                    // back into the steady (frozen, sidecar
+                                    // present) state instead of vanishing into a
+                                    // record that is frozen forever with no
+                                    // artifact explaining why. `conflict` is
+                                    // left `true` — do not unfreeze.
+                                    self.pending.arm(&sidecar, db);
+                                    if let Err(e) = self.store.write(&sidecar, &rendered).await {
+                                        eprintln!(
+                                            "vault: sidecar restore of {sidecar} failed: {e}"
+                                        );
+                                        report.failed += 1;
+                                        continue;
+                                    }
+                                    report.invalid += 1;
+                                    report.conflicts += 1;
+                                }
                                 Err(e) => {
                                     eprintln!("vault: conflict resolution of {key} failed: {e}");
                                     report.failed += 1;
@@ -1396,6 +1419,68 @@ mod tests {
         );
         let report = svc.reconcile().await.expect("reconcile");
         assert_eq!(report.resolved, 1);
+    }
+
+    /// The GM deletes the sidecar to resolve, but their own file has
+    /// unparsable frontmatter: `apply_inbound` refuses to touch the DB or the
+    /// file, so the sidecar is re-written with the DB's current render and
+    /// the record stays frozen — never left invisibly stuck.
+    #[tokio::test]
+    async fn resolving_with_unparsable_frontmatter_restores_the_sidecar_and_stays_frozen() {
+        let base = 111_u64;
+        let db_render = crate::render::render_record(&npc(Some("A.")));
+
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        store
+            .expect_read()
+            .withf(|k| k == KEY)
+            .returning(|_| Ok("no frontmatter at all".to_string()));
+        let sidecar_key = crate::keys::sidecar_key(KEY);
+        let sidecar_key_read = sidecar_key.clone();
+        store
+            .expect_read()
+            .withf(move |k| k == sidecar_key_read)
+            .returning(|_| Err(VaultStoreError::NotFound("gone".into())));
+        let sidecar_key_write = sidecar_key.clone();
+        let db_render_write = db_render.clone();
+        store
+            .expect_write()
+            .withf(move |k, content| k == sidecar_key_write && content == db_render_write)
+            .times(1)
+            .returning(|_, _| Ok(()));
+        // The GM's own file must never be written or deleted.
+        store.expect_write().withf(|k, _| k == KEY).never();
+        store.expect_delete().never();
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_list_all()
+            .returning(|| Ok(vec![npc(Some("A."))]));
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(base),
+                conflict: true,
+            }])
+        });
+        records.expect_apply_gm_parts().never();
+        records.expect_set_synced_hash().never();
+        records.expect_set_conflict().never(); // stays frozen
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let report = svc.reconcile().await.expect("reconcile");
+        assert_eq!(report.invalid, 1);
+        assert_eq!(report.conflicts, 1);
+        assert_eq!(report.resolved, 0);
     }
 
     /// The conflict evaporates on its own (the GM reverted the file back to
