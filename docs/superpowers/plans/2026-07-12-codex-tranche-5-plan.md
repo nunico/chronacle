@@ -108,7 +108,7 @@ New Tauri commands: `soft_delete_entity(id, kind)` (E5), `list_vault_conflicts()
 
 ---
 
-### Task E1: PendingWrites into the service + fresh baseline on vault-path switch
+### Task 1 (E1): PendingWrites into the service + fresh baseline on vault-path switch
 
 Fixes L2. `PendingWrites` becomes a constructor dependency of `VaultSyncService` (reconcile and the watcher must share it); `set_vault_path` clears all bases when the path *changes* and persists the setting only after a successful reconcile.
 
@@ -378,7 +378,7 @@ pub async fn set_vault_path(
 
 ---
 
-### Task E2: Schema + record-store inbound surface
+### Task 2 (E2): Schema + record-store inbound surface
 
 The persistence layer inbound needs: the `conflict` flag, `vault_deleted` on `rule_entry`, and the four remaining `VaultRecordStore` methods with their Surreal implementations.
 
@@ -640,7 +640,7 @@ Note: `WikilinkScope`'s exact field types must match its definition in `chronacl
 
 ---
 
-### Task E3: Reconcile materializes Apply + SoftDelete + orphan sweep
+### Task 3 (E3): Reconcile materializes Apply + SoftDelete + orphan sweep
 
 The core of the tranche. The deferred arm becomes real for `Apply` and `SoftDelete`; `Conflict` is E4 (this task leaves a `conflicts += 1` count with no side effects, explicitly temporary). Report reshaped.
 
@@ -994,7 +994,7 @@ async fn gm_edit_round_trips_through_reconcile_into_the_db() {
 
 ---
 
-### Task E4: Conflict lifecycle (sidecar + freeze + deletion-as-resolution)
+### Task 4 (E4): Conflict lifecycle (sidecar + freeze + deletion-as-resolution)
 
 **Files:**
 - Modify: `crates/chronacle-vault/src/keys.rs` (`sidecar_key`), `crates/chronacle-vault/src/reconcile.rs`
@@ -1214,7 +1214,7 @@ async fn conflict_freezes_then_sidecar_deletion_resolves_to_the_file_version() {
 
 ---
 
-### Task E5: IPC surface — soft_delete_entity, collection-scoped create, list_vault_conflicts, I1, re-embed applied refs
+### Task 5 (E5): IPC surface — soft_delete_entity, collection-scoped create, list_vault_conflicts, I1, re-embed applied refs
 
 **Files:**
 - Modify: `crates/chronacle-extraction/src/entity_service/crud/write.rs` (add `soft_delete`)
@@ -1445,7 +1445,7 @@ pub(crate) async fn embed_applied_refs(state: &AppState, refs: &[chronacle_core:
 
 ---
 
-### Task E6: NotifyWatcher + app wiring (VaultRuntime)
+### Task 6 (E6): NotifyWatcher + app wiring (VaultRuntime)
 
 **Files:**
 - Create: `crates/chronacle-providers/src/vault_watcher.rs` (+ `pub mod vault_watcher;` in `lib.rs`)
@@ -1775,7 +1775,7 @@ async fn our_own_export_is_recognised_by_the_guard() {
 
 ---
 
-### Task E7: Frontend — conflict list, record banner, hints, soft-delete wiring
+### Task 7 (E7): Frontend — conflict list, record banner, hints, soft-delete wiring
 
 **Files:**
 - Modify: `apps/desktop/src/components/VaultSyncSettings.svelte` (+ `.test.ts`)
@@ -1849,7 +1849,7 @@ Implementation: on mount (`$effect` keyed by the entity id), call `listVaultConf
 
 ---
 
-### Task E8: Acceptance scenarios + D-series minors
+### Task 8 (E8): Acceptance scenarios + D-series minors
 
 **Files:**
 - Create: `apps/desktop/tests/e2e/features/vault-inbound.feature`
@@ -1953,7 +1953,7 @@ Update `LocalFsVaultStore` construction sites (`VaultStoreError::Io(e.to_string(
 
 ---
 
-### Task E9: GM-facing user guide — "Your Vault"
+### Task 9 (E9): GM-facing user guide — "Your Vault"
 
 **Files:**
 - Modify: `docs/user-guide.md` (new chapter)
