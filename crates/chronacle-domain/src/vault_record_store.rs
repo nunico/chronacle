@@ -340,7 +340,10 @@ impl VaultRecordStore for SurrealVaultRecordStore {
             }
             "rule_entry" => {
                 self.db
-                    .query("UPDATE type::thing('rule_entry', $id) SET notes = $notes")
+                    .query(
+                        "UPDATE type::thing('rule_entry', $id) SET \
+                             notes = $notes, updated_at = time::now()",
+                    )
                     .bind(("id", vref.id.clone()))
                     .bind(("notes", opt(&parts.notes)))
                     .await
@@ -378,8 +381,16 @@ impl VaultRecordStore for SurrealVaultRecordStore {
                                 WikilinkScope::Collection { collection_id: id }
                             }
                         };
-                        let _ =
-                            parse_and_sync_wikilinks(&self.db, table, &vref.id, notes, scope).await;
+                        if let Err(e) =
+                            parse_and_sync_wikilinks(&self.db, table, &vref.id, notes, scope).await
+                        {
+                            // Non-fatal: a failed wikilink resync must not fail the
+                            // inbound apply, but it must not vanish silently either.
+                            eprintln!(
+                                "apply_gm_parts: wikilink resync failed for {}:{}: {e}",
+                                table, vref.id
+                            );
+                        }
                     }
                 }
             }
@@ -732,6 +743,48 @@ mod tests {
         );
     }
 
+    /// Pins the real `GmParts` contract (see its doc comment): a `None` field
+    /// is a deletion, not "no opinion". A vault file with no `## Summary`
+    /// section must clear a pre-existing summary, not preserve it.
+    #[tokio::test]
+    async fn apply_gm_parts_clears_a_field_absent_from_the_file() {
+        let db = db().await;
+        seed_campaign_npc(&db).await;
+        let store = SurrealVaultRecordStore::new(db.clone());
+        let vref = VaultRef {
+            table: "npc".into(),
+            id: "n1".into(),
+        };
+
+        // Precondition: the seeded npc has a summary.
+        let before = store.load(&vref).await.expect("load").expect("exists");
+        let chronacle_core::VaultRecord::Entity(e) = before else {
+            panic!("entity")
+        };
+        assert_eq!(e.summary.as_deref(), Some("Archivist"));
+
+        store
+            .apply_gm_parts(
+                &vref,
+                &chronacle_core::GmParts {
+                    summary: None,
+                    notes: Some("kept".into()),
+                },
+            )
+            .await
+            .expect("apply");
+
+        let after = store.load(&vref).await.expect("load").expect("exists");
+        let chronacle_core::VaultRecord::Entity(e) = after else {
+            panic!("entity")
+        };
+        assert_eq!(
+            e.summary, None,
+            "a section absent from the file must clear the DB field"
+        );
+        assert_eq!(e.notes.as_deref(), Some("kept"));
+    }
+
     #[tokio::test]
     async fn soft_delete_removes_the_record_from_list_all() {
         let db = db().await;
@@ -791,5 +844,51 @@ mod tests {
             .await
             .expect("clear");
         assert!(!store.list_synced().await.expect("list")[0].conflict);
+    }
+
+    /// `set_conflict` UPSERTs the same row `set_synced_hash` writes. If it
+    /// replaced the row instead of merging into it, flagging a record
+    /// conflicted would silently destroy its merge base and corrupt every
+    /// subsequent sync decision. Covers both call orders.
+    #[tokio::test]
+    async fn set_conflict_preserves_an_existing_synced_hash() {
+        let db = db().await;
+        seed_campaign_npc(&db).await;
+        let store = SurrealVaultRecordStore::new(db);
+        let vref = VaultRef {
+            table: "npc".into(),
+            id: "n1".into(),
+        };
+        let key = "campaigns/c/entities/npc/a.md";
+
+        // hash first, then conflict: conflict must not wipe the base.
+        store.set_synced_hash(&vref, key, 42).await.expect("set");
+        store
+            .set_conflict(&vref, key, true)
+            .await
+            .expect("conflict");
+        let rows = store.list_synced().await.expect("list");
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].conflict, "conflict flag must be set");
+        assert_eq!(
+            rows[0].synced_hash,
+            Some(42),
+            "set_conflict must preserve the existing merge base"
+        );
+
+        // conflict first, then hash: hash write must not clear the flag.
+        store
+            .set_conflict(&vref, key, false)
+            .await
+            .expect("clear conflict");
+        store.set_synced_hash(&vref, key, 7).await.expect("set");
+        store
+            .set_conflict(&vref, key, true)
+            .await
+            .expect("conflict again");
+        let rows = store.list_synced().await.expect("list");
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].conflict, "conflict must survive a prior hash set");
+        assert_eq!(rows[0].synced_hash, Some(7));
     }
 }
