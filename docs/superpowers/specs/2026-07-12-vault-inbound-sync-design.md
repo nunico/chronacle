@@ -15,7 +15,7 @@ it near-live. Fix the two landmines (L1, L2) that gate `SoftDelete` safety.
 
 | # | Question | Decision |
 | --- | --- | --- |
-| 1 | Conflict UX | Sidecar `<stem>.conflict.md` + read-only conflict badge in the Vault Sync settings panel. No resolution UI this tranche. |
+| 1 | Conflict UX | Sidecar `<stem>.conflict.md` + a conflict **list** (not just a count) in the Vault Sync settings panel, plus an in-place banner on affected records. No in-app resolution UI this tranche — resolution happens in the vault. |
 | 2 | Conflict termination | **Sidecar deletion = resolved.** The record freezes (no apply, no export, no base update) while the sidecar exists; deleting the sidecar tells the next reconcile "apply my file". Requires a per-record `conflict` flag on `vault_sync_state`. |
 | 3 | Fence edits | **Revert on apply.** GM-owned parts go to the DB, then the canonical render is re-exported over the file. The fence marker already says "compiled; edits are not applied". |
 | 4 | Apply scope | **Body only.** Entity `summary` + `notes`, session `notes`, rule-entry `notes`. Frontmatter is compiler-owned like the fence; edits to it are reverted by the re-export. Entity renames happen in the app; renaming a *file* stays cosmetic (index-wins, unchanged). |
@@ -78,8 +78,12 @@ canonical render. Sidecars are compiler-owned.
 | Non-conflict action, flag set | Conflict evaporated (e.g. GM reverted the file): delete the sidecar, clear flag, proceed with the normal action. |
 
 Known, accepted trade-off: a record in conflict stops exporting DB changes
-until the GM resolves it. The settings-panel badge (conflict count from the
-last `ReconcileReport`) makes this visible.
+until the GM resolves it. Because the `conflict` flag is persisted on
+`vault_sync_state`, conflicts are queryable at any time — a new
+`list_vault_conflicts()` IPC command returns each conflicted record's name,
+kind, vault file key, and sidecar key. The settings panel renders these as a
+list (badge count derives from its length), and the entity/session editor
+shows a banner on affected records (see Frontend changes).
 
 `*.conflict.md` keys are excluded from `VaultIndex::scan` and from reconcile's
 record matching — the sidecar carries the same frontmatter `id` as the real
@@ -167,9 +171,37 @@ handled behaviourally by the fresh-baseline rule.
 
 ## Frontend changes
 
-- Vault Sync settings panel: read-only conflict badge (count from the last
-  reconcile report) and surfacing of the `invalid` count. Svelte 5 runes.
-- Entity UI: delete action calls `soft_delete_entity`; no other UI this tranche.
+All new UI in Svelte 5 runes.
+
+- **Vault Sync settings panel:** a conflict *list* — one row per conflicted
+  record showing name, kind, and the vault file + sidecar paths — fed by
+  `list_vault_conflicts()`, with a badge count derived from it, plus the
+  `invalid` count from the last reconcile. Each row carries a short inline
+  hint: "Merge the two files in your vault, then delete the `.conflict.md`
+  file — Chronacle applies your version on the next sync."
+- **Record editors (entity/session):** when the open record is conflicted, a
+  non-blocking banner: "This record has unsynced vault edits in conflict —
+  resolve in your vault" with the sidecar filename.
+- **UI hints at select places:** a one-line explainer next to the vault-path
+  setting ("Changing the folder re-exports everything; nothing is deleted"),
+  and a note near the fence-related behaviours in the settings panel help
+  text ("Text inside the marked compiled block is overwritten by Chronacle").
+- **Entity UI:** delete action calls `soft_delete_entity`.
+
+## Documentation (ships in this tranche)
+
+`docs/user-guide.md` gains a GM-facing "Your Vault" chapter, written for
+non-technical readers (`user-guide-writer` agent):
+
+- What vault sync is: your campaign as ordinary Markdown files, editable in
+  Obsidian or any editor; changes flow both ways.
+- What is yours vs Chronacle's in a file: Summary and Notes are yours; the
+  marked "compiled" block and the metadata header are Chronacle's and get
+  rewritten (with a worked example file).
+- Conflicts: why they happen, what a `.conflict.md` file is, and the exact
+  resolution walkthrough (compare, merge into your file, delete the sidecar).
+- Deleting: removing a vault file hides the record in Chronacle (soft
+  delete); what switching vault folders does and does not do.
 
 ## Error handling
 
@@ -192,8 +224,11 @@ handled behaviourally by the fresh-baseline rule.
   overflow.
 - **Tauri integration (`mem://` SurrealDB):** end-to-end apply round-trip
   through `SurrealVaultRecordStore` → services; soft-delete via reconcile;
-  vault-path switch produces zero soft-deletes; `soft_delete_entity` and
-  collection-scoped `create_entity` commands.
+  vault-path switch produces zero soft-deletes; `soft_delete_entity`,
+  collection-scoped `create_entity`, and `list_vault_conflicts` commands.
+- **Frontend (Vitest + testing-library):** conflict list renders rows from
+  `list_vault_conflicts`; record-editor banner appears for a conflicted
+  record and not otherwise.
 - **Acceptance (`.feature`, ADR-011):** GM edits notes in vault → DB updates;
   GM edits inside the fence → reverted; both sides edited → sidecar appears,
   badge counts it; GM deletes sidecar → file version applied; GM deletes a
@@ -204,7 +239,8 @@ handled behaviourally by the fresh-baseline rule.
 
 ## Out of scope
 
-- Conflict-resolution UI (badge only).
+- In-app conflict *resolution* UI (conflicts are listed and flagged in-app,
+  but merging happens in the vault).
 - Inbound frontmatter fields (`name`, session metadata) — body only.
 - Undelete / trash UI for soft-deleted records.
 - Path-scoped merge bases (fresh-baseline chosen instead).
