@@ -14,9 +14,9 @@ pub use embedding::{EmbeddingError, EmbeddingProvider};
 pub use llm::{ChatMessage, LlmError, LlmProvider};
 pub use text::sanitize_scalar;
 pub use vault::{
-    EntityRecord, NoopOutbound, RuleEntryRecord, RulePageRef, SessionRecord, VaultEvent, VaultKey,
-    VaultMetadata, VaultOutbound, VaultRecord, VaultRecordError, VaultRecordStore, VaultRef,
-    VaultScope, VaultStore, VaultStoreError, VaultWatcher,
+    EntityRecord, GmParts, NoopOutbound, RuleEntryRecord, RulePageRef, SessionRecord, SyncedRow,
+    VaultEvent, VaultKey, VaultMetadata, VaultOutbound, VaultRecord, VaultRecordError,
+    VaultRecordStore, VaultRef, VaultScope, VaultStore, VaultStoreError, VaultWatcher,
 };
 #[cfg(any(test, feature = "mocks"))]
 pub use vault::{MockVaultRecordStore, MockVaultStore, MockVaultWatcher};

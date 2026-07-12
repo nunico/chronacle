@@ -174,6 +174,28 @@ pub enum VaultScope {
     Collection { id: String, name: String },
 }
 
+/// GM-owned fields an inbound vault edit may update.
+///
+/// Deliberately narrow: never `name`, never a compiled article/body. `None`
+/// means "leave unchanged"; `Some("")` clears the field.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GmParts {
+    /// Entities only. Ignored for sessions and rule entries.
+    pub summary: Option<String>,
+    /// Entities, sessions, and rule entries.
+    pub notes: Option<String>,
+}
+
+/// A single persisted `vault_sync_state` row, as read by `list_synced`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncedRow {
+    pub vref: VaultRef,
+    pub key: VaultKey,
+    /// `None` when the row has never had a base hash (e.g. conflict-only).
+    pub synced_hash: Option<u64>,
+    pub conflict: bool,
+}
+
 /// Errors surfaced by a `VaultRecordStore` implementation.
 #[derive(Debug, thiserror::Error)]
 pub enum VaultRecordError {
@@ -206,6 +228,25 @@ pub trait VaultRecordStore: Send + Sync {
     /// Wipe every persisted merge base (all `vault_sync_state` rows).
     /// Used when the vault path changes: the new directory gets a fresh baseline.
     async fn clear_all_synced(&self) -> Result<(), VaultRecordError>;
+    /// Every persisted sync-state row. One query per reconcile pass; also
+    /// powers the orphan sweep (rows whose record no longer syncs).
+    async fn list_synced(&self) -> Result<Vec<SyncedRow>, VaultRecordError>;
+    /// Apply GM-owned fields inbound. Entities: summary + notes (+ wikilink
+    /// resync, codex_stale). Sessions and rule entries: notes only.
+    async fn apply_gm_parts(
+        &self,
+        vref: &VaultRef,
+        parts: &GmParts,
+    ) -> Result<(), VaultRecordError>;
+    /// Set `vault_deleted = true`. The record disappears from `list_all`.
+    async fn soft_delete(&self, vref: &VaultRef) -> Result<(), VaultRecordError>;
+    /// Mark or clear the frozen-conflict flag for a record's row (UPSERT).
+    async fn set_conflict(
+        &self,
+        vref: &VaultRef,
+        key: &str,
+        in_conflict: bool,
+    ) -> Result<(), VaultRecordError>;
 }
 
 #[cfg(test)]
