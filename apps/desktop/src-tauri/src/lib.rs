@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-mod commands;
+pub mod commands;
 pub mod services;
 
 use chronacle_providers::embedding::EmbeddingProvider;

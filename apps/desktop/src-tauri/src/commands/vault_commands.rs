@@ -44,6 +44,40 @@ pub async fn get_vault_path(state: State<'_, Arc<AppState>>) -> Result<Option<St
         .filter(|v| !v.is_empty()))
 }
 
+/// Clear-if-changed → reconcile → persist.
+///
+/// A different vault directory must never inherit the old dir's merge bases,
+/// or every record reads as a deletion against the new (empty) folder (L2);
+/// re-submitting the SAME path must leave the bases alone. The
+/// `vault_sync_path` setting is written only after `reconcile` succeeds, so a
+/// failed switch leaves the previous path and its bases in force.
+///
+/// Takes a bare database handle and an already-constructed service, so it is
+/// reachable from a test with only a `mem://` SurrealDB and no Tauri `State`.
+/// `pub` (not `#[tauri::command]`) so integration tests can drive it without a
+/// Tauri `State` — the state-swapping stays in `set_vault_path`.
+pub async fn configure_vault_path(
+    db: &surrealdb::Surreal<surrealdb::engine::any::Any>,
+    svc: &chronacle_vault::reconcile::VaultSyncService,
+    path: &str,
+) -> Result<(), String> {
+    let previous = settings_service::get_all(db)
+        .await?
+        .into_iter()
+        .find(|s| s.key == "vault_sync_path")
+        .map(|s| s.value)
+        .filter(|v| !v.is_empty());
+
+    if previous.as_deref() != Some(path) {
+        svc.clear_all_bases().await.map_err(|e| e.to_string())?;
+    }
+    svc.reconcile().await.map_err(|e| e.to_string())?;
+    // Persist only after the reconcile succeeded; on failure the old path
+    // and old bases remain in force.
+    settings_service::upsert(db, "vault_sync_path", path).await?;
+    Ok(())
+}
+
 /// Set or clear the vault root. Setting a path constructs the engine and runs a
 /// full reconcile immediately; clearing it drops the engine.
 #[tauri::command]
@@ -53,23 +87,8 @@ pub async fn set_vault_path(
 ) -> Result<(), String> {
     match vault_path {
         Some(path) if !path.is_empty() => {
-            let previous = settings_service::get_all(&state.db)
-                .await?
-                .into_iter()
-                .find(|s| s.key == "vault_sync_path")
-                .map(|s| s.value)
-                .filter(|v| !v.is_empty());
-
             let (svc, _pending) = build_vault_service(state.db.clone(), &path);
-            // Fresh baseline: a different directory must never inherit the old
-            // dir's bases, or every record reads as SoftDelete (L2).
-            if previous.as_deref() != Some(path.as_str()) {
-                svc.clear_all_bases().await.map_err(|e| e.to_string())?;
-            }
-            svc.reconcile().await.map_err(|e| e.to_string())?;
-            // Persist only after the reconcile succeeded; on failure the old
-            // path and old bases remain in force.
-            settings_service::upsert(&state.db, "vault_sync_path", &path).await?;
+            configure_vault_path(&state.db, &svc, &path).await?;
             // Rebuild the queue and respawn the drain before publishing either
             // handle, so no producer can enqueue onto a channel with no drain.
             let new_outbound = spawn_outbound(Arc::clone(&svc));

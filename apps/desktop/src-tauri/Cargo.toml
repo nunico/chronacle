@@ -51,6 +51,7 @@ tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
+chronacle-core = { path = "../../../crates/chronacle-core", features = ["mocks"] }
 mockall = "0.13"
 tempfile = "3"
 pretty_assertions = "1"

@@ -148,6 +148,13 @@ impl VaultSyncService {
             }
         }
 
+        // Every `Export` above armed a write guard (crate::outbound::PendingWrites)
+        // so a watcher event racing the write still matches it. Only `drain_loop`
+        // swept those before; a reconcile-heavy workload ("Sync now" repeatedly)
+        // would accumulate armed-but-unswept entries indefinitely. Sweep here too
+        // so the guard map is self-limiting regardless of which path armed it.
+        self.pending.sweep();
+
         Ok(report)
     }
 
@@ -486,6 +493,39 @@ mod tests {
         let keys = written.lock().unwrap().clone();
         assert_eq!(keys.len(), 2);
         assert_ne!(keys[0], keys[1], "colliding names must not share a key");
+    }
+
+    /// Every `Export` arms a write guard (`crate::outbound::PendingWrites`),
+    /// but only `drain_loop` used to sweep them. A "Sync now"-heavy workload
+    /// would accumulate armed-but-unswept entries forever. `reconcile` must
+    /// sweep expired guards itself, even ones it did not arm this pass.
+    #[tokio::test]
+    async fn reconcile_sweeps_expired_guards_it_did_not_arm() {
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![]));
+
+        let mut records = MockVaultRecordStore::new();
+        records.expect_list_all().returning(|| Ok(vec![])); // nothing to reconcile
+
+        let pending = Arc::new(crate::outbound::PendingWrites::default());
+        // A guard from a previous batch that never got its watcher event.
+        pending.arm_at(
+            "stale.md",
+            1,
+            std::time::Instant::now()
+                - crate::outbound::PendingWrites::TTL
+                - std::time::Duration::from_secs(1),
+        );
+        assert_eq!(pending.len(), 1);
+
+        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records), Arc::clone(&pending));
+        svc.reconcile().await.expect("reconcile");
+
+        assert_eq!(
+            pending.len(),
+            0,
+            "reconcile must sweep expired guards, not just arm new ones"
+        );
     }
 
     #[tokio::test]
