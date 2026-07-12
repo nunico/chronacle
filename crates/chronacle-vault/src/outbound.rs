@@ -72,6 +72,14 @@ impl PendingWrites {
             .expect("poisoned")
             .retain(|_, (_, at)| at.elapsed() < Self::TTL);
     }
+
+    /// Count of currently-armed guards, expired or not. Test seam — proves a
+    /// caller actually swept (vs. relying on `matches`, which already ignores
+    /// expired entries and so cannot distinguish "swept" from "not swept").
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.inner.lock().expect("poisoned").len()
+    }
 }
 
 /// Drain the queue, coalescing repeats, calling `export` once per distinct ref.

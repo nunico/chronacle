@@ -2,8 +2,10 @@
 
 use std::sync::Arc;
 
-use chronacle_core::{VaultRecordStore, VaultRef};
+use chronacle_core::{VaultRecordStore, VaultRef, VaultStoreError};
 use chronacle_domain::vault_record_store::SurrealVaultRecordStore;
+use chronacle_lib::commands::vault_commands::configure_vault_path;
+use chronacle_lib::services::settings_service;
 use chronacle_providers::vault_store::LocalFsVaultStore;
 use chronacle_vault::outbound::PendingWrites;
 use chronacle_vault::reconcile::VaultSyncService;
@@ -66,4 +68,112 @@ async fn switching_to_a_fresh_dir_after_clearing_bases_exports_cleanly() {
         id: "n1".into(),
     };
     assert!(store.get_synced_hash(&vref).await.expect("get").is_some());
+}
+
+/// Drives the command-layer helper directly (no Tauri `State`), exercising
+/// the exact ordering `set_vault_path` relies on: clear-if-changed → reconcile
+/// → persist. This is what the two tests below prove pieces of.
+#[tokio::test]
+async fn resubmitting_the_same_path_preserves_the_base_and_exports_an_edit() {
+    let db = db().await;
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().to_str().unwrap().to_string();
+
+    let svc = svc_for(&db, dir.path());
+    configure_vault_path(&db, &svc, &path)
+        .await
+        .expect("first configure exports the initial record");
+
+    let store = SurrealVaultRecordStore::new(db.clone());
+    let vref = VaultRef {
+        table: "npc".into(),
+        id: "n1".into(),
+    };
+    let hash_1 = store
+        .get_synced_hash(&vref)
+        .await
+        .expect("get")
+        .expect("base set after first configure");
+
+    // Edit the record in the DB without touching the vault file — this is
+    // the "Sync now" scenario: same path, changed content.
+    db.query("UPDATE npc:n1 SET notes = 'Revised.', updated_at = time::now()")
+        .await
+        .expect("edit")
+        .check()
+        .expect("edit ok");
+
+    // Re-submitting the SAME path must NOT wipe the base. If it did, the
+    // base would go to `None` while the on-disk file still holds the old
+    // content, and since the DB now disagrees with both, `decide()` would
+    // read that as a `Conflict` (deferred, no write, no base update) instead
+    // of the plain `Export` it actually is — leaving `hash_1` stuck forever
+    // instead of advancing.
+    configure_vault_path(&db, &svc, &path)
+        .await
+        .expect("re-submitting the same path reconciles cleanly");
+
+    let hash_2 = store
+        .get_synced_hash(&vref)
+        .await
+        .expect("get")
+        .expect("base must still be present, not wiped");
+    assert_ne!(
+        hash_2, hash_1,
+        "the edit must be exported and the base advanced, not stuck at the pre-edit hash \
+         (a base stuck at hash_1 means the base was wrongly cleared and the edit was \
+         misread as a Conflict instead of an Export)"
+    );
+}
+
+/// A `VaultStore` whose `list` always errors — `VaultIndex::scan` propagates
+/// that with `?`, making `reconcile()` fail before it writes or touches any
+/// base. Used to prove a failed reconcile never reaches the `upsert`.
+fn failing_svc(db: &surrealdb::Surreal<surrealdb::engine::any::Any>) -> Arc<VaultSyncService> {
+    let mut store = chronacle_core::MockVaultStore::new();
+    store.expect_list().returning(|_| {
+        Err(VaultStoreError::Io(
+            "simulated: cannot read vault root".into(),
+        ))
+    });
+    Arc::new(VaultSyncService::new(
+        Arc::new(store),
+        Arc::new(SurrealVaultRecordStore::new(db.clone())),
+        Arc::new(PendingWrites::default()),
+    ))
+}
+
+#[tokio::test]
+async fn a_failing_reconcile_does_not_persist_the_new_vault_path() {
+    let db = db().await;
+    let dir_old = tempfile::TempDir::new().unwrap();
+    let old_path = dir_old.path().to_str().unwrap().to_string();
+
+    // Establish a working, persisted "old" configuration first.
+    let old_svc = svc_for(&db, dir_old.path());
+    configure_vault_path(&db, &old_svc, &old_path)
+        .await
+        .expect("initial configure succeeds");
+
+    // Attempt to switch to a path whose reconcile always fails.
+    let broken = failing_svc(&db);
+    let err = configure_vault_path(&db, &broken, "/some/other/path")
+        .await
+        .expect_err("a failing reconcile must surface as an error");
+    assert!(!err.is_empty());
+
+    // The setting must still hold the OLD path — the failed switch did not
+    // take effect. This fails if the `upsert` is moved back before the
+    // `reconcile` call.
+    let persisted = settings_service::get_all(&db)
+        .await
+        .expect("get_all")
+        .into_iter()
+        .find(|s| s.key == "vault_sync_path")
+        .map(|s| s.value);
+    assert_eq!(
+        persisted.as_deref(),
+        Some(old_path.as_str()),
+        "a failed vault path switch must leave the previous path in force"
+    );
 }
