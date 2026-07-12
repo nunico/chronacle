@@ -833,9 +833,12 @@ export interface ReconcileReport {
   exported: number;
   unchanged: number;
   adopted: number;
-  deferred_apply: number;
-  deferred_conflict: number;
-  deferred_delete: number;
+  applied: number;
+  conflicts: number;
+  resolved: number;
+  soft_deleted: number;
+  swept: number;
+  invalid: number;
   failed: number;
 }
 
