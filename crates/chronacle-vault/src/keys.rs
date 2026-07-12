@@ -196,6 +196,15 @@ pub fn is_managed(key: &str) -> bool {
     }
 }
 
+/// The compiler-owned conflict sidecar for `key`. `is_managed` already treats
+/// `*.conflict.md` as unmanaged, so a sidecar can never hijack the index.
+pub fn sidecar_key(key: &str) -> VaultKey {
+    match key.strip_suffix(".md") {
+        Some(stem) => format!("{stem}.conflict.md"),
+        None => format!("{key}.conflict.md"),
+    }
+}
+
 /// Returns the segment after `entities/` in `key`, if it is a recognised
 /// entity type.
 pub fn entity_type_of(key: &str) -> Option<&str> {
@@ -511,6 +520,13 @@ mod tests {
             let k = key_for(&rule, collides);
             assert!(is_managed(&k), "rule key {k} should be managed");
         }
+    }
+
+    #[test]
+    fn sidecar_key_is_always_unmanaged() {
+        let k = sidecar_key("campaigns/c/entities/npc/a.md");
+        assert_eq!(k, "campaigns/c/entities/npc/a.conflict.md");
+        assert!(!is_managed(&k));
     }
 
     #[test]

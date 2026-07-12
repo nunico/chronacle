@@ -5,8 +5,9 @@
 //! on next reconcile", never to "the file is permanently wrong". That is also
 //! why a backend with no change feed (S3, WebDAV) is still correct.
 //!
-//! `Conflict` is counted but not yet materialised — E4 adds the sidecar
-//! lifecycle that resolves it.
+//! `Conflict` materialises as a sidecar file (`<key>.conflict.md`) that
+//! carries the DB's render while the record freezes. Deleting the sidecar is
+//! the GM's resolution signal.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -29,9 +30,10 @@ pub struct ReconcileReport {
     pub adopted: usize,
     /// Inbound edits applied to the DB and re-exported canonically.
     pub applied: usize,
-    /// Divergent edits seen. Not yet materialised — E4 turns this on.
+    /// Divergent edits seen this pass. Includes both newly-frozen records
+    /// and already-frozen records that are still frozen.
     pub conflicts: usize,
-    /// Conflicts resolved (reserved for E4's resolution path).
+    /// Conflicts resolved this pass (the GM deleted the sidecar).
     pub resolved: usize,
     /// Records soft-deleted because their vault file disappeared.
     pub soft_deleted: usize,
@@ -92,10 +94,12 @@ impl VaultSyncService {
     ///
     /// Loads every record and the on-disk vault index, computes a three-way
     /// sync decision per record, and acts on `Export`/`AdoptBase`/`NoOp`/
-    /// `Apply`/`SoftDelete`. `Conflict` is only counted for now — E4
-    /// materialises the conflict sidecar lifecycle. A trailing orphan sweep
-    /// clears sync-state rows whose record no longer syncs, deleting the
-    /// vault file only while it still matches the last-known base.
+    /// `Apply`/`SoftDelete`/`Conflict`. A `Conflict` writes (or refreshes) a
+    /// `<key>.conflict.md` sidecar with the DB's render and freezes the
+    /// record; deleting the sidecar resolves it in favour of the GM's file.
+    /// A trailing orphan sweep clears sync-state rows whose record no longer
+    /// syncs, deleting the vault file (and any sidecar) only while it still
+    /// matches the last-known base.
     pub async fn reconcile(&self) -> Result<ReconcileReport, VaultError> {
         let index = VaultIndex::scan(self.store.as_ref()).await?;
         let records = self.records.list_all().await?;
@@ -155,8 +159,27 @@ impl VaultSyncService {
             let file = file_content.as_deref().map(content_hash);
             let state = synced.get(vref);
             let base = state.and_then(|s| s.synced_hash);
+            let was_frozen = state.is_some_and(|s| s.conflict);
+            let sidecar = crate::keys::sidecar_key(&key);
 
-            match decide(base, db, file) {
+            let action = decide(base, db, file);
+
+            if was_frozen && action != SyncAction::Conflict {
+                // The conflict evaporated on its own (e.g. the GM reverted
+                // the file back to what the DB already has). Clean up before
+                // handling the action normally.
+                match self.store.delete(&sidecar).await {
+                    Ok(()) | Err(chronacle_core::VaultStoreError::NotFound(_)) => {}
+                    Err(e) => eprintln!("vault: sidecar cleanup of {sidecar} failed: {e}"),
+                }
+                if let Err(e) = self.records.set_conflict(vref, &key, false).await {
+                    eprintln!("vault: unfreeze of {} failed: {e}", vref.to_thing());
+                    report.failed += 1;
+                    continue;
+                }
+            }
+
+            match action {
                 SyncAction::NoOp => report.unchanged += 1,
                 SyncAction::AdoptBase => {
                     if let Err(e) = self.records.set_synced_hash(vref, &key, db).await {
@@ -203,7 +226,73 @@ impl VaultSyncService {
                         }
                     }
                 }
-                SyncAction::Conflict => report.conflicts += 1, // E4 materializes this
+                SyncAction::Conflict => {
+                    let sidecar_content = match self.store.read(&sidecar).await {
+                        Ok(c) => Some(c),
+                        Err(chronacle_core::VaultStoreError::NotFound(_)) => None,
+                        Err(e) => {
+                            eprintln!("vault: sidecar read of {sidecar} failed: {e}");
+                            report.failed += 1;
+                            continue;
+                        }
+                    };
+                    match (was_frozen, sidecar_content) {
+                        // Deletion of the sidecar is the GM's resolution signal.
+                        (true, None) => {
+                            match self
+                                .apply_inbound(vref, &key, file_content.as_deref().unwrap_or(""))
+                                .await
+                            {
+                                Ok(true) => {
+                                    if let Err(e) =
+                                        self.records.set_conflict(vref, &key, false).await
+                                    {
+                                        eprintln!(
+                                            "vault: resolve of {} failed: {e}",
+                                            vref.to_thing()
+                                        );
+                                        report.failed += 1;
+                                        continue;
+                                    }
+                                    report.resolved += 1;
+                                    report.applied_refs.push(vref.clone());
+                                }
+                                Ok(false) => report.invalid += 1,
+                                Err(e) => {
+                                    eprintln!("vault: conflict resolution of {key} failed: {e}");
+                                    report.failed += 1;
+                                }
+                            }
+                        }
+                        // Frozen: keep the sidecar current with the DB render.
+                        (true, Some(existing)) => {
+                            if content_hash(&existing) != db {
+                                self.pending.arm(&sidecar, db);
+                                if let Err(e) = self.store.write(&sidecar, &rendered).await {
+                                    eprintln!("vault: sidecar refresh of {sidecar} failed: {e}");
+                                    report.failed += 1;
+                                    continue;
+                                }
+                            }
+                            report.conflicts += 1;
+                        }
+                        // New conflict: preserve the DB version, freeze.
+                        (false, _) => {
+                            self.pending.arm(&sidecar, db);
+                            if let Err(e) = self.store.write(&sidecar, &rendered).await {
+                                eprintln!("vault: sidecar write of {sidecar} failed: {e}");
+                                report.failed += 1;
+                                continue;
+                            }
+                            if let Err(e) = self.records.set_conflict(vref, &key, true).await {
+                                eprintln!("vault: freeze of {} failed: {e}", vref.to_thing());
+                                report.failed += 1;
+                                continue;
+                            }
+                            report.conflicts += 1;
+                        }
+                    }
+                }
                 // Identity is the frontmatter `id`. A file that loses its
                 // frontmatter AND is renamed to a name that matches no
                 // record is unattributable here — `key_of` misses (no
@@ -258,6 +347,13 @@ impl VaultSyncService {
                     report.failed += 1;
                     continue;
                 }
+            }
+            // Sidecars are compiler-owned: delete unconditionally, unlike the
+            // record's own file above which is spared if the GM edited it.
+            let sidecar = crate::keys::sidecar_key(&row.key);
+            match self.store.delete(&sidecar).await {
+                Ok(()) | Err(chronacle_core::VaultStoreError::NotFound(_)) => {}
+                Err(e) => eprintln!("vault: orphan sidecar delete of {sidecar} failed: {e}"),
             }
             if let Err(e) = self.records.clear_synced_hash(&row.vref).await {
                 eprintln!(
@@ -702,7 +798,9 @@ mod tests {
         let rendered = crate::render::render_record(&npc(Some("A.")));
         let matching = crate::render::content_hash(&rendered);
 
-        // Case 1: file matches the base -> deleted.
+        // Case 1: file matches the base -> deleted. Its sidecar is always
+        // deleted too (compiler-owned, unconditional; NotFound is fine).
+        let sidecar = crate::keys::sidecar_key(KEY);
         let mut store = MockVaultStore::new();
         store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
         store.expect_read().returning(move |_| Ok(rendered.clone()));
@@ -711,6 +809,12 @@ mod tests {
             .withf(|k| k == KEY)
             .times(1)
             .returning(|_| Ok(()));
+        let sidecar_for_del = sidecar.clone();
+        store
+            .expect_delete()
+            .withf(move |k| k == sidecar_for_del)
+            .times(1)
+            .returning(|_| Err(VaultStoreError::NotFound("no sidecar".into())));
 
         let mut records = MockVaultRecordStore::new();
         records.expect_list_all().returning(|| Ok(vec![])); // record is gone
@@ -738,13 +842,20 @@ mod tests {
         let report = svc.reconcile().await.expect("reconcile");
         assert_eq!(report.swept, 1);
 
-        // Case 2: the GM edited the file after the record died -> file survives.
+        // Case 2: the GM edited the file after the record died -> file survives,
+        // but the sidecar is still deleted unconditionally.
         let mut store = MockVaultStore::new();
         store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
         store
             .expect_read()
             .returning(|_| Ok("GM kept writing here".to_string()));
-        store.expect_delete().never();
+        store.expect_delete().withf(|k| k == KEY).never();
+        let sidecar_for_del2 = sidecar.clone();
+        store
+            .expect_delete()
+            .withf(move |k| k == sidecar_for_del2)
+            .times(1)
+            .returning(|_| Err(VaultStoreError::NotFound("no sidecar".into())));
         let mut records = MockVaultRecordStore::new();
         records.expect_list_all().returning(|| Ok(vec![]));
         records.expect_list_synced().returning(move || {
@@ -1088,6 +1199,371 @@ mod tests {
         assert_eq!(report.soft_deleted, 0);
         assert_eq!(report.failed, 1);
         assert_eq!(report.exported, 1, "the second record is still processed");
+    }
+
+    // -- conflict lifecycle (E4) -----------------------------------------
+
+    /// Both sides diverged from the base: the DB render lands in the sidecar,
+    /// the GM's file is untouched, the record is frozen (no base update).
+    #[tokio::test]
+    async fn a_new_conflict_writes_the_sidecar_and_freezes_the_record() {
+        let base = 111_u64; // both sides differ from it and from each other
+        let db_render = crate::render::render_record(&npc(Some("A.")));
+
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        store.expect_read().withf(|k| k == KEY).returning(|_| {
+            Ok(
+                "---\nid: \"npc:n1\"\ncreated_at: \"x\"\nupdated_at: \"y\"\n---\n\nGM version.\n"
+                    .to_string(),
+            )
+        });
+        let expected_sidecar = crate::keys::sidecar_key(KEY);
+        let expected_sidecar_read = expected_sidecar.clone();
+        store
+            .expect_read()
+            .withf(move |k| k == expected_sidecar_read)
+            .returning(|_| Err(VaultStoreError::NotFound("no sidecar yet".into())));
+        let render_for_assert = db_render.clone();
+        store
+            .expect_write()
+            .withf(move |k, content| k == expected_sidecar && content == render_for_assert)
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_list_all()
+            .returning(|| Ok(vec![npc(Some("A."))]));
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(base),
+                conflict: false,
+            }])
+        });
+        records
+            .expect_set_conflict()
+            .withf(|_, _, flag| *flag)
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+        records.expect_apply_gm_parts().never();
+        records.expect_set_synced_hash().never(); // frozen: no base movement
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let report = svc.reconcile().await.expect("reconcile");
+        assert_eq!(report.conflicts, 1);
+    }
+
+    /// Frozen and the sidecar already reflects a stale DB render: refresh it
+    /// in place. Still frozen — the base does not move, GM parts are untouched.
+    #[tokio::test]
+    async fn a_frozen_conflict_with_a_live_sidecar_stays_frozen_and_refreshes_a_stale_sidecar() {
+        let base = 111_u64;
+        let db_render = crate::render::render_record(&npc(Some("A.")));
+        let old_sidecar = crate::render::render_record(&npc(Some("OLD.")));
+
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        store.expect_read().withf(|k| k == KEY).returning(|_| {
+            Ok(
+                "---\nid: \"npc:n1\"\ncreated_at: \"x\"\nupdated_at: \"y\"\n---\n\nGM version.\n"
+                    .to_string(),
+            )
+        });
+        let sidecar_key = crate::keys::sidecar_key(KEY);
+        let sidecar_key_read = sidecar_key.clone();
+        store
+            .expect_read()
+            .withf(move |k| k == sidecar_key_read)
+            .returning(move |_| Ok(old_sidecar.clone()));
+        let sidecar_key_write = sidecar_key.clone();
+        let db_render_write = db_render.clone();
+        store
+            .expect_write()
+            .withf(move |k, content| k == sidecar_key_write && content == db_render_write)
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_list_all()
+            .returning(|| Ok(vec![npc(Some("A."))]));
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(base),
+                conflict: true,
+            }])
+        });
+        records.expect_set_conflict().never();
+        records.expect_apply_gm_parts().never();
+        records.expect_set_synced_hash().never();
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let report = svc.reconcile().await.expect("reconcile");
+        assert_eq!(report.conflicts, 1);
+    }
+
+    /// Deleting the sidecar is the GM's resolution signal: the GM file is
+    /// applied inbound, re-exported canonically, and the record unfreezes.
+    #[tokio::test]
+    async fn deleting_the_sidecar_resolves_the_conflict_by_applying_the_gm_file() {
+        let base = 111_u64;
+        let gm_file =
+            "---\nid: \"npc:n1\"\ncreated_at: \"x\"\nupdated_at: \"y\"\n---\n\n## Notes\n\nGM resolved.\n"
+                .to_string();
+
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        let gm_file_read = gm_file.clone();
+        store
+            .expect_read()
+            .withf(|k| k == KEY)
+            .returning(move |_| Ok(gm_file_read.clone()));
+        let sidecar_key = crate::keys::sidecar_key(KEY);
+        let sidecar_key_read = sidecar_key.clone();
+        store
+            .expect_read()
+            .withf(move |k| k == sidecar_key_read)
+            .returning(|_| Err(VaultStoreError::NotFound("gone".into())));
+        store
+            .expect_write()
+            .withf(|k, _| k == KEY)
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_list_all()
+            .returning(|| Ok(vec![npc(Some("A."))]));
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(base),
+                conflict: true,
+            }])
+        });
+        records
+            .expect_apply_gm_parts()
+            .withf(|_, parts| parts.notes.as_deref() == Some("GM resolved."))
+            .times(1)
+            .returning(|_, _| Ok(()));
+        let updated = {
+            let VaultRecord::Entity(mut e) = npc(Some("A.")) else {
+                unreachable!()
+            };
+            e.notes = Some("GM resolved.".into());
+            VaultRecord::Entity(e)
+        };
+        records
+            .expect_load()
+            .returning(move |_| Ok(Some(updated.clone())));
+        records
+            .expect_set_synced_hash()
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+        records
+            .expect_set_conflict()
+            .withf(|_, _, flag| !*flag)
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let report = svc.reconcile().await.expect("reconcile");
+        assert_eq!(report.resolved, 1);
+    }
+
+    /// The conflict evaporates on its own (the GM reverted the file back to
+    /// the base): the sidecar is cleaned up and the record unfreezes.
+    #[tokio::test]
+    async fn an_evaporated_conflict_cleans_up_the_sidecar_and_proceeds() {
+        let rendered = crate::render::render_record(&npc(Some("A.")));
+        let base = crate::render::content_hash(&rendered);
+
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        let rendered_read = rendered.clone();
+        store
+            .expect_read()
+            .withf(|k| k == KEY)
+            .returning(move |_| Ok(rendered_read.clone()));
+        let sidecar_key = crate::keys::sidecar_key(KEY);
+        let sidecar_key_del = sidecar_key.clone();
+        store
+            .expect_delete()
+            .withf(move |k| k == sidecar_key_del)
+            .times(1)
+            .returning(|_| Ok(()));
+        store.expect_write().never();
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_list_all()
+            .returning(|| Ok(vec![npc(Some("A."))]));
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(base),
+                conflict: true,
+            }])
+        });
+        records
+            .expect_set_conflict()
+            .withf(|_, _, flag| !*flag)
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+        records.expect_apply_gm_parts().never();
+        records.expect_set_synced_hash().never();
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let report = svc.reconcile().await.expect("reconcile");
+        assert_eq!(report.unchanged, 1);
+        assert_eq!(report.conflicts, 0);
+    }
+
+    /// A file already claims a record's id before the record ever synced (no
+    /// sync-state row exists yet): `decide` returns `Conflict` with `base ==
+    /// None`. `set_conflict` UPSERTs a key-only row (no base); the next pass
+    /// still reads `Conflict` (frozen) until the GM deletes the sidecar, at
+    /// which point the file is adopted.
+    #[tokio::test]
+    async fn an_unmanaged_file_conflict_freezes_then_resolves_on_sidecar_deletion() {
+        let gm_file =
+            "---\nid: \"npc:n1\"\ncreated_at: \"x\"\nupdated_at: \"y\"\n---\n\n## Notes\n\nPre-existing GM file.\n"
+                .to_string();
+
+        // Pass 1: new conflict, no prior sync-state row.
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        let gm_file_read = gm_file.clone();
+        store
+            .expect_read()
+            .withf(|k| k == KEY)
+            .returning(move |_| Ok(gm_file_read.clone()));
+        let sidecar_key = crate::keys::sidecar_key(KEY);
+        let sidecar_key_read = sidecar_key.clone();
+        store
+            .expect_read()
+            .withf(move |k| k == sidecar_key_read)
+            .returning(|_| Err(VaultStoreError::NotFound("no sidecar yet".into())));
+        let sidecar_key_write = sidecar_key.clone();
+        store
+            .expect_write()
+            .withf(move |k, _| k == sidecar_key_write)
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_list_all()
+            .returning(|| Ok(vec![npc(Some("A."))]));
+        records.expect_list_synced().returning(|| Ok(vec![])); // no row yet
+        records
+            .expect_set_conflict()
+            .withf(|_, _, flag| *flag)
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+        records.expect_apply_gm_parts().never();
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let report = svc.reconcile().await.expect("reconcile pass 1");
+        assert_eq!(report.conflicts, 1);
+
+        // Pass 2: frozen row now exists with no base (key-only UPSERT); the GM
+        // deletes the sidecar, resolving in favour of the file.
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        let gm_file_read2 = gm_file.clone();
+        store
+            .expect_read()
+            .withf(|k| k == KEY)
+            .returning(move |_| Ok(gm_file_read2.clone()));
+        let sidecar_key2 = crate::keys::sidecar_key(KEY);
+        let sidecar_key_read2 = sidecar_key2.clone();
+        store
+            .expect_read()
+            .withf(move |k| k == sidecar_key_read2)
+            .returning(|_| Err(VaultStoreError::NotFound("gone".into())));
+        store
+            .expect_write()
+            .withf(|k, _| k == KEY)
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_list_all()
+            .returning(|| Ok(vec![npc(Some("A."))]));
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: None, // no base: this row exists only for the conflict flag
+                conflict: true,
+            }])
+        });
+        records.expect_apply_gm_parts().returning(|_, _| Ok(()));
+        let updated = npc(Some("A."));
+        records
+            .expect_load()
+            .returning(move |_| Ok(Some(updated.clone())));
+        records
+            .expect_set_synced_hash()
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+        records
+            .expect_set_conflict()
+            .withf(|_, _, flag| !*flag)
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let report = svc.reconcile().await.expect("reconcile pass 2");
+        assert_eq!(report.resolved, 1);
     }
 
     // -- export_one -----------------------------------------------------
