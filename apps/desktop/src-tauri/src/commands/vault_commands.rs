@@ -8,14 +8,18 @@ use serde::Serialize;
 use tauri::State;
 
 /// Wire shape of `ReconcileReport` (snake_case matches the Rust struct).
+/// `applied_refs` is omitted — the frontend has no use for the raw refs.
 #[derive(Serialize)]
 pub struct ReconcileReportDto {
     pub exported: usize,
     pub unchanged: usize,
     pub adopted: usize,
-    pub deferred_apply: usize,
-    pub deferred_conflict: usize,
-    pub deferred_delete: usize,
+    pub applied: usize,
+    pub conflicts: usize,
+    pub resolved: usize,
+    pub soft_deleted: usize,
+    pub swept: usize,
+    pub invalid: usize,
     pub failed: usize,
 }
 
@@ -25,9 +29,12 @@ impl From<ReconcileReport> for ReconcileReportDto {
             exported: r.exported,
             unchanged: r.unchanged,
             adopted: r.adopted,
-            deferred_apply: r.deferred_apply,
-            deferred_conflict: r.deferred_conflict,
-            deferred_delete: r.deferred_delete,
+            applied: r.applied,
+            conflicts: r.conflicts,
+            resolved: r.resolved,
+            soft_deleted: r.soft_deleted,
+            swept: r.swept,
+            invalid: r.invalid,
             failed: r.failed,
         }
     }

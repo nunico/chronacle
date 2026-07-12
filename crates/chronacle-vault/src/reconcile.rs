@@ -1,9 +1,12 @@
-//! Bidirectional reconcile — export direction only in this tranche.
+//! Bidirectional reconcile.
 //!
 //! Reconcile is the **correctness guarantee**; the outbound queue (D4a) is only
 //! a latency optimisation. A dropped `enqueue()` degrades to "the file updates
 //! on next reconcile", never to "the file is permanently wrong". That is also
 //! why a backend with no change feed (S3, WebDAV) is still correct.
+//!
+//! `Conflict` is counted but not yet materialised — E4 adds the sidecar
+//! lifecycle that resolves it.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,14 +27,24 @@ pub struct ReconcileReport {
     pub unchanged: usize,
     /// Stale merge bases adopted (crash recovery).
     pub adopted: usize,
-    /// Inbound edits seen but not applied (tranche 5).
-    pub deferred_apply: usize,
-    /// Divergent edits seen but not materialised (tranche 5).
-    pub deferred_conflict: usize,
-    /// Vault deletions seen but not soft-deleted (tranche 5).
-    pub deferred_delete: usize,
+    /// Inbound edits applied to the DB and re-exported canonically.
+    pub applied: usize,
+    /// Divergent edits seen. Not yet materialised — E4 turns this on.
+    pub conflicts: usize,
+    /// Conflicts resolved (reserved for E4's resolution path).
+    pub resolved: usize,
+    /// Records soft-deleted because their vault file disappeared.
+    pub soft_deleted: usize,
+    /// Orphaned sync-state rows cleared (record no longer syncs).
+    pub swept: usize,
+    /// Managed files whose frontmatter could not be parsed. Never applied,
+    /// never overwritten.
+    pub invalid: usize,
     /// Keys that failed to write. The run continues.
     pub failed: usize,
+    /// Refs applied this pass, for callers that need to react (e.g. a
+    /// wikilink resync). Populated alongside `applied`.
+    pub applied_refs: Vec<VaultRef>,
 }
 
 /// The vault sync engine.
@@ -75,12 +88,14 @@ impl VaultSyncService {
         Ok(self.records.clear_all_synced().await?)
     }
 
-    /// Run one export-direction reconcile pass over every syncable record.
+    /// Run one bidirectional reconcile pass over every syncable record.
     ///
     /// Loads every record and the on-disk vault index, computes a three-way
-    /// sync decision per record, and acts on `Export`/`AdoptBase`/`NoOp`.
-    /// `Apply`, `Conflict`, and `SoftDelete` are only counted and logged —
-    /// tranche 5 turns those on.
+    /// sync decision per record, and acts on `Export`/`AdoptBase`/`NoOp`/
+    /// `Apply`/`SoftDelete`. `Conflict` is only counted for now — E4
+    /// materialises the conflict sidecar lifecycle. A trailing orphan sweep
+    /// clears sync-state rows whose record no longer syncs, deleting the
+    /// vault file only while it still matches the last-known base.
     pub async fn reconcile(&self) -> Result<ReconcileReport, VaultError> {
         let index = VaultIndex::scan(self.store.as_ref()).await?;
         let records = self.records.list_all().await?;
@@ -92,6 +107,14 @@ impl VaultSyncService {
         for record in &records {
             *unsuffixed_counts.entry(key_for(record, false)).or_insert(0) += 1;
         }
+
+        let synced: HashMap<VaultRef, chronacle_core::SyncedRow> = self
+            .records
+            .list_synced()
+            .await?
+            .into_iter()
+            .map(|row| (row.vref.clone(), row))
+            .collect();
 
         let mut report = ReconcileReport::default();
 
@@ -108,11 +131,19 @@ impl VaultSyncService {
             let key = existing_key
                 .clone()
                 .unwrap_or_else(|| key_for(record, collides));
-            let file = match &existing_key {
-                Some(k) => Some(content_hash(&self.store.read(k).await?)),
-                None => None,
+            // A file can exist at `key` without being in `by_ref` when its
+            // frontmatter is corrupted — the id-based lookup can't find it,
+            // but `managed_keys` still saw it on disk. Read it either way so
+            // the Apply/invalid path can inspect (and never resurrect) it.
+            let file_exists = existing_key.is_some() || index.has_key(&key);
+            let file_content = if file_exists {
+                Some(self.store.read(&key).await?)
+            } else {
+                None
             };
-            let base = self.records.get_synced_hash(vref).await?;
+            let file = file_content.as_deref().map(content_hash);
+            let state = synced.get(vref);
+            let base = state.and_then(|s| s.synced_hash);
 
             match decide(base, db, file) {
                 SyncAction::NoOp => report.unchanged += 1,
@@ -134,18 +165,59 @@ impl VaultSyncService {
                         }
                     }
                 }
-                action @ (SyncAction::Apply | SyncAction::Conflict | SyncAction::SoftDelete) => {
-                    eprintln!(
-                        "vault: inbound action deferred to tranche 5: {action:?} for {vref:?}"
-                    );
-                    match action {
-                        SyncAction::Apply => report.deferred_apply += 1,
-                        SyncAction::Conflict => report.deferred_conflict += 1,
-                        SyncAction::SoftDelete => report.deferred_delete += 1,
-                        _ => unreachable!(),
+                SyncAction::Apply => {
+                    match self
+                        .apply_inbound(vref, &key, file_content.as_deref().unwrap_or(""))
+                        .await
+                    {
+                        Ok(true) => {
+                            report.applied += 1;
+                            report.applied_refs.push(vref.clone());
+                        }
+                        Ok(false) => report.invalid += 1,
+                        Err(e) => {
+                            eprintln!("vault: inbound apply of {key} failed: {e}");
+                            report.failed += 1;
+                        }
                     }
                 }
+                SyncAction::Conflict => report.conflicts += 1, // E4 materializes this
+                SyncAction::SoftDelete => {
+                    self.records.soft_delete(vref).await?;
+                    self.records.clear_synced_hash(vref).await?;
+                    report.soft_deleted += 1;
+                }
             }
+        }
+
+        // Orphan sweep: rows whose record no longer syncs (in-app soft/hard
+        // delete). Delete the file only while it still matches the base —
+        // never clobber prose the GM kept editing after the record died.
+        let record_refs: std::collections::HashSet<&VaultRef> =
+            records.iter().map(vref_of).collect();
+        for row in synced.values() {
+            if record_refs.contains(&row.vref) {
+                continue;
+            }
+            match self.store.read(&row.key).await {
+                Ok(content) => {
+                    if row.synced_hash == Some(content_hash(&content)) {
+                        if let Err(e) = self.store.delete(&row.key).await {
+                            eprintln!("vault: orphan delete of {} failed: {e}", row.key);
+                            report.failed += 1;
+                            continue;
+                        }
+                    }
+                }
+                Err(chronacle_core::VaultStoreError::NotFound(_)) => {}
+                Err(e) => {
+                    eprintln!("vault: orphan read of {} failed: {e}", row.key);
+                    report.failed += 1;
+                    continue;
+                }
+            }
+            self.records.clear_synced_hash(&row.vref).await?;
+            report.swept += 1;
         }
 
         // Every `Export` above armed a write guard (crate::outbound::PendingWrites)
@@ -156,6 +228,38 @@ impl VaultSyncService {
         self.pending.sweep();
 
         Ok(report)
+    }
+
+    /// Apply the GM-owned parts of `file_content` to the DB, then re-export the
+    /// canonical render over `key` and set the base. Returns Ok(false) when the
+    /// file has no parsable frontmatter (never applied, never overwritten).
+    async fn apply_inbound(
+        &self,
+        vref: &VaultRef,
+        key: &str,
+        file_content: &str,
+    ) -> Result<bool, VaultError> {
+        let Ok((_fm, body)) = crate::frontmatter::parse(file_content) else {
+            return Ok(false);
+        };
+        let parts = crate::markdown::split_body(&body);
+        let gm = chronacle_core::GmParts {
+            summary: parts.summary,
+            notes: parts.notes,
+        };
+        self.records.apply_gm_parts(vref, &gm).await?;
+
+        // Re-export canonical: fence and frontmatter edits are reverted here,
+        // and the record settles to NoOp on the next pass.
+        let Some(record) = self.records.load(vref).await? else {
+            return Ok(true); // deleted mid-flight; the next pass sweeps it
+        };
+        let rendered = render_record(&record);
+        let hash = content_hash(&rendered);
+        self.pending.arm(key, hash);
+        self.store.write(key, &rendered).await?;
+        self.records.set_synced_hash(vref, key, hash).await?;
+        Ok(true)
     }
 
     /// Export a single record, using `index` to find a file the GM already
@@ -257,7 +361,7 @@ mod tests {
         records
             .expect_list_all()
             .returning(|| Ok(vec![npc(Some("A."))]));
-        records.expect_get_synced_hash().returning(|_| Ok(None));
+        records.expect_list_synced().returning(|| Ok(vec![]));
         records
             .expect_set_synced_hash()
             .times(1)
@@ -287,9 +391,17 @@ mod tests {
         records
             .expect_list_all()
             .returning(|| Ok(vec![npc(Some("A."))]));
-        records
-            .expect_get_synced_hash()
-            .returning(move |_| Ok(Some(h)));
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(h),
+                conflict: false,
+            }])
+        });
         records.expect_set_synced_hash().never();
 
         let svc = VaultSyncService::new(
@@ -319,9 +431,17 @@ mod tests {
         records
             .expect_list_all()
             .returning(|| Ok(vec![npc(Some("NEW."))]));
-        records
-            .expect_get_synced_hash()
-            .returning(move |_| Ok(Some(old_hash)));
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(old_hash),
+                conflict: false,
+            }])
+        });
         records
             .expect_set_synced_hash()
             .times(1)
@@ -350,9 +470,17 @@ mod tests {
         records
             .expect_list_all()
             .returning(|| Ok(vec![npc(Some("A."))]));
-        records
-            .expect_get_synced_hash()
-            .returning(|_| Ok(Some(999_999))); // stale
+        records.expect_list_synced().returning(|| {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(999_999), // stale
+                conflict: false,
+            }])
+        });
         records
             .expect_set_synced_hash()
             .times(1)
@@ -365,34 +493,68 @@ mod tests {
         );
         let report = svc.reconcile().await.expect("reconcile");
         assert_eq!(report.adopted, 1);
-        assert_eq!(
-            report.deferred_conflict, 0,
-            "identical sides are not a conflict"
-        );
+        assert_eq!(report.conflicts, 0, "identical sides are not a conflict");
     }
 
+    /// db == base, file differs => Apply: GM parts land in the DB, the canonical
+    /// render is re-exported (fence/frontmatter edits reverted), base updated.
     #[tokio::test]
-    async fn reconcile_defers_apply_and_conflict_without_writing() {
+    async fn reconcile_applies_an_inbound_edit_and_reexports_canonical() {
+        let old_rendered = crate::render::render_record(&npc(Some("A.")));
+        let base = crate::render::content_hash(&old_rendered);
+        // The GM's file: valid frontmatter, edited notes, and a tampered fence.
+        let gm_file = format!(
+            "---\nid: \"npc:n1\"\ncreated_at: \"x\"\nupdated_at: \"y\"\n---\n\
+             \n{}\nGM EDIT INSIDE FENCE\n{}\n\n## Notes\n\nEdited notes.\n",
+            crate::markdown::FENCE_START,
+            crate::markdown::FENCE_END
+        );
+
         let mut store = MockVaultStore::new();
         store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
-        store.expect_read().returning(|_| {
-            Ok("---\nid: \"npc:n1\"\ncreated_at: \"x\"\nupdated_at: \"y\"\n---\n\nGM edited this.\n"
-                .to_string())
-        });
-        store.expect_write().never(); // export-only tranche must not clobber
-        store.expect_delete().never();
+        store.expect_read().returning(move |_| Ok(gm_file.clone()));
+        // The re-export writes the canonical render (fence reverted).
+        store
+            .expect_write()
+            .withf(|k, content| k == KEY && !content.contains("GM EDIT INSIDE FENCE"))
+            .times(1)
+            .returning(|_, _| Ok(()));
 
         let mut records = MockVaultRecordStore::new();
         records
             .expect_list_all()
             .returning(|| Ok(vec![npc(Some("A."))]));
-        // db == base, file differs => Apply (deferred to tranche 5)
-        records.expect_get_synced_hash().returning(|_| {
-            Ok(Some(crate::render::content_hash(
-                &crate::render::render_record(&npc(Some("A."))),
-            )))
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(base),
+                conflict: false,
+            }])
         });
-        records.expect_set_synced_hash().never();
+        records
+            .expect_apply_gm_parts()
+            .withf(|_, parts| parts.notes.as_deref() == Some("Edited notes."))
+            .times(1)
+            .returning(|_, _| Ok(()));
+        // After apply, load() returns the updated record for re-render.
+        let updated = {
+            let VaultRecord::Entity(mut e) = npc(Some("A.")) else {
+                unreachable!()
+            };
+            e.notes = Some("Edited notes.".into());
+            VaultRecord::Entity(e)
+        };
+        records
+            .expect_load()
+            .returning(move |_| Ok(Some(updated.clone())));
+        records
+            .expect_set_synced_hash()
+            .times(1)
+            .returning(|_, _, _| Ok(()));
 
         let svc = VaultSyncService::new(
             Arc::new(store),
@@ -400,23 +562,39 @@ mod tests {
             Arc::new(crate::outbound::PendingWrites::default()),
         );
         let report = svc.reconcile().await.expect("reconcile");
-        assert_eq!(report.deferred_apply, 1);
+        assert_eq!(report.applied, 1);
+        assert_eq!(report.applied_refs.len(), 1);
         assert_eq!(report.exported, 0);
     }
 
+    /// A managed file with unparsable frontmatter is counted invalid and never
+    /// applied or overwritten.
     #[tokio::test]
-    async fn reconcile_defers_soft_delete_and_does_not_resurrect_the_file() {
+    async fn reconcile_counts_an_unparsable_file_as_invalid_and_leaves_it() {
+        let base = crate::render::content_hash(&crate::render::render_record(&npc(Some("A."))));
         let mut store = MockVaultStore::new();
-        store.expect_list().returning(|_| Ok(vec![])); // file is gone
-        store.expect_write().never(); // MUST NOT rewrite it
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        store
+            .expect_read()
+            .returning(|_| Ok("no frontmatter at all".to_string()));
+        store.expect_write().never();
 
         let mut records = MockVaultRecordStore::new();
         records
             .expect_list_all()
             .returning(|| Ok(vec![npc(Some("A."))]));
-        records
-            .expect_get_synced_hash()
-            .returning(|_| Ok(Some(123))); // we wrote it once
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(base),
+                conflict: false,
+            }])
+        });
+        records.expect_apply_gm_parts().never();
         records.expect_set_synced_hash().never();
 
         let svc = VaultSyncService::new(
@@ -425,11 +603,122 @@ mod tests {
             Arc::new(crate::outbound::PendingWrites::default()),
         );
         let report = svc.reconcile().await.expect("reconcile");
-        assert_eq!(report.deferred_delete, 1);
-        assert_eq!(
-            report.exported, 0,
-            "reconcile must never resurrect a deleted file"
+        assert_eq!(report.invalid, 1);
+        assert_eq!(report.applied, 0);
+    }
+
+    /// base set, file gone => SoftDelete: vault_deleted set, base cleared,
+    /// file never resurrected.
+    #[tokio::test]
+    async fn reconcile_soft_deletes_a_record_whose_file_is_gone() {
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![]));
+        store.expect_write().never();
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_list_all()
+            .returning(|| Ok(vec![npc(Some("A."))]));
+        records.expect_list_synced().returning(|| {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(123),
+                conflict: false,
+            }])
+        });
+        records.expect_soft_delete().times(1).returning(|_| Ok(()));
+        records
+            .expect_clear_synced_hash()
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
         );
+        let report = svc.reconcile().await.expect("reconcile");
+        assert_eq!(report.soft_deleted, 1);
+    }
+
+    /// A sync-state row whose record no longer exists (in-app soft delete):
+    /// the file is deleted only while it still matches the base.
+    #[tokio::test]
+    async fn orphan_sweep_deletes_an_unmodified_file_and_spares_an_edited_one() {
+        let rendered = crate::render::render_record(&npc(Some("A.")));
+        let matching = crate::render::content_hash(&rendered);
+
+        // Case 1: file matches the base -> deleted.
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        store.expect_read().returning(move |_| Ok(rendered.clone()));
+        store
+            .expect_delete()
+            .withf(|k| k == KEY)
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let mut records = MockVaultRecordStore::new();
+        records.expect_list_all().returning(|| Ok(vec![])); // record is gone
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(matching),
+                conflict: false,
+            }])
+        });
+        records
+            .expect_clear_synced_hash()
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let report = svc.reconcile().await.expect("reconcile");
+        assert_eq!(report.swept, 1);
+
+        // Case 2: the GM edited the file after the record died -> file survives.
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        store
+            .expect_read()
+            .returning(|_| Ok("GM kept writing here".to_string()));
+        store.expect_delete().never();
+        let mut records = MockVaultRecordStore::new();
+        records.expect_list_all().returning(|| Ok(vec![]));
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(matching),
+                conflict: false,
+            }])
+        });
+        records
+            .expect_clear_synced_hash()
+            .times(1)
+            .returning(|_| Ok(()));
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let report = svc.reconcile().await.expect("reconcile");
+        assert_eq!(report.swept, 1, "row cleared either way");
     }
 
     #[tokio::test]
@@ -480,7 +769,7 @@ mod tests {
         records
             .expect_list_all()
             .returning(move || Ok(vec![a.clone(), b.clone()]));
-        records.expect_get_synced_hash().returning(|_| Ok(None));
+        records.expect_list_synced().returning(|| Ok(vec![]));
         records.expect_set_synced_hash().returning(|_, _, _| Ok(()));
 
         let svc = VaultSyncService::new(
@@ -506,6 +795,7 @@ mod tests {
 
         let mut records = MockVaultRecordStore::new();
         records.expect_list_all().returning(|| Ok(vec![])); // nothing to reconcile
+        records.expect_list_synced().returning(|| Ok(vec![]));
 
         let pending = Arc::new(crate::outbound::PendingWrites::default());
         // A guard from a previous batch that never got its watcher event.
@@ -540,7 +830,7 @@ mod tests {
         records
             .expect_list_all()
             .returning(|| Ok(vec![npc(Some("A."))]));
-        records.expect_get_synced_hash().returning(|_| Ok(None));
+        records.expect_list_synced().returning(|| Ok(vec![]));
         records.expect_set_synced_hash().never(); // never claim a base we did not write
 
         let svc = VaultSyncService::new(

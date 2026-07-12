@@ -1,4 +1,4 @@
-//! L2: switching vault folders must never read as mass deletion.
+//! L2 (path-switch) + E3 (inbound reconcile) integration coverage.
 
 use std::sync::Arc;
 
@@ -176,4 +176,49 @@ async fn a_failing_reconcile_does_not_persist_the_new_vault_path() {
         Some(old_path.as_str()),
         "a failed vault path switch must leave the previous path in force"
     );
+}
+
+#[tokio::test]
+async fn gm_edit_round_trips_through_reconcile_into_the_db() {
+    let db = db().await;
+    let dir = tempfile::TempDir::new().unwrap();
+    let svc = svc_for(&db, dir.path());
+    svc.reconcile().await.expect("first export");
+
+    // Find the exported file and append GM notes outside the fence.
+    let path = dir
+        .path()
+        .join("campaigns/sov/entities/npc")
+        .read_dir()
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let content = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("{content}\n\nInbound edit from Obsidian.\n")).unwrap();
+
+    let report = svc.reconcile().await.expect("inbound pass");
+    assert_eq!(report.applied, 1);
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        notes: Option<String>,
+    }
+    let mut resp = db
+        .query("SELECT notes FROM npc:n1")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    let rows: Vec<Row> = resp.take(0).unwrap();
+    assert!(rows[0]
+        .notes
+        .as_deref()
+        .unwrap_or("")
+        .contains("Inbound edit from Obsidian."));
+
+    // Third pass: everything converged.
+    let report = svc.reconcile().await.expect("settle");
+    assert_eq!(report.unchanged, 1);
 }

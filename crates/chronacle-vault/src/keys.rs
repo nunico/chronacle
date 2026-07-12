@@ -529,19 +529,26 @@ mod tests {
 #[derive(Debug, Default)]
 pub struct VaultIndex {
     by_ref: std::collections::HashMap<chronacle_core::VaultRef, VaultKey>,
+    /// Every managed key seen on disk, whether or not its frontmatter parsed.
+    /// A record whose file's frontmatter got corrupted (Apply's `invalid`
+    /// bucket) still needs its content read — `by_ref` alone can't find it.
+    managed_keys: std::collections::HashSet<VaultKey>,
 }
 
 impl VaultIndex {
     /// Read every managed `.md` under the vault root and index it by `id`.
     ///
-    /// Files with no frontmatter, or unparsable frontmatter, are skipped —
-    /// they are tranche-5 create candidates, not errors.
+    /// Files with no frontmatter, or unparsable frontmatter, are not mapped
+    /// by ref — they are inbound-apply "invalid" candidates, not create
+    /// candidates — but they are still recorded in `managed_keys`.
     pub async fn scan(store: &dyn chronacle_core::VaultStore) -> Result<Self, crate::VaultError> {
         let mut by_ref = std::collections::HashMap::new();
+        let mut managed_keys = std::collections::HashSet::new();
         for key in store.list("").await? {
             if !is_managed(&key) {
                 continue;
             }
+            managed_keys.insert(key.clone());
             let content = store.read(&key).await?;
             let Ok((fm, _)) = crate::frontmatter::parse(&content) else {
                 continue;
@@ -551,7 +558,10 @@ impl VaultIndex {
             };
             by_ref.insert(vref, key);
         }
-        Ok(Self { by_ref })
+        Ok(Self {
+            by_ref,
+            managed_keys,
+        })
     }
 
     /// The key currently holding this record, if any.
@@ -562,6 +572,13 @@ impl VaultIndex {
     /// Whether the vault holds a file for this record.
     pub fn contains(&self, vref: &chronacle_core::VaultRef) -> bool {
         self.by_ref.contains_key(vref)
+    }
+
+    /// Whether a managed file exists at `key`, regardless of whether its
+    /// frontmatter parsed. Used to detect a corrupted file at the
+    /// record's computed slug when the id-based lookup misses it.
+    pub fn has_key(&self, key: &str) -> bool {
+        self.managed_keys.contains(key)
     }
 
     /// Number of indexed records.
