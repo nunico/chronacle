@@ -303,6 +303,7 @@ pub async fn run() {
             commands::create_entity,
             commands::update_entity,
             commands::delete_entity,
+            commands::soft_delete_entity,
             commands::relate_entities,
             commands::get_events_timeline,
             commands::get_entity_graph,
@@ -336,6 +337,7 @@ pub async fn run() {
             commands::get_vault_path,
             commands::set_vault_path,
             commands::vault_sync_now,
+            commands::list_vault_conflicts,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Tauri application");

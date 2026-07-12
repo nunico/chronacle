@@ -56,6 +56,15 @@ pub struct VaultSyncService {
     pending: Arc<crate::outbound::PendingWrites>,
 }
 
+/// A frozen conflict, shaped for display.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VaultConflict {
+    pub vref: VaultRef,
+    pub name: String,
+    pub key: chronacle_core::VaultKey,
+    pub sidecar_key: chronacle_core::VaultKey,
+}
+
 /// The stable identity carried by every `VaultRecord` variant.
 fn vref_of(record: &VaultRecord) -> &VaultRef {
     match record {
@@ -484,6 +493,29 @@ impl VaultSyncService {
             }
         }
         Ok(())
+    }
+
+    /// Every record currently frozen in conflict, with display names resolved.
+    pub async fn conflicts(&self) -> Result<Vec<VaultConflict>, VaultError> {
+        let mut out = Vec::new();
+        for row in self.records.list_synced().await? {
+            if !row.conflict {
+                continue;
+            }
+            let name = match self.records.load(&row.vref).await? {
+                Some(VaultRecord::Entity(e)) => e.name,
+                Some(VaultRecord::Session(s)) => s.title,
+                Some(VaultRecord::RuleEntry(r)) => r.name,
+                None => row.vref.to_thing(),
+            };
+            out.push(VaultConflict {
+                sidecar_key: crate::keys::sidecar_key(&row.key),
+                vref: row.vref,
+                name,
+                key: row.key,
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -1762,5 +1794,82 @@ mod tests {
         refs.insert(vref);
 
         svc.export_refs(&refs).await.expect("export_refs");
+    }
+
+    /// `conflicts()` returns only frozen rows, resolving the display name from
+    /// the current record and deriving the sidecar key from the synced key.
+    #[tokio::test]
+    async fn conflicts_returns_only_frozen_rows_with_resolved_names() {
+        let store = MockVaultStore::new();
+
+        let mut records = MockVaultRecordStore::new();
+        records.expect_list_synced().returning(|| {
+            Ok(vec![
+                chronacle_core::SyncedRow {
+                    vref: VaultRef {
+                        table: "npc".into(),
+                        id: "n1".into(),
+                    },
+                    key: KEY.into(),
+                    synced_hash: Some(1),
+                    conflict: true,
+                },
+                chronacle_core::SyncedRow {
+                    vref: VaultRef {
+                        table: "npc".into(),
+                        id: "n2".into(),
+                    },
+                    key: "campaigns/sov/entities/npc/other.md".into(),
+                    synced_hash: Some(2),
+                    conflict: false,
+                },
+            ])
+        });
+        records
+            .expect_load()
+            .withf(|vref| vref.id == "n1")
+            .returning(|_| Ok(Some(npc(Some("A.")))));
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let conflicts = svc.conflicts().await.expect("conflicts");
+        assert_eq!(conflicts.len(), 1, "only the frozen row is returned");
+        assert_eq!(conflicts[0].vref.id, "n1");
+        assert_eq!(conflicts[0].name, "Seraphina");
+        assert_eq!(conflicts[0].key, KEY);
+        assert_eq!(conflicts[0].sidecar_key, crate::keys::sidecar_key(KEY));
+    }
+
+    /// A frozen row whose record was deleted mid-flight falls back to the
+    /// `table:id` form for the display name instead of failing.
+    #[tokio::test]
+    async fn conflicts_falls_back_to_thing_string_when_record_is_gone() {
+        let store = MockVaultStore::new();
+
+        let mut records = MockVaultRecordStore::new();
+        records.expect_list_synced().returning(|| {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(1),
+                conflict: true,
+            }])
+        });
+        records.expect_load().returning(|_| Ok(None));
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let conflicts = svc.conflicts().await.expect("conflicts");
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].name, "npc:n1");
     }
 }

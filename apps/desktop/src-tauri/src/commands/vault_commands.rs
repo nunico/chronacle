@@ -118,8 +118,103 @@ pub async fn set_vault_path(
 pub async fn vault_sync_now(state: State<'_, Arc<AppState>>) -> Result<ReconcileReportDto, String> {
     let guard = state.vault.read().await;
     let svc = guard.as_ref().ok_or("No vault path configured")?;
-    svc.reconcile()
+    let report = svc.reconcile().await.map_err(|e| e.to_string())?;
+    embed_applied_refs(&state, &report.applied_refs).await;
+    Ok(report.into())
+}
+
+/// One frozen conflict, for the settings list and record-editor banners.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultConflictDto {
+    pub id: String,   // bare id
+    pub kind: String, // table
+    pub name: String,
+    pub key: String,
+    pub sidecar_key: String,
+}
+
+/// Every record currently frozen in conflict. Empty when no vault is configured.
+#[tauri::command]
+pub async fn list_vault_conflicts(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<VaultConflictDto>, String> {
+    let guard = state.vault.read().await;
+    let Some(svc) = guard.as_ref() else {
+        return Ok(vec![]);
+    };
+    Ok(svc
+        .conflicts()
         .await
-        .map(Into::into)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|c| VaultConflictDto {
+            id: c.vref.id,
+            kind: c.vref.table,
+            name: c.name,
+            key: c.key,
+            sidecar_key: c.sidecar_key,
+        })
+        .collect())
+}
+
+/// Re-embed entities whose GM parts just changed inbound. Best-effort — an
+/// embedding failure only means stale semantic search until the next edit.
+pub(crate) async fn embed_applied_refs(state: &AppState, refs: &[chronacle_core::VaultRef]) {
+    for vref in refs {
+        let Ok(kind) = crate::commands::entity_commands::kind_of_table(&vref.table) else {
+            continue; // sessions / rule entries are not entity-embedded
+        };
+        match chronacle_extraction::entity_service::get_by_id(&state.db, &vref.id, kind).await {
+            Ok(node) => {
+                let provider = match state.embedding_provider.read() {
+                    Ok(p) => p.clone(),
+                    Err(_) => return,
+                };
+                if let Err(e) =
+                    chronacle_extraction::entity_service::embed_node(&state.db, &provider, &node)
+                        .await
+                {
+                    eprintln!("vault: re-embed of {} failed: {e}", vref.to_thing());
+                }
+            }
+            Err(e) => eprintln!(
+                "vault: load for re-embed of {} failed: {e}",
+                vref.to_thing()
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Smoke test: the new command functions are referenced so the compiler
+    /// verifies their signatures, imports, and return types.
+    #[test]
+    fn list_vault_conflicts_and_vault_sync_now_commands_compile() {
+        let _ = list_vault_conflicts as fn(_) -> _;
+        let _ = vault_sync_now as fn(_) -> _;
+    }
+
+    /// `VaultConflictDto` serializes with camelCase keys, matching the
+    /// frontend `invoke()` wire contract.
+    #[test]
+    fn vault_conflict_dto_serializes_camel_case() {
+        let dto = VaultConflictDto {
+            id: "n1".to_string(),
+            kind: "npc".to_string(),
+            name: "Seraphina".to_string(),
+            key: "campaigns/sov/entities/npc/seraphina.md".to_string(),
+            sidecar_key: "campaigns/sov/entities/npc/seraphina.conflict.md".to_string(),
+        };
+        let v = serde_json::to_value(&dto).unwrap();
+        assert_eq!(v["id"], "n1");
+        assert_eq!(v["kind"], "npc");
+        assert_eq!(
+            v["sidecarKey"],
+            "campaigns/sov/entities/npc/seraphina.conflict.md"
+        );
+    }
 }

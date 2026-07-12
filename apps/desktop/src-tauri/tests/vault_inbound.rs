@@ -289,3 +289,74 @@ async fn conflict_freezes_then_sidecar_deletion_resolves_to_the_file_version() {
         .unwrap()
         .contains("Vault-side edit."));
 }
+
+/// E5: soft-deleting an entity in the app must sweep its vault file on the
+/// next reconcile — the same orphan-sweep path a hard delete already used.
+#[tokio::test]
+async fn soft_deleting_an_entity_sweeps_its_vault_file_on_reconcile() {
+    let db = db().await;
+    let dir = tempfile::TempDir::new().unwrap();
+    let svc = svc_for(&db, dir.path());
+    svc.reconcile().await.expect("first export");
+
+    let entities_dir = dir.path().join("campaigns/sov/entities/npc");
+    assert_eq!(entities_dir.read_dir().unwrap().count(), 1);
+
+    chronacle_extraction::entity_service::soft_delete(
+        &db,
+        "n1",
+        chronacle_extraction::entity_service::EntityKind::Npc,
+    )
+    .await
+    .expect("soft delete");
+
+    let report = svc.reconcile().await.expect("sweep pass");
+    assert_eq!(report.soft_deleted, 0, "already soft-deleted, not newly so");
+    assert_eq!(report.swept, 1, "orphaned sync row is swept");
+    assert_eq!(
+        entities_dir.read_dir().unwrap().count(),
+        0,
+        "the vault file must be removed"
+    );
+}
+
+/// E5: `VaultSyncService::conflicts()` end-to-end — a genuine two-sided
+/// divergence freezes the record, and `conflicts()` surfaces it with a
+/// resolved display name and the sidecar's key.
+#[tokio::test]
+async fn conflicts_lists_a_frozen_record_end_to_end() {
+    let db = db().await;
+    let dir = tempfile::TempDir::new().unwrap();
+    let svc = svc_for(&db, dir.path());
+    svc.reconcile().await.expect("export");
+
+    assert!(
+        svc.conflicts().await.expect("conflicts").is_empty(),
+        "nothing frozen yet"
+    );
+
+    let path = dir
+        .path()
+        .join("campaigns/sov/entities/npc")
+        .read_dir()
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let content = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("{content}\nVault-side edit.\n")).unwrap();
+    db.query("UPDATE npc:n1 SET notes = 'App-side edit.'")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    svc.reconcile().await.expect("conflict pass");
+
+    let conflicts = svc.conflicts().await.expect("conflicts");
+    assert_eq!(conflicts.len(), 1);
+    assert_eq!(conflicts[0].vref.table, "npc");
+    assert_eq!(conflicts[0].vref.id, "n1");
+    assert_eq!(conflicts[0].name, "Seraphina");
+    assert!(conflicts[0].sidecar_key.ends_with(".conflict.md"));
+}
