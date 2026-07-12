@@ -9,8 +9,8 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use chronacle_core::{
-    EntityRecord, RuleEntryRecord, RulePageRef, SessionRecord, VaultRecord, VaultRecordError,
-    VaultRecordStore, VaultRef, VaultScope,
+    EntityRecord, GmParts, RuleEntryRecord, RulePageRef, SessionRecord, SyncedRow, VaultRecord,
+    VaultRecordError, VaultRecordStore, VaultRef, VaultScope,
 };
 use serde::Deserialize;
 use surrealdb::{engine::any::Any, sql::Thing, Surreal};
@@ -176,13 +176,14 @@ impl VaultRecordStore for SurrealVaultRecordStore {
             }));
         }
 
-        // Rule entries — not soft-deletable in this tranche.
+        // Rule entries.
         let mut response = self
             .db
             .query(
                 "SELECT id, name, category, body, notes, page_refs, collection, \
                      created_at, updated_at \
-                 FROM rule_entry",
+                 FROM rule_entry \
+                 WHERE vault_deleted != true",
             )
             .await
             .map_err(backend_err)?
@@ -275,6 +276,149 @@ impl VaultRecordStore for SurrealVaultRecordStore {
     async fn clear_all_synced(&self) -> Result<(), VaultRecordError> {
         self.db
             .query("DELETE vault_sync_state")
+            .await
+            .map_err(backend_err)?
+            .check()
+            .map_err(backend_err)?;
+        Ok(())
+    }
+
+    async fn list_synced(&self) -> Result<Vec<SyncedRow>, VaultRecordError> {
+        #[derive(Debug, Deserialize)]
+        struct Row {
+            record: String,
+            key: String,
+            synced_hash: String,
+            #[serde(default)]
+            conflict: bool,
+        }
+        let mut response = self
+            .db
+            .query("SELECT record, key, synced_hash, conflict FROM vault_sync_state")
+            .await
+            .map_err(backend_err)?
+            .check()
+            .map_err(backend_err)?;
+        let rows: Vec<Row> = response.take(0).map_err(backend_err)?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                let vref = VaultRef::parse(&r.record)?;
+                Some(SyncedRow {
+                    vref,
+                    key: r.key,
+                    synced_hash: r.synced_hash.parse::<u64>().ok(),
+                    conflict: r.conflict,
+                })
+            })
+            .collect())
+    }
+
+    async fn apply_gm_parts(
+        &self,
+        vref: &VaultRef,
+        parts: &GmParts,
+    ) -> Result<(), VaultRecordError> {
+        // `Option::None` binds as NONE, which SCHEMAFULL `… | NULL` rejects —
+        // bind explicit NULL (same convention as entity_service::update).
+        fn opt(o: &Option<String>) -> surrealdb::sql::Value {
+            o.clone().map_or(surrealdb::sql::Value::Null, Into::into)
+        }
+        match vref.table.as_str() {
+            "session" => {
+                self.db
+                    .query(
+                        "UPDATE type::thing('session', $id) SET \
+                             notes = $notes, updated_at = time::now()",
+                    )
+                    .bind(("id", vref.id.clone()))
+                    .bind(("notes", parts.notes.clone().unwrap_or_default()))
+                    .await
+                    .map_err(backend_err)?
+                    .check()
+                    .map_err(backend_err)?;
+            }
+            "rule_entry" => {
+                self.db
+                    .query("UPDATE type::thing('rule_entry', $id) SET notes = $notes")
+                    .bind(("id", vref.id.clone()))
+                    .bind(("notes", opt(&parts.notes)))
+                    .await
+                    .map_err(backend_err)?
+                    .check()
+                    .map_err(backend_err)?;
+            }
+            table if ENTITY_TABLES.contains(&table) => {
+                self.db
+                    .query(
+                        "UPDATE type::thing($table, $id) SET \
+                             summary = $summary, notes = $notes, \
+                             codex_stale = true, updated_at = time::now()",
+                    )
+                    .bind(("table", table.to_owned()))
+                    .bind(("id", vref.id.clone()))
+                    .bind(("summary", opt(&parts.summary)))
+                    .bind(("notes", opt(&parts.notes)))
+                    .await
+                    .map_err(backend_err)?
+                    .check()
+                    .map_err(backend_err)?;
+                // Keep wikilinks (relates_to edges) consistent with the new notes,
+                // exactly as an in-app edit would (entity_service::update does this).
+                if let Some(notes) = &parts.notes {
+                    if let Ok(Some(VaultRecord::Entity(e))) = self.load(vref).await {
+                        use chronacle_extraction::wikilink::{
+                            parse_and_sync_wikilinks, WikilinkScope,
+                        };
+                        let scope = match &e.scope {
+                            VaultScope::Campaign { id, .. } => {
+                                WikilinkScope::Campaign { campaign_id: id }
+                            }
+                            VaultScope::Collection { id, .. } => {
+                                WikilinkScope::Collection { collection_id: id }
+                            }
+                        };
+                        let _ =
+                            parse_and_sync_wikilinks(&self.db, table, &vref.id, notes, scope).await;
+                    }
+                }
+            }
+            other => {
+                return Err(VaultRecordError::Backend(format!(
+                    "apply_gm_parts: unsupported table {other}"
+                )))
+            }
+        }
+        Ok(())
+    }
+
+    async fn soft_delete(&self, vref: &VaultRef) -> Result<(), VaultRecordError> {
+        self.db
+            .query("UPDATE type::thing($table, $id) SET vault_deleted = true")
+            .bind(("table", vref.table.clone()))
+            .bind(("id", vref.id.clone()))
+            .await
+            .map_err(backend_err)?
+            .check()
+            .map_err(backend_err)?;
+        Ok(())
+    }
+
+    async fn set_conflict(
+        &self,
+        vref: &VaultRef,
+        key: &str,
+        in_conflict: bool,
+    ) -> Result<(), VaultRecordError> {
+        let record = vref.to_thing();
+        self.db
+            .query(
+                "UPSERT type::thing('vault_sync_state', $record) \
+                 SET record = $record, key = $key, conflict = $flag",
+            )
+            .bind(("record", record))
+            .bind(("key", key.to_owned()))
+            .bind(("flag", in_conflict))
             .await
             .map_err(backend_err)?
             .check()
@@ -548,5 +692,104 @@ mod tests {
             id: "nope".into(),
         };
         assert!(store.load(&vref).await.expect("load").is_none());
+    }
+
+    #[tokio::test]
+    async fn apply_gm_parts_updates_only_summary_and_notes() {
+        let db = db().await;
+        seed_campaign_npc(&db).await;
+        let store = SurrealVaultRecordStore::new(db.clone());
+        let vref = VaultRef {
+            table: "npc".into(),
+            id: "n1".into(),
+        };
+
+        store
+            .apply_gm_parts(
+                &vref,
+                &chronacle_core::GmParts {
+                    summary: Some("New summary.".into()),
+                    notes: Some("Edited in Obsidian. [[Iron Tower]]".into()),
+                },
+            )
+            .await
+            .expect("apply");
+
+        let rec = store.load(&vref).await.expect("load").expect("exists");
+        let chronacle_core::VaultRecord::Entity(e) = rec else {
+            panic!("entity")
+        };
+        assert_eq!(e.summary.as_deref(), Some("New summary."));
+        assert_eq!(
+            e.notes.as_deref(),
+            Some("Edited in Obsidian. [[Iron Tower]]")
+        );
+        assert_eq!(e.name, "Seraphina Aldric", "name is never applied inbound");
+        assert_eq!(
+            e.codex_article.as_deref(),
+            Some("Compiled."),
+            "article untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn soft_delete_removes_the_record_from_list_all() {
+        let db = db().await;
+        seed_campaign_npc(&db).await;
+        let store = SurrealVaultRecordStore::new(db);
+        let vref = VaultRef {
+            table: "npc".into(),
+            id: "n1".into(),
+        };
+        store.soft_delete(&vref).await.expect("soft delete");
+        assert!(store.list_all().await.expect("list").is_empty());
+    }
+
+    #[tokio::test]
+    async fn soft_delete_removes_a_rule_entry_from_list_all() {
+        let db = db().await;
+        db.query(
+            "CREATE collection:k1 SET name = 'D&D 5e Core', created_at = time::now(), updated_at = time::now(); \
+             CREATE rule_entry:r1 SET collection = collection:k1, name = 'Grappling', \
+                 category = 'procedure', body = 'Rules text.', compiled_at = time::now();",
+        )
+        .await
+        .expect("seed")
+        .check()
+        .expect("seed response");
+        let store = SurrealVaultRecordStore::new(db);
+        let vref = VaultRef {
+            table: "rule_entry".into(),
+            id: "r1".into(),
+        };
+        store.soft_delete(&vref).await.expect("soft delete");
+        assert!(store.list_all().await.expect("list").is_empty());
+    }
+
+    #[tokio::test]
+    async fn set_conflict_round_trips_through_list_synced_without_a_base() {
+        let db = db().await;
+        seed_campaign_npc(&db).await;
+        let store = SurrealVaultRecordStore::new(db);
+        let vref = VaultRef {
+            table: "npc".into(),
+            id: "n1".into(),
+        };
+
+        store
+            .set_conflict(&vref, "campaigns/c/entities/npc/a.md", true)
+            .await
+            .expect("set");
+        let rows = store.list_synced().await.expect("list");
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].conflict);
+        assert_eq!(rows[0].synced_hash, None, "conflict-only row has no base");
+        assert_eq!(rows[0].key, "campaigns/c/entities/npc/a.md");
+
+        store
+            .set_conflict(&vref, "campaigns/c/entities/npc/a.md", false)
+            .await
+            .expect("clear");
+        assert!(!store.list_synced().await.expect("list")[0].conflict);
     }
 }
