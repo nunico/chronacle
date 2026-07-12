@@ -14,6 +14,12 @@ fn parse_kind(kind: &str) -> Result<EntityKind, EntityError> {
     })
 }
 
+/// Inverse of [`parse_kind`] for a bare table name — table names equal the
+/// serde kind strings, so this is the same lookup.
+pub(crate) fn kind_of_table(table: &str) -> Result<EntityKind, EntityError> {
+    parse_kind(table)
+}
+
 /// Embed an entity's notes for semantic retrieval after a manual create/update.
 ///
 /// Embedding failure is logged but never fails the save — a missing vector only
@@ -86,22 +92,68 @@ pub async fn get_entity(
     entity_service::get_by_id(&state.db, &id, k).await
 }
 
+/// A create must be scoped to exactly one of a campaign or a collection —
+/// never both, never neither. Split out so the XOR rule is unit-testable
+/// without a Tauri `State`.
+fn validate_create_scope(
+    campaign_id: Option<&str>,
+    collection_id: Option<&str>,
+) -> Result<(), EntityError> {
+    if campaign_id.is_some() == collection_id.is_some() {
+        return Err(EntityError::Validation {
+            field: "scope".to_string(),
+            message: "Exactly one of campaignId or collectionId is required".to_string(),
+        });
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn create_entity(
     state: State<'_, Arc<AppState>>,
-    campaign_id: String,
+    campaign_id: Option<String>,
+    collection_id: Option<String>,
     kind: String,
     input: EntityInput,
 ) -> Result<GraphNode, EntityError> {
     let k = parse_kind(&kind)?;
+    validate_create_scope(campaign_id.as_deref(), collection_id.as_deref())?;
     let outbound = state.outbound.read().await.clone();
-    let node = entity_service::create(&state.db, Some(&campaign_id), None, k, input).await?;
+    let node = entity_service::create(
+        &state.db,
+        campaign_id.as_deref(),
+        collection_id.as_deref(),
+        k,
+        input,
+    )
+    .await?;
     outbound.enqueue(chronacle_core::VaultRef {
         table: node.kind.clone(),
         id: node.id.clone(),
     });
     embed_after_save(&state, &node).await;
     Ok(node)
+}
+
+/// Soft-delete: the record disappears from the app and (via the next
+/// reconcile's orphan sweep) from the vault. Hard delete remains `delete_entity`.
+#[tauri::command]
+pub async fn soft_delete_entity(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    kind: String,
+) -> Result<(), EntityError> {
+    let k = parse_kind(&kind)?;
+    entity_service::soft_delete(&state.db, &id, k).await?;
+    // Latency: sweep the vault file now instead of waiting for the next sync.
+    if let Some(svc) = state.vault.read().await.as_ref().map(Arc::clone) {
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = svc.reconcile().await {
+                eprintln!("vault: post-soft-delete reconcile failed: {e}");
+            }
+        });
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -234,6 +286,41 @@ mod tests {
     }
 
     #[test]
+    fn kind_of_table_is_the_inverse_of_parse_kind() {
+        for table in [
+            "npc",
+            "location",
+            "faction",
+            "creature",
+            "item",
+            "event",
+            "player_character",
+            "misc",
+        ] {
+            assert_eq!(kind_of_table(table).unwrap(), parse_kind(table).unwrap());
+        }
+        assert!(
+            kind_of_table("session").is_err(),
+            "sessions are not entities"
+        );
+    }
+
+    #[test]
+    fn validate_create_scope_accepts_exactly_one_of_campaign_or_collection() {
+        assert!(validate_create_scope(Some("camp1"), None).is_ok());
+        assert!(validate_create_scope(None, Some("col1")).is_ok());
+    }
+
+    #[test]
+    fn validate_create_scope_rejects_neither_or_both() {
+        let err = validate_create_scope(None, None).unwrap_err();
+        assert!(matches!(err, EntityError::Validation { field, .. } if field == "scope"));
+
+        let err = validate_create_scope(Some("camp1"), Some("col1")).unwrap_err();
+        assert!(matches!(err, EntityError::Validation { field, .. } if field == "scope"));
+    }
+
+    #[test]
     fn relate_entities_rejects_invalid_from_kind() {
         let err = parse_kind("goblin").unwrap_err();
         assert!(matches!(err, EntityError::InvalidKind { .. }));
@@ -303,5 +390,14 @@ mod tests {
     #[test]
     fn delete_relation_command_compiles() {
         let _ = delete_relation as fn(_, _) -> _;
+    }
+
+    /// Smoke test: `create_entity` and `soft_delete_entity` command functions
+    /// are referenced so the compiler verifies their signatures, imports, and
+    /// return types (including the new `collection_id` parameter).
+    #[test]
+    fn create_and_soft_delete_entity_commands_compile() {
+        let _ = create_entity as fn(_, _, _, _, _) -> _;
+        let _ = soft_delete_entity as fn(_, _, _) -> _;
     }
 }

@@ -240,3 +240,103 @@ pub async fn delete<C: surrealdb::Connection>(
         })?;
     Ok(())
 }
+
+/// Soft-delete: hide the entity from the app and the vault without destroying
+/// it. `delete` (hard) remains for genuine destruction.
+pub async fn soft_delete<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    id: &str,
+    kind: EntityKind,
+) -> Result<(), EntityError> {
+    // `RETURN AFTER` on a nonexistent record returns an empty result set (UPDATE
+    // never creates); deserialize only `id` — the full record contains
+    // `Datetime`/`Thing` fields that `serde_json::Value` cannot deserialize
+    // through the SurrealDB response decoder.
+    #[derive(serde::Deserialize)]
+    struct IdRow {
+        #[allow(dead_code)] // only the row's presence is used, not its content
+        id: surrealdb::sql::Thing,
+    }
+    let mut response = db
+        .query(
+            "UPDATE type::thing($table, $id) SET \
+                 vault_deleted = true, updated_at = time::now() RETURN AFTER",
+        )
+        .bind(("table", kind.table_name()))
+        .bind(("id", id.to_owned()))
+        .await
+        .map_err(|e| EntityError::Database {
+            message: e.to_string(),
+        })?;
+    let rows: Vec<IdRow> = response.take(0).map_err(|e| EntityError::Database {
+        message: e.to_string(),
+    })?;
+    if rows.is_empty() {
+        return Err(EntityError::NotFound { id: id.to_string() });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity_service::crud::{get_by_campaign, get_by_id};
+    use crate::entity_service::EntityInput;
+
+    async fn setup_db() -> surrealdb::Surreal<surrealdb::engine::local::Db> {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        chronacle_db::run_migrations(&db).await.unwrap();
+        db
+    }
+
+    /// After `soft_delete`, the entity must vanish from `get_by_campaign` (the
+    /// app-facing list) and `get_by_id` must report `NotFound` — read paths
+    /// filter `vault_deleted != true`.
+    #[tokio::test]
+    async fn soft_delete_hides_the_entity_from_read_paths() {
+        let db = setup_db().await;
+        db.query(
+            "CREATE campaign SET id='camp1', name='Test', system='5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+        let node = create(
+            &db,
+            Some("camp1"),
+            None,
+            EntityKind::Npc,
+            EntityInput {
+                name: "Torvin".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        soft_delete(&db, &node.id, EntityKind::Npc).await.unwrap();
+
+        let list = get_by_campaign(&db, "camp1", EntityKind::Npc)
+            .await
+            .unwrap();
+        assert!(
+            list.is_empty(),
+            "soft-deleted entity must not appear in get_by_campaign"
+        );
+
+        let err = get_by_id(&db, &node.id, EntityKind::Npc).await.unwrap_err();
+        assert!(matches!(err, EntityError::NotFound { .. }));
+    }
+
+    /// Soft-deleting an unknown id reports `NotFound`, matching `delete`'s
+    /// error shape for a missing record.
+    #[tokio::test]
+    async fn soft_delete_of_unknown_id_returns_not_found() {
+        let db = setup_db().await;
+        let err = soft_delete(&db, "nope", EntityKind::Npc).await.unwrap_err();
+        assert!(matches!(err, EntityError::NotFound { id } if id == "nope"));
+    }
+}

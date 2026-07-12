@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use surrealdb::sql::Thing;
 
 use super::super::{EntityError, EntityKind, GraphNode, GraphNodeRecord, SELECT_SCOPE_ALIASES};
 
@@ -9,7 +10,12 @@ pub async fn get_by_id<C: surrealdb::Connection>(
     kind: EntityKind,
 ) -> Result<GraphNode, EntityError> {
     let table = kind.table_name();
-    let sql = format!("SELECT *, {SELECT_SCOPE_ALIASES} FROM type::thing($table, $id)");
+    // `vault_deleted != true`, never `= false`: DEFAULT does not backfill
+    // pre-migration rows, and `= false` would silently drop them.
+    let sql = format!(
+        "SELECT *, {SELECT_SCOPE_ALIASES} FROM type::thing($table, $id) \
+         WHERE vault_deleted != true"
+    );
     let mut response = db
         .query(sql)
         .bind(("table", table))
@@ -43,10 +49,11 @@ pub async fn get_by_campaign<C: surrealdb::Connection>(
     let sql = format!(
         "SELECT *, {SELECT_SCOPE_ALIASES} \
          FROM type::table($table) \
-         WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $campaign_id)) \
+         WHERE vault_deleted != true \
+           AND (id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $campaign_id)) \
             OR id IN (SELECT VALUE out FROM in_collection \
                       WHERE in IN (SELECT VALUE out FROM subscribes_to \
-                                   WHERE in = type::thing('campaign', $campaign_id))) \
+                                   WHERE in = type::thing('campaign', $campaign_id)))) \
          ORDER BY name ASC"
     );
     let mut response = db
@@ -96,8 +103,9 @@ pub async fn count_by_campaign<C: surrealdb::Connection>(
     campaign_id: &str,
 ) -> Result<std::collections::HashMap<String, u64>, EntityError> {
     #[derive(Deserialize)]
-    struct CountRow {
-        c: u64,
+    struct IdRow {
+        #[allow(dead_code)] // only the row's presence is used, not its content
+        id: Thing,
     }
 
     const ALL_KINDS: [EntityKind; 8] = [
@@ -114,15 +122,15 @@ pub async fn count_by_campaign<C: surrealdb::Connection>(
     let mut counts = std::collections::HashMap::new();
     for kind in ALL_KINDS {
         let table = kind.table_name();
-        let row: Option<CountRow> = db
+        let rows: Vec<IdRow> = db
             .query(
-                "SELECT count() AS c FROM type::table($table) \
-                 WHERE id IN (SELECT VALUE out FROM in_campaign \
+                "SELECT id FROM type::table($table) \
+                 WHERE vault_deleted != true \
+                   AND (id IN (SELECT VALUE out FROM in_campaign \
                               WHERE in = type::thing('campaign', $campaign_id)) \
                     OR id IN (SELECT VALUE out FROM in_collection \
                               WHERE in IN (SELECT VALUE out FROM subscribes_to \
-                                           WHERE in = type::thing('campaign', $campaign_id))) \
-                 GROUP ALL",
+                                           WHERE in = type::thing('campaign', $campaign_id))))",
             )
             .bind(("table", table))
             .bind(("campaign_id", campaign_id.to_owned()))
@@ -134,7 +142,7 @@ pub async fn count_by_campaign<C: surrealdb::Connection>(
             .map_err(|e| EntityError::Database {
                 message: e.to_string(),
             })?;
-        counts.insert(table.to_string(), row.map(|r| r.c).unwrap_or(0));
+        counts.insert(table.to_string(), rows.len() as u64);
     }
     Ok(counts)
 }
@@ -149,7 +157,8 @@ pub async fn get_by_collection<C: surrealdb::Connection>(
     let sql = format!(
         "SELECT *, {SELECT_SCOPE_ALIASES} \
          FROM type::table($table) \
-         WHERE id IN (SELECT VALUE out FROM in_collection WHERE in = type::thing('collection', $collection_id)) \
+         WHERE vault_deleted != true \
+           AND id IN (SELECT VALUE out FROM in_collection WHERE in = type::thing('collection', $collection_id)) \
          ORDER BY name ASC"
     );
     let mut response = db
@@ -179,7 +188,8 @@ pub async fn find_by_name_and_collection<C: surrealdb::Connection>(
     let sql = format!(
         "SELECT *, {SELECT_SCOPE_ALIASES} \
          FROM type::table($table) \
-         WHERE id IN (SELECT VALUE out FROM in_collection WHERE in = type::thing('collection', $collection_id)) \
+         WHERE vault_deleted != true \
+             AND id IN (SELECT VALUE out FROM in_collection WHERE in = type::thing('collection', $collection_id)) \
              AND string::lowercase(name) = string::lowercase($name) \
          LIMIT 1"
     );
@@ -205,7 +215,7 @@ pub async fn get_events_for_session<C: surrealdb::Connection>(
 ) -> Result<Vec<GraphNode>, EntityError> {
     let sql = format!(
         "SELECT *, {SELECT_SCOPE_ALIASES} FROM event \
-         WHERE session = type::thing('session', $session_id)"
+         WHERE vault_deleted != true AND session = type::thing('session', $session_id)"
     );
     let mut response = db
         .query(sql)
