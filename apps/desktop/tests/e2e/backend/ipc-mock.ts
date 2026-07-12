@@ -134,9 +134,12 @@ export async function installIpcMock(
               exported: 0,
               unchanged: 0,
               adopted: 0,
-              deferred_apply: 0,
-              deferred_conflict: 0,
-              deferred_delete: 0,
+              applied: 0,
+              conflicts: 0,
+              resolved: 0,
+              soft_deleted: 0,
+              swept: 0,
+              invalid: 0,
               failed: 0,
             });
           default:

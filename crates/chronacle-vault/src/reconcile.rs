@@ -148,14 +148,25 @@ impl VaultSyncService {
             match decide(base, db, file) {
                 SyncAction::NoOp => report.unchanged += 1,
                 SyncAction::AdoptBase => {
-                    self.records.set_synced_hash(vref, &key, db).await?;
+                    if let Err(e) = self.records.set_synced_hash(vref, &key, db).await {
+                        eprintln!("vault: adopt-base of {} failed: {e}", vref.to_thing());
+                        report.failed += 1;
+                        continue;
+                    }
                     report.adopted += 1;
                 }
                 SyncAction::Export => {
                     self.pending.arm(&key, db);
                     match self.store.write(&key, &rendered).await {
                         Ok(()) => {
-                            self.records.set_synced_hash(vref, &key, db).await?;
+                            if let Err(e) = self.records.set_synced_hash(vref, &key, db).await {
+                                eprintln!(
+                                    "vault: set-synced-hash of {} failed after export: {e}",
+                                    vref.to_thing()
+                                );
+                                report.failed += 1;
+                                continue;
+                            }
                             report.exported += 1;
                         }
                         Err(e) => {
@@ -182,9 +193,30 @@ impl VaultSyncService {
                     }
                 }
                 SyncAction::Conflict => report.conflicts += 1, // E4 materializes this
+                // Identity is the frontmatter `id`. A file that loses its
+                // frontmatter AND is renamed to a name that matches no
+                // record is unattributable here — `key_of` misses (no
+                // parsable id) and `has_key` misses (name differs), so this
+                // arm fires even though the file is still on disk. That is
+                // safe: soft-delete only flips `vault_deleted` (recoverable
+                // in the DB) and the orphan sweep's never-clobber rule
+                // leaves the file untouched since its hash won't match the
+                // base. Recovering it is the deferred "id-less file
+                // adoption" feature, not this arm's job.
                 SyncAction::SoftDelete => {
-                    self.records.soft_delete(vref).await?;
-                    self.records.clear_synced_hash(vref).await?;
+                    if let Err(e) = self.records.soft_delete(vref).await {
+                        eprintln!("vault: soft-delete of {} failed: {e}", vref.to_thing());
+                        report.failed += 1;
+                        continue;
+                    }
+                    if let Err(e) = self.records.clear_synced_hash(vref).await {
+                        eprintln!(
+                            "vault: clear-synced-hash of {} failed after soft-delete: {e}",
+                            vref.to_thing()
+                        );
+                        report.failed += 1;
+                        continue;
+                    }
                     report.soft_deleted += 1;
                 }
             }
@@ -216,7 +248,14 @@ impl VaultSyncService {
                     continue;
                 }
             }
-            self.records.clear_synced_hash(&row.vref).await?;
+            if let Err(e) = self.records.clear_synced_hash(&row.vref).await {
+                eprintln!(
+                    "vault: clear-synced-hash of {} failed during orphan sweep: {e}",
+                    row.vref.to_thing()
+                );
+                report.failed += 1;
+                continue;
+            }
             report.swept += 1;
         }
 
@@ -818,6 +857,61 @@ mod tests {
         );
     }
 
+    /// A file that loses both its frontmatter id AND its expected filename
+    /// (renamed and corrupted in the same GM edit) is unattributable: `key_of`
+    /// misses because there is no parsable id, and `has_key` misses because
+    /// the name no longer matches the computed slug. `decide` sees no file
+    /// and soft-deletes the record. That is safe and non-destructive — it
+    /// only flips `vault_deleted` (recoverable) — and the file itself, still
+    /// sitting on disk under its new name, is never touched. Recovering it is
+    /// the deferred "id-less file adoption" feature, not this arm's job.
+    #[tokio::test]
+    async fn a_renamed_and_corrupted_file_soft_deletes_the_record_but_never_touches_the_file() {
+        const RENAMED_CORRUPT_KEY: &str = "campaigns/sov/entities/npc/renamed-corrupt.md";
+
+        let mut store = MockVaultStore::new();
+        store
+            .expect_list()
+            .returning(|_| Ok(vec![RENAMED_CORRUPT_KEY.to_string()]));
+        // Scanned once to build the index; unparsable, so it lands only in
+        // `managed_keys`, never in `by_ref`.
+        store
+            .expect_read()
+            .withf(|k| k == RENAMED_CORRUPT_KEY)
+            .returning(|_| Ok("no frontmatter, and not named seraphina.md either".to_string()));
+        store.expect_write().never();
+        store.expect_delete().never();
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_list_all()
+            .returning(|| Ok(vec![npc(Some("A."))]));
+        records.expect_list_synced().returning(|| {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(123),
+                conflict: false,
+            }])
+        });
+        records.expect_soft_delete().times(1).returning(|_| Ok(()));
+        records
+            .expect_clear_synced_hash()
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let report = svc.reconcile().await.expect("reconcile");
+        assert_eq!(report.soft_deleted, 1);
+    }
+
     #[tokio::test]
     async fn reconcile_reports_an_io_failure_without_aborting_the_run() {
         let mut store = MockVaultStore::new();
@@ -844,6 +938,77 @@ mod tests {
             .expect("a failing key must not fail the run");
         assert_eq!(report.exported, 0);
         assert_eq!(report.failed, 1);
+    }
+
+    /// A failing `soft_delete` on one record must be logged and counted, not
+    /// let abort the whole pass — the SoftDelete arm must treat DB errors the
+    /// same way Export/Apply already do.
+    #[tokio::test]
+    async fn reconcile_continues_past_a_failing_soft_delete() {
+        const KEY2: &str = "campaigns/sov/entities/npc/second.md";
+        let second = VaultRecord::Entity(EntityRecord {
+            vref: VaultRef {
+                table: "npc".into(),
+                id: "n2".into(),
+            },
+            name: "Second".into(),
+            summary: None,
+            notes: None,
+            codex_article: None,
+            scope: VaultScope::Campaign {
+                id: "campaign:c1".into(),
+                name: "SoV".into(),
+            },
+            created_at: "x".into(),
+            updated_at: "y".into(),
+        });
+
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![]));
+        store
+            .expect_write()
+            .withf(|k, _| k == KEY2)
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_list_all()
+            .returning(move || Ok(vec![npc(Some("A.")), second.clone()]));
+        records.expect_list_synced().returning(|| {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(123),
+                conflict: false,
+            }])
+        });
+        records
+            .expect_soft_delete()
+            .times(1)
+            .returning(|_| Err(chronacle_core::VaultRecordError::Backend("db down".into())));
+        records.expect_clear_synced_hash().never(); // soft_delete failed first — never called
+        records
+            .expect_set_synced_hash()
+            .withf(|_, k, _| k == KEY2)
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let report = svc
+            .reconcile()
+            .await
+            .expect("a failing soft-delete must not fail the run");
+        assert_eq!(report.soft_deleted, 0);
+        assert_eq!(report.failed, 1);
+        assert_eq!(report.exported, 1, "the second record is still processed");
     }
 
     // -- export_one -----------------------------------------------------
