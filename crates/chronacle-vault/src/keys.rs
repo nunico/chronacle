@@ -549,7 +549,17 @@ impl VaultIndex {
                 continue;
             }
             managed_keys.insert(key.clone());
-            let content = store.read(&key).await?;
+            // An unreadable file must not abort the scan — one bad file would
+            // otherwise block every record in the vault from ever syncing. It
+            // stays in `managed_keys`, so it still reads as "a file exists
+            // here" and can never be mistaken for a GM deletion.
+            let content = match store.read(&key).await {
+                Ok(content) => content,
+                Err(e) => {
+                    eprintln!("vault: index scan could not read {key}: {e}");
+                    continue;
+                }
+            };
             let Ok((fm, _)) = crate::frontmatter::parse(&content) else {
                 continue;
             };
