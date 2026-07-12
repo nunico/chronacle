@@ -222,3 +222,70 @@ async fn gm_edit_round_trips_through_reconcile_into_the_db() {
     let report = svc.reconcile().await.expect("settle");
     assert_eq!(report.unchanged, 1);
 }
+
+#[tokio::test]
+async fn conflict_freezes_then_sidecar_deletion_resolves_to_the_file_version() {
+    let db = db().await;
+    let dir = tempfile::TempDir::new().unwrap();
+    let svc = svc_for(&db, dir.path());
+    svc.reconcile().await.expect("export");
+
+    let path = dir
+        .path()
+        .join("campaigns/sov/entities/npc")
+        .read_dir()
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+
+    // Diverge BOTH sides: edit the file, and edit the DB notes.
+    let content = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("{content}\nVault-side edit.\n")).unwrap();
+    db.query("UPDATE npc:n1 SET notes = 'App-side edit.'")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+
+    let report = svc.reconcile().await.expect("conflict pass");
+    assert_eq!(report.conflicts, 1);
+    let sidecar = path.with_file_name(format!(
+        "{}.conflict.md",
+        path.file_stem().unwrap().to_str().unwrap()
+    ));
+    assert!(sidecar.exists(), "DB version preserved in the sidecar");
+    assert!(std::fs::read_to_string(&sidecar)
+        .unwrap()
+        .contains("App-side edit."));
+
+    // Frozen: another pass changes nothing, file untouched.
+    let report = svc.reconcile().await.expect("frozen pass");
+    assert_eq!(report.conflicts, 1);
+    assert!(std::fs::read_to_string(&path)
+        .unwrap()
+        .contains("Vault-side edit."));
+
+    // GM resolves by deleting the sidecar.
+    std::fs::remove_file(&sidecar).unwrap();
+    let report = svc.reconcile().await.expect("resolution pass");
+    assert_eq!(report.resolved, 1);
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        notes: Option<String>,
+    }
+    let mut resp = db
+        .query("SELECT notes FROM npc:n1")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    let rows: Vec<Row> = resp.take(0).unwrap();
+    assert!(rows[0]
+        .notes
+        .as_deref()
+        .unwrap()
+        .contains("Vault-side edit."));
+}
