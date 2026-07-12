@@ -203,6 +203,9 @@ pub trait VaultRecordStore: Send + Sync {
     ) -> Result<(), VaultRecordError>;
     /// Clear the persisted merge base, e.g. after a soft delete.
     async fn clear_synced_hash(&self, vref: &VaultRef) -> Result<(), VaultRecordError>;
+    /// Wipe every persisted merge base (all `vault_sync_state` rows).
+    /// Used when the vault path changes: the new directory gets a fresh baseline.
+    async fn clear_all_synced(&self) -> Result<(), VaultRecordError>;
 }
 
 #[cfg(test)]

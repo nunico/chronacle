@@ -53,9 +53,23 @@ pub async fn set_vault_path(
 ) -> Result<(), String> {
     match vault_path {
         Some(path) if !path.is_empty() => {
-            settings_service::upsert(&state.db, "vault_sync_path", &path).await?;
-            let svc = build_vault_service(state.db.clone(), &path);
+            let previous = settings_service::get_all(&state.db)
+                .await?
+                .into_iter()
+                .find(|s| s.key == "vault_sync_path")
+                .map(|s| s.value)
+                .filter(|v| !v.is_empty());
+
+            let (svc, _pending) = build_vault_service(state.db.clone(), &path);
+            // Fresh baseline: a different directory must never inherit the old
+            // dir's bases, or every record reads as SoftDelete (L2).
+            if previous.as_deref() != Some(path.as_str()) {
+                svc.clear_all_bases().await.map_err(|e| e.to_string())?;
+            }
             svc.reconcile().await.map_err(|e| e.to_string())?;
+            // Persist only after the reconcile succeeded; on failure the old
+            // path and old bases remain in force.
+            settings_service::upsert(&state.db, "vault_sync_path", &path).await?;
             // Rebuild the queue and respawn the drain before publishing either
             // handle, so no producer can enqueue onto a channel with no drain.
             let new_outbound = spawn_outbound(Arc::clone(&svc));

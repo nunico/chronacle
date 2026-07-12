@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use chronacle_domain::vault_record_store::SurrealVaultRecordStore;
 use chronacle_providers::vault_store::LocalFsVaultStore;
+use chronacle_vault::outbound::PendingWrites;
 use chronacle_vault::reconcile::VaultSyncService;
 use tempfile::TempDir;
 
@@ -39,6 +40,7 @@ async fn reconcile_writes_one_file_per_record_with_resolving_aliases() {
     let svc = VaultSyncService::new(
         Arc::new(LocalFsVaultStore::new(dir.path())),
         Arc::new(SurrealVaultRecordStore::new(db)),
+        Arc::new(PendingWrites::default()),
     );
 
     let report = svc.reconcile().await.expect("reconcile");
@@ -72,6 +74,7 @@ async fn a_second_reconcile_writes_nothing() {
     let svc = VaultSyncService::new(
         Arc::new(LocalFsVaultStore::new(dir.path())),
         Arc::new(SurrealVaultRecordStore::new(db)),
+        Arc::new(PendingWrites::default()),
     );
 
     assert_eq!(svc.reconcile().await.expect("first").exported, 1);
@@ -95,6 +98,7 @@ async fn reconcile_skips_soft_deleted_records() {
     let svc = VaultSyncService::new(
         Arc::new(LocalFsVaultStore::new(dir.path())),
         Arc::new(SurrealVaultRecordStore::new(db)),
+        Arc::new(PendingWrites::default()),
     );
     assert_eq!(svc.reconcile().await.expect("reconcile").exported, 0);
     assert!(
@@ -122,6 +126,7 @@ async fn a_shared_collection_entity_is_written_once_under_collections() {
     let svc = VaultSyncService::new(
         Arc::new(LocalFsVaultStore::new(dir.path())),
         Arc::new(SurrealVaultRecordStore::new(db)),
+        Arc::new(PendingWrites::default()),
     );
     assert_eq!(svc.reconcile().await.expect("reconcile").exported, 1);
     assert!(dir
