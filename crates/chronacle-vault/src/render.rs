@@ -216,4 +216,55 @@ mod tests {
     fn render_record_is_deterministic() {
         assert_eq!(render_record(&npc()), render_record(&npc()));
     }
+
+    /// Locks the exact byte layout of the frontmatter/body seam. A drive-by
+    /// whitespace change here would re-hash every synced file as "changed"
+    /// and force a spurious full re-export.
+    #[test]
+    fn rendered_record_layout_is_stable_at_the_seam() {
+        use pretty_assertions::assert_eq;
+        let record = VaultRecord::Entity(EntityRecord {
+            vref: VaultRef {
+                table: "npc".into(),
+                id: "n1".into(),
+            },
+            name: "Seraphina".into(),
+            summary: Some("S.".into()),
+            notes: Some("N.".into()),
+            codex_article: Some("C.".into()),
+            scope: VaultScope::Campaign {
+                id: "campaign:c1".into(),
+                name: "SoV".into(),
+            },
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-02T00:00:00Z".into(),
+        });
+        let rendered = render_record(&record);
+        // Pin the FULL literal: run the test once, paste the actual output
+        // here verbatim, and review that it is what the grammar promises
+        // (frontmatter fences, one blank line, Summary, fenced article, Notes).
+        let expected = "---\n\
+             id: \"npc:n1\"\n\
+             name: \"Seraphina\"\n\
+             title: \"Seraphina\"\n\
+             aliases: [\"Seraphina\"]\n\
+             type: \"npc\"\n\
+             campaign: \"SoV\"\n\
+             created_at: \"2026-01-01T00:00:00Z\"\n\
+             updated_at: \"2026-01-02T00:00:00Z\"\n\
+             ---\n\
+             \n\
+             ## Summary\n\
+             \n\
+             S.\n\
+             \n\
+             <!-- chronacle:codex-article start -- compiled; edits are not applied -->\n\
+             C.\n\
+             <!-- chronacle:codex-article end -->\n\
+             \n\
+             ## Notes\n\
+             \n\
+             N.\n";
+        assert_eq!(rendered, expected);
+    }
 }

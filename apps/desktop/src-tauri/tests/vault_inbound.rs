@@ -132,9 +132,10 @@ async fn resubmitting_the_same_path_preserves_the_base_and_exports_an_edit() {
 fn failing_svc(db: &surrealdb::Surreal<surrealdb::engine::any::Any>) -> Arc<VaultSyncService> {
     let mut store = chronacle_core::MockVaultStore::new();
     store.expect_list().returning(|_| {
-        Err(VaultStoreError::Io(
-            "simulated: cannot read vault root".into(),
-        ))
+        Err(VaultStoreError::Io {
+            kind: std::io::ErrorKind::Other,
+            message: "simulated: cannot read vault root".into(),
+        })
     });
     Arc::new(VaultSyncService::new(
         Arc::new(store),

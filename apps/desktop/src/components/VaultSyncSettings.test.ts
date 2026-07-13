@@ -26,9 +26,7 @@ describe('VaultSyncSettings', () => {
   it('disables Sync now when no vault is configured', async () => {
     vi.spyOn(commands, 'getVaultPath').mockResolvedValue(null);
     render(VaultSyncSettings);
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /sync now/i })).toBeDisabled(),
-    );
+    await waitFor(() => expect(screen.getByRole('button', { name: /sync now/i })).toBeDisabled());
   });
 
   it('reports the export count after a successful sync', async () => {
@@ -148,6 +146,16 @@ describe('VaultSyncSettings', () => {
     // The conflict raised by the sync must show up without a reload.
     expect(await screen.findByText('Seraphina Aldric')).toBeInTheDocument();
     expect(listConflicts.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('renders an error and does not claim success when a sync fails', async () => {
+    vi.spyOn(commands, 'getVaultPath').mockResolvedValue('/Users/gm/Vault');
+    vi.spyOn(commands, 'vaultSyncNow').mockRejectedValue(new Error('disk full'));
+    render(VaultSyncSettings);
+    await userEvent.click(await screen.findByRole('button', { name: /sync now/i }));
+    expect(await screen.findByText(/sync failed/i)).toBeInTheDocument();
+    expect(screen.getByText(/disk full/i)).toBeInTheDocument();
+    expect(screen.queryByText(/exported/i)).not.toBeInTheDocument();
   });
 
   it('survives a failure to load the conflict list', async () => {

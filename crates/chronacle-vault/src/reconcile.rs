@@ -1015,7 +1015,10 @@ mod tests {
         store.expect_list().returning(|_| Ok(vec![BAD.to_string()]));
         store.expect_read().returning(|k| {
             if k == BAD {
-                Err(VaultStoreError::Io("permission denied".into()))
+                Err(VaultStoreError::Io {
+                    kind: std::io::ErrorKind::Other,
+                    message: "permission denied".into(),
+                })
             } else {
                 Ok(String::new())
             }
@@ -1209,9 +1212,12 @@ mod tests {
     async fn reconcile_reports_an_io_failure_without_aborting_the_run() {
         let mut store = MockVaultStore::new();
         store.expect_list().returning(|_| Ok(vec![]));
-        store
-            .expect_write()
-            .returning(|_, _| Err(VaultStoreError::Io("disk full".into())));
+        store.expect_write().returning(|_, _| {
+            Err(VaultStoreError::Io {
+                kind: std::io::ErrorKind::Other,
+                message: "disk full".into(),
+            })
+        });
 
         let mut records = MockVaultRecordStore::new();
         records
