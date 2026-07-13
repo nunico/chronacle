@@ -169,7 +169,13 @@ pub(crate) async fn embed_applied_refs(state: &AppState, refs: &[chronacle_core:
             Ok(node) => {
                 let provider = match state.embedding_provider.read() {
                     Ok(p) => p.clone(),
-                    Err(_) => return,
+                    Err(_) => {
+                        eprintln!(
+                            "vault: re-embed of {} skipped: embedding_provider lock poisoned",
+                            vref.to_thing()
+                        );
+                        continue;
+                    }
                 };
                 if let Err(e) =
                     chronacle_extraction::entity_service::embed_node(&state.db, &provider, &node)

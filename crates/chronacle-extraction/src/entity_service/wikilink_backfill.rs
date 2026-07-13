@@ -39,7 +39,12 @@ pub async fn resync_all_wikilinks<C: surrealdb::Connection>(
     let mut processed = 0usize;
 
     for table in TABLES {
-        let query = format!("SELECT id, notes, {SELECT_SCOPE_ALIASES} FROM {table}");
+        // `vault_deleted != true`, never `= false`: a soft-deleted entity's
+        // notes must not be parsed for wikilinks — that would create NEW
+        // `relates_to` edges to/from a record the GM deleted.
+        let query = format!(
+            "SELECT id, notes, {SELECT_SCOPE_ALIASES} FROM {table} WHERE vault_deleted != true"
+        );
         let mut resp = db.query(query).await.map_err(|e| EntityError::Database {
             message: e.to_string(),
         })?;

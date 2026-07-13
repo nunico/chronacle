@@ -228,6 +228,65 @@ async fn fetch_entity_context_knn_over_collection_executes() {
     );
 }
 
+/// Regression test: `vault_deleted != true` was added to the KNN branch's
+/// WHERE clause. Verify it (a) still returns the live entity and (b) actually
+/// excludes a soft-deleted one, since a plain field predicate could in
+/// principle interact badly with the MTREE `<|K|>` operator the way an
+/// `id IN (SELECT ...)` subquery does.
+#[tokio::test]
+async fn fetch_entity_context_knn_over_collection_omits_soft_deleted() {
+    let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+        .await
+        .unwrap();
+    db.use_ns("test").use_db("test").await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
+
+    let embedding: Vec<f32> = (0..768).map(|i| (i as f32) * 0.001).collect();
+    let vec_str = embedding
+        .iter()
+        .map(|f| f.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    db.query(
+        "CREATE campaign SET id='camp1', name='Test', system='D&D 5e', \
+         created_at=time::now(), updated_at=time::now(); \
+         CREATE collection SET id='col1', name='Lore', \
+         created_at=time::now(), updated_at=time::now()",
+    )
+    .await
+    .unwrap();
+    db.query(format!(
+        "CREATE npc SET id='npc1', name='Seraphine', summary='oracle', notes=NULL, \
+         embedding=[{vec_str}], embed_model='test', \
+         created_at=time::now(), updated_at=time::now(); \
+         LET $src = type::thing('collection','col1'); \
+         LET $dst = type::thing('npc','npc1'); \
+         RELATE $src->in_collection->$dst SET created_at = time::now(); \
+         CREATE npc SET id='npc2', name='Gone', summary='ghost', notes=NULL, \
+         vault_deleted=true, \
+         embedding=[{vec_str}], embed_model='test', \
+         created_at=time::now(), updated_at=time::now(); \
+         LET $src2 = type::thing('collection','col1'); \
+         LET $dst2 = type::thing('npc','npc2'); \
+         RELATE $src2->in_collection->$dst2 SET created_at = time::now()"
+    ))
+    .await
+    .unwrap();
+
+    let result = fetch_entity_context(&db, "camp1", &["col1".to_string()], Some(&embedding))
+        .await
+        .expect("entity-context KNN query must be valid SurrealQL");
+    assert!(
+        result.contains("[npc] Seraphine"),
+        "live collection entity missing from KNN result: {result}"
+    );
+    assert!(
+        !result.contains("Gone"),
+        "soft-deleted entity leaked into KNN RAG context: {result}"
+    );
+}
+
 #[tokio::test]
 async fn entity_with_codex_article_contributes_excerpt_instead_of_summary() {
     let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
