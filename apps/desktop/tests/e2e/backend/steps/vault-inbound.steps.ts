@@ -186,16 +186,27 @@ When(
 
 When('the GM deletes the conflict sidecar', async ({ page }) => {
   const name = names.get(page) ?? 'Seraphina Aldric';
-  // The GM's resolution signal; the next sync applies the vault's version and
-  // clears the conflict.
-  await installIpcMock(page, {
-    get_vault_path: VAULT_PATH,
-    get_entities: [entityNode(name, VAULT_VERSION_NOTES)],
-    get_entity_counts: { npc: 1 },
-    get_entity_relations: [],
-    list_vault_conflicts: [],
-    vault_sync_now: { ...defaultReport(), resolved: 1 },
-  });
+  // The GM's resolution signal. Deleting the sidecar changes nothing on its
+  // own: until a sync runs, the record is still frozen in conflict and still
+  // carries Chronacle's version. Only once the mock observes vault_sync_now
+  // does it serve the resolved state (conflict cleared, vault's version
+  // adopted) — so both `Then` steps fail if the sync click is removed (see the
+  // module-level causality note).
+  await installIpcMock(
+    page,
+    {
+      get_vault_path: VAULT_PATH,
+      get_entities: [entityNode(name, ORIGINAL_NOTES)],
+      get_entity_counts: { npc: 1 },
+      get_entity_relations: [],
+      list_vault_conflicts: [conflictEntry(name)],
+      vault_sync_now: { ...defaultReport(), resolved: 1 },
+    },
+    {
+      get_entities: [entityNode(name, VAULT_VERSION_NOTES)],
+      list_vault_conflicts: [],
+    },
+  );
 });
 
 When('the GM deletes the vault file of {string}', async ({ page }, name: string) => {
@@ -286,7 +297,16 @@ Then('the entity {string} has the vault version in Chronacle', async ({ page }, 
 });
 
 Then('no conflict is listed for {string}', async ({ page }, _name: string) => {
-  expect(await page.locator('.conflicts-section').count()).toBe(0);
+  // The previous `Then` left the entity form open in the manager view, where a
+  // conflicts list could never render anyway — so assert against the vault
+  // panel itself: close the form, go back to Settings, and require the freshly
+  // re-fetched conflict list to be empty. Before the sync, that same panel
+  // still lists the frozen record, so this fails if the sync never ran.
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.locator('form[aria-label="entity form"]')).toBeHidden();
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('heading', { name: 'Markdown vault' })).toBeVisible();
+  await expect(page.locator('.conflicts-section')).toHaveCount(0);
 });
 
 Then('{string} is no longer visible in Chronacle', async ({ page }, name: string) => {
