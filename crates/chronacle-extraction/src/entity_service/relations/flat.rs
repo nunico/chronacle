@@ -132,8 +132,11 @@ pub async fn get_entity_relations<C: surrealdb::Connection>(
             .iter()
             .map(|i| Thing::from((table.as_str(), i.as_str())))
             .collect();
+        // `vault_deleted != true`, never `= false`: a soft-deleted entity must
+        // not appear in the flat relations list even when a live entity still
+        // has an edge to it.
         let mut r = db
-            .query("SELECT id, name FROM type::table($table) WHERE id IN $ids")
+            .query("SELECT id, name FROM type::table($table) WHERE id IN $ids AND vault_deleted != true")
             .bind(("table", table.clone()))
             .bind(("ids", things))
             .await

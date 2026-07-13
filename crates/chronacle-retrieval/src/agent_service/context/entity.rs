@@ -19,16 +19,19 @@ pub async fn fetch_entity_context<C: Connection>(
     query_embedding: Option<&[f32]>,
 ) -> Result<String, AgentError> {
     // ── Campaign entities (always full scan) ─────────────────────────────────
+    // `vault_deleted != true`, never `= false`: DEFAULT does not backfill
+    // pre-migration rows, and `= false` would silently drop them. A
+    // soft-deleted entity must never be quoted back to the GM in a chat answer.
     let mut resp = db
-        .query("SELECT name, summary, notes, player_name, character_class, character_level, status, codex_article FROM player_character WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes, codex_article FROM npc WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes, codex_article FROM location WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes, codex_article FROM faction WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes, codex_article FROM creature WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes, codex_article FROM item WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes, date_start, date_end, codex_article FROM event WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT name, summary, notes, codex_article FROM misc WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
-        .query("SELECT title, notes, date_played, session_number FROM session WHERE campaign = type::thing('campaign', $cid) ORDER BY session_number ASC")
+        .query("SELECT name, summary, notes, player_name, character_class, character_level, status, codex_article FROM player_character WHERE vault_deleted != true AND id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, codex_article FROM npc WHERE vault_deleted != true AND id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, codex_article FROM location WHERE vault_deleted != true AND id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, codex_article FROM faction WHERE vault_deleted != true AND id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, codex_article FROM creature WHERE vault_deleted != true AND id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, codex_article FROM item WHERE vault_deleted != true AND id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, date_start, date_end, codex_article FROM event WHERE vault_deleted != true AND id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT name, summary, notes, codex_article FROM misc WHERE vault_deleted != true AND id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $cid)) ORDER BY name ASC")
+        .query("SELECT title, notes, date_played, session_number FROM session WHERE vault_deleted != true AND campaign = type::thing('campaign', $cid) ORDER BY session_number ASC")
         .bind(("cid", campaign_id.to_owned()))
         .await
         .map_err(|e| AgentError::Db(e.to_string()))?;
@@ -84,16 +87,22 @@ pub async fn fetch_entity_context<C: Connection>(
                     .join(",");
                 // KNN pattern: the `<|K|>` operator must live in WHERE to activate
                 // the index; ordering is by the computed distance.
+                // `vault_deleted != true` is a plain field predicate (not an
+                // `id IN (SELECT ...)` subquery), which composes fine with the
+                // MTREE KNN operator — verified by
+                // `fetch_entity_context_knn_over_collection_omits_soft_deleted`.
                 format!(
                     "SELECT name, summary, notes, codex_article, vector::distance::knn() AS distance \
                      FROM {table} \
-                     WHERE embedding <|10|> [{vec_str}] AND ({col_filter}) \
+                     WHERE embedding <|10|> [{vec_str}] AND vault_deleted != true AND ({col_filter}) \
                      ORDER BY distance ASC LIMIT 10"
                 )
             } else {
                 // Full scan fallback (no embedding provider / test paths).
+                // `vault_deleted != true`, never `= false` — see module note above.
                 format!(
-                    "SELECT name, summary, notes, codex_article FROM {table} WHERE {col_filter} LIMIT 50"
+                    "SELECT name, summary, notes, codex_article FROM {table} \
+                     WHERE vault_deleted != true AND ({col_filter}) LIMIT 50"
                 )
             };
             let mut r = db

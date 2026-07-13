@@ -2,8 +2,18 @@
 -- DEFINE-only. `run_migrations` re-executes this file on every boot; a REMOVE
 -- here would wipe live data on every restart.
 --
--- NOTE: `DEFAULT false` does NOT backfill rows written before this migration.
--- Every read path must filter `vault_deleted != true`, never `= false`.
+-- ## Soft delete
+-- A soft-deleted record (`vault_deleted = true`) is a record the GM deleted
+-- from their vault. The promise to the GM is absolute: it is GONE from the
+-- app — no lists, graphs, timelines, search results, or LLM/RAG context.
+-- EVERY query that reads from `npc`, `location`, `faction`, `creature`,
+-- `item`, `event`, `player_character`, `misc`, `session`, or `rule_entry`
+-- MUST filter `vault_deleted != true`, NEVER `= false`. `DEFAULT false` does
+-- NOT backfill rows written before this migration — those rows have no value
+-- at all, and `= false` silently drops them. This has already regressed
+-- twice (a full entity_service sweep, then a RAG/graph/wikilink sweep); when
+-- adding a new read path, filter it or add it to the invariant test in
+-- `apps/desktop/src-tauri/tests/`.
 
 DEFINE FIELD OVERWRITE vault_deleted ON TABLE npc              TYPE bool DEFAULT false;
 DEFINE FIELD OVERWRITE vault_deleted ON TABLE location         TYPE bool DEFAULT false;
