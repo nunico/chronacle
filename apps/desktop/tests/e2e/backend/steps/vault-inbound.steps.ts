@@ -11,6 +11,19 @@ import { installIpcMock } from '../ipc-mock';
 // backend returns. See the `# backend:` comments in vault-inbound.feature for
 // the Rust tests that prove the deep half (the actual file write, fence
 // revert, sidecar bytes, and DB round-trip).
+//
+// NOTE on causality: unlike vault-sync.steps.ts (D4b), which asserts the
+// *arguments* of a dispatched IPC call — a check that is causal by
+// construction — several scenarios here can only assert *rendered mock
+// echo* (what get_entities / list_vault_conflicts return on a later read).
+// A naive single `installIpcMock` call bakes that "post-sync" data in at
+// the very first `page.goto('/')`, before the sync ever runs, which makes
+// the assertion pass even with the sync button wired to a no-op. Where that
+// applies, the `When` step below passes a `postSyncOverrides` argument to
+// `installIpcMock`: the mock only starts serving that data once it has
+// itself observed a `vault_sync_now` dispatch, so the `Then` step's
+// rendered-echo check is causally gated on the click, not merely coincident
+// with it.
 
 const VAULT_PATH = '/Users/gm/Vault';
 const ORIGINAL_NOTES = 'Original notes.';
@@ -115,15 +128,23 @@ Given('an entity {string} frozen in conflict', async ({ page }, name: string) =>
 });
 
 When('the GM edits the notes of {string} in the vault', async ({ page }, name: string) => {
-  // External vault edit; reconfigure so the next sync's refetch reflects it.
-  await installIpcMock(page, {
-    get_vault_path: VAULT_PATH,
-    get_entities: [entityNode(name, EDITED_NOTES)],
-    get_entity_counts: { npc: 1 },
-    get_entity_relations: [],
-    list_vault_conflicts: [],
-    vault_sync_now: { ...defaultReport(), applied: 1 },
-  });
+  // External vault edit: the mock still serves the ORIGINAL notes until it
+  // observes vault_sync_now, so "Then the entity has the edited notes" fails
+  // if the sync click is removed (see the module-level causality note).
+  await installIpcMock(
+    page,
+    {
+      get_vault_path: VAULT_PATH,
+      get_entities: [entityNode(name, ORIGINAL_NOTES)],
+      get_entity_counts: { npc: 1 },
+      get_entity_relations: [],
+      list_vault_conflicts: [],
+      vault_sync_now: { ...defaultReport(), applied: 1 },
+    },
+    {
+      get_entities: [entityNode(name, EDITED_NOTES)],
+    },
+  );
 });
 
 When('the GM edits inside the compiled block of {string}', async ({ page }, name: string) => {
@@ -142,14 +163,24 @@ When('the GM edits inside the compiled block of {string}', async ({ page }, name
 When(
   'both Chronacle and the vault file of {string} are edited differently',
   async ({ page }, name: string) => {
-    await installIpcMock(page, {
-      get_vault_path: VAULT_PATH,
-      get_entities: [entityNode(name, ORIGINAL_NOTES)],
-      get_entity_counts: { npc: 1 },
-      get_entity_relations: [],
-      list_vault_conflicts: [conflictEntry(name)],
-      vault_sync_now: { ...defaultReport(), conflicts: 1 },
-    });
+    // No conflict is listed until the mock observes vault_sync_now, so "Then
+    // ... list X as a conflict" fails if the sync click is removed — that
+    // conflict row is otherwise loaded by a mount-time effect independent of
+    // the click (see the module-level causality note).
+    await installIpcMock(
+      page,
+      {
+        get_vault_path: VAULT_PATH,
+        get_entities: [entityNode(name, ORIGINAL_NOTES)],
+        get_entity_counts: { npc: 1 },
+        get_entity_relations: [],
+        list_vault_conflicts: [],
+        vault_sync_now: { ...defaultReport(), conflicts: 1 },
+      },
+      {
+        list_vault_conflicts: [conflictEntry(name)],
+      },
+    );
   },
 );
 
@@ -169,15 +200,26 @@ When('the GM deletes the conflict sidecar', async ({ page }) => {
 
 When('the GM deletes the vault file of {string}', async ({ page }, name: string) => {
   names.set(page, name);
-  // Soft-deleted entities are hidden from every read path (E5).
-  await installIpcMock(page, {
-    get_vault_path: VAULT_PATH,
-    get_entities: [],
-    get_entity_counts: { npc: 0 },
-    get_entity_relations: [],
-    list_vault_conflicts: [],
-    vault_sync_now: { ...defaultReport(), soft_deleted: 1 },
-  });
+  // Soft-deleted entities are hidden from every read path (E5). The mock
+  // still lists the entity until it observes vault_sync_now, so "Then X is
+  // no longer visible" fails if the sync click is removed — get_entities is
+  // otherwise loaded by a mount-time effect independent of the click (see
+  // the module-level causality note).
+  await installIpcMock(
+    page,
+    {
+      get_vault_path: VAULT_PATH,
+      get_entities: [entityNode(name, ORIGINAL_NOTES)],
+      get_entity_counts: { npc: 1 },
+      get_entity_relations: [],
+      list_vault_conflicts: [],
+      vault_sync_now: { ...defaultReport(), soft_deleted: 1 },
+    },
+    {
+      get_entities: [],
+      get_entity_counts: { npc: 0 },
+    },
+  );
 });
 
 When('a sync runs', async ({ page }) => {

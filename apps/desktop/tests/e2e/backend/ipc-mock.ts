@@ -11,14 +11,22 @@ import type { Page } from '@playwright/test';
  * can assert which commands were (not) sent.
  *
  * @param overrides - Optional map of command names to response values to override defaults
+ * @param postSyncOverrides - Optional map of command names to response values that only take
+ *   effect once `vault_sync_now` has been dispatched at least once. Use this to make a
+ *   scenario's "after sync" reads (e.g. a subsequent `get_entities` or `list_vault_conflicts`
+ *   call) causally depend on the sync having actually run, instead of baking the post-sync
+ *   state into the very first page load. Commands not listed here fall back to `overrides`
+ *   (or the built-in default) both before and after the sync.
  */
 export async function installIpcMock(
   page: Page,
   overrides?: Record<string, unknown>,
+  postSyncOverrides?: Record<string, unknown>,
 ): Promise<void> {
   await page.addInitScript(
-    ({ overridesArg }) => {
+    ({ overridesArg, postSyncOverridesArg }) => {
       let _cbId = 0;
+      let _synced = false;
       // @ts-expect-error -- injected by Tauri at runtime
       // eslint-disable-next-line @typescript-eslint/no-empty-function
       window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
@@ -30,6 +38,18 @@ export async function installIpcMock(
         invoke: (cmd: string, args?: Record<string, unknown>) => {
           // @ts-expect-error -- test-only call log
           window.__ipcCalls.push({ cmd, args });
+          // Decide before flipping the flag: the vault_sync_now call itself is
+          // always answered from the pre-sync overrides (its report), never
+          // from postSyncOverrides.
+          const usePostSync = _synced && postSyncOverridesArg && cmd in postSyncOverridesArg;
+          if (cmd === 'vault_sync_now') {
+            _synced = true;
+          }
+          if (usePostSync) {
+            return Promise.resolve(
+              postSyncOverridesArg[cmd as keyof typeof postSyncOverridesArg],
+            );
+          }
           // Check overrides first
           if (overridesArg && cmd in overridesArg) {
             return Promise.resolve(overridesArg[cmd as keyof typeof overridesArg]);
@@ -153,6 +173,6 @@ export async function installIpcMock(
         },
       };
     },
-    { overridesArg: overrides },
+    { overridesArg: overrides, postSyncOverridesArg: postSyncOverrides },
   );
 }
