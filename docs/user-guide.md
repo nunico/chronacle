@@ -375,6 +375,89 @@ If the AI gives an answer **without a citation**, it might be making a guess bas
 
 ---
 
+## Your Vault
+
+Chronacle can mirror a campaign into an ordinary folder of text files on your computer — the same kind of folder [Obsidian](https://obsidian.md) reads, but it works with any text editor, not just Obsidian. This section explains what that folder is, how it stays in step with Chronacle, and how to handle it if you and Chronacle change the same thing at the same time.
+
+### What vault sync is
+
+Every NPC, location, faction, creature, item, event, and player character in a campaign — plus your session write-ups and the Codex's compiled rule entries — can be written out as a `.md` file. Point Chronacle at a folder (an empty one, or a live Obsidian vault you already use) and it fills that folder with one file per record, organised into subfolders by campaign or collection.
+
+This isn't a one-time export. It's a two-way street:
+
+- **Chronacle → your files.** Whenever something changes in Chronacle — you edit an NPC, save an answer to the Codex, or compile a collection — the matching file is rewritten within a couple of seconds, automatically, with no button to press.
+- **Your files → Chronacle.** Open a file in Obsidian (or Notepad, or anything else) and edit it. Chronacle notices the change and pulls it back in — again within a couple of seconds, no button needed.
+- **"Sync now."** You don't have to rely on the automatic watch. **Settings → Markdown vault → Sync now** runs a full pass in both directions on demand — handy right after you've made a batch of edits, or if you're not sure everything caught up.
+
+**To set it up:** open **Settings**, find the **Markdown vault** panel, and click **Choose folder…**. Pick any folder — a new empty one, or the root of an Obsidian vault you already have open. Chronacle writes your campaign into it immediately. To stop syncing, click **Disconnect** — this does not delete anything, it just stops watching.
+
+### What's yours vs Chronacle's in a file
+
+Open any entity's `.md` file and you'll find three regions. Here's what a real NPC file looks like — Seraphina Aldric, the archivist of the Iron Tower, in the "Shadows of Valdris" campaign:
+
+```text
+---
+id: "npc:abc123"
+name: "Seraphina Aldric"
+title: "Seraphina Aldric"
+aliases: ["Seraphina Aldric"]
+type: "npc"
+campaign: "Shadows of Valdris"
+created_at: "2026-05-28T14:00:00Z"
+updated_at: "2026-07-09T18:32:00Z"
+---
+
+## Summary
+
+Archivist of the Iron Tower.
+
+<!-- chronacle:codex-article start -- compiled; edits are not applied -->
+Seraphina is the archivist of [[The Iron Tower]].
+<!-- chronacle:codex-article end -->
+
+## Notes
+
+GM notes.
+```
+
+Three things are happening in that file:
+
+- **The block between the `---` lines at the very top** is Chronacle's bookkeeping — the record's ID, its name, what campaign it belongs to, and timestamps. Chronacle rewrites this block every time it syncs. Don't edit it, and in particular never touch or remove the `id` line — that's the only thing that tells Chronacle "this file is Seraphina Aldric" rather than a new, different NPC.
+- **The block between `<!-- chronacle:codex-article start -- compiled; edits are not applied -->` and `<!-- chronacle:codex-article end -->`** is the AI-compiled article — the same text you'd see on Seraphina's Codex entry. Exactly as the comment says, edits inside this fence are not applied: if you type over it, your text is overwritten the next time Chronacle syncs. If you want a compiled article to say something different, use **Redo with objections…** in the Codex (see **The Codex** above) rather than editing the file directly.
+- **Everything else — the `## Summary` line, the `## Notes` section, and any other text you add** — is yours. Type in the Summary field, write freeform notes under `## Notes`, add your own headings, whatever you like: it all flows back into Chronacle on the next sync, into the matching Summary and Notes fields on that entity.
+
+Session files and compiled rule entries follow the same split, minus whichever pieces don't apply to them: a session file has no compiled fence (there's no AI-written article for a session), so everything below its frontmatter is yours. A rule entry's body is the compiled fence, same as an article.
+
+### Conflicts
+
+A conflict happens when the same record changes in **both** places between syncs — say, you rewrite Seraphina's `## Notes` in Obsidian on your laptop at the table, while a player conversation earlier in Chronacle triggered a Codex update to the same entity before that sync ran. Chronacle can't safely guess which version you want, so it doesn't try to merge them automatically. Instead:
+
+1. Chronacle writes its own version of the file next to yours, named `seraphina-aldric.conflict.md` — your file, `seraphina-aldric.md`, is left completely untouched.
+2. That record **freezes**: Chronacle stops syncing it in either direction until you resolve the conflict, so neither version can silently overwrite the other.
+3. You'll see it listed in **Settings → Markdown vault**, under **Conflicts**, showing the record's name and both file paths. If you open the record itself in Chronacle, you'll also see a banner: "This record has unsynced vault edits in conflict — resolve in your vault ({file path})."
+
+**To resolve it:**
+
+1. Open both files side by side — `seraphina-aldric.md` (yours) and `seraphina-aldric.conflict.md` (Chronacle's).
+2. Copy across whatever you want to keep from the `.conflict.md` file into your own file, `seraphina-aldric.md`.
+3. Delete `seraphina-aldric.conflict.md`.
+4. On the next sync (automatic, or **Sync now**), Chronacle sees the sidecar is gone, treats that as your decision, and applies the content of your file. The record unfreezes and syncs normally again.
+
+If your file's top metadata block got damaged or deleted while you were editing, Chronacle can't read it as a valid record — in that case it puts the `.conflict.md` sidecar back instead of losing its version, so the record stays visibly in conflict rather than vanishing into a stuck state. Fix the metadata block (or restore it from the sidecar's own copy) and try deleting the sidecar again.
+
+### Deleting
+
+Deleting works differently depending on which side you delete from:
+
+- **Delete the file in your vault** (in Obsidian, in Finder, wherever) → the record disappears from Chronacle. It isn't destroyed — it's hidden, the same way a soft-deleted record is hidden everywhere else in the app.
+- **Delete the record inside Chronacle** — the **Delete** button on an entity's card in the entity manager, after confirming "Remove Seraphina Aldric? It disappears from Chronacle and your vault." → its vault file is removed too, **unless** you had hand-edited that file since Chronacle last wrote it. In that case Chronacle leaves your edited file alone rather than throwing away work you haven't synced yet.
+
+### Switching folders
+
+If you click **Choose folder…** again and pick a different folder, Chronacle re-exports your whole campaign into the new location. **Nothing is deleted** — the old folder is simply left as-is once Chronacle stops watching it, and files in the new folder aren't cleared out first. The Markdown vault panel reminds you of this: "Changing the folder re-exports everything; nothing is deleted." Pick an empty folder (or a fresh spot inside your Obsidian vault) if you want a clean re-export with nothing left over to sort out.
+
+---
+
 ## Chat History
 
 Every conversation you have with Chronacle is saved automatically. When you close the app and open it again, your previous chats will be waiting for you.
@@ -465,6 +548,10 @@ This glossary explains the technical terms used in this guide. If you see a word
 **Campaign** — A container for your game's resources: rulebooks, chat history, and notes. Each campaign has its own set of PDF sources and its own conversation history. You can switch between campaigns to keep different games separate.
 
 **Global Source** — A PDF that isn't tied to any campaign. It's searchable from every campaign, making it useful for core rulebooks like the Player's Handbook that you use across all your games.
+
+**Markdown vault** — A folder of ordinary `.md` text files that Chronacle keeps in step with a campaign, so you can browse and edit your NPCs, locations, and sessions in Obsidian or any text editor. See **Your Vault** above.
+
+**Conflict (vault sync)** — What happens when the same record is edited both in Chronacle and in a vault file before the two get a chance to sync. Chronacle saves its own version as a `.conflict.md` file next to yours and pauses syncing that record until you resolve it. See **Your Vault → Conflicts** above.
 
 ---
 
