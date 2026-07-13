@@ -41,6 +41,18 @@ impl VaultOutbound for QueueOutbound {
 /// this, the watcher would misread Chronacle's own orphan-sweep or
 /// evaporated-conflict cleanup as the GM's sidecar-deletion resolution
 /// signal.
+///
+/// Asymmetry with the write guard, deliberately: `matches` (write) is
+/// content-keyed and non-consuming, because a stale write guard can never
+/// mask a real later edit — a genuine GM edit produces different content, so
+/// `matches` returns `false` for it even while the guard is still armed. The
+/// delete guard has no content dimension to fall back on, so a stale,
+/// non-consuming delete guard COULD mask a real later GM deletion (see
+/// `take_delete`). The fix is to make the delete guard one-shot: consumed by
+/// its first match. Masking a genuine GM resolution is far worse than the
+/// alternative (a surplus `Remove` event slipping through and triggering one
+/// harmless extra `reconcile()` — reconcile re-derives everything from real
+/// on-disk and DB state, so a redundant pass just finds nothing to do).
 #[derive(Default)]
 pub struct PendingWrites {
     inner: Mutex<HashMap<String, (u64, Instant)>>,
@@ -92,11 +104,24 @@ impl PendingWrites {
 
     /// Whether a `Remove` event on `key` is a delete we made ourselves.
     ///
-    /// Deliberately does **not** consume the guard, for the same reason as
-    /// `matches`: one delete can surface more than one fs event.
-    pub fn matches_delete(&self, key: &str) -> bool {
-        let guard = self.deletes.lock().expect("poisoned");
-        guard.get(key).is_some_and(|at| at.elapsed() < Self::TTL)
+    /// CONSUMING, unlike `matches`: removes the guard entry on a match so it
+    /// suppresses exactly one `Remove` event. A single compiler delete can
+    /// still surface more than one fs event, but that is the one case where
+    /// letting a surplus event through is the safe failure mode — a masked
+    /// GM deletion would leave a conflict frozen forever with the GM
+    /// believing they resolved it; a redundant `reconcile()` costs a little
+    /// work and changes nothing. See the type-level doc comment above for
+    /// the full write-vs-delete-guard reasoning.
+    pub fn take_delete(&self, key: &str) -> bool {
+        let mut guard = self.deletes.lock().expect("poisoned");
+        match guard.get(key) {
+            Some(at) if at.elapsed() < Self::TTL => {
+                guard.remove(key);
+                true
+            }
+            Some(_) => false, // expired; leave it for `sweep` to reap
+            None => false,
+        }
     }
 
     /// Drop expired guards, both write and delete.
@@ -255,23 +280,52 @@ mod tests {
     fn a_delete_guard_matches_the_same_key() {
         let p = PendingWrites::default();
         p.arm_delete("sidecar.md");
-        assert!(p.matches_delete("sidecar.md"));
+        assert!(p.take_delete("sidecar.md"));
     }
 
     #[test]
     fn a_delete_guard_does_not_match_a_different_key() {
         let p = PendingWrites::default();
         p.arm_delete("sidecar.md");
-        assert!(!p.matches_delete("other.md"));
+        assert!(!p.take_delete("other.md"));
     }
 
     #[test]
-    fn a_delete_guard_survives_repeated_matches() {
-        // A single delete can surface more than one fs event.
+    fn a_delete_guard_is_consumed_by_its_first_match() {
+        // Unlike the write guard, the delete guard is one-shot: it suppresses
+        // exactly one `Remove` event, never more.
         let p = PendingWrites::default();
         p.arm_delete("sidecar.md");
-        assert!(p.matches_delete("sidecar.md"));
-        assert!(p.matches_delete("sidecar.md"));
+        assert!(p.take_delete("sidecar.md"));
+        assert!(!p.take_delete("sidecar.md"));
+    }
+
+    /// THE MASKING BUG (Finding 1): a non-consuming delete guard would let a
+    /// stale arm from an earlier compiler-driven delete suppress a LATER,
+    /// genuine GM deletion of the same key (the record re-entered conflict
+    /// and Chronacle rewrote the sidecar in between). Consuming the guard on
+    /// its first match means a second, independent `Remove` at the same key
+    /// is never suppressed by a guard that already did its job.
+    #[test]
+    fn a_second_delete_at_the_same_key_is_not_masked_by_an_earlier_consumed_guard() {
+        let p = PendingWrites::default();
+
+        // t=0: reconcile deletes sidecar S (our own cleanup).
+        p.arm_delete("sidecar.md");
+        assert!(
+            p.take_delete("sidecar.md"),
+            "our own delete's Remove event is suppressed"
+        );
+
+        // t=5s: the record re-enters conflict; reconcile writes S again
+        // (not modelled here — no delete guard is armed for this write).
+        // t=10s: the GM deletes S themselves. No delete guard is armed for
+        // this deletion, since the only prior arm was already consumed.
+        assert!(
+            !p.take_delete("sidecar.md"),
+            "a second, independent Remove at the same key must NOT be masked \
+             by an earlier guard that already suppressed one event"
+        );
     }
 
     #[test]
@@ -283,7 +337,7 @@ mod tests {
         );
         p.sweep();
         assert!(
-            !p.matches_delete("sidecar.md"),
+            !p.take_delete("sidecar.md"),
             "a delete event that never arrived must not pin a guard forever"
         );
     }
@@ -294,7 +348,7 @@ mod tests {
         let p = PendingWrites::default();
         p.arm("k.md", 42);
         assert!(
-            !p.matches_delete("k.md"),
+            !p.take_delete("k.md"),
             "arming a write must not arm a delete"
         );
         p.arm_delete("k.md");

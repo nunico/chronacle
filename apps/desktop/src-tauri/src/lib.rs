@@ -63,16 +63,50 @@ fn build_vault_service(
     (svc, pending)
 }
 
-/// Consume watcher events: drop our own writes and deletes, trigger one
-/// reconcile per surviving batch (single in-flight by construction — this
-/// loop is the only caller and awaits the reconcile), re-embed applied
-/// entities.
+/// Whether a batch of watcher events contains anything the consumer loop
+/// should act on, i.e. anything that is not Chronacle's own write or delete.
+///
+/// Extracted out of `spawn_watcher`'s loop body so it is directly unit-
+/// testable (`spawn_watcher` itself is only reachable end-to-end, since it
+/// owns a real `NotifyWatcher`) — a future change to the relevance rule
+/// cannot silently drift from what the integration tests exercise.
 ///
 /// A `Remove` event is checked against `is_own_delete`, not treated as
 /// automatically relevant: reconcile's own orphan sweep and evaporated-
 /// conflict cleanup delete files/sidecars too, and a sidecar deletion is
 /// separately the GM's conflict-resolution signal — conflating "we deleted
 /// it" with "the GM deleted it" would misread our own cleanup as GM intent.
+///
+/// `is_own_delete` is consuming (Finding 1: the delete guard is one-shot),
+/// so this must be called at most once per batch, and each event in the
+/// batch checked at most once — exactly what the single pass below does.
+pub(crate) async fn batch_is_relevant(
+    batch: &[chronacle_core::VaultEvent],
+    svc: &chronacle_vault::reconcile::VaultSyncService,
+) -> bool {
+    let mut relevant = false;
+    for ev in batch {
+        match ev {
+            chronacle_core::VaultEvent::Upsert(key) => {
+                if !svc.is_own_write(key).await {
+                    relevant = true;
+                }
+            }
+            chronacle_core::VaultEvent::Remove(key) => {
+                if !svc.is_own_delete(key) {
+                    relevant = true;
+                }
+            }
+            chronacle_core::VaultEvent::Rescan => relevant = true,
+        }
+    }
+    relevant
+}
+
+/// Consume watcher events: drop our own writes and deletes, trigger one
+/// reconcile per surviving batch (single in-flight by construction — this
+/// loop is the only caller and awaits the reconcile), re-embed applied
+/// entities.
 pub(crate) fn spawn_watcher(
     state: Arc<AppState>,
     svc: Arc<chronacle_vault::reconcile::VaultSyncService>,
@@ -86,23 +120,7 @@ pub(crate) fn spawn_watcher(
             while let Ok(next) = rx.try_recv() {
                 batch.push(next);
             }
-            let mut relevant = false;
-            for ev in &batch {
-                match ev {
-                    chronacle_core::VaultEvent::Upsert(key) => {
-                        if !svc.is_own_write(key).await {
-                            relevant = true;
-                        }
-                    }
-                    chronacle_core::VaultEvent::Remove(key) => {
-                        if !svc.is_own_delete(key) {
-                            relevant = true;
-                        }
-                    }
-                    chronacle_core::VaultEvent::Rescan => relevant = true,
-                }
-            }
-            if !relevant {
+            if !batch_is_relevant(&batch, &svc).await {
                 continue;
             }
             match svc.reconcile().await {
@@ -266,6 +284,13 @@ pub async fn run() {
         Some((svc, _)) => spawn_outbound(Arc::clone(svc)),
         None => Arc::new(chronacle_core::NoopOutbound),
     };
+    // Captured by value here, BEFORE `vault_svc_and_pending` is consumed
+    // below — this is the `original_svc` the startup watcher-spawn task (in
+    // `.setup()`) compares against via `Arc::ptr_eq` to detect whether
+    // `set_vault_path` already replaced the vault while it was waiting.
+    let startup_vault_svc = vault_svc_and_pending
+        .as_ref()
+        .map(|(svc, _)| Arc::clone(svc));
     let vault = vault_svc_and_pending.map(|(svc, pending)| VaultRuntime {
         svc,
         pending,
@@ -334,15 +359,37 @@ pub async fn run() {
             // Spawn the vault watcher now that `Arc<AppState>` exists —
             // `spawn_watcher` needs it to re-embed applied entities after a
             // watcher-triggered reconcile.
-            if let Some(root) = vault_root.clone() {
+            //
+            // Capture the startup service BY VALUE before spawning: if
+            // `set_vault_path` runs and replaces `state.vault` before this
+            // task acquires the write lock below, this task must not clobber
+            // the newer, legitimate watcher with one pointed at the stale
+            // startup root. `Arc::ptr_eq` against the just-captured `Arc`
+            // (not a fresh read through the lock) is what lets the task tell
+            // "still installed" from "already replaced".
+            if let (Some(root), Some(original_svc)) =
+                (vault_root.clone(), startup_vault_svc.clone())
+            {
                 let state_for_watcher = state.clone();
                 tokio::spawn(async move {
+                    let watcher_svc = Arc::clone(&original_svc);
+                    let task = spawn_watcher(state_for_watcher.clone(), watcher_svc, root);
                     let mut guard = state_for_watcher.vault.write().await;
                     let Some(rt) = guard.as_mut() else {
-                        return; // vault was cleared before this task ran
+                        // Vault was cleared before this task ran; the watcher
+                        // we just spawned has nothing to attach to. Abort it.
+                        task.abort();
+                        return;
                     };
-                    let svc = Arc::clone(&rt.svc);
-                    let task = spawn_watcher(state_for_watcher.clone(), svc, root);
+                    if !Arc::ptr_eq(&rt.svc, &original_svc) {
+                        // Someone already replaced the vault while we were
+                        // waiting for the lock (or for the watcher to spawn).
+                        // Their watcher is authoritative; ours would be wired
+                        // to the stale startup service/root, so drop it
+                        // instead of overwriting (and orphaning) theirs.
+                        task.abort();
+                        return;
+                    }
                     rt.watcher_task = Some(task);
                 });
             }
@@ -603,4 +650,98 @@ async fn build_custom_provider(
 /// Return a short human-readable provider type name.
 pub(crate) fn provider_type_name(provider: &Arc<dyn LlmProvider>) -> &'static str {
     provider.provider_type()
+}
+
+#[cfg(test)]
+mod watcher_relevance_tests {
+    use super::*;
+    use chronacle_core::VaultEvent;
+
+    /// A bare `VaultSyncService` with an in-memory-backed store/records is
+    /// overkill here — `batch_is_relevant` only needs `is_own_write` and
+    /// `is_own_delete`, which are pure functions of the shared `PendingWrites`
+    /// guard plus (for writes) whatever the store currently holds. Build the
+    /// smallest real service that exercises both.
+    fn svc_with(
+        pending: Arc<chronacle_vault::outbound::PendingWrites>,
+        content: Option<&'static str>,
+    ) -> chronacle_vault::reconcile::VaultSyncService {
+        let mut store = chronacle_core::MockVaultStore::new();
+        store.expect_read().returning(move |_| {
+            content
+                .map(str::to_string)
+                .ok_or_else(|| chronacle_core::VaultStoreError::NotFound("gone".into()))
+        });
+        let records = chronacle_core::MockVaultRecordStore::new();
+        chronacle_vault::reconcile::VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            pending,
+        )
+    }
+
+    #[tokio::test]
+    async fn a_rescan_event_is_always_relevant() {
+        let pending = Arc::new(chronacle_vault::outbound::PendingWrites::default());
+        let svc = svc_with(Arc::clone(&pending), None);
+        assert!(batch_is_relevant(&[VaultEvent::Rescan], &svc).await);
+    }
+
+    #[tokio::test]
+    async fn an_upsert_matching_our_own_armed_write_is_not_relevant() {
+        let pending = Arc::new(chronacle_vault::outbound::PendingWrites::default());
+        let content = "hello";
+        let hash = chronacle_vault::render::content_hash(content);
+        pending.arm("k.md", hash);
+        let svc = svc_with(Arc::clone(&pending), Some(content));
+        assert!(
+            !batch_is_relevant(&[VaultEvent::Upsert("k.md".into())], &svc).await,
+            "our own write must not trigger a reconcile"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_upsert_with_no_matching_write_guard_is_relevant() {
+        let pending = Arc::new(chronacle_vault::outbound::PendingWrites::default());
+        let svc = svc_with(Arc::clone(&pending), Some("a GM edit"));
+        assert!(
+            batch_is_relevant(&[VaultEvent::Upsert("k.md".into())], &svc).await,
+            "an unguarded upsert (a GM edit) must trigger a reconcile"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_remove_matching_our_own_armed_delete_is_not_relevant() {
+        let pending = Arc::new(chronacle_vault::outbound::PendingWrites::default());
+        pending.arm_delete("sidecar.md");
+        let svc = svc_with(Arc::clone(&pending), None);
+        assert!(
+            !batch_is_relevant(&[VaultEvent::Remove("sidecar.md".into())], &svc).await,
+            "our own cleanup delete must not trigger a reconcile"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_remove_with_no_matching_delete_guard_is_relevant() {
+        let pending = Arc::new(chronacle_vault::outbound::PendingWrites::default());
+        let svc = svc_with(Arc::clone(&pending), None);
+        assert!(
+            batch_is_relevant(&[VaultEvent::Remove("sidecar.md".into())], &svc).await,
+            "the GM's own sidecar deletion (no guard armed) must trigger a reconcile"
+        );
+    }
+
+    #[tokio::test]
+    async fn one_relevant_event_in_a_batch_makes_the_whole_batch_relevant() {
+        let pending = Arc::new(chronacle_vault::outbound::PendingWrites::default());
+        let content = "hello";
+        let hash = chronacle_vault::render::content_hash(content);
+        pending.arm("ours.md", hash);
+        let svc = svc_with(Arc::clone(&pending), Some(content));
+        let batch = vec![
+            VaultEvent::Upsert("ours.md".into()), // our own write, not relevant alone
+            VaultEvent::Remove("theirs.md".into()), // no guard armed — relevant
+        ];
+        assert!(batch_is_relevant(&batch, &svc).await);
+    }
 }

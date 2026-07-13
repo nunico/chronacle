@@ -54,6 +54,16 @@ pub struct VaultSyncService {
     store: Arc<dyn VaultStore>,
     records: Arc<dyn VaultRecordStore>,
     pending: Arc<crate::outbound::PendingWrites>,
+    /// Serializes `reconcile()` passes. `reconcile` is the correctness
+    /// guarantee — every future sync decision is derived from the merge base
+    /// it writes — and now has several concurrent triggers (the watcher, on
+    /// every relevant fs-event batch; "Sync now"; soft-delete's background
+    /// reconcile; the post-extraction reconcile). Two overlapping passes
+    /// interleaving their reads and their `set_synced_hash` writes could
+    /// corrupt that base. A request never gets dropped for this — it waits
+    /// for the lock and then runs, so a late fs event is never lost, only
+    /// delayed.
+    reconcile_lock: tokio::sync::Mutex<()>,
 }
 
 /// A frozen conflict, shaped for display.
@@ -86,6 +96,7 @@ impl VaultSyncService {
             store,
             records,
             pending,
+            reconcile_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -109,8 +120,13 @@ impl VaultSyncService {
     /// `is_own_write`, there is no content left to read, so this consults the
     /// key-only delete guard directly. The watcher drops such events instead
     /// of misreading Chronacle's own cleanup as the GM's resolution signal.
+    ///
+    /// CONSUMING: a match uses up the guard (see `PendingWrites::take_delete`),
+    /// so a stale guard from an earlier compiler-driven delete can never mask
+    /// a later, genuine GM deletion of the same key. Call this at most once
+    /// per observed `Remove` event.
     pub fn is_own_delete(&self, key: &str) -> bool {
-        self.pending.matches_delete(key)
+        self.pending.take_delete(key)
     }
 
     /// Wipe every persisted merge base — fresh baseline for a new vault dir.
@@ -128,7 +144,12 @@ impl VaultSyncService {
     /// A trailing orphan sweep clears sync-state rows whose record no longer
     /// syncs, deleting the vault file (and any sidecar) only while it still
     /// matches the last-known base.
+    ///
+    /// Serialized via `reconcile_lock`: this is the correctness guarantee and
+    /// must never interleave with itself (see the field doc). A concurrent
+    /// caller waits for the lock rather than being skipped or dropped.
     pub async fn reconcile(&self) -> Result<ReconcileReport, VaultError> {
+        let _guard = self.reconcile_lock.lock().await;
         let index = VaultIndex::scan(self.store.as_ref()).await?;
         let records = self.records.list_all().await?;
 
@@ -2012,18 +2033,20 @@ mod tests {
         let svc = VaultSyncService::new(Arc::new(store), Arc::new(records), Arc::clone(&pending));
         svc.reconcile().await.expect("reconcile");
 
-        assert!(
-            pending.matches_delete(KEY),
-            "the orphan-swept file's delete guard must be armed"
-        );
-        assert!(
-            pending.matches_delete(&crate::keys::sidecar_key(KEY)),
-            "the orphan-swept sidecar's delete guard must be armed unconditionally"
-        );
+        // Check the count BEFORE consuming either guard — `take_delete` is
+        // one-shot (Finding 1) and would zero the count itself.
         assert_eq!(
             pending.deletes_len(),
             2,
             "both the file and its sidecar armed exactly one delete guard each"
+        );
+        assert!(
+            pending.take_delete(KEY),
+            "the orphan-swept file's delete guard must be armed"
+        );
+        assert!(
+            pending.take_delete(&crate::keys::sidecar_key(KEY)),
+            "the orphan-swept sidecar's delete guard must be armed unconditionally"
         );
     }
 
@@ -2071,7 +2094,7 @@ mod tests {
         assert_eq!(report.unchanged, 1);
 
         assert!(
-            pending.matches_delete(&crate::keys::sidecar_key(KEY)),
+            pending.take_delete(&crate::keys::sidecar_key(KEY)),
             "the evaporated conflict's sidecar delete guard must be armed"
         );
     }

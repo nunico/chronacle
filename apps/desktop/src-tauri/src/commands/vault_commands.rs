@@ -103,17 +103,20 @@ pub async fn set_vault_path(
             // Rebuild the queue and respawn the drain before publishing either
             // handle, so no producer can enqueue onto a channel with no drain.
             let new_outbound = spawn_outbound(Arc::clone(&svc));
-            let watcher_task = spawn_watcher(Arc::clone(&state_ref), Arc::clone(&svc), path);
             {
                 let mut guard = state.vault.write().await;
-                // Abort the old watcher before installing the new runtime — a
+                // Abort the old watcher, and only THEN spawn the new one — a
                 // vault-path switch must never leave two watchers racing to
-                // reconcile against different roots.
+                // reconcile against different roots, even briefly. Spawning
+                // the new watcher before taking this lock would let it start
+                // subscribing to the new root while the old watcher (still
+                // pointed at the old root) is still live.
                 if let Some(old) = guard.take() {
                     if let Some(t) = old.watcher_task {
                         t.abort();
                     }
                 }
+                let watcher_task = spawn_watcher(Arc::clone(&state_ref), Arc::clone(&svc), path);
                 *guard = Some(VaultRuntime {
                     svc,
                     pending,
