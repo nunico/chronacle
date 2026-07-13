@@ -55,8 +55,11 @@ pub enum VaultEvent {
 /// Errors surfaced by a `VaultStore` implementation.
 #[derive(Debug, thiserror::Error)]
 pub enum VaultStoreError {
-    #[error("I/O error: {0}")]
-    Io(String),
+    #[error("I/O error ({kind:?}): {message}")]
+    Io {
+        kind: std::io::ErrorKind,
+        message: String,
+    },
     #[error("Not found: {0}")]
     NotFound(VaultKey),
     #[error("Invalid key: {0}")]

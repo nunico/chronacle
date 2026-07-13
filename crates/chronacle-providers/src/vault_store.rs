@@ -15,6 +15,15 @@ pub struct LocalFsVaultStore {
     root: PathBuf,
 }
 
+/// Wrap a `std::io::Error`, preserving its `kind()` for callers that need to
+/// distinguish e.g. permission errors from a full disk.
+fn io_err(e: std::io::Error) -> VaultStoreError {
+    VaultStoreError::Io {
+        kind: e.kind(),
+        message: e.to_string(),
+    }
+}
+
 impl LocalFsVaultStore {
     /// Create a store rooted at `root`. The directory need not exist yet.
     pub fn new(root: impl Into<PathBuf>) -> Self {
@@ -51,20 +60,16 @@ impl VaultStore for LocalFsVaultStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 Err(VaultStoreError::NotFound(key.to_owned()))
             }
-            Err(e) => Err(VaultStoreError::Io(e.to_string())),
+            Err(e) => Err(io_err(e)),
         }
     }
 
     async fn write(&self, key: &str, content: &str) -> Result<(), VaultStoreError> {
         let path = self.resolve(key)?;
         if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| VaultStoreError::Io(e.to_string()))?;
+            tokio::fs::create_dir_all(parent).await.map_err(io_err)?;
         }
-        tokio::fs::write(&path, content)
-            .await
-            .map_err(|e| VaultStoreError::Io(e.to_string()))
+        tokio::fs::write(&path, content).await.map_err(io_err)
     }
 
     async fn delete(&self, key: &str) -> Result<(), VaultStoreError> {
@@ -73,7 +78,7 @@ impl VaultStore for LocalFsVaultStore {
             Ok(()) => Ok(()),
             // Reconcile may re-delete a key it already removed; that must be a no-op.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(VaultStoreError::Io(e.to_string())),
+            Err(e) => Err(io_err(e)),
         }
     }
 
@@ -91,29 +96,25 @@ impl VaultStore for LocalFsVaultStore {
             let mut entries = match tokio::fs::read_dir(&dir).await {
                 Ok(entries) => entries,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(VaultStoreError::Io(e.to_string())),
+                Err(e) => return Err(io_err(e)),
             };
 
-            while let Some(entry) = entries
-                .next_entry()
-                .await
-                .map_err(|e| VaultStoreError::Io(e.to_string()))?
-            {
-                let ft = entry
-                    .file_type()
-                    .await
-                    .map_err(|e| VaultStoreError::Io(e.to_string()))?;
+            while let Some(entry) = entries.next_entry().await.map_err(io_err)? {
+                let ft = entry.file_type().await.map_err(io_err)?;
                 let path = entry.path();
 
                 if ft.is_dir() {
                     stack.push(path);
                 } else if ft.is_file() && path.extension().is_some_and(|ext| ext == "md") {
-                    let rel = path.strip_prefix(&self.root).map_err(|_| {
-                        VaultStoreError::Io(format!(
-                            "path {} escaped vault root during list",
-                            path.display()
-                        ))
-                    })?;
+                    let rel = path
+                        .strip_prefix(&self.root)
+                        .map_err(|_| VaultStoreError::Io {
+                            kind: std::io::ErrorKind::Other,
+                            message: format!(
+                                "path {} escaped vault root during list",
+                                path.display()
+                            ),
+                        })?;
                     let key = rel
                         .components()
                         .map(|c| c.as_os_str().to_string_lossy().into_owned())
@@ -134,11 +135,9 @@ impl VaultStore for LocalFsVaultStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Err(VaultStoreError::NotFound(key.to_owned()));
             }
-            Err(e) => return Err(VaultStoreError::Io(e.to_string())),
+            Err(e) => return Err(io_err(e)),
         };
-        let mtime = meta
-            .modified()
-            .map_err(|e| VaultStoreError::Io(e.to_string()))?;
+        let mtime = meta.modified().map_err(io_err)?;
         Ok(VaultMetadata { mtime })
     }
 }
