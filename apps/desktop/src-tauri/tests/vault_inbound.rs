@@ -360,3 +360,229 @@ async fn conflicts_lists_a_frozen_record_end_to_end() {
     assert_eq!(conflicts[0].name, "Seraphina");
     assert!(conflicts[0].sidecar_key.ends_with(".conflict.md"));
 }
+
+// -- E6: NotifyWatcher end-to-end (watcher -> reconcile, no manual call) ---
+
+#[tokio::test]
+async fn a_vault_edit_flows_into_the_db_via_the_watcher() {
+    let db = db().await;
+    let dir = tempfile::TempDir::new().unwrap();
+    let svc = svc_for(&db, dir.path());
+    svc.reconcile().await.expect("export");
+
+    let watcher = chronacle_providers::vault_watcher::NotifyWatcher::with_debounce(
+        dir.path(),
+        std::time::Duration::from_millis(100),
+    );
+    let mut rx = chronacle_core::VaultWatcher::subscribe(&watcher).await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    let path = dir
+        .path()
+        .join("campaigns/sov/entities/npc")
+        .read_dir()
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let content = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("{content}\nWatcher-driven edit.\n")).unwrap();
+
+    // Mimic the consumer loop: event -> not our write -> reconcile.
+    let ev = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("event")
+        .expect("open");
+    let chronacle_core::VaultEvent::Upsert(key) = ev else {
+        panic!("expected upsert")
+    };
+    assert!(!svc.is_own_write(&key).await, "a GM edit is not our write");
+    let report = svc.reconcile().await.expect("reconcile");
+    assert_eq!(report.applied, 1);
+}
+
+#[tokio::test]
+async fn our_own_export_is_recognised_by_the_guard() {
+    let db = db().await;
+    let dir = tempfile::TempDir::new().unwrap();
+    let svc = svc_for(&db, dir.path());
+    svc.reconcile().await.expect("export");
+    // Every file reconcile just wrote must match the armed guard.
+    let key = "campaigns/sov/entities/npc/seraphina.md";
+    assert!(
+        svc.is_own_write(key).await,
+        "export must arm the guard (E1)"
+    );
+}
+
+/// THE HAZARD (direction 1): reconcile's own cleanup deletes are compiler-
+/// driven, not GM signals. When an evaporated conflict's sidecar cleanup
+/// deletes `<key>.conflict.md`, the watcher must recognise that deletion as
+/// its own and must NOT read it as the GM's "I merged, apply my file"
+/// resolution signal.
+#[tokio::test]
+async fn our_own_sidecar_cleanup_is_not_mistaken_for_the_gms_resolution_signal() {
+    let db = db().await;
+    let dir = tempfile::TempDir::new().unwrap();
+    let svc = svc_for(&db, dir.path());
+    svc.reconcile().await.expect("export");
+
+    let path = dir
+        .path()
+        .join("campaigns/sov/entities/npc")
+        .read_dir()
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+
+    let watcher = chronacle_providers::vault_watcher::NotifyWatcher::with_debounce(
+        dir.path(),
+        std::time::Duration::from_millis(100),
+    );
+    let mut rx = chronacle_core::VaultWatcher::subscribe(&watcher).await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    // Diverge both sides to freeze a conflict; the DB render lands in the
+    // sidecar.
+    let content = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("{content}\nVault-side edit.\n")).unwrap();
+    db.query("UPDATE npc:n1 SET notes = 'App-side edit.'")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    let report = svc.reconcile().await.expect("conflict pass");
+    assert_eq!(report.conflicts, 1);
+
+    let sidecar = path.with_file_name(format!(
+        "{}.conflict.md",
+        path.file_stem().unwrap().to_str().unwrap()
+    ));
+    let sidecar_key = "campaigns/sov/entities/npc/seraphina.conflict.md";
+    let sidecar_content = std::fs::read_to_string(&sidecar).unwrap();
+
+    // The conflict evaporates on its own: overwrite the primary file with
+    // exactly the DB's current render (the sidecar's content) — no GM
+    // resolution here, the file just happens to now match the DB.
+    std::fs::write(&path, &sidecar_content).unwrap();
+    let report = svc
+        .reconcile()
+        .await
+        .expect("evaporated-conflict cleanup pass");
+    assert_eq!(report.conflicts, 0, "the conflict evaporated");
+
+    // Reconcile deletes the sidecar itself as part of that cleanup, arming
+    // the delete guard first. Drain the watcher until it observes the
+    // resulting Remove event (other Upsert events from the file edits above
+    // may also arrive; they are not the point of this assertion).
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let ev = tokio::time::timeout(remaining, rx.recv())
+            .await
+            .expect("a remove event for the sidecar within 5s")
+            .expect("open channel");
+        if ev == chronacle_core::VaultEvent::Remove(sidecar_key.to_string()) {
+            break;
+        }
+    }
+
+    // Mimic the consumer loop's Remove handling: this must be recognised as
+    // our own cleanup, not a GM resolution signal.
+    assert!(
+        svc.is_own_delete(sidecar_key),
+        "our own evaporated-conflict sidecar cleanup must be recognised as our own delete"
+    );
+}
+
+/// THE HAZARD (direction 2): a GM's own sidecar deletion IS the resolution
+/// signal and must still reach `reconcile()` and take effect — the delete
+/// guard must never blanket-suppress every `Remove` event, only the ones
+/// Chronacle itself made.
+#[tokio::test]
+async fn a_gms_sidecar_deletion_is_not_masked_and_still_resolves_the_conflict() {
+    let db = db().await;
+    let dir = tempfile::TempDir::new().unwrap();
+    let svc = svc_for(&db, dir.path());
+    svc.reconcile().await.expect("export");
+
+    let path = dir
+        .path()
+        .join("campaigns/sov/entities/npc")
+        .read_dir()
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+
+    let watcher = chronacle_providers::vault_watcher::NotifyWatcher::with_debounce(
+        dir.path(),
+        std::time::Duration::from_millis(100),
+    );
+    let mut rx = chronacle_core::VaultWatcher::subscribe(&watcher).await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    // Diverge both sides to freeze a conflict (Chronacle writes the sidecar —
+    // its own write, not under test here).
+    let content = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("{content}\nVault-side edit.\n")).unwrap();
+    db.query("UPDATE npc:n1 SET notes = 'App-side edit.'")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    svc.reconcile().await.expect("conflict pass");
+
+    let sidecar = path.with_file_name(format!(
+        "{}.conflict.md",
+        path.file_stem().unwrap().to_str().unwrap()
+    ));
+    let sidecar_key = "campaigns/sov/entities/npc/seraphina.conflict.md";
+
+    // The GM resolves by deleting the sidecar themselves.
+    std::fs::remove_file(&sidecar).unwrap();
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let ev = tokio::time::timeout(remaining, rx.recv())
+            .await
+            .expect("a remove event for the sidecar within 5s")
+            .expect("open channel");
+        if ev == chronacle_core::VaultEvent::Remove(sidecar_key.to_string()) {
+            break;
+        }
+    }
+
+    // Mimic the consumer loop: not our delete -> relevant -> reconcile.
+    assert!(
+        !svc.is_own_delete(sidecar_key),
+        "the GM's own sidecar deletion must not be masked as our own"
+    );
+    let report = svc.reconcile().await.expect("resolution pass");
+    assert_eq!(
+        report.resolved, 1,
+        "the GM's resolution must still take effect"
+    );
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        notes: Option<String>,
+    }
+    let mut resp = db
+        .query("SELECT notes FROM npc:n1")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    let rows: Vec<Row> = resp.take(0).unwrap();
+    assert!(rows[0]
+        .notes
+        .as_deref()
+        .unwrap()
+        .contains("Vault-side edit."));
+}

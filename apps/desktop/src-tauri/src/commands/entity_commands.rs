@@ -146,7 +146,13 @@ pub async fn soft_delete_entity(
     let k = parse_kind(&kind)?;
     entity_service::soft_delete(&state.db, &id, k).await?;
     // Latency: sweep the vault file now instead of waiting for the next sync.
-    if let Some(svc) = state.vault.read().await.as_ref().map(Arc::clone) {
+    if let Some(svc) = state
+        .vault
+        .read()
+        .await
+        .as_ref()
+        .map(|rt| Arc::clone(&rt.svc))
+    {
         tauri::async_runtime::spawn(async move {
             if let Err(e) = svc.reconcile().await {
                 eprintln!("vault: post-soft-delete reconcile failed: {e}");

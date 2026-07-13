@@ -196,7 +196,13 @@ pub async fn extract_all_from_campaign(
 
         // I1: bulk extraction bypasses the outbound queue (NoopOutbound in
         // persist_batch); one trailing reconcile brings the vault current.
-        if let Some(svc) = task_state.vault.read().await.as_ref().map(Arc::clone) {
+        if let Some(svc) = task_state
+            .vault
+            .read()
+            .await
+            .as_ref()
+            .map(|rt| Arc::clone(&rt.svc))
+        {
             if let Err(e) = svc.reconcile().await {
                 eprintln!("vault: post-extraction reconcile failed: {e}");
             }
