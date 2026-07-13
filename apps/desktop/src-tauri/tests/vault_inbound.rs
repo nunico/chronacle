@@ -586,3 +586,115 @@ async fn a_gms_sidecar_deletion_is_not_masked_and_still_resolves_the_conflict() 
         .unwrap()
         .contains("Vault-side edit."));
 }
+
+/// Finding 1, end-to-end: the exact masking sequence a non-consuming delete
+/// guard would get wrong. Compiler deletes the sidecar (evaporated conflict)
+/// -> the record re-diverges and the conflict recurs, so reconcile rewrites
+/// the sidecar -> the GM deletes it themselves, a genuine resolution signal.
+/// A stale, non-consuming guard from step 1 would still be "armed" and would
+/// swallow the GM's `Remove` in step 3, freezing the conflict forever with
+/// the GM believing they resolved it. The consuming guard (`take_delete`)
+/// must let the second, independent deletion through.
+#[tokio::test]
+async fn a_gms_deletion_after_an_earlier_compiler_delete_of_the_same_key_still_resolves() {
+    let db = db().await;
+    let dir = tempfile::TempDir::new().unwrap();
+    let svc = svc_for(&db, dir.path());
+    svc.reconcile().await.expect("export");
+
+    let path = dir
+        .path()
+        .join("campaigns/sov/entities/npc")
+        .read_dir()
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let sidecar = path.with_file_name(format!(
+        "{}.conflict.md",
+        path.file_stem().unwrap().to_str().unwrap()
+    ));
+    let sidecar_key = "campaigns/sov/entities/npc/seraphina.conflict.md";
+
+    // Round 1: diverge both sides -> freeze a conflict, sidecar written.
+    let content = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("{content}\nVault-side edit A.\n")).unwrap();
+    db.query("UPDATE npc:n1 SET notes = 'App-side edit A.'")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    let report = svc.reconcile().await.expect("first conflict pass");
+    assert_eq!(report.conflicts, 1);
+    assert!(sidecar.exists());
+
+    // The conflict evaporates: the file is overwritten with exactly the
+    // sidecar's (DB's) content, so reconcile deletes the sidecar itself
+    // (compiler-driven), arming the delete guard for `sidecar_key`.
+    let sidecar_content = std::fs::read_to_string(&sidecar).unwrap();
+    std::fs::write(&path, &sidecar_content).unwrap();
+    let report = svc.reconcile().await.expect("evaporated-conflict cleanup");
+    assert_eq!(report.conflicts, 0, "the conflict evaporated");
+    assert!(
+        !sidecar.exists(),
+        "reconcile's own cleanup deleted the sidecar"
+    );
+
+    // In production, the watcher observes this compiler-driven `Remove` and
+    // calls `is_own_delete` once, consuming the guard — exactly what THE
+    // MASKING BUG (Finding 1) needed a non-consuming guard to still exist
+    // for at the GM's later, unrelated deletion of the same key.
+    assert!(
+        svc.is_own_delete(sidecar_key),
+        "the compiler's own cleanup delete must be recognised as our own"
+    );
+
+    // Round 2: the record re-diverges -> the conflict recurs, and reconcile
+    // rewrites the sidecar. This does NOT re-arm the delete guard — only a
+    // delete arms it, and this pass performs a write, not a delete.
+    let content = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("{content}\nVault-side edit B.\n")).unwrap();
+    db.query("UPDATE npc:n1 SET notes = 'App-side edit B.'")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    let report = svc.reconcile().await.expect("second conflict pass");
+    assert_eq!(report.conflicts, 1, "the conflict recurred");
+    assert!(sidecar.exists(), "the sidecar was rewritten");
+
+    // The GM deletes the sidecar themselves — a genuine resolution signal,
+    // unrelated to round 1's compiler-driven delete of the same key.
+    std::fs::remove_file(&sidecar).unwrap();
+
+    // Mimic the watcher's Remove handling: with a consuming guard, this
+    // deletion is NOT masked by the stale round-1 arm.
+    assert!(
+        !svc.is_own_delete(sidecar_key),
+        "a genuine GM deletion must not be masked by an earlier, already-served \
+         compiler-driven delete of the same key"
+    );
+    let report = svc.reconcile().await.expect("resolution pass");
+    assert_eq!(
+        report.resolved, 1,
+        "the GM's second resolution must still take effect"
+    );
+
+    #[derive(serde::Deserialize)]
+    struct Row2 {
+        notes: Option<String>,
+    }
+    let mut resp = db
+        .query("SELECT notes FROM npc:n1")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    let rows: Vec<Row2> = resp.take(0).unwrap();
+    assert!(rows[0]
+        .notes
+        .as_deref()
+        .unwrap()
+        .contains("Vault-side edit B."));
+}
