@@ -1,5 +1,14 @@
 <script lang="ts">
-  import { getEntityRelations, type EntityKind, type GraphNode, type EntityInput, type Session, type RelatedEntity } from '../lib/commands';
+  import {
+    getEntityRelations,
+    listVaultConflicts,
+    type EntityKind,
+    type GraphNode,
+    type EntityInput,
+    type Session,
+    type RelatedEntity,
+    type VaultConflict,
+  } from '../lib/commands';
   import WikiLinkEditor from './WikiLinkEditor.svelte';
 
   interface Props {
@@ -40,6 +49,34 @@
 
   // Relationships section — only fetched for existing (saved) entities.
   let relations = $state<RelatedEntity[]>([]);
+
+  // Vault conflict banner — checked whenever the open entity changes. When no
+  // vault is configured, listVaultConflicts() resolves to [] and this simply
+  // never matches.
+  let conflict = $state<VaultConflict | null>(null);
+
+  $effect(() => {
+    const currentId = node?.id;
+    const currentKind = kind;
+    if (!currentId) {
+      conflict = null;
+      return;
+    }
+    let cancelled = false;
+    listVaultConflicts().then(
+      (result) => {
+        if (cancelled) return;
+        const list = Array.isArray(result) ? result : [];
+        conflict = list.find((c) => c.id === currentId && c.kind === currentKind) ?? null;
+      },
+      () => {
+        if (!cancelled) conflict = null;
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  });
 
   $effect(() => {
     const currentId = node?.id;
@@ -100,6 +137,12 @@
     onsave?.(input);
   }
 </script>
+
+{#if conflict}
+  <div class="conflict-banner" role="alert">
+    This record has unsynced vault edits in conflict — resolve in your vault ({conflict.sidecarKey}).
+  </div>
+{/if}
 
 <form aria-label="entity form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
   <div class="field">
@@ -248,6 +291,15 @@
     font-size: 0.9rem;
   }
   .field-error, .form-error { color: var(--danger); font-size: 0.8rem; margin: 0; }
+  .conflict-banner {
+    background: var(--danger-bg, rgba(220, 38, 38, 0.12));
+    color: var(--danger);
+    border: 1px solid var(--danger);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    margin-bottom: 4px;
+  }
   .actions { display: flex; gap: 8px; margin-top: 8px; }
   .btn-primary {
     background: var(--violet-300);

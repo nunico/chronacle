@@ -142,6 +142,10 @@ export async function installIpcMock(
               invalid: 0,
               failed: 0,
             });
+          case 'list_vault_conflicts':
+            return Promise.resolve([]);
+          case 'soft_delete_entity':
+            return Promise.resolve(null);
           default:
             console.warn(`Unhandled IPC mock: ${cmd}`);
             return Promise.resolve(null);

@@ -8,9 +8,10 @@ vi.mock('../lib/commands', () => ({
   getEntity: vi.fn(),
   createEntity: vi.fn(),
   updateEntity: vi.fn(),
-  deleteEntity: vi.fn(),
+  softDeleteEntity: vi.fn(),
   getSessions: vi.fn().mockResolvedValue([]),
   getEntityRelations: vi.fn().mockResolvedValue([]),
+  listVaultConflicts: vi.fn().mockResolvedValue([]),
   compileEntity: vi.fn(),
 }));
 
@@ -217,7 +218,19 @@ describe('EntityManager', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
-    expect(commands.deleteEntity).not.toHaveBeenCalled();
+    expect(commands.softDeleteEntity).not.toHaveBeenCalled();
+  });
+
+  it('confirming delete calls softDeleteEntity, not the hard-delete command', async () => {
+    vi.mocked(commands.getEntities).mockResolvedValue([mockNpc()]);
+    vi.mocked(commands.softDeleteEntity).mockResolvedValue();
+    render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
+    await waitFor(() => screen.getByText('Torvin'));
+    await fireEvent.click(screen.getByRole('button', { name: /delete torvin/i }));
+    await screen.findByRole('dialog');
+    expect(screen.getByText(/it disappears from chronacle and your vault/i)).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: /^delete$/i }));
+    await waitFor(() => expect(commands.softDeleteEntity).toHaveBeenCalledWith('npc1', 'npc'));
   });
 
   it('renders the codex article read-only with a stale chip', async () => {

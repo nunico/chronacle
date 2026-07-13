@@ -1,15 +1,32 @@
 <script lang="ts">
   import { open } from '@tauri-apps/plugin-dialog';
-  import { getVaultPath, setVaultPath, vaultSyncNow, type ReconcileReport } from '../lib/commands';
+  import {
+    getVaultPath,
+    setVaultPath,
+    vaultSyncNow,
+    listVaultConflicts,
+    type ReconcileReport,
+    type VaultConflict,
+  } from '../lib/commands';
 
   let path = $state<string | null>(null);
   let busy = $state(false);
   let report = $state<ReconcileReport | null>(null);
   let error = $state<string | null>(null);
+  let conflicts = $state<VaultConflict[]>([]);
 
   $effect(() => {
     getVaultPath().then((p) => (path = p));
   });
+
+  $effect(() => {
+    loadConflicts();
+  });
+
+  async function loadConflicts() {
+    const result = await listVaultConflicts();
+    conflicts = Array.isArray(result) ? result : [];
+  }
 
   async function choose() {
     const selected = await open({ directory: true });
@@ -19,6 +36,7 @@
       await setVaultPath(selected);
       path = selected;
       report = null;
+      await loadConflicts();
     } catch (e) {
       error = String(e);
     }
@@ -29,6 +47,7 @@
     path = null;
     report = null;
     error = null;
+    await loadConflicts();
   }
 
   async function syncNow() {
@@ -36,6 +55,7 @@
     error = null;
     try {
       report = await vaultSyncNow();
+      await loadConflicts();
     } catch (e) {
       error = String(e);
     } finally {
@@ -49,6 +69,7 @@
   <p class="muted">
     Sync entities, sessions, and collections to a folder of Markdown files —
     edit them in any text editor and Chronacle reconciles the changes back in.
+    Text inside the marked compiled block is overwritten by Chronacle.
   </p>
 
   <div class="vault-path">
@@ -58,6 +79,7 @@
       <span class="path-value muted">No vault configured</span>
     {/if}
   </div>
+  <p class="muted path-hint">Changing the folder re-exports everything; nothing is deleted.</p>
 
   <div class="actions">
     <button class="small-btn" onclick={choose}>Choose folder…</button>
@@ -75,10 +97,44 @@
 
   {#if report}
     <div class="reindex-success">
-      {report.exported} exported · {report.unchanged} unchanged
+      {report.exported} exported · {report.unchanged} unchanged · {report.applied} applied
+      {#if report.conflicts > 0}
+        · {report.conflicts} conflicts
+      {/if}
+      {#if report.resolved > 0}
+        · {report.resolved} resolved
+      {/if}
+      {#if report.soft_deleted > 0}
+        · {report.soft_deleted} soft-deleted
+      {/if}
+      {#if report.invalid > 0}
+        · {report.invalid} invalid
+      {/if}
       {#if report.failed > 0}
         · {report.failed} failed
       {/if}
+    </div>
+  {/if}
+
+  {#if conflicts.length > 0}
+    <div class="conflicts-section">
+      <h4>
+        Conflicts <span class="badge">({conflicts.length})</span>
+      </h4>
+      <ul class="conflicts-list">
+        {#each conflicts as c (c.id)}
+          <li class="conflict-row">
+            <span class="conflict-name">{c.name}</span>
+            <span class="conflict-kind">{c.kind}</span>
+            <span class="conflict-path">{c.key}</span>
+            <span class="conflict-path">{c.sidecarKey}</span>
+          </li>
+        {/each}
+      </ul>
+      <p class="muted conflict-hint">
+        Merge the two files in your vault, then delete the .conflict.md file — Chronacle applies
+        your version on the next sync.
+      </p>
     </div>
   {/if}
 </section>
@@ -157,5 +213,64 @@
     background: var(--success-bg);
     color: var(--success);
     font-size: 13px;
+  }
+  .path-hint {
+    margin-top: -4px;
+  }
+  .conflicts-section {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+  }
+  .conflicts-section h4 {
+    font-family: var(--font-sans);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--danger);
+    margin: 0 0 8px;
+  }
+  .badge {
+    color: var(--fg-3);
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  .conflicts-list {
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .conflict-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: var(--bg-panel-2, var(--bg-panel));
+    font-size: 12px;
+  }
+  .conflict-name {
+    font-weight: 700;
+    color: var(--fg-1);
+  }
+  .conflict-kind {
+    color: var(--fg-3);
+    text-transform: uppercase;
+    font-size: 11px;
+  }
+  .conflict-path {
+    color: var(--fg-3);
+    word-break: break-all;
+    flex-basis: 100%;
+  }
+  .conflict-hint {
+    margin: 0;
   }
 </style>

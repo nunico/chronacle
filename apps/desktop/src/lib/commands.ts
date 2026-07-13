@@ -532,6 +532,15 @@ export async function deleteEntity(id: string, kind: EntityKind): Promise<void> 
   return invoke<never>('delete_entity', { id, kind });
 }
 
+/**
+ * Soft-delete: the record disappears from Chronacle and (on the next vault
+ * reconcile) from the vault. Hand-edited vault files outside the mirrored
+ * key are left alone. Prefer this over `deleteEntity` for user-facing delete.
+ */
+export async function softDeleteEntity(id: string, kind: EntityKind): Promise<void> {
+  return invoke<never>('soft_delete_entity', { id, kind });
+}
+
 export async function relateEntities(
   fromId: string,
   fromKind: EntityKind,
@@ -855,4 +864,21 @@ export function setVaultPath(vaultPath: string | null): Promise<void> {
 /** Run a full reconcile now. */
 export function vaultSyncNow(): Promise<ReconcileReport> {
   return invoke('vault_sync_now');
+}
+
+/** One record frozen in conflict — wire shape is camelCase (`VaultConflictDto`). */
+export interface VaultConflict {
+  id: string;
+  kind: string;
+  name: string;
+  key: string;
+  sidecarKey: string;
+}
+
+/**
+ * Every record currently frozen in conflict. Empty (never an error) when no
+ * vault is configured — always safe to call unconditionally.
+ */
+export function listVaultConflicts(): Promise<VaultConflict[]> {
+  return invoke('list_vault_conflicts');
 }
