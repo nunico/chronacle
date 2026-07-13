@@ -292,7 +292,7 @@
   }
   .field-error, .form-error { color: var(--danger); font-size: 0.8rem; margin: 0; }
   .conflict-banner {
-    background: var(--danger-bg, rgba(220, 38, 38, 0.12));
+    background: var(--danger-bg);
     color: var(--danger);
     border: 1px solid var(--danger);
     border-radius: 6px;

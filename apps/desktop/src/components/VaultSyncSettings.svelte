@@ -23,9 +23,17 @@
     loadConflicts();
   });
 
+  // Swallows its own errors: the conflict list is supplementary, so a failure
+  // to load it must never break the panel or surface as an unhandled rejection
+  // (it is also called from a bare $effect and from disconnect(), neither of
+  // which has a surrounding catch).
   async function loadConflicts() {
-    const result = await listVaultConflicts();
-    conflicts = Array.isArray(result) ? result : [];
+    try {
+      const result = await listVaultConflicts();
+      conflicts = Array.isArray(result) ? result : [];
+    } catch {
+      conflicts = [];
+    }
   }
 
   async function choose() {

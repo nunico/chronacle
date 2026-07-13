@@ -90,8 +90,15 @@ describe('VaultSyncSettings', () => {
       },
     ]);
     render(VaultSyncSettings);
+    // The GM must be able to identify the record AND find both files, so every
+    // field of the row is asserted — a count alone is not enough.
     expect(await screen.findByText('Seraphina Aldric')).toBeInTheDocument();
-    expect(screen.getByText(/seraphina-aldric\.conflict\.md/)).toBeInTheDocument();
+    expect(screen.getByText('npc')).toBeInTheDocument();
+    expect(screen.getByText('campaigns/sov/entities/npc/seraphina-aldric.md')).toBeInTheDocument();
+    expect(
+      screen.getByText('campaigns/sov/entities/npc/seraphina-aldric.conflict.md'),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/\(1\)/)).toBeInTheDocument();
     expect(screen.getByText(/delete the \.conflict\.md file/i)).toBeInTheDocument();
   });
 
@@ -101,5 +108,54 @@ describe('VaultSyncSettings', () => {
     render(VaultSyncSettings);
     await screen.findByText('/Users/gm/Vault');
     expect(screen.queryByText(/conflict/i)).not.toBeInTheDocument();
+  });
+
+  /// A sync is exactly when a conflict appears or gets resolved, so a stale
+  /// list after "Sync now" would show the GM a conflict they just fixed.
+  it('reloads the conflict list after a sync', async () => {
+    vi.spyOn(commands, 'getVaultPath').mockResolvedValue('/Users/gm/Vault');
+    vi.spyOn(commands, 'vaultSyncNow').mockResolvedValue({
+      exported: 0,
+      unchanged: 0,
+      adopted: 0,
+      applied: 0,
+      conflicts: 1,
+      resolved: 0,
+      soft_deleted: 0,
+      swept: 0,
+      invalid: 0,
+      failed: 0,
+    });
+    const listConflicts = vi
+      .spyOn(commands, 'listVaultConflicts')
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'n1',
+          kind: 'npc',
+          name: 'Seraphina Aldric',
+          key: 'campaigns/sov/entities/npc/seraphina-aldric.md',
+          sidecarKey: 'campaigns/sov/entities/npc/seraphina-aldric.conflict.md',
+        },
+      ]);
+
+    render(VaultSyncSettings);
+    await screen.findByText('/Users/gm/Vault');
+    expect(screen.queryByText('Seraphina Aldric')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /sync now/i }));
+
+    // The conflict raised by the sync must show up without a reload.
+    expect(await screen.findByText('Seraphina Aldric')).toBeInTheDocument();
+    expect(listConflicts.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('survives a failure to load the conflict list', async () => {
+    vi.spyOn(commands, 'getVaultPath').mockResolvedValue('/Users/gm/Vault');
+    vi.spyOn(commands, 'listVaultConflicts').mockRejectedValue(new Error('backend down'));
+    render(VaultSyncSettings);
+    // The panel still renders; the supplementary list simply stays empty.
+    expect(await screen.findByText('/Users/gm/Vault')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sync now/i })).toBeEnabled();
   });
 });
