@@ -544,7 +544,7 @@ Introduce a **`VaultSyncService`** that keeps a user-configured directory of `.m
         grappling.md
 ```
 
-Everything outside `campaigns/*/…` and `collections/*/…` is unmanaged and ignored — the vault root, `.obsidian/`, and `*.conflict.*.md` — on the watcher path as well as during reconcile.
+Everything outside `campaigns/*/…` and `collections/*/…` is unmanaged and ignored — the vault root, `.obsidian/`, and `*.conflict.md` (the `is_managed` matcher also tolerates a `*.conflict.*.md` form for forward-compatibility, though `sidecar_key` only ever emits the untimestamped form) — on the watcher path as well as during reconcile.
 
 **File format — YAML frontmatter + Markdown body:**
 
@@ -597,9 +597,9 @@ The frontmatter `id` is the sole identity and the stable link between a file and
 
 Reconcile runs on startup, on `vault_sync_path` change, and on explicit "Sync now"; it is the only inbound path for a backend running with `watcher = None`.
 
-**Conflict resolution.** A conflict is precisely `db_hash != base ∧ file_hash != base` — no time window is involved. On conflict the file's version is copied to `<slug>.conflict.<ts>.md` (with its `id` demoted to `conflict_of:` and its `aliases` / `title` stripped, so it neither poisons the `id → key` map nor hijacks Obsidian's link graph), the DB version is written to the canonical key, `synced_hash` is advanced, and a conflict card surfaces in the Maintenance view. Nothing is discarded.
+**Conflict resolution.** A conflict is precisely `db_hash != base ∧ file_hash != base` — no time window is involved. On conflict the record **freezes** (`vault_sync_state.conflict = TRUE`, set via `VaultRecordStore::set_conflict`): reconcile stops applying either direction for that key until the conflict resolves. The DB's render is written to the canonical key `<key>.conflict.md` — a sidecar next to the GM's file, which is left untouched — via `crate::keys::sidecar_key`. `*.conflict.md` is unmanaged, so the sidecar can never hijack the `id → key` index or Obsidian's link graph. Nothing is discarded. Resolution is GM-initiated, not automatic: deleting the sidecar is the signal. The next reconcile pass sees a frozen record whose sidecar is gone, applies the GM's file inbound, clears `conflict`, and the record rejoins normal two-way sync. If the GM's file fails to parse at that point (e.g. a broken frontmatter block), reconcile restores the sidecar from the DB's current render and leaves `conflict = TRUE` rather than losing the DB's version or unfreezing onto unparseable content. A conflict that evaporates on its own — the GM's file reverts to match what the DB already holds — is cleaned up (sidecar deleted, unfrozen) the same way, without the GM needing to intervene. The current record set is surfaced via the `list_vault_conflicts` IPC command, consumed by the desktop app's vault-sync settings panel and the entity-editor conflict banner — not the Maintenance view (no Maintenance-based conflict UI is implemented).
 
-**Inbound.** Every watcher event re-reads the affected key and re-derives truth from frontmatter (watcher events are hints, not facts). A `Modify` with a known `id` applies GM-owned fields only. A `Create` with a known `id` is a relocation. A `Create` with no `id` in a managed folder creates a record and writes the assigned `id` back into the frontmatter (itself a guarded write). A `Remove` first rescans the vault for the `id` — only if it is absent everywhere does it soft-delete (`vault_deleted = TRUE`) and raise a restore-or-confirm card; this makes editor atomic-save (`Remove` + `Create`) safe. Anything unmanaged is ignored.
+**Inbound.** Every watcher event re-reads the affected key and re-derives truth from frontmatter (watcher events are hints, not facts). A `Modify` with a known `id` applies GM-owned fields only. A `Create` with a known `id` is a relocation. A `Create` with no `id` in a managed folder creates a record and writes the assigned `id` back into the frontmatter (itself a guarded write). A `Remove` first rescans the vault for the `id` — only if it is absent everywhere does it soft-delete (`vault_deleted = TRUE`); this makes editor atomic-save (`Remove` + `Create`) safe. There is no restore-or-confirm UI for a vault-triggered soft-delete: the record is simply hidden everywhere, the same as an in-app soft-delete (`soft_delete_entity`). No undelete path is implemented yet in either direction (tracked as a Phase-3+ follow-up). Anything unmanaged is ignored.
 
 **Loop-prevention:** outbound writes record a `pending_write` guard keyed by `(key, hash(content))`. The inbound handler re-reads the key, hashes its content, and drops the event when the hash matches a live guard. Guards are content-based (not key-only), are not consumed on first match — a single write's trailing events must all be dropped — and expire on a TTL (30s) or when the key's content is observed to differ.
 
@@ -647,8 +647,8 @@ DEFINE FIELD OVERWRITE synced_at ON vault_sync_state TYPE datetime;
 - The `notify` crate is added to approved crates (see Crate & Tool Summary); it uses OS-native APIs (`inotify`, FSEvents, ReadDirectoryChangesW) with no polling overhead.
 - `yaml_serde` is added for frontmatter parsing and serialisation (see Crate & Tool Summary for why not `serde_yaml` / `serde_yml`).
 - Inbound changes trigger SurrealDB re-indexing of the updated note, so vault-edited notes remain searchable without any manual action in Chronacle.
-- Deletions from the vault are intentionally non-destructive (soft-delete + UI prompt) to prevent accidental data loss from a misplaced `rm`.
-- A soft-deleted record is excluded everywhere except the Maintenance view's pending-deletions list — entity lists, RAG retrieval, wikilink resolution, and codex compile inputs all filter it out.
+- Deletions from the vault are intentionally non-destructive (soft-delete, `vault_deleted = TRUE`) to prevent accidental data loss from a misplaced `rm`; there is no restore UI yet (see Inbound above).
+- A soft-deleted record is excluded from every read path — entity lists, RAG retrieval, wikilink resolution, and codex compile inputs all filter on `vault_deleted != true`.
 - File I/O goes through the `VaultStore` port, so I/O-failure and crash-recovery paths are reachable in tests, and a future remote backend needs no engine change.
 
 ---
