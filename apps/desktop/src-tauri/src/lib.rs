@@ -27,12 +27,21 @@ pub struct AppState {
     pub extract_task: tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
     /// Abort handle for the in-flight codex compile task, if any (see `cancel_compile`).
     pub compile_task: tokio::sync::Mutex<Option<tokio::task::AbortHandle>>,
-    /// Vault sync engine. `None` until `vault_sync_path` is configured.
-    pub vault: tokio::sync::RwLock<Option<Arc<chronacle_vault::reconcile::VaultSyncService>>>,
+    /// Vault sync engine, write guard, and watcher task, wired together.
+    /// `None` until `vault_sync_path` is configured.
+    pub vault: tokio::sync::RwLock<Option<VaultRuntime>>,
     /// Producer handle the five record producers enqueue onto. Falls back to
     /// `NoopOutbound` whenever no vault is configured — producers never branch
     /// on `Option`, see `chronacle_core::VaultOutbound`.
     pub outbound: tokio::sync::RwLock<Arc<dyn chronacle_core::VaultOutbound>>,
+}
+
+/// Everything a live vault configuration owns. Replaced wholesale on
+/// `set_vault_path`; the watcher task is aborted when dropped out.
+pub struct VaultRuntime {
+    pub svc: Arc<chronacle_vault::reconcile::VaultSyncService>,
+    pub pending: Arc<chronacle_vault::outbound::PendingWrites>,
+    pub watcher_task: Option<tauri::async_runtime::JoinHandle<()>>,
 }
 
 /// Construct the vault sync engine and its shared write guard.
@@ -52,6 +61,62 @@ fn build_vault_service(
         Arc::clone(&pending),
     ));
     (svc, pending)
+}
+
+/// Consume watcher events: drop our own writes and deletes, trigger one
+/// reconcile per surviving batch (single in-flight by construction — this
+/// loop is the only caller and awaits the reconcile), re-embed applied
+/// entities.
+///
+/// A `Remove` event is checked against `is_own_delete`, not treated as
+/// automatically relevant: reconcile's own orphan sweep and evaporated-
+/// conflict cleanup delete files/sidecars too, and a sidecar deletion is
+/// separately the GM's conflict-resolution signal — conflating "we deleted
+/// it" with "the GM deleted it" would misread our own cleanup as GM intent.
+pub(crate) fn spawn_watcher(
+    state: Arc<AppState>,
+    svc: Arc<chronacle_vault::reconcile::VaultSyncService>,
+    root: String,
+) -> tauri::async_runtime::JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        let watcher = chronacle_providers::vault_watcher::NotifyWatcher::new(&root);
+        let mut rx = chronacle_core::VaultWatcher::subscribe(&watcher).await;
+        while let Some(first) = rx.recv().await {
+            let mut batch = vec![first];
+            while let Ok(next) = rx.try_recv() {
+                batch.push(next);
+            }
+            let mut relevant = false;
+            for ev in &batch {
+                match ev {
+                    chronacle_core::VaultEvent::Upsert(key) => {
+                        if !svc.is_own_write(key).await {
+                            relevant = true;
+                        }
+                    }
+                    chronacle_core::VaultEvent::Remove(key) => {
+                        if !svc.is_own_delete(key) {
+                            relevant = true;
+                        }
+                    }
+                    chronacle_core::VaultEvent::Rescan => relevant = true,
+                }
+            }
+            if !relevant {
+                continue;
+            }
+            match svc.reconcile().await {
+                Ok(report) => {
+                    crate::commands::vault_commands::embed_applied_refs(
+                        &state,
+                        &report.applied_refs,
+                    )
+                    .await;
+                }
+                Err(e) => eprintln!("vault: watcher-triggered reconcile failed: {e}"),
+            }
+        }
+    })
 }
 
 /// Build a fresh outbound queue producer and spawn its drain loop against
@@ -186,19 +251,26 @@ pub async fn run() {
     );
 
     // Build the vault sync engine now if a vault root is already configured,
-    // reading the setting before `db` is moved into `AppState` below.
+    // reading the setting before `db` is moved into `AppState` below. The
+    // watcher task is spawned later, inside `.setup()`, once `Arc<AppState>`
+    // exists — `spawn_watcher` needs it to re-embed applied entities.
     let vault_settings = read_settings_map(&db).await;
-    let vault = vault_settings
+    let vault_root = vault_settings
         .get("vault_sync_path")
         .filter(|p| !p.is_empty())
-        .map(|path| {
-            let (svc, _pending) = build_vault_service(db.clone(), path);
-            svc
-        });
-    let outbound: Arc<dyn chronacle_core::VaultOutbound> = match &vault {
-        Some(svc) => spawn_outbound(Arc::clone(svc)),
+        .cloned();
+    let vault_svc_and_pending = vault_root
+        .as_deref()
+        .map(|path| build_vault_service(db.clone(), path));
+    let outbound: Arc<dyn chronacle_core::VaultOutbound> = match &vault_svc_and_pending {
+        Some((svc, _)) => spawn_outbound(Arc::clone(svc)),
         None => Arc::new(chronacle_core::NoopOutbound),
     };
+    let vault = vault_svc_and_pending.map(|(svc, pending)| VaultRuntime {
+        svc,
+        pending,
+        watcher_task: None, // spawned below, once `state` exists
+    });
 
     let state = Arc::new(AppState {
         db,
@@ -258,6 +330,22 @@ pub async fn run() {
                     }
                 }
             });
+
+            // Spawn the vault watcher now that `Arc<AppState>` exists —
+            // `spawn_watcher` needs it to re-embed applied entities after a
+            // watcher-triggered reconcile.
+            if let Some(root) = vault_root.clone() {
+                let state_for_watcher = state.clone();
+                tokio::spawn(async move {
+                    let mut guard = state_for_watcher.vault.write().await;
+                    let Some(rt) = guard.as_mut() else {
+                        return; // vault was cleared before this task ran
+                    };
+                    let svc = Arc::clone(&rt.svc);
+                    let task = spawn_watcher(state_for_watcher.clone(), svc, root);
+                    rt.watcher_task = Some(task);
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

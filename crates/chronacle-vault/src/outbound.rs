@@ -32,9 +32,19 @@ impl VaultOutbound for QueueOutbound {
 }
 
 /// Content-hash keyed loop guard with a TTL.
+///
+/// Deletes cannot be content-hash keyed — there is no content left to hash
+/// once the file is gone — so they get a second, key-only guard (`deletes`)
+/// with the same TTL semantics. Every compiler-driven delete in `reconcile()`
+/// arms it before deleting; the watcher drops a `Remove` event that matches,
+/// exactly as it drops an `Upsert` whose content matches `inner`. Without
+/// this, the watcher would misread Chronacle's own orphan-sweep or
+/// evaporated-conflict cleanup as the GM's sidecar-deletion resolution
+/// signal.
 #[derive(Default)]
 pub struct PendingWrites {
     inner: Mutex<HashMap<String, (u64, Instant)>>,
+    deletes: Mutex<HashMap<String, Instant>>,
 }
 
 impl PendingWrites {
@@ -65,20 +75,56 @@ impl PendingWrites {
             .is_some_and(|(h, at)| *h == hash && at.elapsed() < Self::TTL)
     }
 
-    /// Drop expired guards.
+    /// Arm a guard for a key we are about to delete ourselves (compiler-driven:
+    /// orphan sweep, evaporated-conflict sidecar cleanup). Key-only — a delete
+    /// has no content to hash.
+    pub fn arm_delete(&self, key: &str) {
+        self.arm_delete_at(key, Instant::now());
+    }
+
+    /// Arm a delete guard with an explicit timestamp. Test seam for TTL expiry.
+    pub fn arm_delete_at(&self, key: &str, at: Instant) {
+        self.deletes
+            .lock()
+            .expect("poisoned")
+            .insert(key.to_owned(), at);
+    }
+
+    /// Whether a `Remove` event on `key` is a delete we made ourselves.
+    ///
+    /// Deliberately does **not** consume the guard, for the same reason as
+    /// `matches`: one delete can surface more than one fs event.
+    pub fn matches_delete(&self, key: &str) -> bool {
+        let guard = self.deletes.lock().expect("poisoned");
+        guard.get(key).is_some_and(|at| at.elapsed() < Self::TTL)
+    }
+
+    /// Drop expired guards, both write and delete.
     pub fn sweep(&self) {
         self.inner
             .lock()
             .expect("poisoned")
             .retain(|_, (_, at)| at.elapsed() < Self::TTL);
+        self.deletes
+            .lock()
+            .expect("poisoned")
+            .retain(|_, at| at.elapsed() < Self::TTL);
     }
 
-    /// Count of currently-armed guards, expired or not. Test seam — proves a
-    /// caller actually swept (vs. relying on `matches`, which already ignores
-    /// expired entries and so cannot distinguish "swept" from "not swept").
+    /// Count of currently-armed write guards, expired or not. Test seam —
+    /// proves a caller actually swept (vs. relying on `matches`, which
+    /// already ignores expired entries and so cannot distinguish "swept"
+    /// from "not swept").
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.inner.lock().expect("poisoned").len()
+    }
+
+    /// Count of currently-armed delete guards, expired or not. Test seam,
+    /// mirroring `len()`.
+    #[cfg(test)]
+    pub(crate) fn deletes_len(&self) -> usize {
+        self.deletes.lock().expect("poisoned").len()
     }
 }
 
@@ -202,6 +248,59 @@ mod tests {
         assert!(
             !p.matches("k.md", 42),
             "an event that never arrived must not pin a guard forever"
+        );
+    }
+
+    #[test]
+    fn a_delete_guard_matches_the_same_key() {
+        let p = PendingWrites::default();
+        p.arm_delete("sidecar.md");
+        assert!(p.matches_delete("sidecar.md"));
+    }
+
+    #[test]
+    fn a_delete_guard_does_not_match_a_different_key() {
+        let p = PendingWrites::default();
+        p.arm_delete("sidecar.md");
+        assert!(!p.matches_delete("other.md"));
+    }
+
+    #[test]
+    fn a_delete_guard_survives_repeated_matches() {
+        // A single delete can surface more than one fs event.
+        let p = PendingWrites::default();
+        p.arm_delete("sidecar.md");
+        assert!(p.matches_delete("sidecar.md"));
+        assert!(p.matches_delete("sidecar.md"));
+    }
+
+    #[test]
+    fn sweep_expires_delete_guards_older_than_the_ttl() {
+        let p = PendingWrites::default();
+        p.arm_delete_at(
+            "sidecar.md",
+            std::time::Instant::now() - PendingWrites::TTL - std::time::Duration::from_secs(1),
+        );
+        p.sweep();
+        assert!(
+            !p.matches_delete("sidecar.md"),
+            "a delete event that never arrived must not pin a guard forever"
+        );
+    }
+
+    #[test]
+    fn write_and_delete_guards_are_independent() {
+        // A key can be both armed for a prior write and, separately, deleted.
+        let p = PendingWrites::default();
+        p.arm("k.md", 42);
+        assert!(
+            !p.matches_delete("k.md"),
+            "arming a write must not arm a delete"
+        );
+        p.arm_delete("k.md");
+        assert!(
+            p.matches("k.md", 42),
+            "arming a delete must not disarm a write"
         );
     }
 

@@ -94,6 +94,25 @@ impl VaultSyncService {
         self.pending.sweep();
     }
 
+    /// Whether the current content of `key` is a write this process made
+    /// (consults the shared `PendingWrites` guard). The watcher drops such
+    /// events instead of triggering a reconcile.
+    pub async fn is_own_write(&self, key: &str) -> bool {
+        match self.store.read(key).await {
+            Ok(content) => self.pending.matches(key, content_hash(&content)),
+            Err(_) => false,
+        }
+    }
+
+    /// Whether a `Remove` event on `key` is a deletion this process made
+    /// (orphan sweep, evaporated-conflict sidecar cleanup). Unlike
+    /// `is_own_write`, there is no content left to read, so this consults the
+    /// key-only delete guard directly. The watcher drops such events instead
+    /// of misreading Chronacle's own cleanup as the GM's resolution signal.
+    pub fn is_own_delete(&self, key: &str) -> bool {
+        self.pending.matches_delete(key)
+    }
+
     /// Wipe every persisted merge base — fresh baseline for a new vault dir.
     pub async fn clear_all_bases(&self) -> Result<(), VaultError> {
         Ok(self.records.clear_all_synced().await?)
@@ -176,7 +195,9 @@ impl VaultSyncService {
             if was_frozen && action != SyncAction::Conflict {
                 // The conflict evaporated on its own (e.g. the GM reverted
                 // the file back to what the DB already has). Clean up before
-                // handling the action normally.
+                // handling the action normally. Arm the delete guard first —
+                // this is OUR deletion, not the GM's resolution signal.
+                self.pending.arm_delete(&sidecar);
                 match self.store.delete(&sidecar).await {
                     Ok(()) | Err(chronacle_core::VaultStoreError::NotFound(_)) => {}
                     Err(e) => eprintln!("vault: sidecar cleanup of {sidecar} failed: {e}"),
@@ -366,6 +387,9 @@ impl VaultSyncService {
             match self.store.read(&row.key).await {
                 Ok(content) => {
                     if row.synced_hash == Some(content_hash(&content)) {
+                        // Arm before the delete — this is OUR deletion, not a
+                        // signal the watcher should act on.
+                        self.pending.arm_delete(&row.key);
                         if let Err(e) = self.store.delete(&row.key).await {
                             eprintln!("vault: orphan delete of {} failed: {e}", row.key);
                             report.failed += 1;
@@ -382,7 +406,10 @@ impl VaultSyncService {
             }
             // Sidecars are compiler-owned: delete unconditionally, unlike the
             // record's own file above which is spared if the GM edited it.
+            // Arm before the delete for the same reason as above — this is
+            // also OUR deletion, never the GM's resolution signal.
             let sidecar = crate::keys::sidecar_key(&row.key);
+            self.pending.arm_delete(&sidecar);
             match self.store.delete(&sidecar).await {
                 Ok(()) | Err(chronacle_core::VaultStoreError::NotFound(_)) => {}
                 Err(e) => eprintln!("vault: orphan sidecar delete of {sidecar} failed: {e}"),
@@ -1871,5 +1898,181 @@ mod tests {
         let conflicts = svc.conflicts().await.expect("conflicts");
         assert_eq!(conflicts.len(), 1);
         assert_eq!(conflicts[0].name, "npc:n1");
+    }
+
+    // -- is_own_write / is_own_delete (E6 watcher self-write filter) ----
+
+    #[tokio::test]
+    async fn is_own_write_matches_an_armed_hash() {
+        let content = "hello".to_string();
+        let hash = content_hash(&content);
+
+        let mut store = MockVaultStore::new();
+        store
+            .expect_read()
+            .withf(|k| k == KEY)
+            .returning(move |_| Ok(content.clone()));
+
+        let records = MockVaultRecordStore::new();
+        let pending = Arc::new(crate::outbound::PendingWrites::default());
+        pending.arm(KEY, hash);
+
+        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records), pending);
+        assert!(svc.is_own_write(KEY).await, "armed hash must match");
+    }
+
+    #[tokio::test]
+    async fn is_own_write_is_false_for_different_content() {
+        let mut store = MockVaultStore::new();
+        store
+            .expect_read()
+            .withf(|k| k == KEY)
+            .returning(|_| Ok("a genuine GM edit".to_string()));
+
+        let records = MockVaultRecordStore::new();
+        let pending = Arc::new(crate::outbound::PendingWrites::default());
+        pending.arm(KEY, content_hash("something else entirely"));
+
+        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records), pending);
+        assert!(
+            !svc.is_own_write(KEY).await,
+            "a genuine GM edit must not be masked as our own write"
+        );
+    }
+
+    #[tokio::test]
+    async fn is_own_write_is_false_when_the_file_is_missing() {
+        let mut store = MockVaultStore::new();
+        store
+            .expect_read()
+            .withf(|k| k == KEY)
+            .returning(|_| Err(VaultStoreError::NotFound(KEY.into())));
+
+        let records = MockVaultRecordStore::new();
+        let pending = Arc::new(crate::outbound::PendingWrites::default());
+        pending.arm(KEY, 42);
+
+        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records), pending);
+        assert!(!svc.is_own_write(KEY).await);
+    }
+
+    #[test]
+    fn is_own_delete_matches_an_armed_key() {
+        let store = MockVaultStore::new();
+        let records = MockVaultRecordStore::new();
+        let pending = Arc::new(crate::outbound::PendingWrites::default());
+        pending.arm_delete(KEY);
+
+        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records), pending);
+        assert!(svc.is_own_delete(KEY));
+    }
+
+    #[test]
+    fn is_own_delete_is_false_for_an_unarmed_key() {
+        let store = MockVaultStore::new();
+        let records = MockVaultRecordStore::new();
+        let pending = Arc::new(crate::outbound::PendingWrites::default());
+
+        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records), pending);
+        assert!(
+            !svc.is_own_delete(KEY),
+            "the GM's own deletion (never armed) must reach reconcile"
+        );
+    }
+
+    /// The orphan sweep's file delete must arm the guard BEFORE deleting, so a
+    /// watcher event racing the delete is recognised as our own cleanup, not
+    /// mistaken for a GM action.
+    #[tokio::test]
+    async fn orphan_sweep_arms_the_delete_guard_before_deleting_the_file() {
+        let rendered = crate::render::render_record(&npc(Some("A.")));
+        let matching = crate::render::content_hash(&rendered);
+
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        store.expect_read().returning(move |_| Ok(rendered.clone()));
+        store.expect_delete().returning(|_| Ok(()));
+
+        let mut records = MockVaultRecordStore::new();
+        records.expect_list_all().returning(|| Ok(vec![])); // record is gone
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(matching),
+                conflict: false,
+            }])
+        });
+        records.expect_clear_synced_hash().returning(|_| Ok(()));
+
+        let pending = Arc::new(crate::outbound::PendingWrites::default());
+        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records), Arc::clone(&pending));
+        svc.reconcile().await.expect("reconcile");
+
+        assert!(
+            pending.matches_delete(KEY),
+            "the orphan-swept file's delete guard must be armed"
+        );
+        assert!(
+            pending.matches_delete(&crate::keys::sidecar_key(KEY)),
+            "the orphan-swept sidecar's delete guard must be armed unconditionally"
+        );
+        assert_eq!(
+            pending.deletes_len(),
+            2,
+            "both the file and its sidecar armed exactly one delete guard each"
+        );
+    }
+
+    /// The evaporated-conflict sidecar cleanup must also arm the delete guard
+    /// before deleting — same hazard as the orphan sweep.
+    #[tokio::test]
+    async fn evaporated_conflict_cleanup_arms_the_delete_guard_before_deleting_the_sidecar() {
+        let rendered = crate::render::render_record(&npc(Some("A.")));
+        let base = crate::render::content_hash(&rendered);
+
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        let rendered_read = rendered.clone();
+        store
+            .expect_read()
+            .withf(|k| k == KEY)
+            .returning(move |_| Ok(rendered_read.clone()));
+        store.expect_delete().returning(|_| Ok(()));
+        store.expect_write().never();
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_list_all()
+            .returning(|| Ok(vec![npc(Some("A."))]));
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(base),
+                conflict: true,
+            }])
+        });
+        records
+            .expect_set_conflict()
+            .withf(|_, _, flag| !*flag)
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        let pending = Arc::new(crate::outbound::PendingWrites::default());
+        let svc = VaultSyncService::new(Arc::new(store), Arc::new(records), Arc::clone(&pending));
+        let report = svc.reconcile().await.expect("reconcile");
+        assert_eq!(report.unchanged, 1);
+
+        assert!(
+            pending.matches_delete(&crate::keys::sidecar_key(KEY)),
+            "the evaporated conflict's sidecar delete guard must be armed"
+        );
     }
 }

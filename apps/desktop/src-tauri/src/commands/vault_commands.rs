@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use crate::{build_vault_service, services::settings_service, spawn_outbound, AppState};
+use crate::{
+    build_vault_service, services::settings_service, spawn_outbound, spawn_watcher, AppState,
+    VaultRuntime,
+};
 use chronacle_vault::reconcile::ReconcileReport;
 use serde::Serialize;
 use tauri::State;
@@ -92,21 +95,45 @@ pub async fn set_vault_path(
     state: State<'_, Arc<AppState>>,
     vault_path: Option<String>,
 ) -> Result<(), String> {
+    let state_ref = state.inner().clone();
     match vault_path {
         Some(path) if !path.is_empty() => {
-            let (svc, _pending) = build_vault_service(state.db.clone(), &path);
+            let (svc, pending) = build_vault_service(state.db.clone(), &path);
             configure_vault_path(&state.db, &svc, &path).await?;
             // Rebuild the queue and respawn the drain before publishing either
             // handle, so no producer can enqueue onto a channel with no drain.
             let new_outbound = spawn_outbound(Arc::clone(&svc));
-            *state.vault.write().await = Some(svc);
+            let watcher_task = spawn_watcher(Arc::clone(&state_ref), Arc::clone(&svc), path);
+            {
+                let mut guard = state.vault.write().await;
+                // Abort the old watcher before installing the new runtime — a
+                // vault-path switch must never leave two watchers racing to
+                // reconcile against different roots.
+                if let Some(old) = guard.take() {
+                    if let Some(t) = old.watcher_task {
+                        t.abort();
+                    }
+                }
+                *guard = Some(VaultRuntime {
+                    svc,
+                    pending,
+                    watcher_task: Some(watcher_task),
+                });
+            }
             // Dropping the old producer here closes its channel; the old
             // drain loop drains whatever was already queued, then ends.
             *state.outbound.write().await = new_outbound;
         }
         _ => {
             settings_service::upsert(&state.db, "vault_sync_path", "").await?;
-            *state.vault.write().await = None;
+            {
+                let mut guard = state.vault.write().await;
+                if let Some(old) = guard.take() {
+                    if let Some(t) = old.watcher_task {
+                        t.abort();
+                    }
+                }
+            }
             *state.outbound.write().await = Arc::new(chronacle_core::NoopOutbound);
         }
     }
@@ -116,8 +143,13 @@ pub async fn set_vault_path(
 /// Run a full reconcile now. Errors when no vault is configured.
 #[tauri::command]
 pub async fn vault_sync_now(state: State<'_, Arc<AppState>>) -> Result<ReconcileReportDto, String> {
-    let guard = state.vault.read().await;
-    let svc = guard.as_ref().ok_or("No vault path configured")?;
+    let svc = state
+        .vault
+        .read()
+        .await
+        .as_ref()
+        .map(|rt| Arc::clone(&rt.svc))
+        .ok_or("No vault path configured")?;
     let report = svc.reconcile().await.map_err(|e| e.to_string())?;
     embed_applied_refs(&state, &report.applied_refs).await;
     Ok(report.into())
@@ -139,8 +171,13 @@ pub struct VaultConflictDto {
 pub async fn list_vault_conflicts(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<VaultConflictDto>, String> {
-    let guard = state.vault.read().await;
-    let Some(svc) = guard.as_ref() else {
+    let Some(svc) = state
+        .vault
+        .read()
+        .await
+        .as_ref()
+        .map(|rt| Arc::clone(&rt.svc))
+    else {
         return Ok(vec![]);
     };
     Ok(svc
