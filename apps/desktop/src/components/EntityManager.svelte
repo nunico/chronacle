@@ -5,7 +5,7 @@
     getEntity,
     createEntity,
     updateEntity,
-    deleteEntity,
+    softDeleteEntity,
     getSessions,
     compileEntity,
     type EntityKind,
@@ -160,7 +160,7 @@
 
   async function confirmDelete(node: GraphNode) {
     try {
-      await deleteEntity(node.id, kind);
+      await softDeleteEntity(node.id, kind);
       entities = entities.filter((e) => e.id !== node.id);
     } catch (e) {
       showToastMsg((e as EntityError).message ?? 'Failed to delete');
@@ -311,7 +311,10 @@
       }}
     >
       <div class="confirm-box">
-        <p>Delete <strong>{deleteConfirm.name}</strong>? This cannot be undone.</p>
+        <p>
+          Remove <strong>{deleteConfirm.name}</strong>? It disappears from Chronacle and your
+          vault. (Files you edited by hand in the vault are kept.)
+        </p>
         <div class="actions">
           <button class="btn-danger" onclick={() => confirmDelete(deleteConfirm as GraphNode)}
             >Delete</button

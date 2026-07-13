@@ -3,10 +3,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import EntityForm from './EntityForm.svelte';
 import type { EntityKind, GraphNode, Session, RelatedEntity } from '../lib/commands';
 
-// Module-level mock: getEntityRelations defaults to [] so existing tests are
-// unaffected; individual tests override it as needed.
+// Module-level mock: getEntityRelations/listVaultConflicts default to [] so
+// existing tests are unaffected; individual tests override as needed.
 vi.mock('../lib/commands', () => ({
   getEntityRelations: vi.fn().mockResolvedValue([]),
+  listVaultConflicts: vi.fn().mockResolvedValue([]),
 }));
 
 import * as commands from '../lib/commands';
@@ -45,6 +46,7 @@ describe('EntityForm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(commands.getEntityRelations).mockResolvedValue([]);
+    vi.mocked(commands.listVaultConflicts).mockResolvedValue([]);
   });
 
   it('renders name field for any entity kind', () => {
@@ -217,5 +219,26 @@ describe('EntityForm', () => {
     });
     // Without onOpenEntity, no button wraps the row content
     expect(screen.queryByRole('button', { name: /open shadowhaven/i })).toBeNull();
+  });
+
+  // ── Vault conflict banner ──────────────────────────────────────────────────
+
+  it('shows a conflict banner when the open entity is conflicted', async () => {
+    vi.mocked(commands.listVaultConflicts).mockResolvedValue([
+      { id: 'n1', kind: 'npc', name: 'Seraphina', key: 'k.md', sidecarKey: 'k.conflict.md' },
+    ]);
+    const node = mockNode({ id: 'n1', kind: 'npc' });
+    render(EntityForm, { props: { kind: 'npc' as EntityKind, node } });
+    expect(await screen.findByText(/unsynced vault edits in conflict/i)).toBeInTheDocument();
+  });
+
+  it('does not show a conflict banner for a different entity', async () => {
+    vi.mocked(commands.listVaultConflicts).mockResolvedValue([
+      { id: 'other', kind: 'npc', name: 'Someone Else', key: 'k.md', sidecarKey: 'k.conflict.md' },
+    ]);
+    const node = mockNode({ id: 'n1', kind: 'npc' });
+    render(EntityForm, { props: { kind: 'npc' as EntityKind, node } });
+    await waitFor(() => expect(commands.listVaultConflicts).toHaveBeenCalled());
+    expect(screen.queryByText(/unsynced vault edits in conflict/i)).toBeNull();
   });
 });

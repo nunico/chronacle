@@ -5,7 +5,10 @@ import VaultSyncSettings from './VaultSyncSettings.svelte';
 import * as commands from '../lib/commands';
 
 describe('VaultSyncSettings', () => {
-  beforeEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(commands, 'listVaultConflicts').mockResolvedValue([]);
+  });
 
   it('shows "not configured" when no vault path is set', async () => {
     vi.spyOn(commands, 'getVaultPath').mockResolvedValue(null);
@@ -73,5 +76,30 @@ describe('VaultSyncSettings', () => {
     render(VaultSyncSettings);
     await userEvent.click(await screen.findByRole('button', { name: /disconnect/i }));
     expect(setPath).toHaveBeenCalledWith(null);
+  });
+
+  it('lists each conflicted record with its resolution hint', async () => {
+    vi.spyOn(commands, 'getVaultPath').mockResolvedValue('/Users/gm/Vault');
+    vi.spyOn(commands, 'listVaultConflicts').mockResolvedValue([
+      {
+        id: 'n1',
+        kind: 'npc',
+        name: 'Seraphina Aldric',
+        key: 'campaigns/sov/entities/npc/seraphina-aldric.md',
+        sidecarKey: 'campaigns/sov/entities/npc/seraphina-aldric.conflict.md',
+      },
+    ]);
+    render(VaultSyncSettings);
+    expect(await screen.findByText('Seraphina Aldric')).toBeInTheDocument();
+    expect(screen.getByText(/seraphina-aldric\.conflict\.md/)).toBeInTheDocument();
+    expect(screen.getByText(/delete the \.conflict\.md file/i)).toBeInTheDocument();
+  });
+
+  it('shows no conflict section when there are none', async () => {
+    vi.spyOn(commands, 'getVaultPath').mockResolvedValue('/Users/gm/Vault');
+    vi.spyOn(commands, 'listVaultConflicts').mockResolvedValue([]);
+    render(VaultSyncSettings);
+    await screen.findByText('/Users/gm/Vault');
+    expect(screen.queryByText(/conflict/i)).not.toBeInTheDocument();
   });
 });
