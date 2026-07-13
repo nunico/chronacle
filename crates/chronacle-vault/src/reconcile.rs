@@ -489,15 +489,35 @@ impl VaultSyncService {
     }
 
     /// Export a single record, using `index` to find a file the GM already
-    /// renamed in the vault instead of blindly writing the computed slug.
+    /// renamed in the vault instead of blindly writing the computed slug, and
+    /// `synced` (a snapshot of every sync-state row) to decide whether the
+    /// fast path is even safe to act on.
     ///
     /// A missing record (deleted between enqueue and drain) is not an error.
     /// The write guard is armed *before* the write so a watcher event racing
     /// the write still matches it (Tranche 5).
+    ///
+    /// This is a **latency optimisation only** — it must never do anything
+    /// `reconcile()` would not also do. Two cases where writing here would be
+    /// destructive are refused instead, deferring to the next `reconcile()`
+    /// pass:
+    ///
+    /// - The record is frozen (`conflict == true`): reconcile already wrote
+    ///   the DB's version into the sidecar and is deliberately leaving the
+    ///   GM's file alone until they delete the sidecar. Overwriting the file
+    ///   here would destroy the GM's prose and make the sidecar the only copy
+    ///   of it — which then gets deleted the moment the conflict "evaporates".
+    /// - The file currently on disk does not hash-equal the stored merge
+    ///   base: either the GM edited it and the watcher/reconcile has not
+    ///   caught up yet, or it is an unmanaged file that pre-dates this
+    ///   record's first sync. Either way, only `reconcile()`'s three-way
+    ///   `decide()` — not a blind overwrite — may resolve it. A file that is
+    ///   simply absent (no prior export) is still a normal first export.
     async fn export_one_using(
         &self,
         vref: &VaultRef,
         index: &crate::keys::VaultIndex,
+        synced: &HashMap<VaultRef, chronacle_core::SyncedRow>,
     ) -> Result<(), VaultError> {
         let Some(record) = self.records.load(vref).await? else {
             return Ok(());
@@ -511,6 +531,35 @@ impl VaultSyncService {
             .key_of(vref)
             .cloned()
             .unwrap_or_else(|| key_for(&record, false));
+
+        let state = synced.get(vref);
+        if state.is_some_and(|s| s.conflict) {
+            eprintln!("vault: export of {key} skipped — record is frozen in conflict");
+            return Ok(());
+        }
+        let base = state.and_then(|s| s.synced_hash);
+        match self.store.read(&key).await {
+            Ok(content) => {
+                if Some(content_hash(&content)) != base {
+                    // The file holds content we did not last write (a GM
+                    // edit not yet reconciled, or an unmanaged pre-existing
+                    // file). Leave it — and the base — untouched.
+                    eprintln!(
+                        "vault: export of {key} skipped — on-disk content diverges from the last synced base"
+                    );
+                    return Ok(());
+                }
+            }
+            Err(chronacle_core::VaultStoreError::NotFound(_)) => {
+                // No file yet: a normal first export.
+            }
+            Err(e) => {
+                // Read failure: do not guess. Reconcile will retry.
+                eprintln!("vault: export of {key} skipped — read failed: {e}");
+                return Ok(());
+            }
+        }
+
         self.pending.arm(&key, db); // arm BEFORE the write so a watcher event matches
         self.store.write(&key, &rendered).await?;
         self.records.set_synced_hash(vref, &key, db).await?;
@@ -519,28 +568,56 @@ impl VaultSyncService {
 
     /// Export a single record — the single-ref path.
     ///
-    /// Scans the vault index so a renamed file keeps its name.
+    /// Scans the vault index and the sync-state table so a renamed file
+    /// keeps its name and a frozen or unreconciled file is never clobbered
+    /// (see `export_one_using`). Serialized against `reconcile()` via the
+    /// same lock reconcile uses, so this fast path never reads a merge base
+    /// that a concurrent reconcile pass is mid-way through updating.
     pub async fn export_one(&self, vref: &VaultRef) -> Result<(), VaultError> {
+        let _guard = self.reconcile_lock.lock().await;
         let index = crate::keys::VaultIndex::scan(self.store.as_ref()).await?;
-        self.export_one_using(vref, &index).await
+        let synced = self.synced_map().await?;
+        self.export_one_using(vref, &index, &synced).await
     }
 
     /// Export a batch of refs — the drain path D4a's outbound queue calls.
     ///
-    /// One index scan for the whole batch (not per ref — the compile case
-    /// enqueues ~200 distinct refs). A failing ref is logged and skipped;
-    /// reconcile is the correctness guarantee, this is a latency optimisation.
+    /// One index scan and one sync-state snapshot for the whole batch (not
+    /// per ref — the compile case enqueues ~200 distinct refs). A failing
+    /// ref is logged and skipped; reconcile is the correctness guarantee,
+    /// this is a latency optimisation.
+    ///
+    /// Takes `reconcile_lock` for the whole batch. `reconcile()` never calls
+    /// `export_refs`/`export_one`, so this cannot deadlock; it only ever
+    /// waits behind a concurrent `reconcile()` pass (or another export
+    /// batch), which is exactly the serialization we want — this fast path
+    /// must not interleave its own reads and writes with a reconcile pass
+    /// touching the same keys.
     pub async fn export_refs(
         &self,
         refs: &std::collections::HashSet<VaultRef>,
     ) -> Result<(), VaultError> {
+        let _guard = self.reconcile_lock.lock().await;
         let index = crate::keys::VaultIndex::scan(self.store.as_ref()).await?;
+        let synced = self.synced_map().await?;
         for vref in refs {
-            if let Err(e) = self.export_one_using(vref, &index).await {
+            if let Err(e) = self.export_one_using(vref, &index, &synced).await {
                 eprintln!("vault: export of {} failed: {e}", vref.to_thing());
             }
         }
         Ok(())
+    }
+
+    /// Snapshot every sync-state row, keyed by `VaultRef`, for the fast-path
+    /// export decision (`export_one_using`).
+    async fn synced_map(&self) -> Result<HashMap<VaultRef, chronacle_core::SyncedRow>, VaultError> {
+        Ok(self
+            .records
+            .list_synced()
+            .await?
+            .into_iter()
+            .map(|row| (row.vref.clone(), row))
+            .collect())
     }
 
     /// Every record currently frozen in conflict, with display names resolved.
@@ -1751,6 +1828,7 @@ mod tests {
 
         let mut records = MockVaultRecordStore::new();
         records.expect_load().returning(|_| Ok(None));
+        records.expect_list_synced().returning(|| Ok(vec![]));
         records.expect_set_synced_hash().never();
 
         let svc = VaultSyncService::new(
@@ -1773,6 +1851,11 @@ mod tests {
         // Empty vault → index has no entry for this ref → falls back to the
         // computed slug.
         store.expect_list().returning(|_| Ok(vec![]));
+        // No file at the computed slug yet: a normal first export.
+        store
+            .expect_read()
+            .withf(|k| k == KEY)
+            .returning(|_| Err(VaultStoreError::NotFound(KEY.into())));
         store
             .expect_write()
             .withf(|k, _| k == KEY)
@@ -1783,6 +1866,7 @@ mod tests {
         records
             .expect_load()
             .returning(|_| Ok(Some(npc(Some("A.")))));
+        records.expect_list_synced().returning(|| Ok(vec![]));
         records
             .expect_set_synced_hash()
             .withf(|_, k, _| k == KEY)
@@ -1810,6 +1894,7 @@ mod tests {
 
         let record = npc(Some("A."));
         let rendered_for_index = crate::render::render_record(&record);
+        let base_hash = crate::render::content_hash(&rendered_for_index);
 
         let mut store = MockVaultStore::new();
         store
@@ -1829,6 +1914,19 @@ mod tests {
         records
             .expect_load()
             .returning(|_| Ok(Some(npc(Some("A.")))));
+        // A prior sync already claimed this renamed key; the file on disk
+        // still matches that base, so the fast path may safely rewrite it.
+        records.expect_list_synced().returning(move || {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: RENAMED_KEY.into(),
+                synced_hash: Some(base_hash),
+                conflict: false,
+            }])
+        });
         records
             .expect_set_synced_hash()
             .withf(|_, k, _| k == RENAMED_KEY)
@@ -1847,6 +1945,102 @@ mod tests {
         let mut refs = std::collections::HashSet::new();
         refs.insert(vref);
 
+        svc.export_refs(&refs).await.expect("export_refs");
+    }
+
+    // -- export_one_using must never clobber the GM (Finding 1) ---------
+
+    /// A frozen record's file must NOT be written by the fast path — only
+    /// `reconcile()` may touch a file while its record is in conflict.
+    /// Overwriting it here would destroy the GM's prose (the sidecar only
+    /// ever holds the DB's version).
+    #[tokio::test]
+    async fn export_refs_skips_a_frozen_record() {
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        // The index scan reads the file to build the by-ref map; the frozen
+        // check must short-circuit before the fast path's own base-check read.
+        store
+            .expect_read()
+            .withf(|k| k == KEY)
+            .returning(|_| Ok("---\nid: \"npc:n1\"\n---\n\nGM version.\n".into()));
+        store.expect_write().never();
+        store.expect_delete().never();
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_load()
+            .returning(|_| Ok(Some(npc(Some("A.")))));
+        records.expect_list_synced().returning(|| {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(111),
+                conflict: true,
+            }])
+        });
+        records.expect_set_synced_hash().never();
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let vref = VaultRef {
+            table: "npc".into(),
+            id: "n1".into(),
+        };
+        let mut refs = std::collections::HashSet::new();
+        refs.insert(vref);
+        svc.export_refs(&refs).await.expect("export_refs");
+    }
+
+    /// A file whose on-disk content diverges from the last synced base must
+    /// NOT be written by the fast path — the GM may have edited it and
+    /// reconcile has not caught up yet. The GM's edit survives; only
+    /// `reconcile()`'s three-way `decide()` may resolve it.
+    #[tokio::test]
+    async fn export_refs_skips_a_file_that_diverges_from_the_base() {
+        let mut store = MockVaultStore::new();
+        store.expect_list().returning(|_| Ok(vec![KEY.to_string()]));
+        // The GM's edit, unreconciled.
+        store
+            .expect_read()
+            .withf(|k| k == KEY)
+            .returning(|_| Ok("---\nid: \"npc:n1\"\n---\n\nGM edit, not yet reconciled.\n".into()));
+        store.expect_write().never();
+
+        let mut records = MockVaultRecordStore::new();
+        records
+            .expect_load()
+            .returning(|_| Ok(Some(npc(Some("A.")))));
+        records.expect_list_synced().returning(|| {
+            Ok(vec![chronacle_core::SyncedRow {
+                vref: VaultRef {
+                    table: "npc".into(),
+                    id: "n1".into(),
+                },
+                key: KEY.into(),
+                synced_hash: Some(999_999), // stale: does not match the file above
+                conflict: false,
+            }])
+        });
+        records.expect_set_synced_hash().never();
+
+        let svc = VaultSyncService::new(
+            Arc::new(store),
+            Arc::new(records),
+            Arc::new(crate::outbound::PendingWrites::default()),
+        );
+        let vref = VaultRef {
+            table: "npc".into(),
+            id: "n1".into(),
+        };
+        let mut refs = std::collections::HashSet::new();
+        refs.insert(vref);
         svc.export_refs(&refs).await.expect("export_refs");
     }
 
