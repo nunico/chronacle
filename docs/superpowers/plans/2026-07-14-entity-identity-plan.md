@@ -1158,7 +1158,10 @@ git commit -m "fix(vault): a rename must move the file, not lose the GM's edits"
 
 **Interfaces:**
 
-- Consumes: `aliases::add_alias` (Task 4); rename-safe reconcile (Task 6); `soft_delete` (existing).
+- Consumes: `aliases::add_alias` (Task 4); rename-safe reconcile (Task 6); and these EXISTING functions — use them, do not reimplement:
+  - `entity_service::relations::relate_collapsing(db, from_id, from_kind, to_id, to_kind, rel_type, notes) -> Result<bool, EntityError>` — tier-aware edge creation (`relations/edge.rs:86`). The correct way to re-point a merged edge.
+  - `entity_service::relations::get_entity_relations(db, id, kind) -> Result<Vec<RelatedEntity>, EntityError>` (`relations/flat.rs:13`). `RelatedEntity { id, kind, name, rel_type, direction }`; `direction` is `"outbound"` when the center is the edge's `in` side.
+  - `entity_service::crud::soft_delete(db, id, kind)` and `crud::embed_node(db, provider, node)`.
 - Produces:
   - `pub struct MergeChoices { pub summary: FieldChoice, pub notes: FieldChoice }`
   - `pub enum FieldChoice { KeepSurvivor, KeepLoser, KeepBoth }`
@@ -1183,7 +1186,7 @@ async fn merge_unions_every_edge_and_keeps_the_losers_name_as_an_alias() {
 
     // NO EDGE IS EVER DROPPED. A relationship is a fact about the world, not a
     // stylistic preference — the survivor must know everything both knew.
-    let related = entity_service::list_related(&db, "a", EntityKind::Faction).await.unwrap();
+    let related = entity_service::get_entity_relations(&db, "a", "faction").await.unwrap();
     let names: Vec<&str> = related.iter().map(|r| r.name.as_str()).collect();
     assert!(names.contains(&"X"), "the survivor's own edge must survive");
     assert!(names.contains(&"Y"), "the loser's edge must be re-pointed, not dropped");
@@ -1242,9 +1245,27 @@ pub async fn merge<C: surrealdb::Connection>(
     }
     let (s, l) = (load(db, survivor).await?, load(db, loser).await?);
 
-    // 1. Re-point every edge onto the survivor, both directions, deduped.
-    //    RELATE is idempotent here because we skip pairs that already exist.
-    repoint_edges(db, loser, survivor).await?;
+    // 1. Re-point every edge onto the survivor, both directions.
+    //
+    //    REUSE `relate_collapsing` (entity_service/relations/edge.rs) — do NOT
+    //    hand-roll an UPDATE of `in`/`out`. It already knows the specificity
+    //    TIERS: a generic `mentioned` (tier 0) or `related_to` (tier 1) edge
+    //    must not pile up on top of a specific `allied_with` between the same
+    //    pair, and a raw re-point would create exactly that pile. It also
+    //    scope-checks both ends and replaces exact duplicates in place.
+    //
+    //    NOTE this means the merged entity can end up with FEWER edge ROWS than
+    //    the two inputs had, while losing no INFORMATION — a redundant generic
+    //    edge collapses into the specific one that already says more. The test
+    //    asserts related ENTITIES are all present, not that row counts add up.
+    for e in get_entity_relations(db, id_of(loser), table_of(loser)?).await? {
+        let (from, to) = match e.direction.as_str() {
+            "outbound" => ((survivor_id, survivor_table), (e.id.as_str(), e.kind.as_str())),
+            _ => ((e.id.as_str(), e.kind.as_str()), (survivor_id, survivor_table)),
+        };
+        relate_collapsing(db, from.0, from.1, to.0, to.1, &e.rel_type, e.notes.clone()).await?;
+    }
+    delete_edges_of(db, loser).await?;
 
     // 2. Aliases: union, plus the loser's NAME — this is what keeps every
     //    [[Free League]] the GM ever wrote working after the merge.
