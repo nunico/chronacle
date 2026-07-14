@@ -252,10 +252,10 @@ Every surface below carries a one-line explanation in place, because a GM who
 has to open the manual to understand a merge dialog has already been failed by
 it:
 
-- Aliases field: _"Other names this is known by. Links using any of them will
+- Aliases field: _"Alternate names this is known by. Links using any of them will
   find this entity."_
 - Merge dialog: a plain-language consequence line — _"12 relationships merged,
-  3 other names kept, the codex article will be rewritten."_
+  3 alternate names kept, the codex article will be rewritten."_
 - Auto-linked list: _"Chronacle made these links on its own. If one is wrong,
   undo it — the link will go back to asking you."_
 - Campaign rename: _"Your vault folder will be renamed too. Close Obsidian
@@ -284,8 +284,8 @@ same, but Chronacle starts out taking every name literally — to it, "The Free
 League" and "Free League" look like two different factions, and a link to
 [[The Quassars]] doesn't find the Quassar Family at all.
 
-You fix this by giving something **other names**. Open any entity and you'll
-find an _Other names_ field. Anything you put there works exactly like the
+You fix this by giving something **alternate names**. Open any entity and you'll
+find an _Alternate names_ field. Anything you put there works exactly like the
 entity's real name: links pointing at it land here, and Chronacle stops treating
 it as a stranger. You only ever have to do this once per name — it sticks.
 
@@ -328,7 +328,7 @@ connection the other didn't, the merged entry knows about it too. Nothing gets
 quietly dropped.
 
 The name of the entry you didn't keep isn't lost either — it becomes one of the
-merged entry's other names. Every link you ever wrote using it keeps working.
+merged entry's alternate names. Every link you ever wrote using it keeps working.
 
 The merged entry's codex article is marked for rewriting, because it was written
 from half the facts. Recompile when you're ready.
@@ -352,9 +352,9 @@ Obsidian we're being careful of.
 
 ### Draft: addition to "Your Vault"
 
-**Other names in your vault files**
+**Alternate names in your vault files**
 
-Each file has an `aliases:` line near the top. That's the entity's other names,
+Each file has an `aliases:` line near the top. That's the entity's alternate names,
 and you can edit it in Obsidian directly — add one and Chronacle picks it up on
 the next sync, exactly as if you'd typed it into the app. Obsidian uses the same
 line for its own linking, so a name you add here works in both places at once.
