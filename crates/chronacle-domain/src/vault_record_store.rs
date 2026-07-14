@@ -283,6 +283,31 @@ impl VaultRecordStore for SurrealVaultRecordStore {
         Ok(())
     }
 
+    async fn restore_synced(&self, rows: &[SyncedRow]) -> Result<(), VaultRecordError> {
+        for row in rows {
+            // `synced_hash` is a string on the wire and `''` reads back as no
+            // base (`None`), so a conflict-only row round-trips unchanged.
+            self.db
+                .query(
+                    "UPSERT type::thing('vault_sync_state', $record) \
+                     SET record = $record, key = $key, synced_hash = $hash, \
+                         conflict = $conflict, synced_at = time::now()",
+                )
+                .bind(("record", row.vref.to_thing()))
+                .bind(("key", row.key.clone()))
+                .bind((
+                    "hash",
+                    row.synced_hash.map(|h| h.to_string()).unwrap_or_default(),
+                ))
+                .bind(("conflict", row.conflict))
+                .await
+                .map_err(backend_err)?
+                .check()
+                .map_err(backend_err)?;
+        }
+        Ok(())
+    }
+
     async fn list_synced(&self) -> Result<Vec<SyncedRow>, VaultRecordError> {
         #[derive(Debug, Deserialize)]
         struct Row {

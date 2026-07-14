@@ -59,8 +59,12 @@ pub async fn get_vault_path(state: State<'_, Arc<AppState>>) -> Result<Option<St
 /// A different vault directory must never inherit the old dir's merge bases,
 /// or every record reads as a deletion against the new (empty) folder (L2);
 /// re-submitting the SAME path must leave the bases alone. The
-/// `vault_sync_path` setting is written only after `reconcile` succeeds, so a
-/// failed switch leaves the previous path and its bases in force.
+/// `vault_sync_path` setting is written only after `reconcile` succeeds, and
+/// the bases are snapshotted before they are cleared and put back if the
+/// reconcile fails — so a failed switch leaves the previous path AND its bases
+/// in force. Rolling back one without the other is only half a rollback: with
+/// the bases gone, the old vault's next reconcile sees no base for any record
+/// and reports every file the GM edited outside the app as a fresh conflict.
 ///
 /// Takes a bare database handle and an already-constructed service, so it is
 /// reachable from a test with only a `mem://` SurrealDB and no Tauri `State`.
@@ -78,10 +82,41 @@ pub async fn configure_vault_path(
         .map(|s| s.value)
         .filter(|v| !v.is_empty());
 
-    if previous.as_deref() != Some(path) {
+    // Snapshot BEFORE clearing: the merge base is the one piece of sync state
+    // nothing can re-derive. If the switch fails and the bases are simply gone,
+    // the next reconcile against the OLD vault sees `base = None` for every
+    // record — and every file the GM had edited outside the app then reads as a
+    // fresh `Conflict` instead of a known divergence. Rolling the path back
+    // without rolling the bases back is only half a rollback.
+    let switching = previous.as_deref() != Some(path);
+    let snapshot = if switching {
+        let rows = svc.snapshot_bases().await.map_err(|e| e.to_string())?;
         svc.clear_all_bases().await.map_err(|e| e.to_string())?;
+        Some(rows)
+    } else {
+        None
+    };
+
+    if let Err(e) = svc.reconcile().await {
+        let reconcile_err = e.to_string();
+        if let Some(rows) = &snapshot {
+            if let Err(restore_err) = svc.restore_bases(rows).await {
+                // The undo failed too, so the old vault's bases really are gone
+                // and its next reconcile will report spurious conflicts. That is
+                // a different problem from "the folder you picked is unusable",
+                // and the GM needs to know both: the first tells them what to do
+                // now, the second tells them what to expect afterwards.
+                eprintln!("vault: base rollback after a failed switch also failed: {restore_err}");
+                return Err(format!(
+                    "{reconcile_err} (the previous vault's sync baseline could not be \
+                     restored: {restore_err} — run a sync on it and resolve any \
+                     conflicts that appear)"
+                ));
+            }
+        }
+        return Err(reconcile_err);
     }
-    svc.reconcile().await.map_err(|e| e.to_string())?;
+
     // Persist only after the reconcile succeeded; on failure the old path
     // and old bases remain in force.
     settings_service::upsert(db, "vault_sync_path", path).await?;

@@ -59,3 +59,7 @@ apps/desktop/src-tauri/resources/onnxruntime/*
 graphify-out/
 # Superpowers brainstorming companion (local mockups)
 .superpowers/
+
+# ── Playwright ────────────────────────────────────────────────────────
+apps/desktop/test-results/
+apps/desktop/playwright-report/

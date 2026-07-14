@@ -134,6 +134,22 @@ impl VaultSyncService {
         Ok(self.records.clear_all_synced().await?)
     }
 
+    /// Every persisted merge base, as a snapshot that `restore_bases` can undo
+    /// a `clear_all_bases` with. Take this BEFORE clearing on a vault-path
+    /// switch: if the switch then fails, the old vault's bases must still be in
+    /// force, and nothing else in the system can re-derive them.
+    pub async fn snapshot_bases(&self) -> Result<Vec<chronacle_core::SyncedRow>, VaultError> {
+        Ok(self.records.list_synced().await?)
+    }
+
+    /// Re-persist a `snapshot_bases` result verbatim, undoing `clear_all_bases`.
+    pub async fn restore_bases(
+        &self,
+        rows: &[chronacle_core::SyncedRow],
+    ) -> Result<(), VaultError> {
+        Ok(self.records.restore_synced(rows).await?)
+    }
+
     /// Run one bidirectional reconcile pass over every syncable record.
     ///
     /// Loads every record and the on-disk vault index, computes a three-way
