@@ -14,7 +14,7 @@ async fn setup_db() -> Surreal<Db> {
 fn make_npc(name: &str) -> EntityInput {
     EntityInput {
         name: name.to_string(),
-        aliases: Vec::new(),
+        aliases: None,
         summary: None,
         notes: None,
         date_start: None,

@@ -244,7 +244,7 @@ async fn get_session_entities_returns_linked_events() {
         EntityKind::Event,
         EntityInput {
             name: "Battle of the Fields".to_string(),
-            aliases: Vec::new(),
+            aliases: None,
             summary: None,
             notes: None,
             date_start: None,

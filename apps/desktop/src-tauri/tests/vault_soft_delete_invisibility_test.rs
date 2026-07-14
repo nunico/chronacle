@@ -23,7 +23,7 @@ async fn setup_db() -> surrealdb::Surreal<surrealdb::engine::local::Db> {
 fn npc_input(name: &str) -> EntityInput {
     EntityInput {
         name: name.to_string(),
-        aliases: Vec::new(),
+        aliases: None,
         summary: Some("a summary".to_string()),
         notes: None,
         date_start: None,
@@ -94,7 +94,7 @@ async fn a_soft_deleted_entity_is_invisible_to_every_read_path() {
         EntityKind::Event,
         EntityInput {
             name: "The Vanishing".to_string(),
-            aliases: Vec::new(),
+            aliases: None,
             session_id: Some(session.id.clone()),
             ..npc_input("The Vanishing")
         },

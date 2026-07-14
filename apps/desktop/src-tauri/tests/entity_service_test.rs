@@ -18,7 +18,7 @@ async fn setup_db() -> Surreal<Db> {
 fn npc_input(name: &str) -> EntityInput {
     EntityInput {
         name: name.to_string(),
-        aliases: Vec::new(),
+        aliases: None,
         summary: Some("A shady merchant".to_string()),
         notes: None,
         date_start: None,
@@ -53,7 +53,7 @@ async fn create_event_stores_temporal_fields() {
     let db = setup_db().await;
     let input = EntityInput {
         name: "Battle of the Ashfields".to_string(),
-        aliases: Vec::new(),
+        aliases: None,
         summary: None,
         notes: None,
         date_start: Some("Year 312".to_string()),
@@ -82,7 +82,7 @@ async fn create_player_character_stores_pc_fields() {
     let db = setup_db().await;
     let input = EntityInput {
         name: "Aeris".to_string(),
-        aliases: Vec::new(),
+        aliases: None,
         summary: None,
         notes: None,
         date_start: None,
@@ -116,7 +116,7 @@ async fn get_by_id_returns_created_node() {
         EntityKind::Location,
         EntityInput {
             name: "Shadowmere".to_string(),
-            aliases: Vec::new(),
+            aliases: None,
             summary: None,
             notes: None,
             date_start: None,
@@ -184,7 +184,7 @@ async fn create_with_empty_name_returns_validation_error() {
     let db = setup_db().await;
     let input = EntityInput {
         name: "   ".to_string(),
-        aliases: Vec::new(),
+        aliases: None,
         summary: None,
         notes: None,
         date_start: None,
@@ -258,7 +258,7 @@ async fn update_changes_name_and_notes() {
 
     let updated_input = EntityInput {
         name: "New Name".to_string(),
-        aliases: Vec::new(),
+        aliases: None,
         summary: Some("Updated summary".to_string()),
         notes: Some("Some notes".to_string()),
         date_start: None,
@@ -290,7 +290,7 @@ async fn update_not_found_returns_error() {
         EntityKind::Location,
         EntityInput {
             name: "Ghost".to_string(),
-            aliases: Vec::new(),
+            aliases: None,
             summary: None,
             notes: None,
             date_start: None,
@@ -321,7 +321,7 @@ async fn delete_removes_node() {
         EntityKind::Faction,
         EntityInput {
             name: "The Crimson Hand".to_string(),
-            aliases: Vec::new(),
+            aliases: None,
             summary: None,
             notes: None,
             date_start: None,
@@ -360,7 +360,7 @@ async fn update_with_empty_name_returns_validation_error() {
         EntityKind::Npc,
         EntityInput {
             name: "  ".to_string(),
-            aliases: Vec::new(),
+            aliases: None,
             summary: None,
             notes: None,
             date_start: None,
@@ -395,7 +395,7 @@ async fn relate_creates_edge_traversable_in_both_directions() {
         EntityKind::Location,
         EntityInput {
             name: "The Rusty Flagon".to_string(),
-            aliases: Vec::new(),
+            aliases: None,
             summary: None,
             notes: None,
             date_start: None,
@@ -461,7 +461,7 @@ async fn create_event_with_session_id_stores_session_link() {
         EntityKind::Event,
         EntityInput {
             name: "Battle".to_string(),
-            aliases: Vec::new(),
+            aliases: None,
             summary: None,
             notes: None,
             date_start: None,
@@ -508,7 +508,7 @@ async fn create_campaign(db: &Surreal<Db>) -> String {
 fn location_input(name: &str, notes: Option<&str>) -> EntityInput {
     EntityInput {
         name: name.to_string(),
-        aliases: Vec::new(),
+        aliases: None,
         summary: Some(String::new()),
         notes: notes.map(|s| s.to_string()),
         date_start: None,
@@ -714,7 +714,7 @@ async fn get_events_timeline_orders_by_sequence_index_nulls_last() {
 
     let event = |name: &str, seq: Option<i64>| EntityInput {
         name: name.to_string(),
-        aliases: Vec::new(),
+        aliases: None,
         sequence_index: seq,
         ..Default::default()
     };
@@ -767,7 +767,7 @@ async fn get_entity_graph_returns_center_neighbors_and_edges() {
         EntityKind::Npc,
         EntityInput {
             name: "Varin".into(),
-            aliases: Vec::new(),
+            aliases: None,
             ..Default::default()
         },
     )
@@ -781,7 +781,7 @@ async fn get_entity_graph_returns_center_neighbors_and_edges() {
         EntityKind::Location,
         EntityInput {
             name: "The Keep".into(),
-            aliases: Vec::new(),
+            aliases: None,
             ..Default::default()
         },
     )
@@ -795,7 +795,7 @@ async fn get_entity_graph_returns_center_neighbors_and_edges() {
         EntityKind::Faction,
         EntityInput {
             name: "The Pact".into(),
-            aliases: Vec::new(),
+            aliases: None,
             ..Default::default()
         },
     )
@@ -854,7 +854,7 @@ async fn get_entity_graph_isolated_entity_returns_just_itself() {
         EntityKind::Npc,
         EntityInput {
             name: "Hermit".into(),
-            aliases: Vec::new(),
+            aliases: None,
             ..Default::default()
         },
     )
@@ -879,7 +879,7 @@ async fn get_entity_graph_dedupes_node_with_multiple_edges_to_same_neighbor() {
         EntityKind::Npc,
         EntityInput {
             name: "Serafine".into(),
-            aliases: Vec::new(),
+            aliases: None,
             ..Default::default()
         },
     )
@@ -894,7 +894,7 @@ async fn get_entity_graph_dedupes_node_with_multiple_edges_to_same_neighbor() {
         EntityKind::Location,
         EntityInput {
             name: "The Iron Tower".into(),
-            aliases: Vec::new(),
+            aliases: None,
             ..Default::default()
         },
     )
@@ -963,7 +963,7 @@ async fn forward_reference_wikilink_reconciled_on_new_entity_create() {
         EntityKind::Npc,
         EntityInput {
             name: "Sven".into(),
-            aliases: Vec::new(),
+            aliases: None,
             notes: Some("Will ally with [[Brother Bram]].".into()),
             ..Default::default()
         },
@@ -987,7 +987,7 @@ async fn forward_reference_wikilink_reconciled_on_new_entity_create() {
         EntityKind::Npc,
         EntityInput {
             name: "Brother Bram".into(),
-            aliases: Vec::new(),
+            aliases: None,
             ..Default::default()
         },
     )
@@ -1029,7 +1029,7 @@ async fn forward_reference_reconciliation_no_false_positive() {
         EntityKind::Npc,
         EntityInput {
             name: "Sven".into(),
-            aliases: Vec::new(),
+            aliases: None,
             notes: Some("Wanders the forest alone.".into()),
             ..Default::default()
         },
@@ -1045,7 +1045,7 @@ async fn forward_reference_reconciliation_no_false_positive() {
         EntityKind::Npc,
         EntityInput {
             name: "Ghost".into(),
-            aliases: Vec::new(),
+            aliases: None,
             ..Default::default()
         },
     )
@@ -1084,7 +1084,7 @@ async fn get_entity_relations_returns_both_directions_with_correct_fields() {
         EntityKind::Npc,
         EntityInput {
             name: "Center".into(),
-            aliases: Vec::new(),
+            aliases: None,
             ..Default::default()
         },
     )
@@ -1098,7 +1098,7 @@ async fn get_entity_relations_returns_both_directions_with_correct_fields() {
         EntityKind::Location,
         EntityInput {
             name: "The Vault".into(),
-            aliases: Vec::new(),
+            aliases: None,
             ..Default::default()
         },
     )
@@ -1112,7 +1112,7 @@ async fn get_entity_relations_returns_both_directions_with_correct_fields() {
         EntityKind::Faction,
         EntityInput {
             name: "Iron Legion".into(),
-            aliases: Vec::new(),
+            aliases: None,
             ..Default::default()
         },
     )
@@ -1204,7 +1204,7 @@ async fn relate_twice_same_triple_produces_exactly_one_edge() {
         EntityKind::Location,
         EntityInput {
             name: "Blackstone Keep".into(),
-            aliases: Vec::new(),
+            aliases: None,
             ..Default::default()
         },
     )
@@ -1261,7 +1261,7 @@ async fn resync_all_wikilinks_regenerates_edges_from_existing_notes() {
         EntityKind::Npc,
         EntityInput {
             name: "Bram".into(),
-            aliases: Vec::new(),
+            aliases: None,
             ..Default::default()
         },
     )
@@ -1275,7 +1275,7 @@ async fn resync_all_wikilinks_regenerates_edges_from_existing_notes() {
         EntityKind::Npc,
         EntityInput {
             name: "Sven".into(),
-            aliases: Vec::new(),
+            aliases: None,
             notes: Some("Always travels with [[Bram]].".into()),
             ..Default::default()
         },
