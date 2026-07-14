@@ -218,8 +218,10 @@ async fn known_rule_entries<C: Connection>(
         name: String,
     }
     let mut resp = db
+        // `vault_deleted != true`, never `= false`: DEFAULT does not
+        // backfill pre-migration rows.
         .query(
-            "SELECT id, name FROM rule_entry WHERE collection IN \
+            "SELECT id, name FROM rule_entry WHERE vault_deleted != true AND collection IN \
                  (SELECT VALUE out FROM subscribes_to WHERE in = type::thing('campaign', $cid))",
         )
         .bind(("cid", campaign_id.to_owned()))
@@ -417,7 +419,11 @@ pub async fn distill_session_notes<C: Connection>(
         notes: String,
     }
     let mut resp = db
-        .query("SELECT campaign, notes FROM type::thing('session', $id)")
+        // `vault_deleted != true`, never `= false`: DEFAULT does not
+        // backfill pre-migration rows.
+        .query(
+            "SELECT campaign, notes FROM type::thing('session', $id) WHERE vault_deleted != true",
+        )
         .bind(("id", session_id.to_owned()))
         .await
         .map_err(|e| CodexError::Db(e.to_string()))?;

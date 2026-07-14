@@ -513,9 +513,11 @@ pub async fn list_rule_entries<C: Connection>(
     collection_id: &str,
 ) -> Result<Vec<RuleEntry>, String> {
     let mut resp = db
+        // `vault_deleted != true`, never `= false`: DEFAULT does not
+        // backfill pre-migration rows.
         .query(
             "SELECT id, name, category, body, notes, page_refs, stale FROM rule_entry \
-             WHERE collection = type::thing('collection', $cid) ORDER BY name",
+             WHERE vault_deleted != true AND collection = type::thing('collection', $cid) ORDER BY name",
         )
         .bind(("cid", collection_id.to_owned()))
         .await
