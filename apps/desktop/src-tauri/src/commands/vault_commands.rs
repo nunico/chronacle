@@ -95,46 +95,97 @@ pub async fn set_vault_path(
     state: State<'_, Arc<AppState>>,
     vault_path: Option<String>,
 ) -> Result<(), String> {
-    let state_ref = state.inner().clone();
+    set_vault_path_inner(state.inner(), vault_path).await
+}
+
+/// The testable core of `set_vault_path` — takes a bare `&Arc<AppState>` so a
+/// test can drive it without a Tauri `State` wrapper.
+///
+/// **Ordering is the correctness guarantee here (Finding 4, tranche-5
+/// whole-branch review):** the OLD runtime's watcher and drain are aborted
+/// BEFORE `configure_vault_path`'s `clear_all_bases` + reconcile pass touches
+/// the NEW root, all under one continuous hold of `state.vault`'s write lock.
+/// `vault_sync_state` is a single global table, not partitioned by root — if
+/// the old watcher or drain were still live while the new root's bases were
+/// being cleared and reconciled, a race-won write from the old side could
+/// resurrect a merge-base row for a record that has no file under the new
+/// root, and the very next reconcile would misread that as the GM having
+/// deleted it (`SoftDelete`) even though it is untouched. Tearing the old
+/// runtime down first — and keeping the lock held for the whole switch —
+/// makes that interleaving impossible.
+///
+/// A failing reconcile must not leave the app with no vault runtime at all:
+/// `configure_vault_path` only persists the setting on success, and on
+/// failure this function respawns the OLD runtime's watcher and drain
+/// exactly as they were, over the same service and root.
+pub async fn set_vault_path_inner(
+    state: &Arc<AppState>,
+    vault_path: Option<String>,
+) -> Result<(), String> {
     match vault_path {
         Some(path) if !path.is_empty() => {
-            let (svc, pending) = build_vault_service(state.db.clone(), &path);
-            configure_vault_path(&state.db, &svc, &path).await?;
-            // Rebuild the queue and respawn the drain before publishing either
-            // handle, so no producer can enqueue onto a channel with no drain.
-            let new_outbound = spawn_outbound(Arc::clone(&svc));
-            {
-                let mut guard = state.vault.write().await;
-                // Abort the old watcher, and only THEN spawn the new one — a
-                // vault-path switch must never leave two watchers racing to
-                // reconcile against different roots, even briefly. Spawning
-                // the new watcher before taking this lock would let it start
-                // subscribing to the new root while the old watcher (still
-                // pointed at the old root) is still live.
-                if let Some(old) = guard.take() {
-                    if let Some(t) = old.watcher_task {
-                        t.abort();
-                    }
+            let mut guard = state.vault.write().await;
+
+            // Tear the old runtime down FIRST — before either its bases are
+            // cleared or a byte is written to the new root — so nothing can
+            // race the switch (see the ordering note above).
+            let old = guard.take();
+            if let Some(rt) = &old {
+                if let Some(t) = &rt.watcher_task {
+                    t.abort();
                 }
-                let watcher_task = spawn_watcher(Arc::clone(&state_ref), Arc::clone(&svc), path);
-                *guard = Some(VaultRuntime {
-                    svc,
-                    pending,
-                    watcher_task: Some(watcher_task),
-                });
+                if let Some(t) = &rt.outbound_task {
+                    t.abort();
+                }
             }
-            // Dropping the old producer here closes its channel; the old
-            // drain loop drains whatever was already queued, then ends.
+            // No live runtime for the duration of the switch: an enqueue
+            // during this window just degrades to "the file updates on the
+            // next reconcile", same as every other dropped enqueue.
+            *state.outbound.write().await = Arc::new(chronacle_core::NoopOutbound);
+
+            let (svc, pending) = build_vault_service(state.db.clone(), &path);
+            if let Err(e) = configure_vault_path(&state.db, &svc, &path).await {
+                // Roll back: `configure_vault_path` never persisted the new
+                // path (it only does so on success), so the previous path
+                // and its bases are still in force. Restore the OLD runtime
+                // — watcher and drain both running again — rather than
+                // leaving the app with none.
+                if let Some(rt) = old {
+                    let (restored_outbound, outbound_task) = spawn_outbound(Arc::clone(&rt.svc));
+                    let watcher_task =
+                        spawn_watcher(Arc::clone(state), Arc::clone(&rt.svc), rt.root.clone());
+                    *state.outbound.write().await = restored_outbound;
+                    *guard = Some(VaultRuntime {
+                        svc: rt.svc,
+                        pending: rt.pending,
+                        watcher_task: Some(watcher_task),
+                        outbound_task: Some(outbound_task),
+                        root: rt.root,
+                    });
+                }
+                return Err(e);
+            }
+
+            let (new_outbound, outbound_task) = spawn_outbound(Arc::clone(&svc));
+            let watcher_task = spawn_watcher(Arc::clone(state), Arc::clone(&svc), path.clone());
+            *guard = Some(VaultRuntime {
+                svc,
+                pending,
+                watcher_task: Some(watcher_task),
+                outbound_task: Some(outbound_task),
+                root: path,
+            });
             *state.outbound.write().await = new_outbound;
         }
         _ => {
             settings_service::upsert(&state.db, "vault_sync_path", "").await?;
-            {
-                let mut guard = state.vault.write().await;
-                if let Some(old) = guard.take() {
-                    if let Some(t) = old.watcher_task {
-                        t.abort();
-                    }
+            let mut guard = state.vault.write().await;
+            if let Some(old) = guard.take() {
+                if let Some(t) = old.watcher_task {
+                    t.abort();
+                }
+                if let Some(t) = old.outbound_task {
+                    t.abort();
                 }
             }
             *state.outbound.write().await = Arc::new(chronacle_core::NoopOutbound);

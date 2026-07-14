@@ -37,11 +37,20 @@ pub struct AppState {
 }
 
 /// Everything a live vault configuration owns. Replaced wholesale on
-/// `set_vault_path`; the watcher task is aborted when dropped out.
+/// `set_vault_path`; the watcher and drain tasks are aborted when dropped
+/// out, so neither can act against a root that is no longer current.
 pub struct VaultRuntime {
     pub svc: Arc<chronacle_vault::reconcile::VaultSyncService>,
     pub pending: Arc<chronacle_vault::outbound::PendingWrites>,
     pub watcher_task: Option<tauri::async_runtime::JoinHandle<()>>,
+    /// The outbound drain loop's task handle, so a vault-path switch can
+    /// abort it — the drain has no other stop signal short of dropping its
+    /// producer, which only closes the channel once queued work drains.
+    pub outbound_task: Option<tauri::async_runtime::JoinHandle<()>>,
+    /// The root this runtime is bound to. Kept so a failed `set_vault_path`
+    /// can respawn the exact same watcher/drain over the previous runtime
+    /// instead of leaving the app with none.
+    pub root: String,
 }
 
 /// Construct the vault sync engine and its shared write guard.
@@ -138,15 +147,20 @@ pub(crate) fn spawn_watcher(
 }
 
 /// Build a fresh outbound queue producer and spawn its drain loop against
-/// `svc`. The old producer (if any) is dropped by the caller replacing
-/// `AppState.outbound`; dropping it closes its channel, so the old drain loop
-/// ends as soon as it drains whatever was already queued — never abruptly.
+/// `svc`, returning the drain's task handle alongside it so a vault-path
+/// switch can abort it outright — dropping the producer alone only closes
+/// the channel, and the drain still finishes whatever was already queued
+/// against the OLD service before it notices (Finding 4, tranche-5
+/// whole-branch review).
 pub(crate) fn spawn_outbound(
     svc: Arc<chronacle_vault::reconcile::VaultSyncService>,
-) -> Arc<dyn chronacle_core::VaultOutbound> {
+) -> (
+    Arc<dyn chronacle_core::VaultOutbound>,
+    tauri::async_runtime::JoinHandle<()>,
+) {
     let (producer, rx) = chronacle_vault::outbound::QueueOutbound::new();
-    tauri::async_runtime::spawn(chronacle_vault::outbound::drain_loop(rx, svc));
-    Arc::new(producer)
+    let task = tauri::async_runtime::spawn(chronacle_vault::outbound::drain_loop(rx, svc));
+    (Arc::new(producer), task)
 }
 
 /// Locate the bundled pdfium dynamic library.
@@ -280,9 +294,15 @@ pub async fn run() {
     let vault_svc_and_pending = vault_root
         .as_deref()
         .map(|path| build_vault_service(db.clone(), path));
-    let outbound: Arc<dyn chronacle_core::VaultOutbound> = match &vault_svc_and_pending {
-        Some((svc, _)) => spawn_outbound(Arc::clone(svc)),
-        None => Arc::new(chronacle_core::NoopOutbound),
+    let (outbound, startup_outbound_task): (
+        Arc<dyn chronacle_core::VaultOutbound>,
+        Option<tauri::async_runtime::JoinHandle<()>>,
+    ) = match &vault_svc_and_pending {
+        Some((svc, _)) => {
+            let (out, task) = spawn_outbound(Arc::clone(svc));
+            (out, Some(task))
+        }
+        None => (Arc::new(chronacle_core::NoopOutbound), None),
     };
     // Captured by value here, BEFORE `vault_svc_and_pending` is consumed
     // below — this is the `original_svc` the startup watcher-spawn task (in
@@ -291,10 +311,13 @@ pub async fn run() {
     let startup_vault_svc = vault_svc_and_pending
         .as_ref()
         .map(|(svc, _)| Arc::clone(svc));
+    let startup_vault_root = vault_root.clone().unwrap_or_default();
     let vault = vault_svc_and_pending.map(|(svc, pending)| VaultRuntime {
         svc,
         pending,
         watcher_task: None, // spawned below, once `state` exists
+        outbound_task: startup_outbound_task,
+        root: startup_vault_root,
     });
 
     let state = Arc::new(AppState {
