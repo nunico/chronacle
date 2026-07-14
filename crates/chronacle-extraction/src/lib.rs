@@ -2,4 +2,5 @@
 pub mod codex_service;
 pub mod entity_service;
 pub mod extraction_service;
+pub mod naming;
 pub mod wikilink;
