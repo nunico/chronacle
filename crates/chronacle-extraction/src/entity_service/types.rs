@@ -199,6 +199,8 @@ pub(crate) struct GraphNodeRecord {
     // populated via backward traversal: array::first(<-in_collection<-collection)
     pub collection: Option<Thing>,
     pub name: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
     pub summary: Option<String>,
     pub notes: Option<String>,
     pub created_at: Option<String>,
@@ -230,6 +232,7 @@ impl From<GraphNodeRecord> for GraphNode {
             campaign_id: r.campaign.map(|t| t.id.to_raw()),
             collection_id: r.collection.map(|t| t.id.to_raw()),
             name: r.name,
+            aliases: r.aliases,
             summary: r.summary,
             notes: r.notes,
             created_at: r.created_at,
@@ -260,6 +263,7 @@ pub struct GraphNode {
     pub campaign_id: Option<String>,
     pub collection_id: Option<String>,
     pub name: String,
+    pub aliases: Vec<String>,
     pub summary: Option<String>,
     pub notes: Option<String>,
     pub created_at: Option<String>,
@@ -314,6 +318,8 @@ pub struct EntityGraph {
 #[serde(rename_all = "camelCase")]
 pub struct EntityInput {
     pub name: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
     pub summary: Option<String>,
     pub notes: Option<String>,
     // event

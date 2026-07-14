@@ -17,6 +17,7 @@ fn order_events_for_timeline_sorts_by_sequence_then_name_nulls_last() {
             campaign_id: None,
             collection_id: None,
             name: name.to_string(),
+            aliases: Vec::new(),
             summary: None,
             notes: None,
             created_at: None,

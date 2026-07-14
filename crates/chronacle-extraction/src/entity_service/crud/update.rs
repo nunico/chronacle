@@ -32,6 +32,7 @@ pub async fn update<C: surrealdb::Connection>(
     let update_sql = format!(
         "UPDATE type::thing($table, $id) SET
             name           = $name,
+            aliases        = $aliases,
             summary        = $summary,
             notes          = $notes,
             date_start     = $date_start,
@@ -54,6 +55,8 @@ pub async fn update<C: surrealdb::Connection>(
         .bind(("table", table))
         .bind(("id", id.to_owned()))
         .bind(("name", sanitized_name))
+        // Aliases are a plain `array<string>`, never NULL — bind directly.
+        .bind(("aliases", input.aliases.clone()))
         // Nullable fields: bind explicit NULL (not NONE) on `None`. SCHEMAFULL
         // `string | NULL` / `int | NULL` fields reject NONE — binding
         // `Option::None` directly would silently abort the UPDATE.

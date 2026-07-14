@@ -14,6 +14,8 @@
 /// - `003_vault_sync.surql` — Markdown Vault Sync (ADR-008, D-series),
 ///   additive; adds `vault_deleted` to the nine syncable entity/session
 ///   tables and the `vault_sync_state` merge-base table
+/// - `004_entity_identity.surql` — Tranche 6 entity identity (F1), additive;
+///   adds `aliases` to the eight entity tables plus `rule_entry`
 use std::path::Path;
 
 /// Run all pending schema migrations against the given database.
@@ -112,6 +114,7 @@ where
          codex_stale   = codex_stale   ?? false, \
          codex_sources = codex_sources ?? [], \
          vault_deleted = vault_deleted ?? false, \
+         aliases       = aliases       ?? [], \
          created_at    = created_at    ?? time::now(), \
          updated_at    = updated_at    ?? time::now()";
 
@@ -120,7 +123,10 @@ where
         .map(|t| format!("UPDATE {t} SET {ENTITY_SET}"))
         .collect();
     statements.push("UPDATE session SET vault_deleted = vault_deleted ?? false".to_owned());
-    statements.push("UPDATE rule_entry SET vault_deleted = vault_deleted ?? false".to_owned());
+    statements.push(
+        "UPDATE rule_entry SET vault_deleted = vault_deleted ?? false, aliases = aliases ?? []"
+            .to_owned(),
+    );
 
     for sql in statements {
         let outcome = match db.query(&sql).await {

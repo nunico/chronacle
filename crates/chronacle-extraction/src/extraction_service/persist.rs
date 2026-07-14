@@ -59,6 +59,7 @@ pub(super) async fn persist_batch<C: Connection>(
                 kind,
                 EntityInput {
                     name: ent.name.clone(),
+                    aliases: Vec::new(),
                     summary: ent.summary.clone(),
                     notes: ent.notes.clone(),
                     date_start: None,
@@ -114,6 +115,7 @@ pub(super) async fn persist_batch<C: Connection>(
                     rel_kind,
                     EntityInput {
                         name: rel.name.clone(),
+                        aliases: Vec::new(),
                         summary: rel.summary.clone(),
                         notes: rel.notes.clone(),
                         date_start: None,
