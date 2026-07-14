@@ -63,6 +63,24 @@ impl PendingWrites {
     /// A guard whose event never arrives expires after this long.
     pub const TTL: Duration = Duration::from_secs(30);
 
+    /// Delete guards expire far sooner than write guards.
+    ///
+    /// A delete guard is the one guard that can mask a *genuine* GM action: it
+    /// is key-only, so "we deleted `x.conflict.md`" and "the GM deleted
+    /// `x.conflict.md`" are indistinguishable. One-shot consumption handles the
+    /// common case, but a guard whose `Remove` event never arrives (coalesced
+    /// away, or an editor's atomic-replace semantics) stays armed until it
+    /// expires — and if the GM deletes that same sidecar within the window,
+    /// their resolution signal is swallowed and the record stays frozen.
+    ///
+    /// So the window is sized to the only thing it must cover: the latency
+    /// between our own `delete()` and the fs event it provokes, which is
+    /// milliseconds. Seconds of slack is generous; 30s is not slack, it is a
+    /// half-minute in which a real GM deletion of that key can be eaten.
+    /// Write guards keep the long TTL — being content-keyed, they cannot mask
+    /// anything, so there is nothing to trade off there.
+    pub const DELETE_TTL: Duration = Duration::from_secs(3);
+
     /// Arm a guard for a key we are about to write.
     pub fn arm(&self, key: &str, hash: u64) {
         self.arm_at(key, hash, Instant::now());
@@ -115,7 +133,7 @@ impl PendingWrites {
     pub fn take_delete(&self, key: &str) -> bool {
         let mut guard = self.deletes.lock().expect("poisoned");
         match guard.get(key) {
-            Some(at) if at.elapsed() < Self::TTL => {
+            Some(at) if at.elapsed() < Self::DELETE_TTL => {
                 guard.remove(key);
                 true
             }
@@ -133,7 +151,7 @@ impl PendingWrites {
         self.deletes
             .lock()
             .expect("poisoned")
-            .retain(|_, at| at.elapsed() < Self::TTL);
+            .retain(|_, at| at.elapsed() < Self::DELETE_TTL);
     }
 
     /// Count of currently-armed write guards, expired or not. Test seam —
@@ -325,6 +343,47 @@ mod tests {
             !p.take_delete("sidecar.md"),
             "a second, independent Remove at the same key must NOT be masked \
              by an earlier guard that already suppressed one event"
+        );
+    }
+
+    /// The residual hazard the one-shot guard does NOT cover: our own delete's
+    /// `Remove` event never arrives (coalesced away, or an editor's
+    /// atomic-replace semantics), so the guard is never consumed and sits
+    /// armed. If the GM then deletes that same sidecar to resolve a conflict,
+    /// a long-lived guard would eat their resolution signal and leave the
+    /// record frozen while they believe they fixed it.
+    ///
+    /// `DELETE_TTL` is what bounds this: it covers only the milliseconds
+    /// between our `delete()` and the event it provokes, so by the time a GM
+    /// could plausibly act, the stale guard is already dead.
+    #[test]
+    fn a_stale_delete_guard_cannot_swallow_a_later_gm_deletion() {
+        let p = PendingWrites::default();
+
+        // Our own delete, whose Remove event never arrives — guard stays armed.
+        p.arm_delete_at(
+            "sidecar.md",
+            std::time::Instant::now() - PendingWrites::DELETE_TTL - Duration::from_millis(1),
+        );
+
+        // The GM deletes the (rewritten) sidecar to resolve the conflict.
+        assert!(
+            !p.take_delete("sidecar.md"),
+            "a delete guard older than DELETE_TTL must never mask the GM's \
+             resolution signal — that would freeze the record while the GM \
+             believes they resolved it"
+        );
+    }
+
+    /// The delete guard must expire much sooner than the write guard: it is the
+    /// only one that can mask a genuine GM action, and it only needs to cover
+    /// our own delete's fs-event latency (milliseconds).
+    #[test]
+    fn delete_guards_expire_far_sooner_than_write_guards() {
+        assert!(
+            PendingWrites::DELETE_TTL < PendingWrites::TTL,
+            "a key-only delete guard must not linger as long as a content-keyed \
+             write guard, which cannot mask anything"
         );
     }
 
