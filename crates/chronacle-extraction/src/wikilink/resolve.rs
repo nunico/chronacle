@@ -90,11 +90,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn tier_2_matches_a_confirmed_alias() {
-        assert_eq!(resolve_exact("Sera", &fixture()).as_deref(), Some("npc:s"));
-    }
-
     /// Adversarial: an entity literally NAMED "Sera" must beat a different
     /// entity that merely has "Sera" as an alias. Unlike
     /// `tier_1_exact_name_still_wins`, tier 1 and tier 3 disagree here — this
@@ -120,23 +115,37 @@ mod tests {
     /// whose NAME merely normalizes to the same key. Tier 2 and tier 3
     /// disagree here — this can only pass if tier 2 actually runs before
     /// tier 3.
+    ///
+    /// Tier 2's condition (`alias.to_lowercase() == link.to_lowercase()`)
+    /// tautologically implies tier 3's condition (`normalize(alias) ==
+    /// normalize(link)`), so tier 2 can never resolve to a DIFFERENT entity
+    /// than tier 3 by itself — it can only change the outcome when tier 3
+    /// has multiple candidates and the smallest-id tie-break would otherwise
+    /// pick the wrong one. So the fixture below deliberately gives the
+    /// tier-3-only competitor ("faction:a", no aliases) an id that sorts
+    /// BEFORE the correct tier-2 answer's id ("faction:z"). With tier 2
+    /// present, the exact alias on "faction:z" wins outright. With tier 2
+    /// deleted, both entities fall through to tier 3 (their normalized
+    /// forms collide), and the smallest-id tie-break would wrongly pick
+    /// "faction:a" — which is exactly what makes this test able to detect
+    /// tier 2's absence.
     #[test]
     fn tier_2_beats_tier_3_when_they_disagree() {
         let entities = vec![
             EntityIdentity {
-                id: "faction:c".into(),
-                name: "The Ash Court".into(),
-                aliases: vec!["Emberguard".into()],
-            },
-            EntityIdentity {
-                id: "faction:d".into(),
+                id: "faction:a".into(),
                 name: "Emberguards".into(),
                 aliases: vec![],
+            },
+            EntityIdentity {
+                id: "faction:z".into(),
+                name: "The Ash Court".into(),
+                aliases: vec!["Emberguard".into()],
             },
         ];
         assert_eq!(
             resolve_exact("Emberguard", &entities).as_deref(),
-            Some("faction:c")
+            Some("faction:z")
         );
     }
 
