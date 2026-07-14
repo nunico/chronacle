@@ -26,7 +26,7 @@ async fn aliases_round_trip_through_create_and_read() {
 
     let input = EntityInput {
         name: "The Quassar Family".to_string(),
-        aliases: vec!["The Quassars".to_string(), "Quassar Clan".to_string()],
+        aliases: Some(vec!["The Quassars".to_string(), "Quassar Clan".to_string()]),
         ..Default::default()
     };
     let node = entity_service::create(&db, Some("c1"), None, EntityKind::Faction, input)
@@ -69,4 +69,120 @@ async fn a_pre_migration_row_can_still_be_written_to() {
         .expect("query")
         .check()
         .expect("a pre-migration row must still accept writes after migrating");
+}
+
+/// FINDING 1 REGRESSION. `EntityInput.aliases: None` means "the caller has no
+/// opinion" — e.g. the desktop entity form, which never sends the field at
+/// all. `update()` must therefore PRESERVE whatever aliases are already
+/// stored when `aliases` is `None`, not silently wipe them to `[]`.
+#[tokio::test]
+async fn aliases_survive_an_update_that_does_not_mention_them() {
+    let db = db().await;
+    chronacle_db::run_migrations(&db).await.expect("migrations");
+    db.query(
+        "CREATE campaign:c1 SET name = 'SoV', system = '5e', \
+              created_at = time::now(), updated_at = time::now()",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    let node = entity_service::create(
+        &db,
+        Some("c1"),
+        None,
+        EntityKind::Faction,
+        EntityInput {
+            name: "The Quassar Family".to_string(),
+            aliases: Some(vec!["The Quassars".to_string()]),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+
+    // Simulate the real desktop form payload: `aliases` is simply absent.
+    let updated = entity_service::update(
+        &db,
+        &node.id,
+        EntityKind::Faction,
+        EntityInput {
+            name: "The Quassar Family".to_string(),
+            aliases: None,
+            notes: Some("Updated notes from the GM.".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("update");
+
+    assert_eq!(
+        updated.aliases,
+        vec!["The Quassars"],
+        "an update that does not mention aliases must preserve them"
+    );
+    assert_eq!(updated.notes.as_deref(), Some("Updated notes from the GM."));
+}
+
+/// `Some(vec![])` is an explicit instruction to clear aliases, distinct from
+/// `None` (no opinion). Both must be honored by `update()`.
+#[tokio::test]
+async fn some_empty_vec_explicitly_clears_aliases() {
+    let db = db().await;
+    chronacle_db::run_migrations(&db).await.expect("migrations");
+    db.query(
+        "CREATE campaign:c1 SET name = 'SoV', system = '5e', \
+              created_at = time::now(), updated_at = time::now()",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    let node = entity_service::create(
+        &db,
+        Some("c1"),
+        None,
+        EntityKind::Faction,
+        EntityInput {
+            name: "The Quassar Family".to_string(),
+            aliases: Some(vec!["The Quassars".to_string()]),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+
+    let updated = entity_service::update(
+        &db,
+        &node.id,
+        EntityKind::Faction,
+        EntityInput {
+            name: "The Quassar Family".to_string(),
+            aliases: Some(vec![]),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("update");
+
+    assert!(
+        updated.aliases.is_empty(),
+        "Some(vec![]) must explicitly clear aliases, got {:?}",
+        updated.aliases
+    );
+}
+
+/// FINDING 3 REGRESSION. `#[serde(default)]` on `EntityInput.aliases` must
+/// keep working: a payload that omits `aliases` entirely (the real shape of
+/// every IPC call from the desktop entity form today) must still deserialize.
+/// If a future refactor removes `#[serde(default)]`, this test — not every
+/// entity save at runtime — must be what breaks.
+#[test]
+fn entity_input_deserializes_with_aliases_omitted() {
+    let input: EntityInput =
+        serde_json::from_str(r#"{"name":"X"}"#).expect("aliases must be optional over IPC");
+    assert_eq!(input.name, "X");
+    assert_eq!(input.aliases, None);
 }

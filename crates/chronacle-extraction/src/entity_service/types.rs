@@ -318,8 +318,22 @@ pub struct EntityGraph {
 #[serde(rename_all = "camelCase")]
 pub struct EntityInput {
     pub name: String,
+    /// `None` vs `Some(vec![])` are NOT interchangeable, and the direction is
+    /// the opposite of `GmParts`/vault-inbound `Option` fields elsewhere in
+    /// this codebase. This payload comes from a FORM (the desktop entity
+    /// editor), which simply omits `aliases` today — it never sends the key.
+    ///
+    /// - `None` means the caller has no opinion: UPDATE preserves whatever
+    ///   aliases are already stored, CREATE defaults to `[]`.
+    /// - `Some(v)` means the caller wants aliases set to exactly `v`,
+    ///   including `Some(vec![])` to explicitly clear them.
+    ///
+    /// Contrast with vault-inbound parsing, where a payload is built from a
+    /// WHOLE FILE and an absent section genuinely means the GM deleted it, so
+    /// `None` means CLEAR there. Same `Option`, opposite meaning — provenance
+    /// decides, not the type.
     #[serde(default)]
-    pub aliases: Vec<String>,
+    pub aliases: Option<Vec<String>>,
     pub summary: Option<String>,
     pub notes: Option<String>,
     // event

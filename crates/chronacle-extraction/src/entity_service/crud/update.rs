@@ -29,11 +29,19 @@ pub async fn update<C: surrealdb::Connection>(
     }
     let table = kind.table_name();
     let notes_for_wikilinks = input.notes.clone();
+    // `aliases: None` means "caller has no opinion" (see doc comment on
+    // `EntityInput::aliases`) — omit the field from SET entirely so the
+    // existing stored value survives untouched. Only bind/set it when the
+    // caller explicitly supplied a value (including `Some(vec![])` to clear).
+    let aliases_clause = if input.aliases.is_some() {
+        "aliases        = $aliases,\n            "
+    } else {
+        ""
+    };
     let update_sql = format!(
         "UPDATE type::thing($table, $id) SET
             name           = $name,
-            aliases        = $aliases,
-            summary        = $summary,
+            {aliases_clause}summary        = $summary,
             notes          = $notes,
             date_start     = $date_start,
             date_end       = $date_end,
@@ -55,8 +63,9 @@ pub async fn update<C: surrealdb::Connection>(
         .bind(("table", table))
         .bind(("id", id.to_owned()))
         .bind(("name", sanitized_name))
-        // Aliases are a plain `array<string>`, never NULL — bind directly.
-        .bind(("aliases", input.aliases.clone()))
+        // Bound unconditionally (harmless no-op when unreferenced): the SET
+        // clause above only mentions `$aliases` when the caller supplied one.
+        .bind(("aliases", input.aliases.clone().unwrap_or_default()))
         // Nullable fields: bind explicit NULL (not NONE) on `None`. SCHEMAFULL
         // `string | NULL` / `int | NULL` fields reject NONE — binding
         // `Option::None` directly would silently abort the UPDATE.

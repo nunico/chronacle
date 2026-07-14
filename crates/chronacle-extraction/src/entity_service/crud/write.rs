@@ -47,7 +47,8 @@ pub async fn create<C: surrealdb::Connection>(
     .bind(("table", table))
     .bind(("id", id.clone()))
     .bind(("name", sanitized_name))
-    .bind(("aliases", input.aliases.clone()))
+    // CREATE has nothing to preserve — `None` (no opinion) defaults to `[]`.
+    .bind(("aliases", input.aliases.clone().unwrap_or_default()))
     .bind(("summary", input.summary))
     .bind(("notes", input.notes))
     .bind(("date_start", input.date_start))
