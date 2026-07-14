@@ -178,3 +178,161 @@ async fn a_soft_deleted_entity_is_invisible_to_every_read_path() {
         "live entity missing from RAG entity context: {context}"
     );
 }
+
+/// A soft-deleted SESSION must be invisible to every read path (finding 2 of
+/// the tranche-5 whole-branch review): `session_service::get_all`/`get_by_id`
+/// had no `vault_deleted != true` filter, so a GM deleting a session's file
+/// in the vault left it hidden from sync but still live and editable in the
+/// session-list UI.
+#[tokio::test]
+async fn a_soft_deleted_session_is_invisible_to_every_read_path() {
+    let db = setup_db().await;
+
+    let campaign = chronacle_domain::campaign_service::create(&db, "Test Campaign", "D&D 5e")
+        .await
+        .unwrap();
+
+    let ghost = chronacle_domain::session_service::create(
+        &db,
+        &campaign.id,
+        chronacle_domain::session_service::SessionInput {
+            session_number: 1,
+            title: "The Ambush".to_string(),
+            date_played: "2026-06-05".to_string(),
+            notes: String::new(),
+        },
+    )
+    .await
+    .unwrap();
+    let survivor = chronacle_domain::session_service::create(
+        &db,
+        &campaign.id,
+        chronacle_domain::session_service::SessionInput {
+            session_number: 2,
+            title: "The Aftermath".to_string(),
+            date_played: "2026-06-12".to_string(),
+            notes: String::new(),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Soft-delete as the vault reconcile path does (UPDATE ... SET
+    // vault_deleted = true — the same mechanism `SurrealVaultRecordStore::
+    // soft_delete` uses).
+    db.query("UPDATE type::thing('session', $id) SET vault_deleted = true")
+        .bind(("id", ghost.id.clone()))
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+
+    // 1. get_all
+    let all = chronacle_domain::session_service::get_all(&db, &campaign.id)
+        .await
+        .unwrap();
+    assert!(
+        all.iter().all(|s| s.title != "The Ambush"),
+        "soft-deleted session leaked from get_all: {all:?}"
+    );
+    assert!(
+        all.iter().any(|s| s.title == "The Aftermath"),
+        "live session missing from get_all"
+    );
+
+    // 2. get_by_id -> NotFound
+    let err = chronacle_domain::session_service::get_by_id(&db, &ghost.id)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            chronacle_domain::session_service::SessionError::NotFound { .. }
+        ),
+        "expected NotFound for a soft-deleted session, got {err:?}"
+    );
+    // The live session is still reachable.
+    chronacle_domain::session_service::get_by_id(&db, &survivor.id)
+        .await
+        .expect("live session must still be reachable by id");
+
+    // 3. RAG entity context includes the session block.
+    let context =
+        chronacle_retrieval::agent_service::fetch_entity_context(&db, &campaign.id, &[], None)
+            .await
+            .unwrap();
+    assert!(
+        !context.contains("The Ambush"),
+        "soft-deleted session leaked into RAG context: {context}"
+    );
+    assert!(
+        context.contains("The Aftermath"),
+        "live session missing from RAG context: {context}"
+    );
+}
+
+/// A soft-deleted RULE ENTRY must be invisible to every read path (finding 3
+/// of the tranche-5 whole-branch review): the rules-list UI and the
+/// `$rules`/`$rstale`/`$ents` compile-status counts had no `vault_deleted !=
+/// true` filter. (The RAG rules-context KNN query is covered by its own
+/// regression test in `chronacle_retrieval::agent_service::rules_block`,
+/// since that function is crate-private.)
+#[tokio::test]
+async fn a_soft_deleted_rule_entry_is_invisible_to_every_read_path() {
+    let db = setup_db().await;
+
+    let campaign = chronacle_domain::campaign_service::create(&db, "Test Campaign", "D&D 5e")
+        .await
+        .unwrap();
+    let collection = chronacle_domain::collection_service::owned_by(&db, &campaign.id)
+        .await
+        .unwrap()
+        .expect("campaign creation auto-owns a collection");
+
+    db.query(
+        "CREATE rule_entry:`ghost` SET collection = type::thing('collection', $cid), \
+             name = 'Vanished Grapple Rule', category = 'procedure', body = 'b', \
+             compiled_at = time::now(), stale = true;
+         CREATE rule_entry:`live` SET collection = type::thing('collection', $cid), \
+             name = 'Initiative', category = 'mechanic', body = 'b', \
+             compiled_at = time::now(), stale = false;",
+    )
+    .bind(("cid", collection.id.clone()))
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    db.query("UPDATE rule_entry:`ghost` SET vault_deleted = true")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+
+    // 1. list_rule_entries (rules-list UI)
+    let listed = chronacle_extraction::codex_service::list_rule_entries(&db, &collection.id)
+        .await
+        .unwrap();
+    assert!(
+        listed.iter().all(|r| r.name != "Vanished Grapple Rule"),
+        "soft-deleted rule entry leaked from list_rule_entries: {listed:?}"
+    );
+    assert!(
+        listed.iter().any(|r| r.name == "Initiative"),
+        "live rule entry missing from list_rule_entries"
+    );
+
+    // 2. codex_status counts ($rules, $rstale, and $ents' sibling bug for
+    //    soft-deleted entities)
+    let status = chronacle_extraction::codex_service::codex_status(&db, &collection.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        status.rule_entries, 1,
+        "soft-deleted rule entry must not count toward rule_entries"
+    );
+    assert_eq!(
+        status.rules_stale, 0,
+        "the soft-deleted rule entry was the only stale one; it must not count"
+    );
+}

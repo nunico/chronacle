@@ -107,11 +107,14 @@ pub(super) async fn fetch_rules_context<C: Connection>(
     // Collection filter must precede the KNN clause in `WHERE`: SurrealDB's
     // MTREE KNN operator silently returns zero rows when a non-KNN predicate
     // is ANDed in *after* it (order-sensitive, unlike a normal SQL `WHERE`).
+    // `vault_deleted != true`, never `= false`: DEFAULT does not backfill
+    // pre-migration rows. Both plain-field predicates are placed before the
+    // KNN clause for the same reason as the collection filter.
     let sql = format!(
         "SELECT name, category, body, notes, page_refs, \
              vector::distance::knn() AS distance \
          FROM rule_entry \
-         WHERE collection IN [{cols}] AND embedding <|{RULES_TOP_K}|> [{vec_str}] \
+         WHERE vault_deleted != true AND collection IN [{cols}] AND embedding <|{RULES_TOP_K}|> [{vec_str}] \
          ORDER BY distance ASC LIMIT {RULES_TOP_K}"
     );
     let mut resp = db
@@ -244,5 +247,39 @@ mod tests {
 
         let empty = fetch_rules_context(&db, &[], &in_vec).await.unwrap();
         assert_eq!(empty, "", "no collections ⇒ no block");
+    }
+
+    /// A soft-deleted rule entry (`vault_deleted = true`) must never be fed
+    /// to the LLM as compiled-rules context, even when it is otherwise the
+    /// closest KNN hit.
+    #[tokio::test]
+    async fn fetch_rules_context_excludes_a_soft_deleted_rule_entry() {
+        let db = setup_db().await;
+        let mut in_vec = vec![0.0f32; 768];
+        in_vec[0] = 1.0;
+        db.query(
+            "CREATE collection:`ca` SET name='A', description=NULL, created_at=time::now(), updated_at=time::now();
+             CREATE rule_entry:`deleted` SET collection=collection:`ca`, name='Deleted Rule', category='mechanic',
+                 body='This was removed by the GM.', compiled_at=time::now(), stale=false,
+                 vault_deleted=true,
+                 embedding=$va, embed_model='mock';
+             CREATE rule_entry:`live` SET collection=collection:`ca`, name='Live Rule', category='mechanic',
+                 body='Still here.', compiled_at=time::now(), stale=false,
+                 embedding=$va, embed_model='mock';",
+        )
+        .bind(("va", in_vec.clone()))
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+
+        let ctx = fetch_rules_context(&db, &["ca".to_string()], &in_vec)
+            .await
+            .unwrap();
+        assert!(
+            !ctx.contains("Deleted Rule"),
+            "soft-deleted rule entry must never reach the LLM: {ctx}"
+        );
+        assert!(ctx.contains("Live Rule"));
     }
 }

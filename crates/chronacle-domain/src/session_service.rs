@@ -151,8 +151,11 @@ pub async fn get_all<C: surrealdb::Connection>(
 ) -> Result<Vec<Session>, SessionError> {
     let mut response = db
         .query(
+            // `vault_deleted != true`, never `= false`: DEFAULT does not
+            // backfill pre-migration rows.
             "SELECT * FROM session \
-             WHERE campaign = type::thing('campaign', $campaign_id) \
+             WHERE vault_deleted != true \
+               AND campaign = type::thing('campaign', $campaign_id) \
              ORDER BY session_number ASC",
         )
         .bind(("campaign_id", campaign_id.to_owned()))
@@ -174,7 +177,9 @@ pub async fn get_by_id<C: surrealdb::Connection>(
     id: &str,
 ) -> Result<Session, SessionError> {
     let mut response = db
-        .query("SELECT * FROM type::thing('session', $id)")
+        // `vault_deleted != true`, never `= false`: DEFAULT does not
+        // backfill pre-migration rows.
+        .query("SELECT * FROM type::thing('session', $id) WHERE vault_deleted != true")
         .bind(("id", id.to_owned()))
         .await
         .map_err(|e| SessionError::Database {

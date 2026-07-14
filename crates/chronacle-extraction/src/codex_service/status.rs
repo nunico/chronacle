@@ -21,14 +21,18 @@ pub async fn codex_status<C: Connection>(
     db: &surrealdb::Surreal<C>,
     collection_id: &str,
 ) -> Result<CodexStatus, String> {
-    let q = "LET $ents = (SELECT VALUE out FROM in_collection \
+    // `vault_deleted != true`, never `= false`, on every branch below: DEFAULT
+    // does not backfill pre-migration rows, and a soft-deleted entity or rule
+    // entry must never count toward the compile-status badges.
+    let q = "LET $all_ents = (SELECT VALUE out FROM in_collection \
                  WHERE in = type::thing('collection', $cid));
+             LET $ents = (SELECT VALUE id FROM $all_ents WHERE vault_deleted != true);
              LET $stale = (SELECT VALUE id FROM $ents \
                  WHERE codex_stale != false OR codex_article = NONE);
              LET $rules = (SELECT VALUE id FROM rule_entry \
-                 WHERE collection = type::thing('collection', $cid));
+                 WHERE collection = type::thing('collection', $cid) AND vault_deleted != true);
              LET $rstale = (SELECT VALUE id FROM rule_entry \
-                 WHERE collection = type::thing('collection', $cid) AND stale = true);
+                 WHERE collection = type::thing('collection', $cid) AND stale = true AND vault_deleted != true);
              RETURN { total: array::len($ents), stale: array::len($stale), \
                       rules: array::len($rules), rules_stale: array::len($rstale) };";
     #[derive(serde::Deserialize)]
@@ -44,7 +48,7 @@ pub async fn codex_status<C: Connection>(
         .await
         .map_err(|e| format!("Failed to query codex status: {e}"))?;
     let row: Option<Row> = resp
-        .take(4)
+        .take(5)
         .map_err(|e| format!("Failed to parse codex status: {e}"))?;
     let row = row.ok_or_else(|| "codex status query returned nothing".to_string())?;
     Ok(CodexStatus {
@@ -103,5 +107,46 @@ mod tests {
         );
         assert_eq!(s.rules_stale, 1);
         assert_eq!(s.rule_entries, 1);
+    }
+
+    /// A soft-deleted entity or rule entry must never count toward the
+    /// compile-status badges — it is invisible everywhere in the app.
+    #[tokio::test]
+    async fn status_excludes_soft_deleted_entities_and_rule_entries() {
+        let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+            .await
+            .unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        chronacle_db::run_migrations(&db).await.unwrap();
+
+        db.query(
+            "CREATE collection:`c1` SET name = 'World', description = NULL, \
+                 created_at = time::now(), updated_at = time::now();
+             CREATE npc:`fresh` SET name = 'Fresh', codex_stale = false, \
+                 codex_article = 'compiled text';
+             CREATE npc:`gone` SET name = 'Gone', codex_stale = true, vault_deleted = true;
+             RELATE collection:`c1`->in_collection->npc:`fresh` SET created_at = time::now();
+             RELATE collection:`c1`->in_collection->npc:`gone` SET created_at = time::now();
+             CREATE rule_entry:`live` SET collection = collection:`c1`, name = 'Initiative', \
+                 category = 'mechanic', body = 'b', compiled_at = time::now(), stale = true;
+             CREATE rule_entry:`removed` SET collection = collection:`c1`, name = 'Old Rule', \
+                 category = 'mechanic', body = 'b', compiled_at = time::now(), stale = true, \
+                 vault_deleted = true;",
+        )
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+
+        let s = codex_status(&db, "c1").await.unwrap();
+        assert_eq!(s.total_entities, 1, "the soft-deleted npc must not count");
+        assert_eq!(
+            s.rule_entries, 1,
+            "the soft-deleted rule entry must not count"
+        );
+        assert_eq!(
+            s.rules_stale, 1,
+            "the soft-deleted rule entry must not count as stale either"
+        );
     }
 }
