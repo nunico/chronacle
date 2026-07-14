@@ -17,8 +17,17 @@ fi
 
 TAG="v${VERSION}"
 ROOT="$(git rev-parse --show-toplevel)"
-TAURI_CONF="$ROOT/src-tauri/tauri.conf.json"
-CARGO_TOML="$ROOT/src-tauri/Cargo.toml"
+# The monorepo restructure moved the desktop app under apps/desktop/. These are
+# the same two files release.yml's version-consistency gate reads.
+TAURI_CONF="$ROOT/apps/desktop/src-tauri/tauri.conf.json"
+CARGO_TOML="$ROOT/apps/desktop/src-tauri/Cargo.toml"
+
+for f in "$TAURI_CONF" "$CARGO_TOML"; do
+  if [[ ! -f "$f" ]]; then
+    echo "error: expected version file not found: $f"
+    exit 1
+  fi
+done
 
 # Require clean working tree
 if ! git -C "$ROOT" diff --quiet || ! git -C "$ROOT" diff --cached --quiet; then
