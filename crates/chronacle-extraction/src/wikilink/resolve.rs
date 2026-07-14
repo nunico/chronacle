@@ -21,27 +21,45 @@ pub struct EntityIdentity {
 ///
 /// Returns the full record id. A tier-3 match is still EXACT — on a normalized
 /// key — so there is no threshold and no ambiguity to adjudicate here.
+///
+/// Within a single tier, more than one entity can legitimately match (e.g.
+/// two factions whose names both normalize to "free league"). That is
+/// genuinely ambiguous GM data, not something this function can resolve
+/// correctly — so it does not try. Instead it breaks the tie by picking the
+/// entity with the lexicographically smallest full record id, purely so the
+/// same link always resolves to the same entity across runs and machines.
+/// Such collisions are meant to be caught separately and surfaced to the GM
+/// as an `alias_collision` lint finding (a later task), not silently guessed
+/// at here.
 pub fn resolve_exact(link: &str, entities: &[EntityIdentity]) -> Option<String> {
     let lower = link.trim().to_lowercase();
 
-    if let Some(e) = entities.iter().find(|e| e.name.to_lowercase() == lower) {
-        return Some(e.id.clone());
+    if let Some(id) = smallest_id(entities.iter().filter(|e| e.name.to_lowercase() == lower)) {
+        return Some(id);
     }
-    if let Some(e) = entities
-        .iter()
-        .find(|e| e.aliases.iter().any(|a| a.to_lowercase() == lower))
-    {
-        return Some(e.id.clone());
+    if let Some(id) = smallest_id(
+        entities
+            .iter()
+            .filter(|e| e.aliases.iter().any(|a| a.to_lowercase() == lower)),
+    ) {
+        return Some(id);
     }
 
     let norm = normalize(link);
     if norm.is_empty() {
         return None;
     }
-    entities
-        .iter()
-        .find(|e| normalize(&e.name) == norm || e.aliases.iter().any(|a| normalize(a) == norm))
-        .map(|e| e.id.clone())
+    smallest_id(
+        entities.iter().filter(|e| {
+            normalize(&e.name) == norm || e.aliases.iter().any(|a| normalize(a) == norm)
+        }),
+    )
+}
+
+/// Deterministic within-tier tie-break: the lexicographically smallest full
+/// record id among the candidates, if any.
+fn smallest_id<'a>(candidates: impl Iterator<Item = &'a EntityIdentity>) -> Option<String> {
+    candidates.map(|e| e.id.clone()).min()
 }
 
 #[cfg(test)]
@@ -75,6 +93,82 @@ mod tests {
     #[test]
     fn tier_2_matches_a_confirmed_alias() {
         assert_eq!(resolve_exact("Sera", &fixture()).as_deref(), Some("npc:s"));
+    }
+
+    /// Adversarial: an entity literally NAMED "Sera" must beat a different
+    /// entity that merely has "Sera" as an alias. Unlike
+    /// `tier_1_exact_name_still_wins`, tier 1 and tier 3 disagree here — this
+    /// can only pass if tier 1 actually runs, and runs first.
+    #[test]
+    fn tier_1_beats_tier_2_when_they_disagree() {
+        let entities = vec![
+            EntityIdentity {
+                id: "npc:a".into(),
+                name: "Sera".into(),
+                aliases: vec![],
+            },
+            EntityIdentity {
+                id: "npc:b".into(),
+                name: "Seraphina".into(),
+                aliases: vec!["Sera".into()],
+            },
+        ];
+        assert_eq!(resolve_exact("Sera", &entities).as_deref(), Some("npc:a"));
+    }
+
+    /// Adversarial: an exact confirmed alias must beat a different entity
+    /// whose NAME merely normalizes to the same key. Tier 2 and tier 3
+    /// disagree here — this can only pass if tier 2 actually runs before
+    /// tier 3.
+    #[test]
+    fn tier_2_beats_tier_3_when_they_disagree() {
+        let entities = vec![
+            EntityIdentity {
+                id: "faction:c".into(),
+                name: "The Ash Court".into(),
+                aliases: vec!["Emberguard".into()],
+            },
+            EntityIdentity {
+                id: "faction:d".into(),
+                name: "Emberguards".into(),
+                aliases: vec![],
+            },
+        ];
+        assert_eq!(
+            resolve_exact("Emberguard", &entities).as_deref(),
+            Some("faction:c")
+        );
+    }
+
+    /// Within a single tier, two entities can genuinely collide (both names
+    /// are equal case-insensitively — a data-entry mistake, but a real one).
+    /// The tie-break must be deterministic regardless of input order — pick
+    /// the lexicographically smallest id.
+    #[test]
+    fn within_tier_collision_breaks_ties_by_smallest_id() {
+        let forward = vec![
+            EntityIdentity {
+                id: "faction:z".into(),
+                name: "The Free League".into(),
+                aliases: vec![],
+            },
+            EntityIdentity {
+                id: "faction:a".into(),
+                name: "THE FREE LEAGUE".into(),
+                aliases: vec![],
+            },
+        ];
+        let mut reversed = forward.clone();
+        reversed.reverse();
+
+        assert_eq!(
+            resolve_exact("The Free League", &forward).as_deref(),
+            Some("faction:a")
+        );
+        assert_eq!(
+            resolve_exact("The Free League", &reversed).as_deref(),
+            Some("faction:a")
+        );
     }
 
     #[test]
