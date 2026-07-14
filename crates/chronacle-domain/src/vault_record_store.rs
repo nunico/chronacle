@@ -585,12 +585,8 @@ mod tests {
         .expect("seed")
         .check()
         .expect("seed response");
-        chronacle_db::run_migrations(&db).await.expect("migrations");
-
-        // Precondition: the pre-migration row's `vault_deleted` is genuinely
-        // absent, not `false`. Without this, the assertion below would pass even
-        // if the row were `false` (already covered by the sibling test) — so this
-        // guard is what makes the unset case provable.
+        // Precondition, asserted BEFORE migrations: the row genuinely carries no
+        // `vault_deleted` value — `DEFINE FIELD … DEFAULT false` never backfills.
         #[derive(serde::Deserialize)]
         struct Row {
             vault_deleted: Option<bool>,
@@ -607,6 +603,13 @@ mod tests {
             rows[0].vault_deleted.is_none(),
             "precondition: vault_deleted must be genuinely unset, not false"
         );
+
+        // `run_migrations` defines the field AND heals rows that predate it — an
+        // unset non-optional field makes every later write to that record fail
+        // (see `backfill_unset_fields`). The `!= true` read rule still stands
+        // regardless: the backfill is deliberately non-fatal, so a row it could
+        // not heal must still be treated as not-deleted rather than vanish.
+        chronacle_db::run_migrations(&db).await.expect("migrations");
 
         let store = SurrealVaultRecordStore::new(db);
         let records = store.list_all().await.expect("list_all");
