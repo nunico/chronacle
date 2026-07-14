@@ -1,6 +1,6 @@
 [package]
 name = "Chronacle"
-version = "0.1.0"
+version = "0.2.0"
 description = "A TTRPG GM assistant — load rules PDFs, take notes, query with cited answers."
 edition = "2021"
 rust-version = "1.95"
