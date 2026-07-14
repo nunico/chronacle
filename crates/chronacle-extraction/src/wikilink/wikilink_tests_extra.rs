@@ -31,6 +31,13 @@ fn make_npc(name: &str) -> EntityInput {
     }
 }
 
+fn make_npc_with_alias(name: &str, aliases: &[&str]) -> EntityInput {
+    EntityInput {
+        aliases: Some(aliases.iter().map(|a| a.to_string()).collect()),
+        ..make_npc(name)
+    }
+}
+
 async fn create_campaign(db: &Surreal<Db>) -> String {
     #[derive(serde::Deserialize)]
     struct Row {
@@ -183,6 +190,78 @@ async fn repeated_call_same_notes_produces_single_edge() {
         "repeated calls with same notes must produce exactly one edge, got {n}"
     );
     let _ = torvin;
+}
+
+#[tokio::test]
+async fn wikilink_resolves_via_confirmed_alias() {
+    let db = setup_db().await;
+    let campaign_id = create_campaign(&db).await;
+    let sera = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Npc,
+        make_npc_with_alias("Seraphina Aldric", &["Sera"]),
+    )
+    .await
+    .unwrap();
+    let source = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Npc,
+        make_npc("SourceNPC"),
+    )
+    .await
+    .unwrap();
+    let result = parse_and_sync_wikilinks(
+        &db,
+        "npc",
+        &source.id,
+        "We ran into [[Sera]] on the road.",
+        WikilinkScope::Campaign {
+            campaign_id: &campaign_id,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result, vec![format!("npc:{}", sera.id)]);
+}
+
+#[tokio::test]
+async fn wikilink_resolves_across_leading_article_via_normalization() {
+    let db = setup_db().await;
+    let campaign_id = create_campaign(&db).await;
+    let free_league = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Faction,
+        make_npc("The Free League"),
+    )
+    .await
+    .unwrap();
+    let source = create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Npc,
+        make_npc("SourceNPC"),
+    )
+    .await
+    .unwrap();
+    let result = parse_and_sync_wikilinks(
+        &db,
+        "npc",
+        &source.id,
+        "They work for the [[Free League]].",
+        WikilinkScope::Campaign {
+            campaign_id: &campaign_id,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result, vec![format!("faction:{}", free_league.id)]);
 }
 
 #[test]

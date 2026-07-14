@@ -1,23 +1,30 @@
-use super::{EntityNameRow, EntityNotesRow, WikilinkError, WikilinkScope, ENTITY_TABLES};
+use super::{
+    EntityIdentity, EntityNameRow, EntityNotesRow, WikilinkError, WikilinkScope, ENTITY_TABLES,
+};
 
-/// Query the `name` and `id` from all 8 entity tables within the given scope.
+/// Query the `id`, `name`, and `aliases` from all 8 entity tables within the
+/// given scope.
 ///
 /// **Campaign scope**: entities reachable via `in_campaign` edges from the
 /// campaign, OR via chained `subscribes_to->in_collection` traversal.
 ///
 /// **Collection scope**: entities reachable via `in_collection` edges from
 /// the collection only.
+///
+/// `aliases` is selected under the exact same `WHERE` clause as `name` — a
+/// link must never resolve to an entity outside `scope` via an alias when it
+/// couldn't via the name.
 pub(crate) async fn query_all_entity_names<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     scope: &WikilinkScope<'_>,
-) -> Result<Vec<(String, String)>, WikilinkError> {
+) -> Result<Vec<EntityIdentity>, WikilinkError> {
     let mut query = String::new();
 
     match scope {
         WikilinkScope::Campaign { campaign_id } => {
             for table in ENTITY_TABLES {
                 query.push_str(&format!(
-                    "SELECT id, name FROM {table} \
+                    "SELECT id, name, aliases FROM {table} \
                      WHERE id IN (SELECT VALUE out FROM in_campaign WHERE in = type::thing('campaign', $campaign_id)) \
                         OR id IN (SELECT VALUE out FROM in_collection \
                                   WHERE in IN (SELECT VALUE out FROM subscribes_to \
@@ -32,14 +39,18 @@ pub(crate) async fn query_all_entity_names<C: surrealdb::Connection>(
                     message: e.to_string(),
                 })?;
 
-            let mut results: Vec<(String, String)> = Vec::new();
+            let mut results: Vec<EntityIdentity> = Vec::new();
             for i in 0..ENTITY_TABLES.len() {
                 let rows: Vec<EntityNameRow> =
                     response.take(i).map_err(|e| WikilinkError::Database {
                         message: e.to_string(),
                     })?;
                 for row in rows {
-                    results.push((format!("{}:{}", row.id.tb, row.id.id.to_raw()), row.name));
+                    results.push(EntityIdentity {
+                        id: format!("{}:{}", row.id.tb, row.id.id.to_raw()),
+                        name: row.name,
+                        aliases: row.aliases,
+                    });
                 }
             }
             Ok(results)
@@ -48,7 +59,7 @@ pub(crate) async fn query_all_entity_names<C: surrealdb::Connection>(
         WikilinkScope::Collection { collection_id } => {
             for table in ENTITY_TABLES {
                 query.push_str(&format!(
-                    "SELECT id, name FROM {table} \
+                    "SELECT id, name, aliases FROM {table} \
                      WHERE id IN (SELECT VALUE out FROM in_collection WHERE in = type::thing('collection', $collection_id));"
                 ));
             }
@@ -60,14 +71,18 @@ pub(crate) async fn query_all_entity_names<C: surrealdb::Connection>(
                     message: e.to_string(),
                 })?;
 
-            let mut results: Vec<(String, String)> = Vec::new();
+            let mut results: Vec<EntityIdentity> = Vec::new();
             for i in 0..ENTITY_TABLES.len() {
                 let rows: Vec<EntityNameRow> =
                     response.take(i).map_err(|e| WikilinkError::Database {
                         message: e.to_string(),
                     })?;
                 for row in rows {
-                    results.push((format!("{}:{}", row.id.tb, row.id.id.to_raw()), row.name));
+                    results.push(EntityIdentity {
+                        id: format!("{}:{}", row.id.tb, row.id.id.to_raw()),
+                        name: row.name,
+                        aliases: row.aliases,
+                    });
                 }
             }
             Ok(results)

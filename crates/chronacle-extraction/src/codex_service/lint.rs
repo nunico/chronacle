@@ -393,9 +393,13 @@ pub async fn run_lint_campaign<C: Connection>(
     db: &surrealdb::Surreal<C>,
     campaign_id: &str,
 ) -> Result<LintSummary, String> {
-    let entities = query_all_entity_names(db, &WikilinkScope::Campaign { campaign_id })
-        .await
-        .map_err(|e| e.to_string())?;
+    let entities: Vec<(String, String)> =
+        query_all_entity_names(db, &WikilinkScope::Campaign { campaign_id })
+            .await
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|e| (e.id, e.name))
+            .collect();
     run_detectors(db, &entities).await
 }
 
@@ -404,9 +408,13 @@ pub async fn run_lint_collection<C: Connection>(
     db: &surrealdb::Surreal<C>,
     collection_id: &str,
 ) -> Result<LintSummary, String> {
-    let entities = query_all_entity_names(db, &WikilinkScope::Collection { collection_id })
-        .await
-        .map_err(|e| e.to_string())?;
+    let entities: Vec<(String, String)> =
+        query_all_entity_names(db, &WikilinkScope::Collection { collection_id })
+            .await
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|e| (e.id, e.name))
+            .collect();
     run_detectors(db, &entities).await
 }
 

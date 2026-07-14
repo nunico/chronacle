@@ -7,8 +7,10 @@ use thiserror::Error;
 
 mod edges;
 mod query;
+mod resolve;
 
 pub(crate) use query::query_all_entity_names;
+pub(crate) use resolve::EntityIdentity;
 
 // ── Error type ────────────────────────────────────────────────────────────────
 
@@ -60,6 +62,8 @@ static WIKILINK_RE: LazyLock<Regex> =
 struct EntityNameRow {
     id: Thing,
     name: String,
+    #[serde(default)]
+    aliases: Vec<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -105,13 +109,7 @@ pub async fn parse_and_sync_wikilinks<C: surrealdb::Connection>(
 
     let mut matched_ids: Vec<String> = extracted
         .iter()
-        .filter_map(|wikilink_name| {
-            let lower = wikilink_name.to_lowercase();
-            all_entities
-                .iter()
-                .find(|(_, name)| name.to_lowercase() == lower)
-                .map(|(id, _)| id.clone())
-        })
+        .filter_map(|wikilink_name| resolve::resolve_exact(wikilink_name, &all_entities))
         .collect();
 
     matched_ids.sort_unstable();
