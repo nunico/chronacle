@@ -128,6 +128,24 @@ fn collect(root: &Path, res: Result<notify::Event, notify::Error>, out: &mut Vec
     };
     use notify::EventKind;
     for path in &event.paths {
+        // A NEW DIRECTORY is the one event we must not drop for want of a `.md`
+        // extension. Linux `inotify` watches one directory at a time: `notify`
+        // adds a watch for a newly-created subdirectory only after it sees the
+        // creation, so a file written into it inside that window produces NO
+        // event at all — a GM who drags a whole folder of notes into the vault
+        // would have it silently ignored until something else triggered a sync.
+        // (macOS FSEvents watches the tree and does not have this hole, which is
+        // exactly why this was invisible in local testing and only failed on CI.)
+        //
+        // Fall back to a Rescan: reconcile re-derives everything from disk, so it
+        // finds whatever the missed events would have told us about. Restricted
+        // to directories on purpose — emitting Rescan for any non-`.md` write
+        // would have Obsidian's own `.obsidian/workspace.json` churn triggering a
+        // reconcile storm.
+        if matches!(event.kind, EventKind::Create(_)) && path.is_dir() {
+            out.push(VaultEvent::Rescan);
+            continue;
+        }
         let Some(key) = NotifyWatcher::key_of(root, path) else {
             continue;
         };
@@ -156,15 +174,23 @@ fn event_order(a: &VaultEvent, b: &VaultEvent) -> std::cmp::Ordering {
 mod tests {
     use super::*;
 
+    /// The key mapping itself: an edit to a file in a directory the watcher is
+    /// already watching must arrive as an `Upsert` carrying a POSIX-style key.
+    ///
+    /// The directory is created BEFORE `subscribe()` on purpose. Creating it
+    /// after would race Linux's per-directory `inotify` registration, which is a
+    /// real hole — but it is a *different* hole, covered by the test below. This
+    /// test is about the key, so it must not be able to fail for that reason.
     #[tokio::test]
-    async fn a_created_md_file_produces_an_upsert_with_a_posix_key() {
+    async fn an_edited_md_file_produces_an_upsert_with_a_posix_key() {
         let dir = tempfile::TempDir::new().unwrap();
+        let sub = dir.path().join("campaigns/c/entities/npc");
+        std::fs::create_dir_all(&sub).unwrap();
+
         let w = NotifyWatcher::with_debounce(dir.path(), Duration::from_millis(100));
         let mut rx = w.subscribe().await;
         tokio::time::sleep(Duration::from_millis(200)).await; // watcher warm-up
 
-        let sub = dir.path().join("campaigns/c/entities/npc");
-        std::fs::create_dir_all(&sub).unwrap();
         std::fs::write(sub.join("a.md"), "hello").unwrap();
 
         let ev = tokio::time::timeout(Duration::from_secs(5), rx.recv())
@@ -174,6 +200,43 @@ mod tests {
         assert_eq!(
             ev,
             VaultEvent::Upsert("campaigns/c/entities/npc/a.md".into())
+        );
+    }
+
+    /// A GM dragging a whole FOLDER of notes into the vault must not be ignored.
+    ///
+    /// Linux `inotify` watches one directory at a time, and `notify` only adds a
+    /// watch for a new subdirectory after it observes the creation — so a file
+    /// written into it inside that window emits no event of its own. Dropping the
+    /// directory event (it has no `.md` extension) therefore lost the whole
+    /// folder until some unrelated change triggered a sync. The watcher falls back
+    /// to `Rescan`, which is sufficient: reconcile re-derives everything from disk.
+    ///
+    /// This asserts the guarantee that matters — *some* event arrives, so a
+    /// reconcile runs — rather than a specific one, because which event wins the
+    /// race is genuinely platform-dependent.
+    #[tokio::test]
+    async fn a_file_created_in_a_brand_new_directory_still_wakes_the_sync() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let w = NotifyWatcher::with_debounce(dir.path(), Duration::from_millis(100));
+        let mut rx = w.subscribe().await;
+        tokio::time::sleep(Duration::from_millis(200)).await; // watcher warm-up
+
+        // Created only now — the directory watch does not exist yet on Linux.
+        let sub = dir.path().join("campaigns/c/entities/npc");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("a.md"), "hello").unwrap();
+
+        let ev = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("a new folder must wake the sync, not be silently ignored")
+            .expect("open channel");
+        assert!(
+            matches!(
+                ev,
+                VaultEvent::Rescan | VaultEvent::Upsert(_) | VaultEvent::Remove(_)
+            ),
+            "expected an event that triggers a reconcile, got {ev:?}"
         );
     }
 
