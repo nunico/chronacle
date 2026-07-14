@@ -53,6 +53,84 @@ where
             .map_err(|e| format!("Schema migration failed on '{}': {e}", path.display()))?;
     }
 
+    backfill_unset_fields(db).await?;
+
+    Ok(())
+}
+
+/// Tables whose rows can predate the fields now defined on them.
+const BACKFILL_ENTITY_TABLES: [&str; 8] = [
+    "npc",
+    "location",
+    "faction",
+    "creature",
+    "item",
+    "event",
+    "player_character",
+    "misc",
+];
+
+/// Give every row a value for the fields that a `DEFINE FIELD` cannot backfill.
+///
+/// **Why this exists.** `DEFINE FIELD … DEFAULT x` is a *write-time* default: it
+/// does not touch rows that already exist, so a record created before a field was
+/// defined holds no value for it at all. SurrealDB re-validates **every** field of
+/// a SCHEMAFULL record on **any** write, and none of these types admit `NONE`
+/// (`bool`, `array<object>`, and even `string | NULL` — `NULL` is a value, `NONE`
+/// is the absence of one). So one unset field makes every later write to that
+/// record fail:
+///
+/// ```text
+/// Found NONE for field `codex_sources`, with record `npc:…`, but expected a array<object>
+/// ```
+///
+/// Found by running the real app against a real campaign: **every** inbound vault
+/// edit failed on entities older than the codex migration. It breaks in-app edits
+/// of those records too — the vault merely made it visible.
+///
+/// All of a row's missing fields must be set in **one** statement: a partial fix
+/// still fails validation on whatever is left unset. `??` coalesces only
+/// `NONE`/`NULL`, so a row that already has a value keeps it — which is what makes
+/// this idempotent, as it must be (`run_migrations` re-runs on every boot).
+/// `option<T>` fields need no entry: `NONE` is legal there. `name` has no entry
+/// either — it is required, and there is no value we could invent for it.
+///
+/// **Never fatal.** A failure is logged and skipped: it must never stop the app
+/// from booting. The worst case is one stubborn row that keeps failing its own
+/// writes — exactly the status quo this heals, and far better than a database that
+/// refuses to open.
+async fn backfill_unset_fields<C>(db: &surrealdb::Surreal<C>) -> Result<(), String>
+where
+    C: surrealdb::Connection + Send + Sync,
+{
+    // The eight entity tables share one field set (verified against
+    // `INFO FOR TABLE`); sessions and rule entries carry their own.
+    const ENTITY_SET: &str = "summary       = summary       ?? NULL, \
+         notes         = notes         ?? NULL, \
+         embedding     = embedding     ?? NULL, \
+         embed_model   = embed_model   ?? NULL, \
+         codex_stale   = codex_stale   ?? false, \
+         codex_sources = codex_sources ?? [], \
+         vault_deleted = vault_deleted ?? false, \
+         created_at    = created_at    ?? time::now(), \
+         updated_at    = updated_at    ?? time::now()";
+
+    let mut statements: Vec<String> = BACKFILL_ENTITY_TABLES
+        .iter()
+        .map(|t| format!("UPDATE {t} SET {ENTITY_SET}"))
+        .collect();
+    statements.push("UPDATE session SET vault_deleted = vault_deleted ?? false".to_owned());
+    statements.push("UPDATE rule_entry SET vault_deleted = vault_deleted ?? false".to_owned());
+
+    for sql in statements {
+        let outcome = match db.query(&sql).await {
+            Ok(response) => response.check().err(),
+            Err(e) => Some(e),
+        };
+        if let Some(e) = outcome {
+            eprintln!("schema: backfill skipped ({e}) for: {sql}");
+        }
+    }
     Ok(())
 }
 
