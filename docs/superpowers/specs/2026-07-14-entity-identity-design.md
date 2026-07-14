@@ -246,6 +246,122 @@ state in one reconcile pass.
 - **Settings → Campaign:** rename, with a warning that the vault folder moves.
 - **Vault frontmatter:** aliases are visible and editable in Obsidian.
 
+### UI hints (in-app, not manual-only)
+
+Every surface below carries a one-line explanation in place, because a GM who
+has to open the manual to understand a merge dialog has already been failed by
+it:
+
+- Aliases field: _"Other names this is known by. Links using any of them will
+  find this entity."_
+- Merge dialog: a plain-language consequence line — _"12 relationships merged,
+  3 other names kept, the codex article will be rewritten."_
+- Auto-linked list: _"Chronacle made these links on its own. If one is wrong,
+  undo it — the link will go back to asking you."_
+- Campaign rename: _"Your vault folder will be renamed too. Close Obsidian
+  first if it has this folder open."_
+
+## Documentation plan (GM-facing)
+
+Every interactive surface ships manual copy **in the same PR**, per the tranche-5
+lesson: the vault conflict lifecycle was unusable until it was explained for
+non-technical GMs. These paragraphs are drafted here so they transfer verbatim
+into `docs/user-guide.md` rather than being reinvented at the end. Voice: second
+person, no jargon, explain the _why_, never the implementation.
+
+Placement: a new **"Names and duplicates"** chapter after "The Codex", plus an
+addition to the existing "Managing Campaigns" chapter for rename.
+
+---
+
+### Draft: Names and duplicates
+
+**When the same thing has two names**
+
+Your world is full of things that go by more than one name. The Free League and
+the Free League. The Quassars and the Quassar Family. You know these are the
+same, but Chronacle starts out taking every name literally — to it, "The Free
+League" and "Free League" look like two different factions, and a link to
+[[The Quassars]] doesn't find the Quassar Family at all.
+
+You fix this by giving something **other names**. Open any entity and you'll
+find an _Other names_ field. Anything you put there works exactly like the
+entity's real name: links pointing at it land here, and Chronacle stops treating
+it as a stranger. You only ever have to do this once per name — it sticks.
+
+**Links that Chronacle sorts out by itself**
+
+Most of the time you won't have to do anything. When you write a link that
+doesn't match anything exactly, Chronacle looks for the obvious answer. If
+there's exactly one thing it's clearly pointing at — [[The Quassars]] when the
+Quassar Family is the only Quassar anything in your campaign — it makes the link
+and remembers the name for next time.
+
+It only does this when there's a single sensible answer. If two things could
+both be what you meant, it won't guess: it asks.
+
+Everything Chronacle links on its own shows up in **Maintenance** under
+_Auto-linked_. You never have to look at that list — it's there so nothing
+happens behind your back. If it ever gets one wrong, hit **Undo** and it will
+ask you next time instead of deciding.
+
+**Links Chronacle isn't sure about**
+
+When a link doesn't match anything and there's no obvious answer, it shows up in
+Maintenance as a broken link — as it does today — but now with a suggestion:
+_"[[The Quassars]] — did you mean **The Quassar Family**?"_ One click and the
+name is added, the link works, and every other link using that name works too.
+
+If the suggestion is wrong, ignore it. A broken link is only a broken link; it
+never invents a connection you didn't ask for.
+
+**Merging two entries that are the same thing**
+
+If you've ended up with two entries for one thing — it happens easily when a
+rulebook says "the Free League" and your session notes say "Free League" —
+Chronacle will spot it and offer to merge them.
+
+You'll see them side by side. Pick which one to keep, and for each piece of
+writing — the summary, your notes — choose which version survives, or keep both.
+Relationships are always kept from both sides: if one entry knew about a
+connection the other didn't, the merged entry knows about it too. Nothing gets
+quietly dropped.
+
+The name of the entry you didn't keep isn't lost either — it becomes one of the
+merged entry's other names. Every link you ever wrote using it keeps working.
+
+The merged entry's codex article is marked for rewriting, because it was written
+from half the facts. Recompile when you're ready.
+
+---
+
+### Draft: addition to "Managing Campaigns"
+
+**Renaming a campaign**
+
+You can rename a campaign from its settings. If you use vault sync, the folder
+holding that campaign's files is renamed to match — your notes move with it,
+edits and all, and nothing is lost.
+
+One thing worth doing first: if you have that folder open in Obsidian, close it
+before you rename. Obsidian doesn't always cope gracefully with a folder being
+renamed underneath it. Chronacle handles the rename safely either way; it's
+Obsidian we're being careful of.
+
+---
+
+### Draft: addition to "Your Vault"
+
+**Other names in your vault files**
+
+Each file has an `aliases:` line near the top. That's the entity's other names,
+and you can edit it in Obsidian directly — add one and Chronacle picks it up on
+the next sync, exactly as if you'd typed it into the app. Obsidian uses the same
+line for its own linking, so a name you add here works in both places at once.
+
+Leave the entity's own name in the list. It's what makes your `[[links]]` in
+Obsidian find the file.
+
 > **LANDMINE — the frontmatter `aliases` key already exists and means
 > something else.** `render.rs:29` writes `aliases: vec![e.name.clone()]` — a
 > _derived_ single-element list whose only job is to make Obsidian resolve
