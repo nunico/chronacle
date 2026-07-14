@@ -27,6 +27,7 @@ pub async fn create<C: surrealdb::Connection>(
     db.query(
         "CREATE type::thing($table, $id) SET
             name            = $name,
+            aliases         = $aliases,
             summary         = $summary,
             notes           = $notes,
             date_start      = $date_start,
@@ -46,6 +47,7 @@ pub async fn create<C: surrealdb::Connection>(
     .bind(("table", table))
     .bind(("id", id.clone()))
     .bind(("name", sanitized_name))
+    .bind(("aliases", input.aliases.clone()))
     .bind(("summary", input.summary))
     .bind(("notes", input.notes))
     .bind(("date_start", input.date_start))
@@ -98,6 +100,8 @@ pub async fn create<C: surrealdb::Connection>(
         id: surrealdb::sql::Thing,
         #[serde(default)]
         name: String,
+        #[serde(default)]
+        aliases: Vec<String>,
         #[serde(default)]
         summary: Option<String>,
         #[serde(default)]
@@ -159,6 +163,7 @@ pub async fn create<C: surrealdb::Connection>(
         campaign_id: campaign_id.map(|s| s.to_owned()),
         collection_id: collection_id.map(|s| s.to_owned()),
         name: rec.name,
+        aliases: rec.aliases,
         summary: rec.summary,
         notes: rec.notes,
         created_at: rec.created_at,
