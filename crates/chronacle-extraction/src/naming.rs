@@ -37,7 +37,18 @@ pub const DEFAULT_THRESHOLD: f64 = 0.72;
 /// ever as a lookup key. The GM's exact spelling is preserved as name or alias.
 pub fn normalize(name: &str) -> String {
     let lowered = name.to_lowercase();
-    let cleaned: String = lowered
+
+    // Strip a trailing possessive ('s / 's) on each raw (still-punctuated)
+    // word BEFORE punctuation is flattened to spaces, so a name that is
+    // itself a single character (e.g. "X") is never confused with the "s"
+    // left behind by stripping "Seraphina's" -> "Seraphina".
+    let depossessed: String = lowered
+        .split_whitespace()
+        .map(strip_trailing_possessive)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let cleaned: String = depossessed
         .chars()
         .map(|c| {
             if c.is_alphanumeric() || c.is_whitespace() {
@@ -54,32 +65,63 @@ pub fn normalize(name: &str) -> String {
         _ => words,
     };
 
-    words
+    let result = words
         .iter()
-        .filter(|w| w.len() > 1 || **w == "a")
         .map(|w| singularize(w))
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" ");
+
+    if result.is_empty() && !name.is_empty() {
+        // Everything was stripped away (e.g. a punctuation-only name like
+        // "!!!"). Fall back to the case-folded, whitespace-collapsed
+        // original rather than silently collapsing to "" — an empty
+        // normalized name would make two unrelated entities match at 1.0.
+        return lowered.split_whitespace().collect::<Vec<_>>().join(" ");
+    }
+    result
+}
+
+/// Strip a trailing `'s` or `’s` from a single raw word, e.g.
+/// `"seraphina's"` -> `"seraphina"`. Operates before punctuation is
+/// flattened so it only ever removes an actual possessive suffix, never a
+/// legitimately single-character name.
+fn strip_trailing_possessive(word: &str) -> &str {
+    word.strip_suffix("'s")
+        .or_else(|| word.strip_suffix("\u{2019}s")) // ’s (curly apostrophe)
+        .unwrap_or(word)
 }
 
 /// Conservative: a small rule set, not a stemmer. Over-eager singularization
 /// merges distinct names, which is the expensive direction to be wrong in.
 fn singularize(word: &str) -> String {
-    // Possessives were already stripped to a bare "s" by punctuation removal
-    // ("seraphina's" -> "seraphina s"), so a lone "s" is dropped by the
-    // whitespace collapse and never reaches here.
+    // Possessives are stripped earlier, before punctuation flattening (see
+    // `strip_trailing_possessive`), so this only ever sees an already-clean
+    // word — a lone "s" never reaches here.
+
+    // Words whose singular and plural forms coincide ("series", "species")
+    // must never be stemmed — there is no "sery"/"specy" to recover.
+    const INVARIANT: [&str; 2] = ["series", "species"];
+    if INVARIANT.contains(&word) {
+        return word.to_string();
+    }
+
     if word.len() > 3 && word.ends_with("ies") {
         return format!("{}y", &word[..word.len() - 3]);
     }
     if word.len() > 3 && word.ends_with("es") && !word.ends_with("ses") {
         return word[..word.len() - 2].to_string();
     }
-    // "chaos", "ss" endings, "os" endings, and short words keep their "s".
+    // "chaos", "ss"/"us"/"os" endings, and a trailing "s" preceded by "a" or
+    // "i" ("Atlas", "Silas", "Iris") are real names, not plurals — keep the
+    // "s". Under-stemming only misses a match (a suggestion the GM can
+    // accept); over-stemming silently fuses two distinct names.
     if word.len() > 3
         && word.ends_with('s')
         && !word.ends_with("ss")
         && !word.ends_with("us")
         && !word.ends_with("os")
+        && !word.ends_with("as")
+        && !word.ends_with("is")
     {
         return word[..word.len() - 1].to_string();
     }
@@ -96,24 +138,49 @@ fn trigrams(s: &str) -> Vec<[char; 3]> {
 /// ("quassar" vs "quassar family") — which is exactly the elided-link case.
 /// Both inputs must already be normalized.
 pub fn similarity(a: &str, b: &str) -> f64 {
-    if a == b {
-        return 1.0;
-    }
+    // The empty check MUST precede the equality check: two inputs that both
+    // normalize to "" would otherwise short-circuit to a "perfect" 1.0 match
+    // between two unrelated entities.
     if a.is_empty() || b.is_empty() {
         return 0.0;
     }
+    if a == b {
+        return 1.0;
+    }
 
     let (ta, tb) = (trigrams(a), trigrams(b));
-    let shared = ta.iter().filter(|t| tb.contains(t)).count();
+    // Multiset intersection (min of per-trigram counts on each side), NOT a
+    // membership test against the other's Vec: a plain `tb.contains(t)`
+    // check double-counts repeated trigrams asymmetrically (e.g. "iron
+    // iron" vs "iron fist") and silently breaks similarity(a, b) ==
+    // similarity(b, a) — which this module exists to guarantee.
+    let mut counts_a: std::collections::HashMap<[char; 3], usize> =
+        std::collections::HashMap::new();
+    for t in &ta {
+        *counts_a.entry(*t).or_insert(0) += 1;
+    }
+    let mut counts_b: std::collections::HashMap<[char; 3], usize> =
+        std::collections::HashMap::new();
+    for t in &tb {
+        *counts_b.entry(*t).or_insert(0) += 1;
+    }
+    let shared: usize = counts_a
+        .iter()
+        .map(|(t, &n)| n.min(*counts_b.get(t).unwrap_or(&0)))
+        .sum();
     let dice = (2.0 * shared as f64) / (ta.len() + tb.len()) as f64;
 
-    // Whole-word containment: every word of the shorter name appears in the
-    // longer one. "quassar" ⊂ "quassar family" -> strong signal.
-    let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
-    let long_words: Vec<&str> = long.split_whitespace().collect();
-    let contained = short.split_whitespace().all(|w| long_words.contains(&w));
+    // Whole-word containment: every word of one name appears in the other.
+    // "quassar" ⊂ "quassar family" -> strong signal. Checked in BOTH
+    // directions and the max taken, so the result never depends on which
+    // argument came first — resolution and duplicate detection must never
+    // disagree about whether two names are "the same".
+    let a_words: Vec<&str> = a.split_whitespace().collect();
+    let b_words: Vec<&str> = b.split_whitespace().collect();
+    let a_in_b = a_words.iter().all(|w| b_words.contains(w));
+    let b_in_a = b_words.iter().all(|w| a_words.contains(w));
 
-    if contained {
+    if a_in_b || b_in_a {
         dice.max(0.75 + 0.25 * dice)
     } else {
         dice
@@ -209,6 +276,53 @@ mod tests {
             similarity(&legion, &rest) < 0.72,
             "distinct entities must not match"
         );
+    }
+
+    #[test]
+    fn normalize_never_empties_a_non_empty_input() {
+        assert_eq!(normalize("X"), "x");
+        assert_eq!(normalize("K"), "k");
+        assert_ne!(normalize("!!!"), "");
+    }
+
+    #[test]
+    fn similarity_of_two_distinct_single_char_names_is_not_perfect() {
+        // Both normalize to non-empty single characters that differ; must
+        // NOT hit the a == b short circuit via a shared "" collapse.
+        assert!(similarity(&normalize("X"), &normalize("K")) < 1.0);
+        assert!(similarity(&normalize("!!!"), &normalize("???")) < 1.0);
+    }
+
+    #[test]
+    fn similarity_of_empty_inputs_is_zero_not_one() {
+        assert_eq!(similarity("", ""), 0.0);
+    }
+
+    #[test]
+    fn similarity_is_symmetric() {
+        let pairs = [
+            ("quassar", "quassar family"),
+            ("legion", "legionnaire rest"),
+            ("iron iron", "iron fist"),
+            ("a", "ab"),
+            ("chaos", "chaotic"),
+        ];
+        for (a, b) in pairs {
+            assert_eq!(
+                similarity(a, b),
+                similarity(b, a),
+                "similarity must be symmetric for ({a:?}, {b:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn singularize_does_not_mangle_as_is_names() {
+        assert_eq!(normalize("Atlas"), "atlas");
+        assert_eq!(normalize("Silas"), "silas");
+        assert_eq!(normalize("Iris"), "iris");
+        assert_eq!(normalize("Series"), "series");
+        assert_eq!(normalize("Species"), "species");
     }
 
     #[test]
