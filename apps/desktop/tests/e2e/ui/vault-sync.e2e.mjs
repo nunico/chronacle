@@ -131,33 +131,94 @@ describe('Markdown vault sync — export', function () {
     assert.equal(report.exported, 0, `expected a no-op resync, got ${JSON.stringify(report)}`);
   });
 
-  // A soft-deleted record (vault_deleted = true) is not exported. There is no
-  // Tauri command that sets vault_deleted — delete_entity hard-deletes the
-  // row (crates/chronacle-extraction/src/entity_service/crud/write.rs:228),
-  // and no other command exposes the soft-delete flag. Seeding this scenario
-  // through real invoke() calls is not possible without inventing a command
-  // name, which the task brief explicitly forbids. BLOCKED — left unimplemented
-  // pending a seeding command (or a documented direct-DB test hook) for
-  // vault_deleted.
-  it('A soft-deleted record is not exported (BLOCKED: no invoke-able seeding command for vault_deleted)');
+  // Previously BLOCKED: there was no IPC-reachable way to set `vault_deleted`
+  // (`delete_entity` hard-deletes). The inbound-sync tranche added
+  // `soft_delete_entity`, so this scenario is now reachable through the same
+  // invoke() path the UI uses.
+  it('A soft-deleted record is not exported', async () => {
+    // Given a campaign with two entities, synced to a vault
+    const campaign = await invoke(driver, 'create_campaign', {
+      name: 'Soft Delete Campaign',
+      system: '5e',
+    });
+    const doomed = await invoke(driver, 'create_entity', {
+      campaignId: campaign.id,
+      kind: 'npc',
+      input: entityInput('Doomed Informant'),
+    });
+    await invoke(driver, 'create_entity', {
+      campaignId: campaign.id,
+      kind: 'npc',
+      input: entityInput('Surviving Informant'),
+    });
+    await invoke(driver, 'set_vault_path', { vaultPath: vaultDir });
 
-  // A shared collection's entities are written once under collections/<slug>/
-  // when an entity is scoped to a *collection* (an `in_collection` graph edge)
-  // rather than a campaign — see VaultScope::Collection in
-  // crates/chronacle-vault/src/keys.rs and the scope resolution in
-  // crates/chronacle-domain/src/vault_record_store.rs:118-125.
-  // entity_service::create() supports this (it takes an optional
-  // collection_id and RELATEs via in_collection — write.rs:83), but the
-  // exposed `create_entity` Tauri command
-  // (apps/desktop/src-tauri/src/commands/entity_commands.rs:90-100) hardcodes
-  // `campaign_id: String` as required and always passes `collection_id: None`
-  // to the service call — there is no IPC-reachable way to create a
-  // collection-scoped entity. Seeding this scenario would require inventing a
-  // command (or an argument shape) that isn't there, which the task brief
-  // explicitly forbids. BLOCKED — left unimplemented pending a seeding
-  // command that can attach an entity to a collection instead of a campaign.
-  it(
-    "A shared collection's entities are written once " +
-      '(BLOCKED: create_entity has no IPC path to collection-scope an entity)',
-  );
+    const dir = path.join(vaultDir, 'campaigns', 'soft-delete-campaign', 'entities', 'npc');
+    assert.ok(
+      fs.existsSync(path.join(dir, 'doomed-informant.md')),
+      'the entity should have been exported before it is soft-deleted',
+    );
+
+    // When the GM deletes it (soft delete — the vault round-trip's delete)
+    await invoke(driver, 'soft_delete_entity', { id: doomed.id, kind: 'npc' });
+    await invoke(driver, 'vault_sync_now');
+
+    // Then its vault file is gone, and its neighbour is untouched
+    assert.ok(
+      !fs.existsSync(path.join(dir, 'doomed-informant.md')),
+      'a soft-deleted record must not remain in the vault',
+    );
+    assert.ok(
+      fs.existsSync(path.join(dir, 'surviving-informant.md')),
+      'soft-deleting one record must not disturb another',
+    );
+  });
+
+  // Previously BLOCKED: `create_entity` hardcoded a required `campaign_id` and
+  // always passed `collection_id: None`, so a collection-scoped entity could not
+  // be created over IPC. The inbound-sync tranche made both scope arguments
+  // optional (exactly one is required), so this is now reachable.
+  it("A shared collection's entities are written once", async () => {
+    // Given an entity scoped to a COLLECTION rather than a campaign
+    const collection = await invoke(driver, 'create_collection', {
+      name: 'Shared Bestiary',
+      description: null,
+    });
+    await invoke(driver, 'create_entity', {
+      collectionId: collection.id,
+      kind: 'creature',
+      input: entityInput('Sand Kraken'),
+    });
+    await invoke(driver, 'set_vault_path', { vaultPath: vaultDir });
+
+    // Then it is written once, under collections/<slug>/ — not under any campaign
+    const file = path.join(
+      vaultDir,
+      'collections',
+      'shared-bestiary',
+      'entities',
+      'creature',
+      'sand-kraken.md',
+    );
+    assert.ok(
+      fs.existsSync(file),
+      'a collection-scoped entity belongs under collections/<slug>/entities/<kind>/',
+    );
+    assert.match(
+      fs.readFileSync(file, 'utf8'),
+      /collection:\s*"Shared Bestiary"/,
+      'frontmatter should record the owning collection',
+    );
+
+    const campaignCopies = fs.existsSync(path.join(vaultDir, 'campaigns'))
+      ? fs
+          .readdirSync(path.join(vaultDir, 'campaigns'), { recursive: true })
+          .filter((p) => String(p).endsWith('sand-kraken.md'))
+      : [];
+    assert.equal(
+      campaignCopies.length,
+      0,
+      'a collection-scoped entity must not be duplicated under any campaign',
+    );
+  });
 });
