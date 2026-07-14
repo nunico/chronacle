@@ -414,6 +414,32 @@ pub async fn run() {
                         return;
                     }
                     rt.watcher_task = Some(task);
+                    drop(guard);
+
+                    // Reconcile once at startup, AFTER the watcher is live.
+                    //
+                    // The watcher only reports what happens from now on, so
+                    // without this pass every edit the GM made in their vault
+                    // while Chronacle was closed would be invisible until they
+                    // happened to touch something else or hit "Sync now" — and
+                    // any DB change made while the vault was disconnected would
+                    // never be exported. Reconcile is the correctness
+                    // guarantee; it has to actually run at least once per boot.
+                    //
+                    // Ordering matters: spawning the watcher first means an
+                    // edit landing *during* this pass still produces an event,
+                    // so it is picked up by the next reconcile rather than
+                    // being missed in the gap.
+                    match original_svc.reconcile().await {
+                        Ok(report) => {
+                            crate::commands::vault_commands::embed_applied_refs(
+                                &state_for_watcher,
+                                &report.applied_refs,
+                            )
+                            .await;
+                        }
+                        Err(e) => eprintln!("vault: startup reconcile failed: {e}"),
+                    }
                 });
             }
             Ok(())
