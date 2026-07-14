@@ -70,6 +70,62 @@ async fn switching_to_a_fresh_dir_after_clearing_bases_exports_cleanly() {
     assert!(store.get_synced_hash(&vref).await.expect("get").is_some());
 }
 
+/// A vault-path switch that fails must leave the OLD vault's merge bases in
+/// force, not just its path.
+///
+/// `configure_vault_path` clears every base before reconciling the new root, so
+/// a reconcile that then fails would otherwise leave the app pointed at the old
+/// vault with no bases at all. That is not a harmless "it'll re-derive": the
+/// base is the one piece of sync state nothing can reconstruct. With it gone,
+/// the old vault's next reconcile sees `base = None` for every record, and any
+/// file the GM edited outside the app reads as a fresh `Conflict` — a wave of
+/// spurious sidecars caused by a switch that supposedly did nothing.
+#[tokio::test]
+async fn a_failing_switch_leaves_the_old_vaults_bases_intact() {
+    let db = db().await;
+    let dir_a = tempfile::TempDir::new().unwrap();
+    let path_a = dir_a.path().to_str().unwrap().to_string();
+
+    let a = svc_for(&db, dir_a.path());
+    configure_vault_path(&db, &a, &path_a)
+        .await
+        .expect("initial configure exports and sets a base");
+
+    let store = SurrealVaultRecordStore::new(db.clone());
+    let before = store.list_synced().await.expect("bases before the switch");
+    assert!(!before.is_empty(), "precondition: a base exists to lose");
+
+    // A regular file as the root makes `read_dir` fail, so `VaultIndex::scan`
+    // fails and `reconcile()` returns Err — a real failure, no mocks needed.
+    let bad_root = dir_a.path().join("not-a-directory");
+    std::fs::write(&bad_root, "nope").unwrap();
+    let bad_path = bad_root.to_str().unwrap().to_string();
+
+    let b = svc_for(&db, &bad_root);
+    configure_vault_path(&db, &b, &bad_path)
+        .await
+        .expect_err("a broken root must fail the switch");
+
+    let after = store.list_synced().await.expect("bases after the switch");
+    assert_eq!(
+        after, before,
+        "a failed switch must restore the old vault's bases verbatim — \
+         hash, key and conflict flag alike"
+    );
+
+    let persisted = settings_service::get_all(&db)
+        .await
+        .expect("settings")
+        .into_iter()
+        .find(|s| s.key == "vault_sync_path")
+        .map(|s| s.value);
+    assert_eq!(
+        persisted.as_deref(),
+        Some(path_a.as_str()),
+        "the old path must still be in force"
+    );
+}
+
 /// Drives the command-layer helper directly (no Tauri `State`), exercising
 /// the exact ordering `set_vault_path` relies on: clear-if-changed → reconcile
 /// → persist. This is what the two tests below prove pieces of.

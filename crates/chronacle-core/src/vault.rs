@@ -243,6 +243,14 @@ pub trait VaultRecordStore: Send + Sync {
     /// Wipe every persisted merge base (all `vault_sync_state` rows).
     /// Used when the vault path changes: the new directory gets a fresh baseline.
     async fn clear_all_synced(&self) -> Result<(), VaultRecordError>;
+    /// Re-persist a previously snapshotted set of sync-state rows verbatim.
+    ///
+    /// The inverse of `clear_all_synced`, and the reason a vault-path switch can
+    /// be rolled back: the merge base is the one piece of sync state nothing can
+    /// re-derive. Once it is gone, a file the GM edited outside the app is
+    /// indistinguishable from a file that never synced, so the next reconcile
+    /// reads it as a fresh `Conflict` rather than a known divergence.
+    async fn restore_synced(&self, rows: &[SyncedRow]) -> Result<(), VaultRecordError>;
     /// Every persisted sync-state row. One query per reconcile pass; also
     /// powers the orphan sweep (rows whose record no longer syncs).
     async fn list_synced(&self) -> Result<Vec<SyncedRow>, VaultRecordError>;
