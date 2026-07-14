@@ -31,6 +31,13 @@ fn make_npc(name: &str) -> EntityInput {
     }
 }
 
+fn make_npc_with_alias(name: &str, aliases: &[&str]) -> EntityInput {
+    EntityInput {
+        aliases: Some(aliases.iter().map(|a| a.to_string()).collect()),
+        ..make_npc(name)
+    }
+}
+
 async fn create_campaign(db: &Surreal<Db>) -> String {
     #[derive(serde::Deserialize)]
     struct Row {
@@ -164,6 +171,63 @@ async fn collection_scope_resolves_same_collection_entities() {
     assert_eq!(
         result[0], expected_id,
         "should match collection entity, not campaign entity"
+    );
+}
+
+/// An alias in another campaign must not leak across scope, exactly like the
+/// name-only case above — aliases are selected under the same WHERE clause.
+#[tokio::test]
+async fn collection_scope_alias_does_not_leak_across_campaigns() {
+    let db = setup_db().await;
+    let col_id = create_collection(&db).await;
+    let goblin = create(
+        &db,
+        None,
+        Some(&col_id),
+        EntityKind::Npc,
+        make_npc_with_alias("Goblin Grunt", &["Grunt"]),
+    )
+    .await
+    .unwrap();
+    let expected_id = format!("npc:{}", goblin.id);
+
+    // Same alias text on an entity in a *different* scope (a campaign, not
+    // subscribed to `col_id`) must never win the match.
+    let campaign_id = create_campaign(&db).await;
+    create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Npc,
+        make_npc_with_alias("Unrelated NPC", &["Grunt"]),
+    )
+    .await
+    .unwrap();
+
+    let source = create(
+        &db,
+        None,
+        Some(&col_id),
+        EntityKind::Npc,
+        make_npc("SourceNPC"),
+    )
+    .await
+    .unwrap();
+    let result = parse_and_sync_wikilinks(
+        &db,
+        "npc",
+        &source.id,
+        "We fought the [[Grunt]].",
+        WikilinkScope::Collection {
+            collection_id: &col_id,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(
+        result[0], expected_id,
+        "alias match must honor collection scope, not resolve into another campaign's entity"
     );
 }
 

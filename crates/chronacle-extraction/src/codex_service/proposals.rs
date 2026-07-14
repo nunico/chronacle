@@ -200,9 +200,10 @@ async fn known_entities<C: Connection>(
     db: &surrealdb::Surreal<C>,
     campaign_id: &str,
 ) -> Result<Vec<(String, String)>, CodexError> {
-    query_all_entity_names(db, &WikilinkScope::Campaign { campaign_id })
+    let entities = query_all_entity_names(db, &WikilinkScope::Campaign { campaign_id })
         .await
-        .map_err(|e| CodexError::Db(e.to_string()))
+        .map_err(|e| CodexError::Db(e.to_string()))?;
+    Ok(entities.into_iter().map(|e| (e.id, e.name)).collect())
 }
 
 /// Name → "rule_entry:<id>" list of rule entries across the campaign's
