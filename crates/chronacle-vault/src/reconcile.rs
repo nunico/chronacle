@@ -627,11 +627,16 @@ impl VaultSyncService {
             if !row.conflict {
                 continue;
             }
+            // A record that no longer syncs (soft-deleted, or hard-deleted)
+            // keeps its sync-state row until the orphan sweep clears it. There
+            // is nothing for the GM to resolve against a record that is gone,
+            // and listing it would surface a raw thing-string ("npc:abc123")
+            // where a name belongs. Skip it; the sweep retires the row.
             let name = match self.records.load(&row.vref).await? {
                 Some(VaultRecord::Entity(e)) => e.name,
                 Some(VaultRecord::Session(s)) => s.title,
                 Some(VaultRecord::RuleEntry(r)) => r.name,
-                None => row.vref.to_thing(),
+                None => continue,
             };
             out.push(VaultConflict {
                 sidecar_key: crate::keys::sidecar_key(&row.key),
@@ -2091,10 +2096,12 @@ mod tests {
         assert_eq!(conflicts[0].sidecar_key, crate::keys::sidecar_key(KEY));
     }
 
-    /// A frozen row whose record was deleted mid-flight falls back to the
-    /// `table:id` form for the display name instead of failing.
+    /// A frozen row whose record is gone (soft-deleted, or hard-deleted) keeps
+    /// its sync-state row until the orphan sweep clears it. It must NOT be
+    /// listed as a conflict: there is nothing left for the GM to resolve
+    /// against, and listing it would show a raw `npc:n1` where a name belongs.
     #[tokio::test]
-    async fn conflicts_falls_back_to_thing_string_when_record_is_gone() {
+    async fn conflicts_omits_a_row_whose_record_is_gone() {
         let store = MockVaultStore::new();
 
         let mut records = MockVaultRecordStore::new();
@@ -2117,8 +2124,11 @@ mod tests {
             Arc::new(crate::outbound::PendingWrites::default()),
         );
         let conflicts = svc.conflicts().await.expect("conflicts");
-        assert_eq!(conflicts.len(), 1);
-        assert_eq!(conflicts[0].name, "npc:n1");
+        assert!(
+            conflicts.is_empty(),
+            "a conflict row for a record that no longer exists must not be \
+             shown to the GM: {conflicts:?}"
+        );
     }
 
     // -- is_own_write / is_own_delete (E6 watcher self-write filter) ----
