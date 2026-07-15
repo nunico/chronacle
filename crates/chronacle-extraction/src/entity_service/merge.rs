@@ -6,10 +6,9 @@
 //! per-field choices, marks the codex article stale, and soft-deletes the loser.
 
 use serde::Deserialize;
+use surrealdb::sql::Thing;
 
-use super::{
-    get_by_id, get_entity_relations, relate_collapsing, soft_delete, EntityError, EntityKind,
-};
+use super::{get_by_id, relate_collapsing, soft_delete, EntityError, EntityKind};
 
 /// Which side of a per-field conflict to keep when merging.
 #[derive(Debug, Clone, Deserialize)]
@@ -47,6 +46,132 @@ fn choose(c: &FieldChoice, s: Option<&str>, l: Option<&str>, loser_name: &str) -
             (None, None) => None,
         },
     }
+}
+
+/// Map an `Option` to a SurrealDB value, using explicit `NULL` for `None`.
+///
+/// Binding `Option::None` directly serializes to SurrealDB `NONE`, which the
+/// SCHEMAFULL `summary`/`notes` fields (`TYPE string | NULL`) reject on
+/// `UPDATE` — `DEFAULT NULL` only backfills on `CREATE`. This is the same fact
+/// that broke tranche 5; mirrors `crud::update::opt_value` (private to that
+/// module, so replicated here rather than exported across an unrelated
+/// boundary).
+fn opt_value<T: Into<surrealdb::sql::Value>>(opt: Option<T>) -> surrealdb::sql::Value {
+    opt.map_or(surrealdb::sql::Value::Null, Into::into)
+}
+
+/// One of the loser's `relates_to` edges, resolved down to the fields merge
+/// needs to re-point it: which end was the loser, the other endpoint, the
+/// relationship type, and the edge's own free-text `notes` (an authored GM
+/// annotation, e.g. "betrayed the party in session 4") that must survive the
+/// re-point rather than being silently dropped.
+struct LoserEdge {
+    other_table: String,
+    other_id: String,
+    rel_type: String,
+    notes: Option<String>,
+    /// `true` when the loser was the edge's `in` side (loser → other).
+    loser_is_in: bool,
+}
+
+/// Fetch every `relates_to` edge touching `loser`, with `notes`, for
+/// re-pointing during a merge.
+///
+/// This queries `relates_to` directly rather than reusing
+/// [`super::get_entity_relations`], for two reasons: that helper does not
+/// expose edge `notes` (see [`LoserEdge`]), and its specificity-tier
+/// collapsing is unnecessary here — `relate_collapsing` already re-applies
+/// that rule per edge as it re-points, so a raw, un-collapsed edge list is
+/// fine to feed it.
+///
+/// Mirrors `relations::flat::get_entity_relations`'s
+/// `vault_deleted != true` filter: an edge to an already soft-deleted
+/// neighbour is dropped rather than re-pointed, so merge does not resurrect a
+/// dangling reference to a record that no longer exists in any read path.
+async fn loser_edges<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    l_id: &str,
+    l_table: &str,
+) -> Result<Vec<LoserEdge>, EntityError> {
+    #[derive(Deserialize)]
+    struct EdgeRow {
+        #[serde(rename = "in")]
+        in_: Thing,
+        out: Thing,
+        rel_type: String,
+        notes: Option<String>,
+    }
+
+    let mut resp = db
+        .query(format!(
+            "SELECT in, out, rel_type, notes FROM relates_to \
+             WHERE in = {l_table}:{l_id} OR out = {l_table}:{l_id}"
+        ))
+        .await
+        .map_err(db_err)?;
+    let rows: Vec<EdgeRow> = resp.take(0).map_err(db_err)?;
+
+    let mut edges: Vec<LoserEdge> = Vec::new();
+    for row in rows {
+        let in_id = row.in_.id.to_raw();
+        let out_id = row.out.id.to_raw();
+        let loser_is_in = in_id == l_id && row.in_.tb == l_table;
+        let (other_table, other_id) = if loser_is_in {
+            (row.out.tb.clone(), out_id)
+        } else {
+            (row.in_.tb.clone(), in_id)
+        };
+        // Self-loop: loser both ends.
+        if other_table == l_table && other_id == l_id {
+            continue;
+        }
+        edges.push(LoserEdge {
+            other_table,
+            other_id,
+            rel_type: row.rel_type,
+            notes: row.notes,
+            loser_is_in,
+        });
+    }
+
+    if edges.is_empty() {
+        return Ok(edges);
+    }
+
+    // Drop edges to neighbours that are themselves already soft-deleted —
+    // matches `get_entity_relations`'s behaviour, grouping ids per table.
+    let mut by_table: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for e in &edges {
+        by_table
+            .entry(e.other_table.clone())
+            .or_default()
+            .push(e.other_id.clone());
+    }
+    let mut live: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    for (table, ids) in &by_table {
+        let things: Vec<Thing> = ids
+            .iter()
+            .map(|i| Thing::from((table.as_str(), i.as_str())))
+            .collect();
+        let mut r = db
+            .query("SELECT id FROM type::table($table) WHERE id IN $ids AND vault_deleted != true")
+            .bind(("table", table.clone()))
+            .bind(("ids", things))
+            .await
+            .map_err(db_err)?;
+        #[derive(Deserialize)]
+        struct IdRow {
+            id: Thing,
+        }
+        let found: Vec<IdRow> = r.take(0).map_err(db_err)?;
+        for row in found {
+            live.insert((row.id.tb.clone(), row.id.id.to_raw()));
+        }
+    }
+    edges.retain(|e| live.contains(&(e.other_table.clone(), e.other_id.clone())));
+
+    Ok(edges)
 }
 
 /// Split a full record id (`faction:abc`) into its table and id fragments.
@@ -131,23 +256,39 @@ pub async fn merge<C: surrealdb::Connection>(
     //    This means the survivor can end with FEWER edge ROWS than the two
     //    inputs had while losing no INFORMATION — a redundant generic edge
     //    collapses into the specific one that already says more.
-    for e in get_entity_relations(db, l_id, l_table).await? {
+    for e in loser_edges(db, l_id, l_table).await? {
         // An edge between loser and survivor themselves becomes a meaningless
         // self-loop after the merge — drop it (the DELETE below removes the row).
-        if e.id == s_id && e.kind == s_table {
+        if e.other_id == s_id && e.other_table == s_table {
             continue;
         }
-        // Edge notes are not exposed by `get_entity_relations`; a re-pointed
-        // edge carries `None`, which `relate_collapsing` treats as "no note".
-        match e.direction.as_str() {
+        // Carry the edge's authored `notes` forward — a GM annotation like
+        // "betrayed the party in session 4" is exactly the kind of hand-written
+        // fact merge promises not to lose.
+        if e.loser_is_in {
             // Loser was the `in` side (loser → other): survivor → other.
-            "outbound" => {
-                relate_collapsing(db, s_id, s_table, &e.id, &e.kind, &e.rel_type, None).await?;
-            }
+            relate_collapsing(
+                db,
+                s_id,
+                s_table,
+                &e.other_id,
+                &e.other_table,
+                &e.rel_type,
+                e.notes,
+            )
+            .await?;
+        } else {
             // Loser was the `out` side (other → loser): other → survivor.
-            _ => {
-                relate_collapsing(db, &e.id, &e.kind, s_id, s_table, &e.rel_type, None).await?;
-            }
+            relate_collapsing(
+                db,
+                &e.other_id,
+                &e.other_table,
+                s_id,
+                s_table,
+                &e.rel_type,
+                e.notes,
+            )
+            .await?;
         }
     }
     // The loser's own edges are now redundant; remove them so no row dangles off
@@ -198,8 +339,8 @@ pub async fn merge<C: surrealdb::Connection>(
     ))
     .bind(("id", s_id.to_owned()))
     .bind(("aliases", aliases))
-    .bind(("summary", summary))
-    .bind(("notes", notes))
+    .bind(("summary", opt_value(summary)))
+    .bind(("notes", opt_value(notes)))
     .await
     .map_err(db_err)?
     .check()
