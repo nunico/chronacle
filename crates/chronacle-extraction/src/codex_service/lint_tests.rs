@@ -211,6 +211,69 @@ async fn duplicate_entity_flags_same_named_pairs_in_scope() {
     assert_eq!(kind_count(&db, "duplicate_entity").await, 1);
 }
 
+/// Seed a `faction` in campaign `camp1`'s owned collection.
+async fn seed_faction(db: &Surreal<Db>, id: &str, name: &str) {
+    db.query(format!(
+        "CREATE faction:`{id}` SET name=$name, summary=NULL, notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         RELATE collection:`own1`->in_collection->faction:`{id}` SET created_at=time::now();"
+    ))
+    .bind(("name", name.to_owned()))
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+}
+
+/// Seed a `location` in campaign `camp1`'s owned collection.
+async fn seed_location(db: &Surreal<Db>, id: &str, name: &str) {
+    db.query(format!(
+        "CREATE location:`{id}` SET name=$name, summary=NULL, notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         RELATE collection:`own1`->in_collection->location:`{id}` SET created_at=time::now();"
+    ))
+    .bind(("name", name.to_owned()))
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+}
+
+/// Today "The Free League" / "Free League" hash to different exact-lowercase
+/// keys and are never reported. Stage 1 of the fuzzy detector groups by the
+/// shared `naming::normalize` engine instead, so a leading-article variant
+/// like this is caught with no scoring at all (similarity 1.0).
+#[tokio::test]
+async fn duplicate_detection_catches_a_leading_article_variant() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    seed_faction(&db, "f1", "The Free League").await;
+    seed_faction(&db, "f2", "Free League").await;
+
+    run_lint_campaign(&db, "camp1").await.unwrap();
+
+    assert_eq!(kind_count(&db, "duplicate_entity").await, 1);
+}
+
+/// A false duplicate proposes a MERGE — data loss if the GM accepts it. Two
+/// distinct same-table factions ("The Legion" / "Iron Host") must not be
+/// flagged, AND a same-named-ish location in a DIFFERENT table ("The
+/// Legionnaire's Rest") must never pair with the "The Legion" faction no
+/// matter how similar the strings look — duplicate detection never crosses
+/// tables.
+#[tokio::test]
+async fn duplicate_detection_does_not_flag_distinct_entities() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    seed_faction(&db, "f1", "The Legion").await;
+    seed_location(&db, "l1", "The Legionnaire's Rest").await;
+    seed_faction(&db, "f2", "Iron Host").await;
+
+    run_lint_campaign(&db, "camp1").await.unwrap();
+
+    assert_eq!(kind_count(&db, "duplicate_entity").await, 0);
+}
+
 #[tokio::test]
 async fn stale_article_aggregates_needs_compile_entities() {
     let db = setup_db().await;
