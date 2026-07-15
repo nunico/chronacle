@@ -48,6 +48,8 @@ struct EntityRow {
     summary: Option<String>,
     notes: Option<String>,
     codex_article: Option<String>,
+    #[serde(default)]
+    aliases: Vec<String>,
     created_at: String,
     updated_at: String,
     campaign_id: Option<Thing>,
@@ -75,6 +77,8 @@ struct RuleEntryRow {
     notes: Option<String>,
     #[serde(default)]
     page_refs: Vec<RulePageRef>,
+    #[serde(default)]
+    aliases: Vec<String>,
     collection: Thing,
     created_at: String,
     updated_at: String,
@@ -101,7 +105,7 @@ impl VaultRecordStore for SurrealVaultRecordStore {
             let mut response = self
                 .db
                 .query(
-                    "SELECT id, name, summary, notes, codex_article, created_at, updated_at, \
+                    "SELECT id, name, summary, notes, codex_article, aliases, created_at, updated_at, \
                          (SELECT VALUE in FROM in_campaign  WHERE out = $parent.id)[0]  AS campaign_id, \
                          (SELECT VALUE in FROM in_collection WHERE out = $parent.id)[0] AS collection_id \
                      FROM type::table($table) \
@@ -137,6 +141,7 @@ impl VaultRecordStore for SurrealVaultRecordStore {
                     summary: row.summary,
                     notes: row.notes,
                     codex_article: row.codex_article,
+                    aliases: row.aliases,
                     scope,
                     created_at: row.created_at,
                     updated_at: row.updated_at,
@@ -180,7 +185,7 @@ impl VaultRecordStore for SurrealVaultRecordStore {
         let mut response = self
             .db
             .query(
-                "SELECT id, name, category, body, notes, page_refs, collection, \
+                "SELECT id, name, category, body, notes, page_refs, aliases, collection, \
                      created_at, updated_at \
                  FROM rule_entry \
                  WHERE vault_deleted != true",
@@ -203,6 +208,7 @@ impl VaultRecordStore for SurrealVaultRecordStore {
                 body: row.body,
                 notes: row.notes,
                 page_refs: row.page_refs,
+                aliases: row.aliases,
                 collection: VaultScope::Collection { id: raw, name },
                 created_at: row.created_at,
                 updated_at: row.updated_at,
@@ -367,10 +373,11 @@ impl VaultRecordStore for SurrealVaultRecordStore {
                 self.db
                     .query(
                         "UPDATE type::thing('rule_entry', $id) SET \
-                             notes = $notes, updated_at = time::now()",
+                             notes = $notes, aliases = $aliases, updated_at = time::now()",
                     )
                     .bind(("id", vref.id.clone()))
                     .bind(("notes", opt(&parts.notes)))
+                    .bind(("aliases", parts.aliases.clone()))
                     .await
                     .map_err(backend_err)?
                     .check()
@@ -380,13 +387,14 @@ impl VaultRecordStore for SurrealVaultRecordStore {
                 self.db
                     .query(
                         "UPDATE type::thing($table, $id) SET \
-                             summary = $summary, notes = $notes, \
+                             summary = $summary, notes = $notes, aliases = $aliases, \
                              codex_stale = true, updated_at = time::now()",
                     )
                     .bind(("table", table.to_owned()))
                     .bind(("id", vref.id.clone()))
                     .bind(("summary", opt(&parts.summary)))
                     .bind(("notes", opt(&parts.notes)))
+                    .bind(("aliases", parts.aliases.clone()))
                     .await
                     .map_err(backend_err)?
                     .check()
@@ -749,6 +757,7 @@ mod tests {
                 &chronacle_core::GmParts {
                     summary: Some("New summary.".into()),
                     notes: Some("Edited in Obsidian. [[Iron Tower]]".into()),
+                    aliases: vec![],
                 },
             )
             .await
@@ -797,6 +806,7 @@ mod tests {
                 &chronacle_core::GmParts {
                     summary: None,
                     notes: Some("kept".into()),
+                    aliases: vec![],
                 },
             )
             .await
@@ -811,6 +821,79 @@ mod tests {
             "a section absent from the file must clear the DB field"
         );
         assert_eq!(e.notes.as_deref(), Some("kept"));
+    }
+
+    /// The DB-round-trip half of the aliases seam: `apply_gm_parts` writes
+    /// `aliases`, and `list_all`/`load` reads them back on the resulting
+    /// `EntityRecord`. The export-side merge with `name` is `chronacle-vault`'s
+    /// job, not this store's — this only proves the column round-trips.
+    #[tokio::test]
+    async fn apply_gm_parts_writes_aliases_on_an_entity() {
+        let db = db().await;
+        seed_campaign_npc(&db).await;
+        let store = SurrealVaultRecordStore::new(db.clone());
+        let vref = VaultRef {
+            table: "npc".into(),
+            id: "n1".into(),
+        };
+
+        store
+            .apply_gm_parts(
+                &vref,
+                &chronacle_core::GmParts {
+                    summary: Some("Archivist".into()),
+                    notes: Some("kept".into()),
+                    aliases: vec!["The Archivist".into(), "Seraphina".into()],
+                },
+            )
+            .await
+            .expect("apply");
+
+        let rec = store.load(&vref).await.expect("load").expect("exists");
+        let chronacle_core::VaultRecord::Entity(e) = rec else {
+            panic!("entity")
+        };
+        assert_eq!(
+            e.aliases,
+            vec!["The Archivist".to_string(), "Seraphina".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_gm_parts_writes_aliases_on_a_rule_entry() {
+        let db = db().await;
+        db.query(
+            "CREATE collection:k1 SET name = 'D&D 5e Core', created_at = time::now(), updated_at = time::now(); \
+             CREATE rule_entry:r1 SET collection = collection:k1, name = 'Grappling', \
+                 category = 'procedure', body = 'Rules text.', compiled_at = time::now();",
+        )
+        .await
+        .expect("seed")
+        .check()
+        .expect("seed response");
+        let store = SurrealVaultRecordStore::new(db.clone());
+        let vref = VaultRef {
+            table: "rule_entry".into(),
+            id: "r1".into(),
+        };
+
+        store
+            .apply_gm_parts(
+                &vref,
+                &chronacle_core::GmParts {
+                    summary: None,
+                    notes: Some("kept".into()),
+                    aliases: vec!["Grapple".into()],
+                },
+            )
+            .await
+            .expect("apply");
+
+        let rec = store.load(&vref).await.expect("load").expect("exists");
+        let chronacle_core::VaultRecord::RuleEntry(r) = rec else {
+            panic!("rule_entry")
+        };
+        assert_eq!(r.aliases, vec!["Grapple".to_string()]);
     }
 
     #[tokio::test]

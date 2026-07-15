@@ -242,6 +242,28 @@ pub fn parse(file: &str) -> Result<(Frontmatter, String), FrontmatterError> {
     Ok((fm, body.to_owned()))
 }
 
+/// Recover the GM's alternate names from a parsed frontmatter `aliases`
+/// list: everything except the record's own name (case-insensitive).
+///
+/// The inverse of `render::frontmatter_aliases`, which put the name into
+/// that same list in the first place — solely so Obsidian resolves
+/// `[[Name]]`. Without this filter, exporting a record with no GM aliases
+/// would parse back as one GM alias equal to its own name, and every
+/// inbound apply would fabricate a self-referential alias.
+///
+/// `name` is `None` for sessions (which have no alternate-name concept);
+/// in that case every entry in `aliases` is returned unfiltered, though
+/// callers building a `GmParts` for a session should ignore the result —
+/// `apply_gm_parts` never writes `aliases` for `session`.
+pub fn gm_aliases(name: Option<&str>, aliases: &[String]) -> Vec<String> {
+    let name = name.unwrap_or_default();
+    aliases
+        .iter()
+        .filter(|a| !a.eq_ignore_ascii_case(name))
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,6 +374,33 @@ mod tests {
         let file = format!("{}\nbody\n", render(&fm));
         let (back, _) = parse(&file).expect("parse");
         assert_eq!(back.aliases, vec!["A".to_string(), "B".to_string()]);
+    }
+
+    #[test]
+    fn gm_aliases_drops_the_entitys_own_name() {
+        let aliases = vec!["Seraphina Aldric".to_string(), "The Archivist".to_string()];
+        assert_eq!(
+            gm_aliases(Some("Seraphina Aldric"), &aliases),
+            vec!["The Archivist".to_string()]
+        );
+    }
+
+    #[test]
+    fn gm_aliases_drops_the_name_case_insensitively() {
+        let aliases = vec!["SERAPHINA ALDRIC".to_string(), "The Archivist".to_string()];
+        assert_eq!(
+            gm_aliases(Some("Seraphina Aldric"), &aliases),
+            vec!["The Archivist".to_string()]
+        );
+    }
+
+    #[test]
+    fn gm_aliases_is_empty_when_frontmatter_aliases_contains_only_the_name() {
+        let aliases = vec!["Seraphina Aldric".to_string()];
+        assert_eq!(
+            gm_aliases(Some("Seraphina Aldric"), &aliases),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

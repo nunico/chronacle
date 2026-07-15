@@ -87,6 +87,7 @@ async fn inbound_apply_succeeds_on_a_record_created_before_the_codex_migration()
             &GmParts {
                 summary: Some("S.".into()),
                 notes: Some("He owes the Syndicate. (Edited in Obsidian.)".into()),
+                aliases: vec![],
             },
         )
         .await

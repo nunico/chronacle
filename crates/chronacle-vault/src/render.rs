@@ -15,6 +15,27 @@ pub fn content_hash(s: &str) -> u64 {
     h.finish()
 }
 
+/// Merge a record's own display name with its GM-authored alternate names
+/// into the single frontmatter `aliases` list: name first, then `aliases`,
+/// deduplicated case-insensitively.
+///
+/// The frontmatter `aliases` key is Obsidian-meaningful (`[[Name]]` link
+/// resolution requires the name itself to be present) as well as the seam
+/// the GM's alternate names round-trip through, so both must live in the
+/// same list, with the canonical name always present and always first. The
+/// inverse — recovering just the GM's alternate names from a parsed file —
+/// is `frontmatter::gm_aliases`.
+fn frontmatter_aliases(name: &str, aliases: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(aliases.len() + 1);
+    for candidate in std::iter::once(name).chain(aliases.iter().map(String::as_str)) {
+        if seen.insert(candidate.to_ascii_lowercase()) {
+            out.push(candidate.to_owned());
+        }
+    }
+    out
+}
+
 /// Render a record to its complete `.md` file: frontmatter plus body.
 pub fn render_record(record: &VaultRecord) -> String {
     let (fm, parts) = match record {
@@ -23,10 +44,11 @@ pub fn render_record(record: &VaultRecord) -> String {
                 id: e.vref.to_thing(),
                 name: Some(e.name.clone()),
                 title: Some(e.name.clone()),
-                // Without this, `[[Seraphina Aldric]]` in a compiled article
-                // renders broken: wikilinks resolve against `name`, files are
-                // slug-named.
-                aliases: vec![e.name.clone()],
+                // Without the name in this list, `[[Seraphina Aldric]]` in a
+                // compiled article renders broken: wikilinks resolve against
+                // `name`, files are slug-named. GM alternate names ride
+                // along in the same list — see `frontmatter_aliases`.
+                aliases: frontmatter_aliases(&e.name, &e.aliases),
                 kind: Some(e.vref.table.clone()),
                 campaign: scope_campaign_name(&e.scope),
                 collection: scope_collection_name(&e.scope),
@@ -74,7 +96,7 @@ pub fn render_record(record: &VaultRecord) -> String {
                 id: r.vref.to_thing(),
                 name: Some(r.name.clone()),
                 title: Some(r.name.clone()),
-                aliases: vec![r.name.clone()],
+                aliases: frontmatter_aliases(&r.name, &r.aliases),
                 kind: None,
                 campaign: None,
                 collection: scope_collection_name(&r.collection),
@@ -130,6 +152,7 @@ mod tests {
             summary: Some("Archivist of the Iron Tower.".into()),
             notes: Some("GM notes.".into()),
             codex_article: Some("Seraphina is the archivist of [[The Iron Tower]].".into()),
+            aliases: vec![],
             scope: VaultScope::Campaign {
                 id: "campaign:c1".into(),
                 name: "Shadows of Valdris".into(),
@@ -147,6 +170,83 @@ mod tests {
             "got:\n{out}"
         );
         assert!(out.contains(r#"title: "Seraphina Aldric""#));
+    }
+
+    #[test]
+    fn render_record_puts_gm_alternate_names_in_frontmatter_aliases_name_first() {
+        let VaultRecord::Entity(mut e) = npc() else {
+            unreachable!()
+        };
+        e.aliases = vec!["The Archivist".into(), "Seraphina".into()];
+        let out = render_record(&VaultRecord::Entity(e));
+        assert!(
+            out.contains(r#"aliases: ["Seraphina Aldric", "The Archivist", "Seraphina"]"#),
+            "got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_record_dedups_aliases_case_insensitively_keeping_the_name_first() {
+        let VaultRecord::Entity(mut e) = npc() else {
+            unreachable!()
+        };
+        // A GM alternate name that only differs in case from the entity's
+        // own name must not produce a duplicate frontmatter entry.
+        e.aliases = vec!["seraphina aldric".into(), "The Archivist".into()];
+        let out = render_record(&VaultRecord::Entity(e));
+        assert!(
+            out.contains(r#"aliases: ["Seraphina Aldric", "The Archivist"]"#),
+            "got:\n{out}"
+        );
+    }
+
+    /// The full round trip the seam exists for: export a record carrying GM
+    /// alternate names, parse the rendered file back, recover the GM's
+    /// aliases with `frontmatter::gm_aliases` (name excluded), and confirm
+    /// they equal the original DB aliases. Then re-render from a record
+    /// updated with those recovered aliases and confirm the output is
+    /// byte-identical to the first export — the seam is a fixed point, not
+    /// just a one-way transform.
+    #[test]
+    fn aliases_round_trip_idempotently_through_export_and_parse() {
+        let VaultRecord::Entity(mut e) = npc() else {
+            unreachable!()
+        };
+        e.aliases = vec!["The Archivist".into(), "Seraphina".into()];
+        let record = VaultRecord::Entity(e.clone());
+
+        let exported = render_record(&record);
+        let (fm, _body) = crate::frontmatter::parse(&exported).expect("parse rendered file");
+        let recovered = crate::frontmatter::gm_aliases(fm.name.as_deref(), &fm.aliases);
+        assert_eq!(
+            recovered, e.aliases,
+            "recovered GM aliases must equal the original DB aliases, name excluded"
+        );
+
+        let mut re_entity = e.clone();
+        re_entity.aliases = recovered;
+        let re_exported = render_record(&VaultRecord::Entity(re_entity));
+        assert_eq!(
+            re_exported, exported,
+            "re-export from the recovered aliases must be byte-identical"
+        );
+    }
+
+    /// A file whose frontmatter `aliases` contains ONLY the entity's own name
+    /// (the common case: no GM alternate names were ever added) must parse
+    /// to zero GM aliases, not one alias equal to the name.
+    #[test]
+    fn a_frontmatter_aliases_list_with_only_the_name_yields_no_gm_aliases() {
+        let record = npc(); // npc()'s aliases is vec![] -> frontmatter aliases == [name]
+        let exported = render_record(&record);
+        let (fm, _body) = crate::frontmatter::parse(&exported).expect("parse rendered file");
+        assert_eq!(fm.aliases, vec!["Seraphina Aldric".to_string()]);
+        let recovered = crate::frontmatter::gm_aliases(fm.name.as_deref(), &fm.aliases);
+        assert_eq!(
+            recovered,
+            Vec::<String>::new(),
+            "a frontmatter aliases list containing only the entity's own name must yield zero GM aliases"
+        );
     }
 
     #[test]
@@ -232,6 +332,7 @@ mod tests {
             summary: Some("S.".into()),
             notes: Some("N.".into()),
             codex_article: Some("C.".into()),
+            aliases: vec![],
             scope: VaultScope::Campaign {
                 id: "campaign:c1".into(),
                 name: "SoV".into(),
