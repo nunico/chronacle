@@ -4,7 +4,7 @@ import type { GraphNode } from './commands';
 
 function ev(name: string, sequence_index: number | null, era: string | null): GraphNode {
   return {
-    id: name, kind: 'event', campaign_id: null, name,
+    id: name, kind: 'event', campaign_id: null, name, aliases: [],
     summary: null, notes: null, created_at: null, updated_at: null,
     date_start: null, date_end: null, is_ongoing: null,
     sequence_index, era, duration_label: null, session_id: null,

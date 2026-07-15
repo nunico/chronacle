@@ -5,6 +5,7 @@ use crate::AppState;
 use chronacle_extraction::entity_service::{
     self, EntityError, EntityGraph, EntityInput, EntityKind, GraphNode, MergeChoices, RelatedEntity,
 };
+use chronacle_extraction::wikilink::WikilinkScope;
 
 fn parse_kind(kind: &str) -> Result<EntityKind, EntityError> {
     serde_json::from_value(serde_json::Value::String(kind.to_owned())).map_err(|_| {
@@ -208,6 +209,57 @@ pub async fn merge_entities(
         });
     }
     Ok(())
+}
+
+/// One-click "did you mean X?" confirmation: persist `alias` as a permanent
+/// alternate name for `entity_id`, subject to the same collision rule
+/// `add_alias` already enforces (see `entity_service::aliases`) — a collision
+/// is surfaced to the caller as a typed `Validation` error, not swallowed.
+///
+/// Scope is derived from the entity's own campaign/collection membership —
+/// the same fields `crud::update` already reads off `GraphNode` to scope its
+/// own wikilink resync.
+#[tauri::command]
+pub async fn confirm_alias_suggestion(
+    state: State<'_, Arc<AppState>>,
+    entity_id: String,
+    alias: String,
+) -> Result<(), EntityError> {
+    let (table, id) = entity_id
+        .split_once(':')
+        .ok_or_else(|| EntityError::Validation {
+            field: "entityId".to_string(),
+            message: format!("Malformed record id: {entity_id}"),
+        })?;
+    let kind = kind_of_table(table)?;
+    let node = entity_service::get_by_id(&state.db, id, kind).await?;
+    let scope = match (node.campaign_id.as_deref(), node.collection_id.as_deref()) {
+        (Some(cid), _) => WikilinkScope::Campaign { campaign_id: cid },
+        (_, Some(col)) => WikilinkScope::Collection { collection_id: col },
+        (None, None) => {
+            return Err(EntityError::Validation {
+                field: "entityId".to_string(),
+                message: "Entity has no campaign or collection scope".to_string(),
+            });
+        }
+    };
+    entity_service::add_alias(&state.db, &entity_id, &alias, scope).await
+}
+
+/// Undo an alternate name auto-created by tier-4 fuzzy wikilink resolution:
+/// remove the alias, then resolve the `auto_alias` finding that recorded it
+/// so it drops out of the Maintenance inbox.
+#[tauri::command]
+pub async fn undo_auto_alias(
+    state: State<'_, Arc<AppState>>,
+    entity_id: String,
+    alias: String,
+    finding_id: String,
+) -> Result<(), EntityError> {
+    entity_service::remove_alias(&state.db, &entity_id, &alias).await?;
+    chronacle_extraction::codex_service::resolve_lint_finding(&state.db, &finding_id)
+        .await
+        .map_err(|message| EntityError::Database { message })
 }
 
 #[tauri::command]
@@ -453,5 +505,13 @@ mod tests {
     fn create_and_soft_delete_entity_commands_compile() {
         let _ = create_entity as fn(_, _, _, _, _) -> _;
         let _ = soft_delete_entity as fn(_, _, _) -> _;
+    }
+
+    /// Smoke test: the new alternate-name commands are referenced so the
+    /// compiler verifies their signatures, imports, and return types.
+    #[test]
+    fn alias_commands_compile() {
+        let _ = confirm_alias_suggestion as fn(_, _, _) -> _;
+        let _ = undo_auto_alias as fn(_, _, _, _) -> _;
     }
 }

@@ -10,9 +10,13 @@
     resolveLintFinding,
     deleteRelation,
     compileEntity,
+    confirmAliasSuggestion,
+    undoAutoAlias,
     type CodexProposal,
     type LintFinding,
+    type EntityKind,
   } from '../lib/commands';
+  import MergeDialog from '../components/MergeDialog.svelte';
 
   interface Props {
     onCountsChanged?: () => void;
@@ -29,6 +33,10 @@
   let busy = $state<string | null>(null); // proposal/finding id being resolved
   let checking = $state(false);
   let lintNote = $state<string | null>(null);
+  let mergeTarget = $state<{
+    a: { id: string; kind: string };
+    b: { id: string; kind: string };
+  } | null>(null);
 
   const KIND_LABELS: Record<string, string> = {
     entity_article_update: 'Article update',
@@ -44,6 +52,7 @@
     broken_wikilink: 'Broken wikilink',
     stale_article: 'Stale article',
     duplicate_entity: 'Possible duplicate',
+    alias_collision: 'Naming conflict',
   };
 
   const findingsByKind = $derived.by(() => {
@@ -60,6 +69,17 @@
     if (typeof v !== 'string' || !v.includes(':')) return null;
     const [kind, id] = v.split(':', 2);
     return { id, kind };
+  }
+
+  interface AliasCandidate {
+    id: string;
+    name: string;
+    similarity: number;
+  }
+
+  function candidatesOf(f: LintFinding): AliasCandidate[] {
+    const c = f.payload.candidates;
+    return Array.isArray(c) ? (c as AliasCandidate[]) : [];
   }
 
   async function refresh() {
@@ -136,6 +156,47 @@
     } finally {
       busy = null;
     }
+  }
+
+  /** "Did you mean X?" — the GM confirms the top candidate as an alternate name. */
+  async function confirmSuggestion(f: LintFinding, candidate: AliasCandidate) {
+    busy = f.id;
+    try {
+      await confirmAliasSuggestion(candidate.id, String(f.payload.link_text));
+      await resolveLintFinding(f.id);
+      await refresh();
+      onCountsChanged?.();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = null;
+    }
+  }
+
+  /** Undo an alternate name the fuzzy resolver auto-linked without asking. */
+  async function undoSuggestion(f: LintFinding) {
+    busy = f.id;
+    try {
+      await undoAutoAlias(String(f.payload.entity), String(f.payload.alias), f.id);
+      await refresh();
+      onCountsChanged?.();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = null;
+    }
+  }
+
+  function openMerge(f: LintFinding) {
+    const a = entityRef(f.payload.a);
+    const b = entityRef(f.payload.b);
+    if (a && b) mergeTarget = { a, b };
+  }
+
+  async function handleMerged() {
+    mergeTarget = null;
+    await refresh();
+    onCountsChanged?.();
   }
 
   async function checkCampaign() {
@@ -248,121 +309,216 @@
     <div class="finding-groups">
       {#each [...findingsByKind.entries()] as [kind, items] (kind)}
         <section class="finding-group">
-          <h3 class="finding-kind-heading">{FINDING_LABELS[kind] ?? kind}</h3>
-          <ul class="finding-list">
-            {#each items as f (f.id)}
-              <li class="finding-card">
-                {#if kind === 'broken_wikilink'}
-                  <p class="finding-detail">
-                    Broken link to <strong>{f.payload.link_text}</strong>
-                  </p>
-                  <div class="finding-actions">
-                    <button
-                      type="button"
-                      disabled={busy === f.id}
-                      onclick={() => void openEntityRef(f.payload.entity)}
-                    >
-                      Open entity
-                    </button>
-                    <button
-                      type="button"
-                      class="btn-ghost"
-                      disabled={busy === f.id}
-                      onclick={() => resolveFinding(f.id)}
-                    >
-                      Mark resolved
-                    </button>
-                  </div>
-                {:else if kind === 'stale_article'}
-                  <p class="finding-detail">{f.payload.reason}</p>
-                  <div class="finding-actions">
-                    <button
-                      type="button"
-                      disabled={busy === f.id}
-                      onclick={() => compileAndResolve(f)}
-                    >
-                      Compile
-                    </button>
-                    <button
-                      type="button"
-                      class="btn-ghost"
-                      disabled={busy === f.id}
-                      onclick={() => resolveFinding(f.id)}
-                    >
-                      Mark resolved
-                    </button>
-                  </div>
-                {:else if kind === 'scope_violation'}
-                  <p class="finding-detail">
-                    {String(f.payload.from)} → {String(f.payload.to)}
-                  </p>
-                  <div class="finding-actions">
-                    <button
-                      type="button"
-                      disabled={busy === f.id}
-                      onclick={() => deleteEdgeAndResolve(f)}
-                    >
-                      Delete edge
-                    </button>
-                    <button
-                      type="button"
-                      class="btn-ghost"
-                      disabled={busy === f.id}
-                      onclick={() => resolveFinding(f.id)}
-                    >
-                      Mark resolved
-                    </button>
-                  </div>
-                {:else if kind === 'duplicate_entity'}
-                  <p class="finding-detail">
-                    Possible duplicate:
-                    <strong>{entityRef(f.payload.a)?.id ?? String(f.payload.a)}</strong>
-                    and
-                    <strong>{entityRef(f.payload.b)?.id ?? String(f.payload.b)}</strong>
-                  </p>
-                  <div class="finding-actions">
-                    <button
-                      type="button"
-                      disabled={busy === f.id}
-                      onclick={() => void openEntityRef(f.payload.a)}
-                    >
-                      Open A
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy === f.id}
-                      onclick={() => void openEntityRef(f.payload.b)}
-                    >
-                      Open B
-                    </button>
-                    <button
-                      type="button"
-                      class="btn-ghost"
-                      disabled={busy === f.id}
-                      onclick={() => resolveFinding(f.id)}
-                    >
-                      Mark resolved
-                    </button>
-                  </div>
-                {:else}
-                  <p class="finding-detail">Orphaned relation edge</p>
-                  <div class="finding-actions">
-                    <button
-                      type="button"
-                      class="btn-ghost"
-                      disabled={busy === f.id}
-                      onclick={() => resolveFinding(f.id)}
-                    >
-                      Mark resolved
-                    </button>
-                  </div>
-                {/if}
-              </li>
-            {/each}
-          </ul>
+          {#if kind === 'auto_alias'}
+            <details class="auto-alias-details">
+              <summary class="finding-kind-heading">
+                Auto-linked ({items.length}) — reviewable, not required
+              </summary>
+              <ul class="finding-list">
+                {#each items as f (f.id)}
+                  <li class="finding-card">
+                    <p class="finding-detail">
+                      <strong>{String(f.payload.alias)}</strong> was auto-linked to
+                      <strong>{entityRef(f.payload.entity)?.id ?? String(f.payload.entity)}</strong>
+                    </p>
+                    <div class="finding-actions">
+                      <button
+                        type="button"
+                        disabled={busy === f.id}
+                        onclick={() => void openEntityRef(f.payload.entity)}
+                      >
+                        Open entity
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-ghost"
+                        disabled={busy === f.id}
+                        onclick={() => undoSuggestion(f)}
+                      >
+                        Undo
+                      </button>
+                    </div>
+                  </li>
+                {/each}
+              </ul>
+            </details>
+          {:else}
+            <h3 class="finding-kind-heading">{FINDING_LABELS[kind] ?? kind}</h3>
+            <ul class="finding-list">
+              {#each items as f (f.id)}
+                <li class="finding-card">
+                  {#if kind === 'broken_wikilink'}
+                    <p class="finding-detail">
+                      Broken link to <strong>{f.payload.link_text}</strong>
+                    </p>
+                    {#if candidatesOf(f).length > 0}
+                      {@const candidate = candidatesOf(f)[0]}
+                      <p class="finding-detail">
+                        Did you mean <strong>{candidate.name}</strong>?
+                      </p>
+                    {/if}
+                    <div class="finding-actions">
+                      {#if candidatesOf(f).length > 0}
+                        <button
+                          type="button"
+                          disabled={busy === f.id}
+                          onclick={() => confirmSuggestion(f, candidatesOf(f)[0])}
+                        >
+                          Yes
+                        </button>
+                      {/if}
+                      <button
+                        type="button"
+                        disabled={busy === f.id}
+                        onclick={() => void openEntityRef(f.payload.entity)}
+                      >
+                        Open entity
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-ghost"
+                        disabled={busy === f.id}
+                        onclick={() => resolveFinding(f.id)}
+                      >
+                        Mark resolved
+                      </button>
+                    </div>
+                  {:else if kind === 'stale_article'}
+                    <p class="finding-detail">{f.payload.reason}</p>
+                    <div class="finding-actions">
+                      <button
+                        type="button"
+                        disabled={busy === f.id}
+                        onclick={() => compileAndResolve(f)}
+                      >
+                        Compile
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-ghost"
+                        disabled={busy === f.id}
+                        onclick={() => resolveFinding(f.id)}
+                      >
+                        Mark resolved
+                      </button>
+                    </div>
+                  {:else if kind === 'scope_violation'}
+                    <p class="finding-detail">
+                      {String(f.payload.from)} → {String(f.payload.to)}
+                    </p>
+                    <div class="finding-actions">
+                      <button
+                        type="button"
+                        disabled={busy === f.id}
+                        onclick={() => deleteEdgeAndResolve(f)}
+                      >
+                        Delete edge
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-ghost"
+                        disabled={busy === f.id}
+                        onclick={() => resolveFinding(f.id)}
+                      >
+                        Mark resolved
+                      </button>
+                    </div>
+                  {:else if kind === 'duplicate_entity'}
+                    <p class="finding-detail">
+                      Possible duplicate:
+                      <strong>{entityRef(f.payload.a)?.id ?? String(f.payload.a)}</strong>
+                      and
+                      <strong>{entityRef(f.payload.b)?.id ?? String(f.payload.b)}</strong>
+                    </p>
+                    <div class="finding-actions">
+                      <button type="button" disabled={busy === f.id} onclick={() => openMerge(f)}>
+                        Merge
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy === f.id}
+                        onclick={() => void openEntityRef(f.payload.a)}
+                      >
+                        Open A
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy === f.id}
+                        onclick={() => void openEntityRef(f.payload.b)}
+                      >
+                        Open B
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-ghost"
+                        disabled={busy === f.id}
+                        onclick={() => resolveFinding(f.id)}
+                      >
+                        Mark resolved
+                      </button>
+                    </div>
+                  {:else if kind === 'alias_collision'}
+                    <p class="finding-detail">
+                      <strong>{String(f.payload.alias)}</strong> is claimed by both
+                      <strong>{entityRef(f.payload.a)?.id ?? String(f.payload.a)}</strong>
+                      and
+                      <strong>{entityRef(f.payload.b)?.id ?? String(f.payload.b)}</strong>
+                    </p>
+                    <div class="finding-actions">
+                      <button
+                        type="button"
+                        disabled={busy === f.id}
+                        onclick={() => void openEntityRef(f.payload.a)}
+                      >
+                        Open A
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy === f.id}
+                        onclick={() => void openEntityRef(f.payload.b)}
+                      >
+                        Open B
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-ghost"
+                        disabled={busy === f.id}
+                        onclick={() => resolveFinding(f.id)}
+                      >
+                        Mark resolved
+                      </button>
+                    </div>
+                  {:else}
+                    <p class="finding-detail">Orphaned relation edge</p>
+                    <div class="finding-actions">
+                      <button
+                        type="button"
+                        class="btn-ghost"
+                        disabled={busy === f.id}
+                        onclick={() => resolveFinding(f.id)}
+                      >
+                        Mark resolved
+                      </button>
+                    </div>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </section>
       {/each}
     </div>
+  {/if}
+
+  {#if mergeTarget}
+    <MergeDialog
+      idA={mergeTarget.a.id}
+      kindA={mergeTarget.a.kind as EntityKind}
+      idB={mergeTarget.b.id}
+      kindB={mergeTarget.b.kind as EntityKind}
+      onclose={() => (mergeTarget = null)}
+      onmerged={handleMerged}
+    />
   {/if}
 </div>
 
@@ -522,6 +678,14 @@
     color: var(--fg-2);
     text-transform: uppercase;
     margin: 0 0 8px;
+  }
+  .auto-alias-details summary.finding-kind-heading {
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  .auto-alias-details .finding-list {
+    margin-top: 8px;
   }
   .finding-detail {
     color: var(--fg-2);

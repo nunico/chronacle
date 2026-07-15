@@ -17,6 +17,7 @@ const mockNode = (overrides: Partial<GraphNode> = {}): GraphNode => ({
   kind: 'npc',
   campaign_id: 'camp1',
   name: 'Torvin',
+  aliases: [],
   summary: null,
   notes: null,
   created_at: null,
@@ -51,7 +52,7 @@ describe('EntityForm', () => {
 
   it('renders name field for any entity kind', () => {
     render(EntityForm, { props: { kind: 'npc' as EntityKind, node: null } });
-    expect(screen.getByLabelText(/name/i)).toBeTruthy();
+    expect(screen.getByLabelText('Name', { exact: true })).toBeTruthy();
   });
 
   it('shows temporal fields for event kind', () => {
@@ -75,7 +76,7 @@ describe('EntityForm', () => {
   it('pre-fills fields when editing an existing node', () => {
     const node = mockNode({ name: 'Vex', kind: 'npc' });
     render(EntityForm, { props: { kind: 'npc' as EntityKind, node } });
-    expect((screen.getByLabelText(/name/i) as HTMLInputElement).value).toBe('Vex');
+    expect((screen.getByLabelText('Name', { exact: true }) as HTMLInputElement).value).toBe('Vex');
   });
 
   it('emits save event with input on submit', async () => {
@@ -83,12 +84,44 @@ describe('EntityForm', () => {
     render(EntityForm, {
       props: { kind: 'npc' as EntityKind, node: null, onsave: onSave },
     });
-    await fireEvent.input(screen.getByLabelText(/name/i), { target: { value: 'New NPC' } });
+    await fireEvent.input(screen.getByLabelText('Name', { exact: true }), { target: { value: 'New NPC' } });
     await fireEvent.submit(screen.getByRole('form'));
     expect(onSave).toHaveBeenCalledOnce();
     expect(onSave.mock.calls[0][0].name).toBe('New NPC');
     expect(onSave.mock.calls[0][0].summary).toBeNull();
     expect(onSave.mock.calls[0][0].playerName).toBeNull();
+  });
+
+  // AliasField -> EntityForm submit must always carry the COMPLETE alternate-name
+  // array, never `null`/`undefined` — an omitted `aliases` field means "preserve"
+  // on the backend, so a partial edit would otherwise silently no-op.
+  it('always submits the complete alternate-name array, never null', async () => {
+    const onSave = vi.fn();
+    const node = mockNode({ aliases: ['The Quassars'] });
+    render(EntityForm, { props: { kind: 'npc' as EntityKind, node, onsave: onSave } });
+
+    await fireEvent.input(screen.getByPlaceholderText('Add an alternate name'), {
+      target: { value: 'Quassar Clan' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await fireEvent.submit(screen.getByRole('form'));
+
+    expect(onSave).toHaveBeenCalledOnce();
+    expect(onSave.mock.calls[0][0].aliases).toEqual(['The Quassars', 'Quassar Clan']);
+  });
+
+  it('submits an empty alternate-name array (not null) for a new entity with none added', async () => {
+    const onSave = vi.fn();
+    render(EntityForm, { props: { kind: 'npc' as EntityKind, node: null, onsave: onSave } });
+
+    await fireEvent.input(screen.getByLabelText('Name', { exact: true }), {
+      target: { value: 'New NPC' },
+    });
+    await fireEvent.submit(screen.getByRole('form'));
+
+    expect(onSave).toHaveBeenCalledOnce();
+    expect(onSave.mock.calls[0][0].aliases).toEqual([]);
+    expect(onSave.mock.calls[0][0].aliases).not.toBeNull();
   });
 
   it('shows prop-supplied field error for the name field', () => {
@@ -128,7 +161,7 @@ describe('EntityForm', () => {
     const onSave = vi.fn();
     const sessions = [mockSession()];
     render(EntityForm, { props: { kind: 'event' as EntityKind, node: null, sessions, onsave: onSave } });
-    await fireEvent.input(screen.getByLabelText(/name/i), { target: { value: 'Battle of Helm' } });
+    await fireEvent.input(screen.getByLabelText('Name', { exact: true }), { target: { value: 'Battle of Helm' } });
     const select = screen.getByLabelText(/session/i) as HTMLSelectElement;
     await fireEvent.change(select, { target: { value: 'sess1' } });
     await fireEvent.submit(screen.getByRole('form'));
@@ -139,7 +172,7 @@ describe('EntityForm', () => {
   it('sets sessionId null when no session selected', async () => {
     const onSave = vi.fn();
     render(EntityForm, { props: { kind: 'event' as EntityKind, node: null, onsave: onSave } });
-    await fireEvent.input(screen.getByLabelText(/name/i), { target: { value: 'Battle' } });
+    await fireEvent.input(screen.getByLabelText('Name', { exact: true }), { target: { value: 'Battle' } });
     await fireEvent.submit(screen.getByRole('form'));
     expect(onSave).toHaveBeenCalledOnce();
     expect(onSave.mock.calls[0][0].sessionId).toBeNull();

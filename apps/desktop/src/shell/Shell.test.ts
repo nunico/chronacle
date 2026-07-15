@@ -299,7 +299,7 @@ describe('Shell keyboard shortcuts', () => {
 
     await fireEvent.keyDown(document.body, { key: 'c' });
     // The create form (EntityForm) exposes a labelled name field.
-    expect(await screen.findByLabelText(/name/i)).toBeTruthy();
+    expect(await screen.findByLabelText('Name', { exact: true })).toBeTruthy();
   });
 
   it('does not trigger shortcuts while typing in a field', async () => {
@@ -308,7 +308,7 @@ describe('Shell keyboard shortcuts', () => {
     await fireEvent.keyDown(document.body, { key: 'g' });
     await fireEvent.keyDown(document.body, { key: 'n' });
     await fireEvent.keyDown(document.body, { key: 'c' });
-    const nameField = await screen.findByLabelText(/name/i);
+    const nameField = await screen.findByLabelText('Name', { exact: true });
 
     // Pressing ? while focused in the name field must NOT open the overlay.
     await fireEvent.keyDown(nameField, { key: '?' });
