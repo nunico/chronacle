@@ -489,6 +489,7 @@ pub async fn run() {
             commands::delete_entity,
             commands::soft_delete_entity,
             commands::relate_entities,
+            commands::merge_entities,
             commands::get_events_timeline,
             commands::get_entity_graph,
             commands::get_entity_relations,
