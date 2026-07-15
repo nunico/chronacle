@@ -259,33 +259,211 @@ async fn try_fuzzy_resolve<C: surrealdb::Connection>(
     };
     let id = id.to_string();
 
-    if let Err(e) = crate::entity_service::add_alias(db, &id, link_text, scope).await {
+    let outcome = persist_alias_with_finding(
+        || crate::entity_service::add_alias(db, &id, link_text, scope),
+        || {
+            crate::codex_service::record_lint(
+                db,
+                "auto_alias",
+                json!({
+                    "entity": id,
+                    "alias": link_text,
+                    "similarity": score,
+                    "source": source_full_id,
+                }),
+            )
+        },
+        || crate::entity_service::remove_alias(db, &id, link_text),
+        &id,
+        link_text,
+    )
+    .await;
+
+    match outcome {
+        PersistOutcome::Persisted => Some(id),
+        PersistOutcome::AliasWriteFailed
+        | PersistOutcome::RolledBack
+        | PersistOutcome::RollbackFailed => None,
+    }
+}
+
+/// Outcome of attempting to persist an auto-resolved alias alongside its
+/// review finding. Named states (rather than a bare `Result`) so the caller's
+/// `match` reads as documentation of every path this invariant can take.
+#[derive(Debug, PartialEq, Eq)]
+enum PersistOutcome {
+    /// Both writes succeeded — the alias is live and reviewable.
+    Persisted,
+    /// The alias write itself failed (e.g. a collision); nothing was
+    /// persisted, so there is nothing to roll back.
+    AliasWriteFailed,
+    /// The alias was written, the finding write then failed, and the
+    /// rollback (removing the alias) succeeded — back to a clean state so
+    /// the next pass retries this variant from scratch.
+    RolledBack,
+    /// The alias was written, the finding write then failed, AND the
+    /// rollback itself failed. Without a transaction this is the one
+    /// unavoidable inconsistent state (an alias with no matching finding);
+    /// it is logged loudly so it is at least diagnosable.
+    RollbackFailed,
+}
+
+/// Persist an auto-resolved alias and its accompanying `auto_alias` review
+/// finding as a pair, preserving the invariant this tier depends on for
+/// safety:
+///
+/// > an auto-created alias EXISTS  <=>  an `auto_alias` finding exists for it
+///
+/// so the GM can see and undo every decision this tier made unattended.
+///
+/// The alias is written first (so a resolvable alias always has *something*
+/// backing it while the finding write is in flight). If the finding write
+/// then fails, the alias is rolled back via `remove_alias` — restoring the
+/// clean pre-attempt state — rather than left orphaned with no way for the
+/// GM to review or undo it. A rollback failure is the one state this
+/// best-effort (non-transactional) approach cannot avoid; it is logged
+/// clearly so it stays diagnosable.
+///
+/// Takes the three writes as closures (rather than concrete DB calls) so the
+/// ordering/rollback logic itself is unit-testable without a real database —
+/// see the tests below, which drive it with a deliberately-failing `record_lint`.
+async fn persist_alias_with_finding<AddFut, LintFut, RemFut>(
+    add_alias: impl FnOnce() -> AddFut,
+    record_lint: impl FnOnce() -> LintFut,
+    remove_alias: impl FnOnce() -> RemFut,
+    id: &str,
+    link_text: &str,
+) -> PersistOutcome
+where
+    AddFut: std::future::Future<Output = Result<(), crate::entity_service::EntityError>>,
+    LintFut: std::future::Future<Output = Result<(), String>>,
+    RemFut: std::future::Future<Output = Result<(), crate::entity_service::EntityError>>,
+{
+    if let Err(e) = add_alias().await {
         eprintln!(
             "wikilink: fuzzy auto-resolve alias write failed for {id} <- {link_text:?}: {e}; \
              link stays unresolved this pass"
         );
-        return None;
-    }
-    if let Err(e) = crate::codex_service::record_lint(
-        db,
-        "auto_alias",
-        json!({
-            "entity": id,
-            "alias": link_text,
-            "similarity": score,
-            "source": source_full_id,
-        }),
-    )
-    .await
-    {
-        eprintln!(
-            "wikilink: fuzzy auto-resolve lint write failed for {id} <- {link_text:?}: {e}; \
-             link stays unresolved this pass"
-        );
-        return None;
+        return PersistOutcome::AliasWriteFailed;
     }
 
-    Some(id)
+    if let Err(e) = record_lint().await {
+        eprintln!(
+            "wikilink: fuzzy auto-resolve lint write failed for {id} <- {link_text:?}: {e}; \
+             rolling back the alias to preserve the auto_alias invariant"
+        );
+        return match remove_alias().await {
+            Ok(()) => {
+                eprintln!(
+                    "wikilink: rollback succeeded for {id} <- {link_text:?}; \
+                     link stays unresolved this pass and will be retried"
+                );
+                PersistOutcome::RolledBack
+            }
+            Err(re) => {
+                eprintln!(
+                    "wikilink: ROLLBACK FAILED for {id} <- {link_text:?} after lint write \
+                     error ({e}); rollback error: {re}. The alias may now be persisted with \
+                     NO matching auto_alias finding — this state is invisible to the GM and \
+                     requires manual investigation."
+                );
+                PersistOutcome::RollbackFailed
+            }
+        };
+    }
+
+    PersistOutcome::Persisted
+}
+
+#[cfg(test)]
+mod persist_alias_with_finding_tests {
+    use std::cell::Cell;
+
+    use super::{persist_alias_with_finding, PersistOutcome};
+    use crate::entity_service::EntityError;
+
+    fn db_err(msg: &str) -> EntityError {
+        EntityError::Database {
+            message: msg.to_string(),
+        }
+    }
+
+    /// The invariant this whole tier depends on: an alias write that
+    /// succeeds followed by a finding write that fails must NOT leave the
+    /// alias persisted with no finding — it must be rolled back.
+    #[tokio::test]
+    async fn a_lint_write_failure_after_a_successful_alias_write_rolls_back_the_alias() {
+        let removed = Cell::new(false);
+
+        let outcome = persist_alias_with_finding(
+            || async { Ok(()) },
+            || async { Err("simulated lint-write failure".to_string()) },
+            || {
+                removed.set(true);
+                async { Ok(()) }
+            },
+            "faction:q",
+            "The Quassars",
+        )
+        .await;
+
+        assert_eq!(outcome, PersistOutcome::RolledBack);
+        assert!(
+            removed.get(),
+            "remove_alias must be called to undo the orphaned alias"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rollback_failure_is_reported_distinctly() {
+        let outcome = persist_alias_with_finding(
+            || async { Ok(()) },
+            || async { Err("simulated lint-write failure".to_string()) },
+            || async { Err(db_err("simulated rollback failure")) },
+            "faction:q",
+            "The Quassars",
+        )
+        .await;
+
+        assert_eq!(outcome, PersistOutcome::RollbackFailed);
+    }
+
+    #[tokio::test]
+    async fn an_alias_write_failure_never_attempts_a_rollback() {
+        let removed = Cell::new(false);
+
+        let outcome = persist_alias_with_finding(
+            || async { Err(db_err("simulated alias-write failure")) },
+            || async { Ok(()) },
+            || {
+                removed.set(true);
+                async { Ok(()) }
+            },
+            "faction:q",
+            "The Quassars",
+        )
+        .await;
+
+        assert_eq!(outcome, PersistOutcome::AliasWriteFailed);
+        assert!(
+            !removed.get(),
+            "there is nothing to roll back when the alias was never written"
+        );
+    }
+
+    #[tokio::test]
+    async fn both_writes_succeeding_persists_cleanly() {
+        let outcome = persist_alias_with_finding(
+            || async { Ok(()) },
+            || async { Ok(()) },
+            || async { Ok(()) },
+            "faction:q",
+            "The Quassars",
+        )
+        .await;
+
+        assert_eq!(outcome, PersistOutcome::Persisted);
+    }
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
