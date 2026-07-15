@@ -3,7 +3,7 @@ use tauri::State;
 
 use crate::AppState;
 use chronacle_extraction::entity_service::{
-    self, EntityError, EntityGraph, EntityInput, EntityKind, GraphNode, RelatedEntity,
+    self, EntityError, EntityGraph, EntityInput, EntityKind, GraphNode, MergeChoices, RelatedEntity,
 };
 
 fn parse_kind(kind: &str) -> Result<EntityKind, EntityError> {
@@ -156,6 +156,54 @@ pub async fn soft_delete_entity(
         tauri::async_runtime::spawn(async move {
             if let Err(e) = svc.reconcile().await {
                 eprintln!("vault: post-soft-delete reconcile failed: {e}");
+            }
+        });
+    }
+    Ok(())
+}
+
+/// Fold the `loser` entity into the `survivor`: re-point every edge, keep the
+/// loser's name as a survivor alias, apply the per-field choices, mark the
+/// survivor's codex article stale, and soft-delete the loser. See
+/// [`entity_service::merge`] for the crash-safety ordering.
+///
+/// After the merge the survivor's name/summary/notes may have changed, so it is
+/// re-embedded and re-enqueued for vault sync; the loser's vault file is swept
+/// by a reconcile, exactly as a plain soft-delete would.
+#[tauri::command]
+pub async fn merge_entities(
+    state: State<'_, Arc<AppState>>,
+    survivor_id: String,
+    loser_id: String,
+    choices: MergeChoices,
+) -> Result<(), EntityError> {
+    entity_service::merge(&state.db, &survivor_id, &loser_id, choices).await?;
+
+    // Re-embed the survivor and re-sync its vault file — its fields changed.
+    if let Some((table, id)) = survivor_id.split_once(':') {
+        if let Ok(kind) = parse_kind(table) {
+            if let Ok(node) = entity_service::get_by_id(&state.db, id, kind).await {
+                let outbound = state.outbound.read().await.clone();
+                outbound.enqueue(chronacle_core::VaultRef {
+                    table: node.kind.clone(),
+                    id: node.id.clone(),
+                });
+                embed_after_save(&state, &node).await;
+            }
+        }
+    }
+
+    // Sweep the loser's now-orphaned vault file immediately (as soft_delete does).
+    if let Some(svc) = state
+        .vault
+        .read()
+        .await
+        .as_ref()
+        .map(|rt| Arc::clone(&rt.svc))
+    {
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = svc.reconcile().await {
+                eprintln!("vault: post-merge reconcile failed: {e}");
             }
         });
     }
