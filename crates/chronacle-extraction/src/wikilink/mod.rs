@@ -1,16 +1,20 @@
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use regex::Regex;
 use serde::Serialize;
+use serde_json::json;
 use surrealdb::sql::Thing;
 use thiserror::Error;
+
+use crate::naming;
 
 mod edges;
 mod query;
 mod resolve;
 
 pub(crate) use query::query_all_entity_names;
-pub(crate) use resolve::EntityIdentity;
+pub(crate) use resolve::{resolve_exact, EntityIdentity};
 
 // ── Error type ────────────────────────────────────────────────────────────────
 
@@ -27,6 +31,11 @@ pub enum WikilinkError {
 // ── Scope ─────────────────────────────────────────────────────────────────────
 
 /// Determines which entities are candidates for wikilink resolution.
+///
+/// `Copy` because it is only ever `&'a str` fields — cheap to pass by value
+/// into the tier-4 fuzzy path, which needs its own owned copy for the
+/// `add_alias` side effect while the caller keeps using the original.
+#[derive(Debug, Clone, Copy)]
 pub enum WikilinkScope<'a> {
     /// Source is a campaign entity. Resolves against:
     ///   - all entities in the campaign (`in_campaign` edges), AND
@@ -106,11 +115,35 @@ pub async fn parse_and_sync_wikilinks<C: surrealdb::Connection>(
     }
 
     let all_entities = query::query_all_entity_names(db, &scope).await?;
-
-    let mut matched_ids: Vec<String> = extracted
+    let names_only: Vec<(String, String)> = all_entities
         .iter()
-        .filter_map(|wikilink_name| resolve::resolve_exact(wikilink_name, &all_entities))
+        .map(|e| (e.id.clone(), e.name.clone()))
         .collect();
+    let source_full_id = format!("{source_table}:{source_id}");
+
+    let mut matched_ids: Vec<String> = Vec::new();
+    // A single wikilink text is only ever run through the fuzzy tier ONCE per
+    // call, even if it appears multiple times in `notes` — the second
+    // occurrence either already resolved via the alias the first occurrence
+    // just persisted, or it is the same unresolved variant and re-attempting
+    // fuzzy resolution would risk a duplicate alias write / lint finding.
+    let mut fuzzy_attempted: HashSet<String> = HashSet::new();
+    for wikilink_name in &extracted {
+        if let Some(id) = resolve::resolve_exact(wikilink_name, &all_entities) {
+            matched_ids.push(id);
+            continue;
+        }
+
+        let key = wikilink_name.to_lowercase();
+        if !fuzzy_attempted.insert(key) {
+            continue;
+        }
+        if let Some(id) =
+            try_fuzzy_resolve(db, wikilink_name, &names_only, scope, &source_full_id).await
+        {
+            matched_ids.push(id);
+        }
+    }
 
     matched_ids.sort_unstable();
     matched_ids.dedup();
@@ -193,6 +226,66 @@ pub async fn sync_inbound_wikilinks_for_new_entity<C: surrealdb::Connection>(
     }
 
     Ok(())
+}
+
+// ── Tier 4: fuzzy auto-resolve ──────────────────────────────────────────────
+
+/// Tier 4 — the only tier that can be WRONG, so it is the only one that must
+/// be unambiguous, persisted, and reviewable.
+///
+/// Fires only when [`naming::best_match`] returns `Unique`: exactly one
+/// candidate clears [`naming::DEFAULT_THRESHOLD`]. On a unique hit it
+/// PERSISTS the decision as an alias (so the next pass hits the deterministic
+/// tier 2 — the fuzzy path runs once per variant, ever) and files an
+/// `auto_alias` lint finding so the GM can review or undo it.
+///
+/// Either side effect failing (an alias collision, or a lint-write error)
+/// leaves the link unresolved for THIS pass rather than guessing or aborting
+/// — a whole extraction pass must never die because one alias could not be
+/// written. An `Ambiguous` or `None` outcome also leaves the link unresolved;
+/// it falls through to `broken_wikilink`, which carries ranked candidates for
+/// a "did you mean …?" suggestion.
+async fn try_fuzzy_resolve<C: surrealdb::Connection>(
+    db: &surrealdb::Surreal<C>,
+    link_text: &str,
+    names_only: &[(String, String)],
+    scope: WikilinkScope<'_>,
+    source_full_id: &str,
+) -> Option<String> {
+    let naming::MatchOutcome::Unique { id, score, .. } =
+        naming::best_match(link_text, names_only, naming::DEFAULT_THRESHOLD)
+    else {
+        return None;
+    };
+    let id = id.to_string();
+
+    if let Err(e) = crate::entity_service::add_alias(db, &id, link_text, scope).await {
+        eprintln!(
+            "wikilink: fuzzy auto-resolve alias write failed for {id} <- {link_text:?}: {e}; \
+             link stays unresolved this pass"
+        );
+        return None;
+    }
+    if let Err(e) = crate::codex_service::record_lint(
+        db,
+        "auto_alias",
+        json!({
+            "entity": id,
+            "alias": link_text,
+            "similarity": score,
+            "source": source_full_id,
+        }),
+    )
+    .await
+    {
+        eprintln!(
+            "wikilink: fuzzy auto-resolve lint write failed for {id} <- {link_text:?}: {e}; \
+             link stays unresolved this pass"
+        );
+        return None;
+    }
+
+    Some(id)
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────

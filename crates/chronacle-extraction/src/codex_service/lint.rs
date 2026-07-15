@@ -13,12 +13,23 @@ use surrealdb::Connection;
 
 use super::record_lint;
 use crate::entity_service::{check_scope, EntityError};
-use crate::wikilink::{query_all_entity_names, WikilinkScope};
+use crate::naming;
+use crate::wikilink::{query_all_entity_names, resolve_exact, EntityIdentity, WikilinkScope};
 
 // Duplicated from `wikilink::mod` per the brief: widening that internal is
 // not worth it for a one-line regex.
 static WIKILINK_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[\[([^\[\]]+)\]\]").expect("wikilink regex is valid"));
+
+/// Project the `(id, name)` pairs a few detectors need out of the full
+/// identity list. Kept separate from [`EntityIdentity`] itself because those
+/// detectors (duplicates, staleness, scope) never look at aliases.
+fn id_name_pairs(entities: &[EntityIdentity]) -> Vec<(String, String)> {
+    entities
+        .iter()
+        .map(|e| (e.id.clone(), e.name.clone()))
+        .collect()
+}
 
 /// Result of one lint pass.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -150,9 +161,10 @@ fn inline_id_array(table: &str, ids: &[String]) -> String {
 
 async fn lint_broken_wikilinks<C: Connection>(
     db: &surrealdb::Surreal<C>,
-    entities: &[(String, String)],
+    entities: &[EntityIdentity],
 ) -> Result<usize, String> {
-    let by_table = group_ids_by_table(entities);
+    let pairs = id_name_pairs(entities);
+    let by_table = group_ids_by_table(&pairs);
     let mut new_findings = 0;
 
     for (table, ids) in &by_table {
@@ -197,10 +209,12 @@ async fn lint_broken_wikilinks<C: Connection>(
                     if seen_links.iter().any(|l| l == &lower) {
                         continue;
                     }
-                    let resolved = entities
-                        .iter()
-                        .any(|(_, name)| name.to_lowercase() == lower);
-                    if resolved {
+                    // Route through the SAME resolver the fuzzy/exact tiers use
+                    // (ADR-009 C2 fold-in): a link that resolves via an alias or
+                    // a normalized-name match must never be reported broken —
+                    // the linter and the resolver must never disagree about
+                    // whether a link works.
+                    if resolve_exact(&link_text, entities).is_some() {
                         continue;
                     }
                     seen_links.push(lower);
@@ -216,10 +230,28 @@ async fn lint_broken_wikilinks<C: Connection>(
                     {
                         continue;
                     }
+                    // A lower bar than auto-resolve on purpose: a SUGGESTION may
+                    // be speculative because the GM adjudicates it, unlike tier
+                    // 4's auto-resolve which must be certain enough to act on
+                    // unattended.
+                    let candidates = match naming::best_match(
+                        &link_text,
+                        &pairs,
+                        naming::DEFAULT_THRESHOLD * 0.8,
+                    ) {
+                        naming::MatchOutcome::Unique { id, name, score } => {
+                            vec![json!({ "id": id, "name": name, "similarity": score })]
+                        }
+                        naming::MatchOutcome::Ambiguous(cs) => cs
+                            .iter()
+                            .map(|c| json!({ "id": c.id, "name": c.name, "similarity": c.similarity }))
+                            .collect(),
+                        naming::MatchOutcome::None => vec![],
+                    };
                     record_lint(
                         db,
                         "broken_wikilink",
-                        json!({ "entity": full_id, "link_text": link_text }),
+                        json!({ "entity": full_id, "link_text": link_text, "candidates": candidates }),
                     )
                     .await?;
                     new_findings += 1;
@@ -386,6 +418,58 @@ async fn lint_scope_violations<C: Connection>(
     Ok(new_findings)
 }
 
+// ── Detector 5: alias collisions ────────────────────────────────────────────
+
+/// Two entities in the same resolution scope must never claim the same name
+/// or alias, or tier-2 wikilink resolution stops being deterministic — the
+/// same link would resolve to whichever entity happens to sort first. Group
+/// every in-scope entity's name AND aliases by their normalized form; any
+/// normalized key claimed by two different records gets one finding.
+async fn lint_alias_collisions<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    entities: &[EntityIdentity],
+) -> Result<usize, String> {
+    let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+    for entity in entities {
+        let mut keys: Vec<String> = vec![naming::normalize(&entity.name)];
+        keys.extend(entity.aliases.iter().map(|a| naming::normalize(a)));
+        keys.sort_unstable();
+        keys.dedup();
+        for key in keys {
+            if key.is_empty() {
+                continue;
+            }
+            groups.entry(key).or_default().push(entity.id.clone());
+        }
+    }
+
+    let mut new_findings = 0;
+    for (alias, mut ids) in groups {
+        ids.sort_unstable();
+        ids.dedup();
+        if ids.len() < 2 {
+            continue;
+        }
+        for i in 0..ids.len() {
+            for j in (i + 1)..ids.len() {
+                let (a, b) = (ids[i].clone(), ids[j].clone());
+                if finding_exists_2(db, "alias_collision", "a", &a, "b", &b).await? {
+                    continue;
+                }
+                record_lint(
+                    db,
+                    "alias_collision",
+                    json!({ "alias": alias, "a": a, "b": b }),
+                )
+                .await?;
+                new_findings += 1;
+            }
+        }
+    }
+
+    Ok(new_findings)
+}
+
 // ── Pass entry points ────────────────────────────────────────────────────────
 
 /// Run every detector over a campaign's full scope (own + subscribed).
@@ -393,13 +477,10 @@ pub async fn run_lint_campaign<C: Connection>(
     db: &surrealdb::Surreal<C>,
     campaign_id: &str,
 ) -> Result<LintSummary, String> {
-    let entities: Vec<(String, String)> =
+    let entities: Vec<EntityIdentity> =
         query_all_entity_names(db, &WikilinkScope::Campaign { campaign_id })
             .await
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|e| (e.id, e.name))
-            .collect();
+            .map_err(|e| e.to_string())?;
     run_detectors(db, &entities).await
 }
 
@@ -408,25 +489,24 @@ pub async fn run_lint_collection<C: Connection>(
     db: &surrealdb::Surreal<C>,
     collection_id: &str,
 ) -> Result<LintSummary, String> {
-    let entities: Vec<(String, String)> =
+    let entities: Vec<EntityIdentity> =
         query_all_entity_names(db, &WikilinkScope::Collection { collection_id })
             .await
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|e| (e.id, e.name))
-            .collect();
+            .map_err(|e| e.to_string())?;
     run_detectors(db, &entities).await
 }
 
 async fn run_detectors<C: Connection>(
     db: &surrealdb::Surreal<C>,
-    entities: &[(String, String)],
+    entities: &[EntityIdentity],
 ) -> Result<LintSummary, String> {
+    let pairs = id_name_pairs(entities);
     let mut new_findings = 0;
     new_findings += lint_broken_wikilinks(db, entities).await?;
-    new_findings += lint_duplicates(db, entities).await?;
-    new_findings += lint_stale_articles(db, entities).await?;
-    new_findings += lint_scope_violations(db, entities).await?;
+    new_findings += lint_duplicates(db, &pairs).await?;
+    new_findings += lint_stale_articles(db, &pairs).await?;
+    new_findings += lint_scope_violations(db, &pairs).await?;
+    new_findings += lint_alias_collisions(db, entities).await?;
     let unresolved_total = unresolved_count(db).await?;
     Ok(LintSummary {
         new_findings,
