@@ -6,12 +6,15 @@
 //! - [`crud`] — create / read / update / delete plus timeline + embedding helpers
 //! - [`relations`] — `relates_to` edges, the ego graph, and the flat relations list
 //! - [`wikilink_backfill`] — one-shot resync of `[[wikilinks]]` across all entities
+//! - [`aliases`] — alternate-name management (tier-4 fuzzy auto-resolve persistence)
 
+mod aliases;
 mod crud;
 mod relations;
 mod types;
 mod wikilink_backfill;
 
+pub use aliases::*;
 pub use crud::*;
 pub use relations::*;
 pub use types::*;

@@ -322,6 +322,148 @@ async fn lint_pass_is_idempotent_no_duplicate_findings() {
     );
 }
 
+/// Fold-in fix (found during Task 3, same file scope): `lint_broken_wikilinks`
+/// used to do its own independent tier-1-only string comparison, so a link
+/// that resolves perfectly well via a confirmed ALIAS was still reported
+/// broken. It must now route through the same `resolve_exact` the resolver
+/// uses, so the linter and the resolver can never disagree.
+#[tokio::test]
+async fn broken_wikilink_does_not_fire_when_the_link_resolves_via_an_alias() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    db.query(
+        "CREATE npc:`ghost` SET name='Ghostfell', aliases=['Ghost'], summary='S', notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         CREATE npc:`mira` SET name='Mira', summary='A sage', \
+             notes='See [[Ghost]] for context.', \
+             created_at=time::now(), updated_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`ghost` SET created_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`mira` SET created_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    run_lint_campaign(&db, "camp1").await.unwrap();
+    assert_eq!(
+        kind_count(&db, "broken_wikilink").await,
+        0,
+        "a link that resolves via a confirmed alias must never be reported broken"
+    );
+}
+
+/// `broken_wikilink` payload must carry ranked `candidates` so the GM sees a
+/// "did you mean …?" suggestion, using a lower bar than tier-4 auto-resolve
+/// on purpose — a suggestion may be speculative because the GM adjudicates it.
+#[tokio::test]
+async fn broken_wikilink_payload_carries_candidates_for_a_near_miss() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    db.query(
+        "CREATE npc:`ghost` SET name='Ghostfell', summary='S', notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         CREATE npc:`mira` SET name='Mira', summary='A sage', \
+             notes='See [[Ghostfel]] for context.', \
+             created_at=time::now(), updated_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`ghost` SET created_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`mira` SET created_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    run_lint_campaign(&db, "camp1").await.unwrap();
+    assert_eq!(kind_count(&db, "broken_wikilink").await, 1);
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        payload: serde_json::Value,
+    }
+    let mut resp = db
+        .query("SELECT payload FROM lint_finding WHERE kind = 'broken_wikilink'")
+        .await
+        .unwrap();
+    let rows: Vec<Row> = resp.take(0).unwrap();
+    assert_eq!(rows.len(), 1);
+    let candidates = rows[0]
+        .payload
+        .get("candidates")
+        .and_then(|v| v.as_array())
+        .expect("candidates must be present, even if empty");
+    assert!(
+        !candidates.is_empty(),
+        "a near-miss like 'Ghostfel' vs 'Ghostfell' must surface at least one candidate"
+    );
+}
+
+/// Two entities in the same scope whose name/alias normalize to the same key
+/// must be flagged — otherwise tier-2 resolution silently depends on row
+/// order.
+#[tokio::test]
+async fn alias_collision_flags_entities_sharing_a_normalized_key() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    db.query(
+        "CREATE npc:`a` SET name='The Grunt', summary='S', notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         CREATE npc:`b` SET name='Grunts', summary='S', notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`a` SET created_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`b` SET created_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    run_lint_campaign(&db, "camp1").await.unwrap();
+    assert_eq!(kind_count(&db, "alias_collision").await, 1);
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        payload: serde_json::Value,
+    }
+    let mut resp = db
+        .query("SELECT payload FROM lint_finding WHERE kind = 'alias_collision'")
+        .await
+        .unwrap();
+    let rows: Vec<Row> = resp.take(0).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0]
+        .payload
+        .get("alias")
+        .and_then(|v| v.as_str())
+        .is_some());
+    assert!(rows[0].payload.get("a").and_then(|v| v.as_str()).is_some());
+    assert!(rows[0].payload.get("b").and_then(|v| v.as_str()).is_some());
+
+    // Idempotent re-run: no second finding for the same pair.
+    run_lint_campaign(&db, "camp1").await.unwrap();
+    assert_eq!(kind_count(&db, "alias_collision").await, 1);
+}
+
+/// A name/alias that appears on only one entity — the overwhelmingly common
+/// case — must never be flagged.
+#[tokio::test]
+async fn alias_collision_does_not_fire_for_a_lone_name() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    db.query(
+        "CREATE npc:`mira` SET name='Mira', summary='S', notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`mira` SET created_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    run_lint_campaign(&db, "camp1").await.unwrap();
+    assert_eq!(kind_count(&db, "alias_collision").await, 0);
+}
+
 #[tokio::test]
 async fn resolve_lint_finding_sets_resolved_at() {
     let db = setup_db().await;
