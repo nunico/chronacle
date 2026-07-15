@@ -318,6 +318,67 @@ Findings are advisory, not enforcement: nothing in Chronacle blocks you from lea
 
 ---
 
+## Names and duplicates
+
+**When the same thing has two names**
+
+Your world is full of things that go by more than one name. The Free League and
+the Free League. The Quassars and the Quassar Family. You know these are the
+same, but Chronacle starts out taking every name literally — to it, "The Free
+League" and "Free League" look like two different factions, and a link to
+[[The Quassars]] doesn't find the Quassar Family at all.
+
+You fix this by giving something **alternate names**. Open any entity and you'll
+find an _Alternate names_ field. Anything you put there works exactly like the
+entity's real name: links pointing at it land here, and Chronacle stops treating
+it as a stranger. You only ever have to do this once per name — it sticks.
+
+**Links that Chronacle sorts out by itself**
+
+Most of the time you won't have to do anything. When you write a link that
+doesn't match anything exactly, Chronacle looks for the obvious answer. If
+there's exactly one thing it's clearly pointing at — [[The Quassars]] when the
+Quassar Family is the only Quassar anything in your campaign — it makes the link
+and remembers the name for next time.
+
+It only does this when there's a single sensible answer. If two things could
+both be what you meant, it won't guess: it asks.
+
+Everything Chronacle links on its own shows up in **Maintenance** under
+_Auto-linked_. You never have to look at that list — it's there so nothing
+happens behind your back. If it ever gets one wrong, hit **Undo** and it will
+ask you next time instead of deciding.
+
+**Links Chronacle isn't sure about**
+
+When a link doesn't match anything and there's no obvious answer, it shows up in
+Maintenance as a broken link — as it does today — but now with a suggestion:
+_"[[The Quassars]] — did you mean **The Quassar Family**?"_ One click and the
+name is added, the link works, and every other link using that name works too.
+
+If the suggestion is wrong, ignore it. A broken link is only a broken link; it
+never invents a connection you didn't ask for.
+
+**Merging two entries that are the same thing**
+
+If you've ended up with two entries for one thing — it happens easily when a
+rulebook says "the Free League" and your session notes say "Free League" —
+Chronacle will spot it and offer to merge them.
+
+You'll see them side by side. Pick which one to keep, and for each piece of
+writing — the summary, your notes — choose which version survives, or keep both.
+Relationships are always kept from both sides: if one entry knew about a
+connection the other didn't, the merged entry knows about it too. Nothing gets
+quietly dropped.
+
+The name of the entry you didn't keep isn't lost either — it becomes one of the
+merged entry's alternate names. Every link you ever wrote using it keeps working.
+
+The merged entry's codex article is marked for rewriting, because it was written
+from half the facts. Recompile when you're ready.
+
+---
+
 ## Asking Questions
 
 Once your rulebooks are loaded, the chat area is your main tool. Think of it like messaging a very knowledgeable assistant who has read every book you've loaded.
@@ -427,6 +488,16 @@ Three things are happening in that file:
 - **Everything else — the `## Summary` line, the `## Notes` section, and any other text you add** — is yours. Type in the Summary field, write freeform notes under `## Notes`, add your own headings, whatever you like: it all flows back into Chronacle on the next sync, into the matching Summary and Notes fields on that entity.
 
 Session files and compiled rule entries follow the same split, minus whichever pieces don't apply to them: a session file has no compiled fence (there's no AI-written article for a session), so everything below its frontmatter is yours. A rule entry's body is the compiled fence, same as an article.
+
+### Alternate names in your vault files
+
+Each file has an `aliases:` line near the top. That's the entity's alternate names,
+and you can edit it in Obsidian directly — add one and Chronacle picks it up on
+the next sync, exactly as if you'd typed it into the app. Obsidian uses the same
+line for its own linking, so a name you add here works in both places at once.
+
+Leave the entity's own name in the list. It's what makes your `[[links]]` in
+Obsidian find the file.
 
 ### Conflicts
 

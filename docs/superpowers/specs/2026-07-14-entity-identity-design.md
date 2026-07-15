@@ -56,7 +56,10 @@ Decided with the maintainer on 2026-07-14; not open:
 5. **Merge is a full merge** with a field-by-field dialog. Edges and aliases
    always union; nothing is silently destroyed.
 6. **Rename safety ships in this tranche**, including campaign rename — merge
-   is unsafe without it.
+   is unsafe without it. **Correction (2026-07-15):** this premise was false;
+   see "Rename safety (the prerequisite)" below. Rename was already safe.
+   Campaign rename and file-move logic were dropped; only the frontmatter
+   alternate-names seam was built.
 
 ## Domain model changes
 
@@ -203,6 +206,30 @@ tranche adopts transactions, steps 1–4 can be wrapped without reordering.
 
 ## Rename safety (the prerequisite)
 
+> **Correction (2026-07-15):** everything below this note described a
+> premise — that renaming an entity strands GM edits as an orphaned
+> duplicate file — that this section's author (the maintainer) got wrong.
+> It was written assuming vault keys are derived from the entity's **name
+> slug**, and never checked against the actual reconcile implementation.
+> Investigation during implementation of this tranche found the opposite:
+> reconcile locates a record's vault file by the record **id** embedded in
+> its frontmatter (`index.key_of`), not by a name-derived slug. Renaming an
+> entity therefore already updates its file **in place** — the filename
+> goes stale relative to the new name, but the content stays correct and
+> Obsidian's own `[[links]]` still resolve via the `aliases:` frontmatter
+> line. A rename with a concurrent, unsynced GM edit produces an ordinary
+> conflict sidecar, exactly like any other concurrent edit — there is no
+> delete-old + export-new path and no data-loss path to guard against.
+>
+> Consequently, the move/rename reconcile logic and campaign-rename command
+> described below were **not built** — they would only have fixed a stale
+> filename, not a safety bug, and were dropped as out of scope for this
+> tranche (see "Out of scope"). The only thing that was actually
+> load-bearing, and was built, is the frontmatter alternate-names seam (see
+> the "Draft: addition to Your Vault" landmine below and ADR-012). The
+> original (incorrect) text is left in place, unedited, for the history —
+> do not treat anything past this note as a description of what shipped.
+
 Vault keys derive from the **name slug** (`chronacle-vault/src/keys.rs:107`,
 `slug(name)`), so renaming an entity — or merging, which renames by definition —
 changes its vault key. Today reconcile sees an unfamiliar key and treats the
@@ -271,6 +298,11 @@ person, no jargon, explain the _why_, never the implementation.
 
 Placement: a new **"Names and duplicates"** chapter after "The Codex", plus an
 addition to the existing "Managing Campaigns" chapter for rename.
+
+> **Correction (2026-07-15):** the "Names and duplicates" chapter and the
+> "Your Vault" addition shipped as drafted below. The "Managing Campaigns"
+> addition did not — campaign rename was dropped (see "Rename safety"
+> above) and its draft copy below describes a feature that was never built.
 
 ---
 
@@ -424,6 +456,13 @@ Iron`) + property tests: idempotent (`normalize(normalize(x)) == normalize(x)`),
 In-app vault conflict _resolution_ UI; undelete/trash for soft-deleted records;
 id-less file adoption; GM-secret detection; `/extract-all` rework;
 cross-encoder reranking. All remain on the Phase-3 list.
+
+**Correction (2026-07-15):** vault rename/move reconcile logic and campaign
+rename (both originally planned as prerequisites for merge, see "Rename
+safety" above) are also out of scope, dropped after the rename-safety
+premise they were built to fix was found to be false — renames were already
+data-safe. Only the frontmatter alternate-names seam was needed and was
+built (see ADR-012).
 
 ## Open questions
 
