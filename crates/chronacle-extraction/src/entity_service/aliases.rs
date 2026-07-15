@@ -46,8 +46,13 @@ pub async fn add_alias<C: surrealdb::Connection>(
             field: "id".into(),
             message: format!("Malformed record id: {full_id}"),
         })?;
+    // `array::union` (already used elsewhere in this codebase for the same
+    // purpose, e.g. `rules.rs`'s `page_refs`) makes the write idempotent:
+    // calling `add_alias` twice with the same (entity, alias) — e.g. a
+    // retried fuzzy-resolve pass — must not store a duplicate entry.
     db.query(format!(
-        "UPDATE type::thing('{table}', $id) SET aliases += $alias, updated_at = time::now()"
+        "UPDATE type::thing('{table}', $id) \
+         SET aliases = array::union(aliases, [$alias]), updated_at = time::now()"
     ))
     .bind(("id", id.to_owned()))
     .bind(("alias", alias.to_owned()))
@@ -153,6 +158,54 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(read.aliases, vec!["The Quassars"]);
+    }
+
+    /// A repeated `add_alias` for the same (entity, alias) — e.g. a fuzzy
+    /// pass that retries after an earlier partial failure — must be a no-op,
+    /// not a duplicate entry in `aliases`.
+    #[tokio::test]
+    async fn add_alias_is_idempotent_when_called_twice_with_the_same_alias() {
+        let db = setup_db().await;
+        let cid = create_campaign(&db).await;
+        let node = create(
+            &db,
+            Some(&cid),
+            None,
+            EntityKind::Faction,
+            EntityInput {
+                name: "The Quassar Family".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let full_id = format!("faction:{}", node.id);
+
+        add_alias(
+            &db,
+            &full_id,
+            "The Quassars",
+            WikilinkScope::Campaign { campaign_id: &cid },
+        )
+        .await
+        .unwrap();
+        add_alias(
+            &db,
+            &full_id,
+            "The Quassars",
+            WikilinkScope::Campaign { campaign_id: &cid },
+        )
+        .await
+        .unwrap();
+
+        let read = crate::entity_service::get_by_id(&db, &node.id, EntityKind::Faction)
+            .await
+            .unwrap();
+        assert_eq!(
+            read.aliases,
+            vec!["The Quassars"],
+            "a repeated add_alias must not store a duplicate"
+        );
     }
 
     #[tokio::test]
