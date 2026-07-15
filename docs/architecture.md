@@ -1364,3 +1364,183 @@ all future feature development**:
 - **Scope.** UI-level (tauri-driver) E2E is unaffected; features bind to
   the backend service-layer suite. Rust unit/integration and Vitest layers
   are unaffected (ADR-006 unchanged).
+
+---
+
+## ADR-012: Entity Identity — Aliases, Fuzzy Resolution, and Merge
+
+**Status:** Accepted (Tranche 6, 2026-07-15). Answers Open Question #1 of
+ADR-009 ("does an entity merge operation exist?" — it did not; now it does).
+
+### Context
+
+Chronacle had no concept of entity identity beyond an exact name string. Two
+symptoms followed from one cause: `lint_duplicates` grouped on
+`(table, name.trim().to_lowercase())`, so name variants like "The Free
+League" / "Free League" never collided and duplicates went unreported (and
+the finding it did write hardcoded `"similarity": 1.0`); and wikilink
+resolution was whole-string equality, so `[[The Quassars]]` failed to
+resolve against "The Quassar Family" even though nothing else could
+plausibly be meant. A design spec
+([`docs/superpowers/specs/2026-07-14-entity-identity-design.md`](superpowers/specs/2026-07-14-entity-identity-design.md))
+also investigated whether vault rename safety was a prerequisite for merge
+(merge renames things by definition); that investigation turned up an
+incorrect premise, corrected below.
+
+### Options Considered
+
+| Option                                                       | Verdict                                                                                                                    |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| Aliases (`aliases: array<string>`) as the identity primitive | **Chosen** — one field, GM-owned, honored by both resolution and duplicate detection                                       |
+| LLM-based synonym inference                                  | Rejected — produces confident nonsense for genuinely different entities ("The Legion" vs "Iron Host"); no determinism      |
+| Third-party fuzzy-matching crate                             | Rejected — normalized trigram Dice + containment bonus is a few dozen lines, fully explainable, no new dependency/ADR      |
+| DB-level uniqueness constraint on alias                      | Rejected — resolution scope is a graph traversal, not a column; enforced at the service layer instead (validate-then-lint) |
+
+### Decision
+
+**Aliases are the single identity mechanism.** Every entity table (`npc`,
+`location`, `faction`, `creature`, `item`, `event`, `player_character`,
+`misc`) plus `rule_entry` gains `aliases: array<string> DEFAULT []`,
+GM-owned: written by merge, by a confirmed suggestion, or directly by the
+GM, and round-tripped through the vault. The GM-facing term is always
+**"alternate names"** — "alias" never appears in UI copy or manual text.
+
+> **Landmine avoided.** `DEFAULT` never backfills existing rows, and a
+> SCHEMAFULL record re-validates every field on any write — a pre-migration
+> row with no `aliases` value would fail every subsequent write, not merely
+> read as empty. `aliases` was added to `backfill_unset_fields` in the same
+> PR as the `DEFINE FIELD`, with a test seeding a row before
+> `run_migrations` and then writing to it. This exact bug shipped in
+> tranche 5 (see the `DEFAULT`-backfill entry in project memory) and would
+> have recurred here without the explicit guard.
+
+**Resolution is tiered.** `resolve(name, scope)` stops at the first tier
+that hits:
+
+| Tier | Match                         | Notes                                                                                |
+| ---- | ----------------------------- | ------------------------------------------------------------------------------------ |
+| 1    | Exact name (case-insensitive) | Unchanged prior behavior                                                             |
+| 2    | Exact alias                   | A confirmed variant; deterministic forever                                           |
+| 3    | Normalized name or alias      | Fixes article/plural variants outright — exact match on a normalized key, no scoring |
+| 4    | Fuzzy over normalized forms   | The only tier that can be wrong                                                      |
+
+Tier 3's `normalize()` is a pure, exhaustively unit-tested function: case-fold
+and trim, strip a leading `the ` (leading only — `A Cage of Iron` keeps its
+`A`), strip a trailing possessive, singularize a trailing `s`/`es` with a
+small conservative rule set, and collapse whitespace/punctuation.
+Normalization is a lookup key only, never a storage transform — the GM's
+exact spelling is always preserved as name or alias.
+
+Tier 4 is trigram similarity (Dice coefficient over character trigrams of
+the normalized forms, with a containment bonus so `quassar` scores high
+against `quassar family`). Because a confident wrong match is
+indistinguishable from a right one, tier 4 carries three safeguards, all
+required together:
+
+1. **Auto-resolves only when exactly one candidate clears the threshold.**
+   Two candidates above it means the link is genuinely ambiguous; the tier
+   surfaces a `broken_wikilink` with ranked `candidates` instead of
+   guessing.
+2. **Persists the alias it resolves.** A hit writes the linked text as an
+   alias on the matched entity, so the fuzzy path runs once per variant,
+   ever — the next occurrence hits tier 2 and the decision is never
+   silently re-made.
+3. **Surfaces an `auto_alias` finding.** Every tier-4 write is reviewable
+   and undoable in Maintenance; nothing happens invisibly.
+
+`DEFAULT_THRESHOLD = 0.72`. This value is **provisional and tunable** — it
+was set from the design spec's table-driven similarity tests plus a
+read-only dry-run against real campaign data, not derived analytically.
+Expect it to move as more real-world data accumulates; the dry-run harness
+exists specifically so it can be re-tuned with evidence rather than intuition.
+
+**Duplicate detection is two-stage.** `lint_duplicates` first groups on the
+normalized name (catching "Free League" / "The Free League" with no scoring
+at all), then fuzzy-compares the remaining pairs within the same table and
+scope, writing a real similarity into the `duplicate_entity` payload instead
+of the old hardcoded `1.0`. Pairs below the threshold are not reported — a
+Maintenance inbox full of non-duplicates is worse than an empty one.
+
+**Merge** (`entity_service::merge(survivor, loser, choices)`) is a new
+operation, ordered for crash safety rather than wrapped in a transaction:
+
+1. Union `relates_to` and `mentioned` edges onto the survivor, both
+   directions, de-duplicated — no edge is ever dropped.
+2. Union aliases, and add the **loser's name** as an alias of the
+   survivor — this is what keeps every existing `[[Free League]]` link
+   working after the merge.
+3. Apply per-field choices (`keep_survivor` | `keep_loser` | `keep_both`)
+   for `summary` and `notes`; `keep_both` concatenates under a
+   `## Merged from <name>` heading.
+4. Mark `codex_stale = true` — the article is compiler-owned, and merging
+   two AI-written articles textually would produce prose no compiler wrote
+   and no citation supports.
+5. Re-embed the survivor (its name/summary/notes changed).
+6. Soft-delete the loser (`vault_deleted = true`) through the normal
+   reconcile path — never a raw `DELETE`.
+7. Resolve the `duplicate_entity` finding.
+
+Merge is **edges-first, soft-delete-last**, and every step before the
+soft-delete is idempotent and re-runnable. This is deliberate: the codebase
+uses no multi-statement transaction anywhere (`BEGIN`/`COMMIT` is available
+in SurrealDB but unused), and merge additionally performs non-DB work — an
+embedding call and a vault file removal — that no DB transaction could cover
+even if one were used. A crash mid-merge therefore leaves both records
+alive with a superset of edges: visibly unfinished, safe, and re-runnable.
+The reverse order (delete first) could orphan edges permanently.
+
+### The rename-safety finding
+
+The design spec that opened this tranche assumed vault rename was
+**unsafe** — that a changed vault key (from a rename, or from merge, which
+renames by definition) would be treated by reconcile as delete-old +
+export-new, stranding a GM's unsynced edit as an orphaned duplicate file.
+Investigation during implementation found this premise **false**: reconcile
+locates a record's vault file by the record **id** embedded in its
+frontmatter (`index.key_of`, see ADR-008), not by a name-derived slug. A
+renamed entity's file is therefore updated **in place** — its filename goes
+stale relative to the new name, but its content stays correct and
+Obsidian's own links still resolve via the `aliases:` frontmatter line. A
+rename with a concurrent, unsynced GM edit produces an ordinary conflict
+sidecar, exactly as any other concurrent edit would (ADR-008's three-way
+merge). There is no data-loss path here to guard against.
+
+Consequently, the file/folder move machinery the spec proposed (a reconcile
+"move" decision, on-disk rename, campaign-folder rename) was **deliberately
+not built** — it would have been cosmetic (fixing a stale filename) rather
+than safety-critical. Campaign rename, which depended on that machinery,
+was dropped from this tranche for the same reason. The only seam that was
+actually load-bearing — and was built — is the frontmatter `aliases` split:
+export writes `[name] ∪ aliases`; inbound parses GM alternate names as
+`frontmatter.aliases − name` (case-insensitively), both directions with a
+round-trip test asserting export → parse → export is byte-identical. See
+ADR-008 for the frontmatter format this seam extends.
+
+### Consequences
+
+- **Positive.** Name variants and small misspellings resolve without GM
+  intervention in the common case; the GM retains full control (confirm,
+  undo, per-field merge choices) in the ambiguous case. Duplicate detection
+  now actually detects duplicates. A merge operation exists for the first
+  time.
+- **Negative.** Tier 4 is a standing trust surface — a wrong auto-resolve is
+  possible even if rare, mitigated by unambiguity-only auto-resolve,
+  persisted + surfaced `auto_alias` findings, and a threshold tuned on real
+  data rather than assumed. Normalization is English-centric (leading
+  "the", trailing "s"); acceptable for the current English TTRPG corpus,
+  and `normalize()` is a single pure function that can grow rules without
+  touching callers.
+- **Scope reduction.** Vault rename/move logic and campaign rename, both
+  planned in the originating spec, were dropped as unnecessary once the
+  rename-safety premise was found false. `rule_entry` participates in alias
+  resolution but not fuzzy duplicate detection in this tranche — rule names
+  are formulaic and a false merge of two rules is worse than a duplicate.
+
+### Migration
+
+Additive only: `aliases: array<string> DEFAULT []` on the eight entity
+tables and `rule_entry`, plus `backfill_unset_fields` coverage (see the
+`DEFAULT`-landmine note above) and the new `alias_collision` / `auto_alias`
+lint finding kinds alongside the existing `duplicate_entity` and
+`broken_wikilink` kinds (the latter two gain, respectively, a real
+`similarity` value and a `candidates` array).
