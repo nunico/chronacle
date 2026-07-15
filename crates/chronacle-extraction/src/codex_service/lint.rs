@@ -138,6 +138,15 @@ fn strip_backticks(id: &str) -> String {
     id.replace('`', "")
 }
 
+/// Order-independent pair, sorted so `(a, b)` and `(b, a)` always dedup to
+/// the same key (used for `duplicate_entity` finding identity).
+fn sorted_pair(a: String, b: String) -> (String, String) {
+    let mut pair = [a, b];
+    pair.sort();
+    let [a, b] = pair;
+    (a, b)
+}
+
 /// Group full entity ids `("table:id", name)` by table, producing a
 /// `table -> [id, ...]` map with backtick-escaped ids ready for an inline
 /// `IN [table:`id`, ...]` array.
@@ -319,9 +328,7 @@ async fn lint_duplicates<C: Connection>(
             }
             for i in 0..ids.len() {
                 for j in (i + 1)..ids.len() {
-                    let mut pair = [ids[i].clone(), ids[j].clone()];
-                    pair.sort();
-                    let [a, b] = pair;
+                    let (a, b) = sorted_pair(ids[i].clone(), ids[j].clone());
                     exact_pairs.insert((a.clone(), b.clone()));
                     new_findings += record_duplicate(db, &a, &b, 1.0).await?;
                 }
@@ -338,9 +345,7 @@ async fn lint_duplicates<C: Connection>(
                 if na == nb {
                     continue; // already reported by stage 1
                 }
-                let mut pair = [id_a.clone(), id_b.clone()];
-                pair.sort();
-                let [a, b] = pair;
+                let (a, b) = sorted_pair(id_a.clone(), id_b.clone());
                 if exact_pairs.contains(&(a.clone(), b.clone())) {
                     continue;
                 }
@@ -365,9 +370,7 @@ async fn record_duplicate<C: Connection>(
     b: &str,
     similarity: f64,
 ) -> Result<usize, String> {
-    let mut pair = [a.to_string(), b.to_string()];
-    pair.sort();
-    let [a, b] = pair;
+    let (a, b) = sorted_pair(a.to_string(), b.to_string());
     if finding_exists_2(db, "duplicate_entity", "a", &a, "b", &b).await? {
         return Ok(0);
     }
