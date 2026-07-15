@@ -481,13 +481,17 @@ impl VaultSyncService {
         key: &str,
         file_content: &str,
     ) -> Result<bool, VaultError> {
-        let Ok((_fm, body)) = crate::frontmatter::parse(file_content) else {
+        let Ok((fm, body)) = crate::frontmatter::parse(file_content) else {
             return Ok(false);
         };
         let parts = crate::markdown::split_body(&body);
         let gm = chronacle_core::GmParts {
             summary: parts.summary,
             notes: parts.notes,
+            // The frontmatter `aliases` list also carries the record's own
+            // name (for Obsidian's benefit) — strip it back out before this
+            // reaches the DB. See `frontmatter::gm_aliases`.
+            aliases: crate::frontmatter::gm_aliases(fm.name.as_deref(), &fm.aliases),
         };
         self.records.apply_gm_parts(vref, &gm).await?;
 
@@ -684,6 +688,7 @@ mod tests {
             summary: None,
             notes: Some("N.".into()),
             codex_article: article.map(str::to_owned),
+            aliases: vec![],
             scope: VaultScope::Campaign {
                 id: "campaign:c1".into(),
                 name: "SoV".into(),
@@ -1099,6 +1104,7 @@ mod tests {
             summary: None,
             notes: None,
             codex_article: None,
+            aliases: vec![],
             scope: VaultScope::Campaign {
                 id: "campaign:c1".into(),
                 name: "SoV".into(),
@@ -1165,6 +1171,7 @@ mod tests {
             summary: None,
             notes: None,
             codex_article: None,
+            aliases: vec![],
             scope: VaultScope::Campaign {
                 id: "campaign:c1".into(),
                 name: "SoV".into(),
@@ -1181,6 +1188,7 @@ mod tests {
             summary: None,
             notes: None,
             codex_article: None,
+            aliases: vec![],
             scope: VaultScope::Campaign {
                 id: "campaign:c1".into(),
                 name: "SoV".into(),
@@ -1352,6 +1360,7 @@ mod tests {
             summary: None,
             notes: None,
             codex_article: None,
+            aliases: vec![],
             scope: VaultScope::Campaign {
                 id: "campaign:c1".into(),
                 name: "SoV".into(),

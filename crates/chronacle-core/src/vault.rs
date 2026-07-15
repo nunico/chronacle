@@ -126,6 +126,11 @@ pub struct EntityRecord {
     pub summary: Option<String>,
     pub notes: Option<String>,
     pub codex_article: Option<String>,
+    /// GM-owned alternate names (ADR-tranche-6 entity identity). Distinct
+    /// from the frontmatter `aliases` key the vault renders: that key also
+    /// carries `name` itself (for Obsidian wikilink resolution) — see
+    /// `chronacle_vault::render`.
+    pub aliases: Vec<String>,
     pub scope: VaultScope,
     /// RFC3339 timestamp.
     pub created_at: String,
@@ -156,6 +161,8 @@ pub struct RuleEntryRecord {
     pub body: String,
     pub notes: Option<String>,
     pub page_refs: Vec<RulePageRef>,
+    /// GM-owned alternate names. See `EntityRecord::aliases`.
+    pub aliases: Vec<String>,
     /// Always `VaultScope::Collection`.
     pub collection: VaultScope,
     pub created_at: String,
@@ -193,12 +200,26 @@ pub enum VaultScope {
 /// anything other than a full parse of the file's current content — a
 /// partially-populated value would silently delete data the GM never
 /// touched.
+///
+/// `aliases` is the one exception to the `Option`-means-absent convention
+/// above: it is already a `Vec`, so "absent" and "empty" coincide and a
+/// plain (never-`Option`) `Vec<String>` is the complete-state representation
+/// — same as how `EntityInput::aliases` being `Option<Vec<String>>` (`None`
+/// = preserve, for a *partial* form-driven update) is a deliberately
+/// different contract from this one. `apply_gm_parts` must derive `aliases`
+/// as the file's frontmatter `aliases` list *minus* the record's own name
+/// (case-insensitively) — the frontmatter list also carries the name itself,
+/// solely so Obsidian resolves `[[Name]]`; that copy is not GM alternate-name
+/// data and must never round-trip into the DB as one.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GmParts {
     /// Entities only. Ignored for sessions and rule entries.
     pub summary: Option<String>,
     /// Entities, sessions, and rule entries.
     pub notes: Option<String>,
+    /// Entities and rule entries only. Ignored for sessions. Never includes
+    /// the record's own name — see the struct doc comment.
+    pub aliases: Vec<String>,
 }
 
 /// A single persisted `vault_sync_state` row, as read by `list_synced`.
@@ -254,8 +275,9 @@ pub trait VaultRecordStore: Send + Sync {
     /// Every persisted sync-state row. One query per reconcile pass; also
     /// powers the orphan sweep (rows whose record no longer syncs).
     async fn list_synced(&self) -> Result<Vec<SyncedRow>, VaultRecordError>;
-    /// Apply GM-owned fields inbound. Entities: summary + notes (+ wikilink
-    /// resync, codex_stale). Sessions and rule entries: notes only.
+    /// Apply GM-owned fields inbound. Entities: summary + notes + aliases (+
+    /// wikilink resync, codex_stale). Rule entries: notes + aliases.
+    /// Sessions: notes only.
     ///
     /// `parts` must describe the complete desired state — see the `GmParts`
     /// doc comment. A `None` field is written as a clear/delete, not skipped.
