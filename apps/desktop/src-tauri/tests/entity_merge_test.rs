@@ -244,6 +244,104 @@ async fn merge_rejects_survivor_equals_loser() {
     assert!(err.is_err(), "merging a record into itself must be refused");
 }
 
+/// FINDING 1 regression: the survivor `UPDATE` binds `summary`/`notes` as raw
+/// `Option<String>`, which serializes `None` to SurrealDB `NONE`. The schema
+/// types both fields `string | NULL`, and `UPDATE` (unlike `CREATE`) never
+/// applies `DEFAULT NULL`, so a kept side that is empty must not crash the
+/// merge. Both entities here have `notes = NULL` and `KeepSurvivor` is chosen,
+/// so the write must go through with `notes` staying `NULL` on the survivor.
+#[tokio::test]
+async fn merge_succeeds_when_the_kept_field_is_empty_on_both_sides() {
+    let db = db().await;
+    db.query(
+        "CREATE faction:a SET name = 'The Free League', summary = 'Survivor summary.';
+         CREATE faction:b SET name = 'Free League', summary = 'Loser summary.';",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    entity_service::merge(
+        &db,
+        "faction:a",
+        "faction:b",
+        MergeChoices {
+            summary: FieldChoice::KeepSurvivor,
+            notes: FieldChoice::KeepSurvivor,
+        },
+    )
+    .await
+    .expect("merge must succeed even when the kept `notes` field is empty on both sides");
+
+    let notes: Vec<Option<String>> = db
+        .query("SELECT VALUE notes FROM faction:a")
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap();
+    assert_eq!(
+        notes[0], None,
+        "the survivor's notes must stay NULL, not crash the write"
+    );
+}
+
+/// FINDING 2 regression: re-pointing a loser's edge onto the survivor must
+/// carry the edge's free-text `notes` along, not drop them.
+#[tokio::test]
+async fn merge_preserves_edge_notes_when_repointing() {
+    let db = seeded().await;
+    db.query("CREATE npc:z SET name = 'Z';")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    entity_service::relate(
+        &db,
+        "z",
+        "npc",
+        "b",
+        "faction",
+        "serves",
+        Some("betrayed the party in session 4".to_string()),
+    )
+    .await
+    .expect("seed annotated edge onto the loser");
+
+    entity_service::merge(
+        &db,
+        "faction:a",
+        "faction:b",
+        MergeChoices {
+            summary: FieldChoice::KeepSurvivor,
+            notes: FieldChoice::KeepSurvivor,
+        },
+    )
+    .await
+    .expect("merge");
+
+    #[derive(serde::Deserialize)]
+    struct NotesRow {
+        notes: Option<String>,
+    }
+    let rows: Vec<NotesRow> = db
+        .query("SELECT notes FROM relates_to WHERE in = npc:z AND out = faction:a")
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap();
+    assert_eq!(
+        rows.len(),
+        1,
+        "the re-pointed edge from npc:z to the survivor must exist"
+    );
+    assert_eq!(
+        rows[0].notes.as_deref(),
+        Some("betrayed the party in session 4"),
+        "the edge's authored note must survive the re-point, not be dropped"
+    );
+}
+
 /// The `duplicate_entity` finding that flagged the pair must be resolved by the
 /// merge — the Maintenance inbox should no longer show it.
 #[tokio::test]
