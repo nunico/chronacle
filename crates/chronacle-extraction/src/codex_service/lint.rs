@@ -265,44 +265,119 @@ async fn lint_broken_wikilinks<C: Connection>(
 
 // ── Detector 2: duplicate entities ──────────────────────────────────────────
 
+/// Detect duplicate entities WITHIN THE SAME TABLE in two stages, both
+/// scoped to the `entities` the caller already resolved (own + subscribed
+/// collections — see `run_lint_campaign`/`run_lint_collection`).
+///
+/// Stage 1: exact grouping on the shared [`naming::normalize`] key — the
+/// same engine wikilink resolution uses, so the two detectors can never
+/// disagree. Catches "The Free League" / "Free League" with no scoring,
+/// similarity 1.0.
+///
+/// Stage 2: for pairs stage 1 didn't already report, score with
+/// [`naming::similarity`] and report only pairs at or above
+/// [`naming::DEFAULT_THRESHOLD`]. A false duplicate proposes a MERGE — data
+/// loss if accepted — so a missed match (which just stays a duplicate) is
+/// always preferred over a false one.
+///
+/// Never compares across tables: a faction and a similarly-named tavern
+/// (location) are different kinds of thing and must never pair regardless
+/// of string similarity.
 async fn lint_duplicates<C: Connection>(
     db: &surrealdb::Surreal<C>,
     entities: &[(String, String)],
 ) -> Result<usize, String> {
-    let mut groups: HashMap<(String, String), Vec<String>> = HashMap::new();
+    // Group (table, full_id, name) by table first — every subsequent
+    // comparison stays within one table.
+    let mut by_table: HashMap<&str, Vec<(String, String)>> = HashMap::new();
     for (full_id, name) in entities {
         let Some((table, _id)) = split_full_id(full_id) else {
             continue;
         };
-        let key = (table.to_string(), name.trim().to_lowercase());
-        groups.entry(key).or_default().push(full_id.clone());
+        by_table
+            .entry(table)
+            .or_default()
+            .push((full_id.clone(), name.clone()));
     }
 
     let mut new_findings = 0;
-    for ids in groups.into_values() {
-        if ids.len() < 2 {
-            continue;
+
+    for members in by_table.values() {
+        // Stage 1: exact grouping on the normalized name.
+        let mut norm_groups: HashMap<String, Vec<String>> = HashMap::new();
+        for (full_id, name) in members {
+            norm_groups
+                .entry(naming::normalize(name))
+                .or_default()
+                .push(full_id.clone());
         }
-        for i in 0..ids.len() {
-            for j in (i + 1)..ids.len() {
-                let mut pair = [ids[i].clone(), ids[j].clone()];
+        let mut exact_pairs: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
+        for ids in norm_groups.values() {
+            if ids.len() < 2 {
+                continue;
+            }
+            for i in 0..ids.len() {
+                for j in (i + 1)..ids.len() {
+                    let mut pair = [ids[i].clone(), ids[j].clone()];
+                    pair.sort();
+                    let [a, b] = pair;
+                    exact_pairs.insert((a.clone(), b.clone()));
+                    new_findings += record_duplicate(db, &a, &b, 1.0).await?;
+                }
+            }
+        }
+
+        // Stage 2: fuzzy scoring for pairs stage 1 didn't already cover.
+        for i in 0..members.len() {
+            for j in (i + 1)..members.len() {
+                let (id_a, name_a) = &members[i];
+                let (id_b, name_b) = &members[j];
+                let na = naming::normalize(name_a);
+                let nb = naming::normalize(name_b);
+                if na == nb {
+                    continue; // already reported by stage 1
+                }
+                let mut pair = [id_a.clone(), id_b.clone()];
                 pair.sort();
                 let [a, b] = pair;
-                if finding_exists_2(db, "duplicate_entity", "a", &a, "b", &b).await? {
+                if exact_pairs.contains(&(a.clone(), b.clone())) {
                     continue;
                 }
-                record_lint(
-                    db,
-                    "duplicate_entity",
-                    json!({ "a": a, "b": b, "similarity": 1.0 }),
-                )
-                .await?;
-                new_findings += 1;
+                let score = naming::similarity(&na, &nb);
+                if score >= naming::DEFAULT_THRESHOLD {
+                    new_findings += record_duplicate(db, &a, &b, score).await?;
+                }
             }
         }
     }
 
     Ok(new_findings)
+}
+
+/// Writes one deduped `duplicate_entity` finding for the (already-sorted or
+/// not — sorted here) pair `a`/`b`. Returns 1 if a new finding was created,
+/// 0 if an unresolved finding for this pair already exists (idempotent
+/// re-runs never accumulate duplicate findings).
+async fn record_duplicate<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    a: &str,
+    b: &str,
+    similarity: f64,
+) -> Result<usize, String> {
+    let mut pair = [a.to_string(), b.to_string()];
+    pair.sort();
+    let [a, b] = pair;
+    if finding_exists_2(db, "duplicate_entity", "a", &a, "b", &b).await? {
+        return Ok(0);
+    }
+    record_lint(
+        db,
+        "duplicate_entity",
+        json!({ "a": a, "b": b, "similarity": similarity }),
+    )
+    .await?;
+    Ok(1)
 }
 
 // ── Detector 3: stale / uncompiled articles ─────────────────────────────────
