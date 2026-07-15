@@ -274,6 +274,30 @@ async fn duplicate_detection_does_not_flag_distinct_entities() {
     assert_eq!(kind_count(&db, "duplicate_entity").await, 0);
 }
 
+/// The same-table test above only proves the THRESHOLD keeps distinct
+/// entities apart — it never exercises table-scoping itself, because its
+/// only cross-table pair ("The Legion" faction / "The Legionnaire's Rest"
+/// location) scores well below `DEFAULT_THRESHOLD` on its own. This test
+/// removes the threshold as a confound: an identically-named `faction` and
+/// `location` ("Iron Host", similarity 1.0 if ever compared) can ONLY be
+/// kept apart by the table partition in `lint_duplicates`. If table-scoping
+/// were ever removed, this pair would score 1.0 and get flagged.
+#[tokio::test]
+async fn duplicate_detection_never_pairs_identical_names_across_tables() {
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    seed_faction(&db, "f1", "Iron Host").await;
+    seed_location(&db, "l1", "Iron Host").await;
+
+    run_lint_campaign(&db, "camp1").await.unwrap();
+
+    assert_eq!(
+        kind_count(&db, "duplicate_entity").await,
+        0,
+        "identically-named entities in different tables must never be proposed as a merge"
+    );
+}
+
 #[tokio::test]
 async fn stale_article_aggregates_needs_compile_entities() {
     let db = setup_db().await;
