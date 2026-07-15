@@ -320,8 +320,9 @@ pub struct EntityInput {
     pub name: String,
     /// `None` vs `Some(vec![])` are NOT interchangeable, and the direction is
     /// the opposite of `GmParts`/vault-inbound `Option` fields elsewhere in
-    /// this codebase. This payload comes from a FORM (the desktop entity
-    /// editor), which simply omits `aliases` today — it never sends the key.
+    /// this codebase. The desktop entity editor always sends the COMPLETE
+    /// current array (`Some(v)`), so an alternate-name edit is never a no-op;
+    /// `None` exists for non-form callers that legitimately have no opinion.
     ///
     /// - `None` means the caller has no opinion: UPDATE preserves whatever
     ///   aliases are already stored, CREATE defaults to `[]`.
