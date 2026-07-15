@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import MaintenanceView from './MaintenanceView.svelte';
 import type { CodexProposal, LintFinding } from '../lib/commands';
@@ -12,6 +12,11 @@ vi.mock('../lib/commands', () => ({
   resolveLintFinding: vi.fn().mockResolvedValue(undefined),
   deleteRelation: vi.fn().mockResolvedValue(undefined),
   compileEntity: vi.fn().mockResolvedValue(true),
+  confirmAliasSuggestion: vi.fn().mockResolvedValue(undefined),
+  undoAutoAlias: vi.fn().mockResolvedValue(undefined),
+  getEntity: vi.fn(),
+  getEntityRelations: vi.fn().mockResolvedValue([]),
+  mergeEntities: vi.fn().mockResolvedValue(undefined),
 }));
 
 import * as commands from '../lib/commands';
@@ -57,6 +62,10 @@ describe('MaintenanceView', () => {
     m.resolveLintFinding.mockResolvedValue(undefined);
     m.deleteRelation.mockResolvedValue(undefined);
     m.compileEntity.mockResolvedValue(true);
+    m.confirmAliasSuggestion.mockResolvedValue(undefined);
+    m.undoAutoAlias.mockResolvedValue(undefined);
+    m.getEntityRelations.mockResolvedValue([]);
+    m.mergeEntities.mockResolvedValue(undefined);
   });
 
   it('renders pending proposals with kind label, target name, rationale', async () => {
@@ -217,5 +226,143 @@ describe('MaintenanceView', () => {
     expect(onOpenEntity).toHaveBeenCalledWith('k1', 'npc');
     await fireEvent.click(screen.getByRole('button', { name: 'Open B' }));
     expect(onOpenEntity).toHaveBeenCalledWith('k2', 'npc');
+  });
+
+  // 12. broken_wikilink with candidates shows a "did you mean?" suggestion
+  it('shows a "did you mean?" suggestion and confirms it as an alternate name', async () => {
+    m.getLintFindings.mockResolvedValue([
+      finding({
+        id: 'lint5',
+        kind: 'broken_wikilink',
+        payload: {
+          entity: 'npc:mira',
+          link_text: 'The Quassars',
+          candidates: [{ id: 'faction:q', name: 'The Quassar Family', similarity: 0.92 }],
+        },
+      }),
+    ]);
+    render(MaintenanceView, { props: {} });
+    await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
+
+    expect(await screen.findByText(/did you mean/i)).toBeInTheDocument();
+    expect(screen.getByText('The Quassar Family')).toBeInTheDocument();
+
+    m.getLintFindings.mockResolvedValue([]);
+    await fireEvent.click(screen.getByRole('button', { name: /yes/i }));
+
+    await waitFor(() =>
+      expect(m.confirmAliasSuggestion).toHaveBeenCalledWith('faction:q', 'The Quassars'),
+    );
+    await waitFor(() => expect(m.resolveLintFinding).toHaveBeenCalledWith('lint5'));
+  });
+
+  // 13. broken_wikilink without candidates never shows "did you mean?"
+  it('does not show "did you mean?" when the finding has no candidates', async () => {
+    m.getLintFindings.mockResolvedValue([
+      finding({ id: 'lint6', kind: 'broken_wikilink', payload: { entity: 'npc:mira', link_text: 'Ghostfell' } }),
+    ]);
+    render(MaintenanceView, { props: {} });
+    await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
+    await screen.findByText('Ghostfell');
+
+    expect(screen.queryByText(/did you mean/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /yes/i })).not.toBeInTheDocument();
+  });
+
+  // 14. auto_alias findings render as a collapsed, reviewable-not-required list with Undo
+  it('lists auto-linked alternate names as reviewable and undoes one on request', async () => {
+    m.getLintFindings.mockResolvedValue([
+      finding({
+        id: 'lint7',
+        kind: 'auto_alias',
+        payload: { entity: 'faction:q', alias: 'The Quassars', similarity: 0.9, source: 'npc:mira' },
+      }),
+    ]);
+    render(MaintenanceView, { props: {} });
+    await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
+
+    expect(await screen.findByText(/reviewable, not required/i)).toBeInTheDocument();
+    expect(screen.getByText('The Quassars')).toBeInTheDocument();
+
+    m.getLintFindings.mockResolvedValue([]);
+    await fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+
+    await waitFor(() =>
+      expect(m.undoAutoAlias).toHaveBeenCalledWith('faction:q', 'The Quassars', 'lint7'),
+    );
+  });
+
+  // 15. alias_collision findings show both claimants
+  it('alias_collision finding shows both claimants', async () => {
+    m.getLintFindings.mockResolvedValue([
+      finding({
+        id: 'lint8',
+        kind: 'alias_collision',
+        payload: { alias: 'The Quassars', a: 'faction:q1', b: 'faction:q2' },
+      }),
+    ]);
+    render(MaintenanceView, { props: {} });
+    await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
+
+    await screen.findByText('Naming conflict');
+    expect(screen.getByText('The Quassars')).toBeInTheDocument();
+    expect(screen.getByText('q1')).toBeInTheDocument();
+    expect(screen.getByText('q2')).toBeInTheDocument();
+  });
+
+  // 16. duplicate_entity "Merge" opens the merge dialog which calls merge_entities
+  it('duplicate_entity finding opens the merge dialog and merges on confirm', async () => {
+    m.getLintFindings.mockResolvedValue([
+      finding({
+        id: 'lint9',
+        kind: 'duplicate_entity',
+        payload: { a: 'faction:a1', b: 'faction:a2', similarity: 1.0 },
+      }),
+    ]);
+    m.getEntity.mockImplementation((id, kind) =>
+      Promise.resolve({
+        id,
+        kind,
+        campaign_id: 'camp1',
+        name: id === 'a1' ? 'The Free League' : 'Free League',
+        aliases: [],
+        summary: null,
+        notes: null,
+        created_at: null,
+        updated_at: null,
+        date_start: null,
+        date_end: null,
+        is_ongoing: null,
+        sequence_index: null,
+        era: null,
+        duration_label: null,
+        session_id: null,
+        player_name: null,
+        character_class: null,
+        character_level: null,
+        status: null,
+        codex_article: null,
+        codex_stale: null,
+        codex_compiled_at: null,
+      }),
+    );
+
+    render(MaintenanceView, { props: {} });
+    await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
+    await screen.findByText('Possible duplicate');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Merge' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Merge entities' });
+    await within(dialog).findByText('The Free League');
+
+    m.getLintFindings.mockResolvedValue([]);
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Merge' }));
+
+    await waitFor(() =>
+      expect(m.mergeEntities).toHaveBeenCalledWith('faction:a1', 'faction:a2', {
+        summary: 'keepSurvivor',
+        notes: 'keepSurvivor',
+      }),
+    );
   });
 });

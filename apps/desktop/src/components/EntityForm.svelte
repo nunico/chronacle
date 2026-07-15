@@ -10,6 +10,7 @@
     type VaultConflict,
   } from '../lib/commands';
   import WikiLinkEditor from './WikiLinkEditor.svelte';
+  import AliasField from './AliasField.svelte';
 
   interface Props {
     kind: EntityKind;
@@ -22,12 +23,22 @@
     onOpenEntity?: (id: string, kind: string) => void;
   }
 
-  let { kind, node = null, error = null, onsave, oncancel, sessions = [], entityMap = new Map(), onOpenEntity }: Props = $props();
+  let {
+    kind,
+    node = null,
+    error = null,
+    onsave,
+    oncancel,
+    sessions = [],
+    entityMap = new Map(),
+    onOpenEntity,
+  }: Props = $props();
 
   // Writable $derived: each field seeds from `node` and recomputes when a
   // different entity is selected, while remaining editable via bind:value
   // (user edits override the derived until `node` changes again).
   let name = $derived(node?.name ?? '');
+  let aliases = $derived(node?.aliases ?? []);
   let summary = $derived(node?.summary ?? '');
   let notes = $derived(node?.notes ?? '');
   // event fields
@@ -89,7 +100,9 @@
     // relations if the user switches entities mid-request.
     let cancelled = false;
     getEntityRelations(currentId, currentKind).then(
-      (result) => { if (!cancelled) relations = result; },
+      (result) => {
+        if (!cancelled) relations = result;
+      },
       (err) => {
         // Log and degrade gracefully — never block the form
         if (!cancelled) {
@@ -98,7 +111,9 @@
         }
       },
     );
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   });
 
   const KIND_LABEL: Record<string, string> = {
@@ -120,6 +135,9 @@
     }
     const input: EntityInput = {
       name: name.trim(),
+      // Always the complete array — omitting this field means "preserve" on
+      // the backend, so a partial edit would otherwise silently no-op.
+      aliases,
       summary: summary || null,
       notes: notes || null,
       dateStart: dateStart || null,
@@ -144,12 +162,22 @@
   </div>
 {/if}
 
-<form aria-label="entity form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+<form
+  aria-label="entity form"
+  onsubmit={(e) => {
+    e.preventDefault();
+    handleSubmit();
+  }}
+>
   <div class="field">
     <label for="ef-name">Name</label>
     <input id="ef-name" type="text" bind:value={name} />
     {#if nameError}<p class="field-error">{nameError}</p>{/if}
     {#if error?.field === 'name'}<p class="field-error">{error.message}</p>{/if}
+  </div>
+
+  <div class="field">
+    <AliasField {aliases} onchange={(a) => (aliases = a)} />
   </div>
 
   <div class="field">
@@ -279,10 +307,22 @@
 </form>
 
 <style>
-  form { display: flex; flex-direction: column; gap: 12px; }
-  .field { display: flex; flex-direction: column; gap: 4px; }
-  label { font-size: 0.85rem; color: var(--fg-3); }
-  input, select {
+  form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  label {
+    font-size: 0.85rem;
+    color: var(--fg-3);
+  }
+  input,
+  select {
     background: var(--bg-panel-2);
     border: 1px solid var(--line);
     border-radius: 6px;
@@ -290,7 +330,12 @@
     padding: 6px 10px;
     font-size: 0.9rem;
   }
-  .field-error, .form-error { color: var(--danger); font-size: 0.8rem; margin: 0; }
+  .field-error,
+  .form-error {
+    color: var(--danger);
+    font-size: 0.8rem;
+    margin: 0;
+  }
   .conflict-banner {
     background: var(--danger-bg);
     color: var(--danger);
@@ -300,7 +345,11 @@
     font-size: 0.85rem;
     margin-bottom: 4px;
   }
-  .actions { display: flex; gap: 8px; margin-top: 8px; }
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
   .btn-primary {
     background: var(--violet-300);
     color: var(--bg-abyss);

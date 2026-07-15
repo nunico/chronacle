@@ -417,6 +417,8 @@ export interface GraphNode {
   kind: string;
   campaign_id: string | null;
   name: string;
+  /** Other names this entity is known by ("alternate names" to the GM). */
+  aliases: string[];
   summary: string | null;
   notes: string | null;
   created_at: string | null;
@@ -462,6 +464,13 @@ export interface EntityGraph {
 
 export interface EntityInput {
   name: string;
+  /**
+   * Alternate names for this entity. ALWAYS send the complete array — the
+   * backend treats an omitted/`undefined` value as "preserve the existing
+   * list unchanged", so a partial edit that forgets to include this field
+   * silently no-ops instead of applying.
+   */
+  aliases?: string[];
   summary?: string | null;
   notes?: string | null;
   // event
@@ -530,6 +539,28 @@ export async function updateEntity(
 
 export async function deleteEntity(id: string, kind: EntityKind): Promise<void> {
   return invoke<never>('delete_entity', { id, kind });
+}
+
+/** Which side of a per-field conflict to keep when merging two entities. */
+export type FieldChoice = 'keepSurvivor' | 'keepLoser' | 'keepBoth';
+
+/** The GM's per-field decisions for a merge — see {@link mergeEntities}. */
+export interface MergeChoices {
+  summary: FieldChoice;
+  notes: FieldChoice;
+}
+
+/**
+ * Fold `loserId` into `survivorId`: every relationship is re-pointed onto the
+ * survivor, the loser's name is kept as one of the survivor's alternate
+ * names, the per-field choices are applied, and the loser is soft-deleted.
+ */
+export async function mergeEntities(
+  survivorId: string,
+  loserId: string,
+  choices: MergeChoices,
+): Promise<void> {
+  return invoke<never>('merge_entities', { survivorId, loserId, choices });
 }
 
 /**
@@ -833,6 +864,29 @@ export async function resolveLintFinding(id: string): Promise<void> {
 /** Delete one `relates_to` edge by its full record id (Maintenance resolve action). */
 export async function deleteRelation(edgeId: string): Promise<void> {
   return invoke('delete_relation', { edgeId });
+}
+
+/**
+ * One-click "did you mean X?" confirmation: persists `alias` as a permanent
+ * alternate name for `entityId`. Throws an {@link EntityError} (code
+ * `VALIDATION`) if the name collides with another entity's name or
+ * alternate name in the same scope.
+ */
+export async function confirmAliasSuggestion(entityId: string, alias: string): Promise<void> {
+  return invoke('confirm_alias_suggestion', { entityId, alias });
+}
+
+/**
+ * Undo an alternate name auto-created by fuzzy wikilink resolution: removes
+ * the alternate name, then resolves the `auto_alias` finding that recorded
+ * it so it drops out of the Maintenance inbox.
+ */
+export async function undoAutoAlias(
+  entityId: string,
+  alias: string,
+  findingId: string,
+): Promise<void> {
+  return invoke('undo_auto_alias', { entityId, alias, findingId });
 }
 
 // ── Vault Sync ──────────────────────────────────────────────────────────

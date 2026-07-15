@@ -22,6 +22,7 @@ const mockNpc = (): GraphNode => ({
   kind: 'npc',
   campaign_id: 'camp1',
   name: 'Torvin',
+  aliases: [],
   summary: 'Shady merchant',
   notes: null,
   created_at: null, updated_at: null,
@@ -55,7 +56,7 @@ describe('EntityManager', () => {
     render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
     await waitFor(() => screen.getByRole('button', { name: /new npc/i }));
     await fireEvent.click(screen.getByRole('button', { name: /new npc/i }));
-    expect(screen.getByLabelText(/name/i)).toBeTruthy();
+    expect(screen.getByLabelText('Name', { exact: true })).toBeTruthy();
   });
 
   it('shows toast on DATABASE error from createEntity', async () => {
