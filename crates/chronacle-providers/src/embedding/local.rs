@@ -22,35 +22,38 @@ pub(super) const ORT_DYLIB_NAME: &str = if cfg!(target_os = "macos") {
 const NOMIC_DOC_PREFIX: &str = "search_document: ";
 const NOMIC_QUERY_PREFIX: &str = "search_query: ";
 
-/// Locate the bundled ONNX Runtime dynamic library.
+/// The platform-specific ONNX Runtime library filename, for callers (e.g. the
+/// desktop shell) that resolve the bundled resource path themselves.
+pub fn ort_dylib_name() -> &'static str {
+    ORT_DYLIB_NAME
+}
+
+/// Locate the ONNX Runtime dynamic library **shipped beside the executable** in
+/// a packaged app.
 ///
 /// `fastembed` is built with the `ort-load-dynamic` feature, so ONNX Runtime is
-/// loaded at runtime rather than linked. Mirrors `pdfium_library_path()` in
-/// `lib.rs`: resolve via `CARGO_MANIFEST_DIR` in dev, and via the executable's
-/// resource directory in a bundled app.
-fn onnxruntime_library_path() -> Option<std::path::PathBuf> {
-    // Dev: <manifest>/resources/onnxruntime/<lib>
-    let dev = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("resources/onnxruntime")
+/// loaded at runtime rather than linked. In a packaged app Tauri copies the lib
+/// into the platform resource dir next to the binary.
+///
+/// A *source checkout* (dev, `tauri build --no-bundle`) has no such adjacent
+/// copy — resolving it via `CARGO_MANIFEST_DIR` here would point at
+/// `crates/chronacle-providers`, which holds no `resources/`. The desktop shell
+/// bridges that gap by setting `ORT_DYLIB_PATH` from its own crate's resource
+/// dir (see `resolve_onnxruntime_library_path`).
+fn bundled_onnxruntime_library_path() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+    // macOS bundle: <exe>/../Resources/resources/onnxruntime/<lib>.
+    let mac = exe_dir
+        .join("../Resources/resources/onnxruntime")
         .join(ORT_DYLIB_NAME);
-    if dev.exists() {
-        return Some(dev);
+    if mac.exists() {
+        return Some(mac);
     }
-    // Bundled app: <exe>/../Resources/resources/onnxruntime/<lib> on macOS,
-    // <exe>/resources/onnxruntime/<lib> elsewhere.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            let mac = exe_dir
-                .join("../Resources/resources/onnxruntime")
-                .join(ORT_DYLIB_NAME);
-            if mac.exists() {
-                return Some(mac);
-            }
-            let other = exe_dir.join("resources/onnxruntime").join(ORT_DYLIB_NAME);
-            if other.exists() {
-                return Some(other);
-            }
-        }
+    // Other platforms: <exe>/resources/onnxruntime/<lib>.
+    let other = exe_dir.join("resources/onnxruntime").join(ORT_DYLIB_NAME);
+    if other.exists() {
+        return Some(other);
     }
     None
 }
@@ -82,10 +85,19 @@ fn system_onnxruntime_library_path() -> Option<std::path::PathBuf> {
         .find(|p| p.exists())
 }
 
-/// Resolve an ONNX Runtime library: bundled resource first (version-controlled),
-/// then a system/Homebrew install.
+/// Resolve an ONNX Runtime library.
+///
+/// Order: an explicit `ORT_DYLIB_PATH` (how the desktop shell points at its own
+/// bundled resource in source checkouts / `--no-bundle` builds, where no
+/// exe-adjacent copy exists) → the version-controlled lib beside the executable
+/// in a packaged app → a system/Homebrew install.
 pub(super) fn resolve_onnxruntime_library_path() -> Option<std::path::PathBuf> {
-    onnxruntime_library_path().or_else(system_onnxruntime_library_path)
+    if let Some(path) = std::env::var_os("ORT_DYLIB_PATH").map(std::path::PathBuf::from) {
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    bundled_onnxruntime_library_path().or_else(system_onnxruntime_library_path)
 }
 
 /// Point `ort` at an ONNX Runtime library before any session is built.

@@ -1,10 +1,11 @@
 // End-to-end: the opt-in second-pass enrichment of related-entity summaries.
 //
 // Drives the REAL built app over tauri-driver: real Rust backend, real
-// SurrealDB, real chunking + embeddings, real PDF extraction. Only the LLM is
-// swapped for a deterministic local stub (so the assertion is reproducible and
-// no API key is needed). Setup uses `invoke()` through the live webview IPC —
-// the same path the UI uses — to avoid native file dialogs.
+// SurrealDB, real chunking + PDF extraction. The LLM is swapped for a
+// deterministic local stub, and embeddings run through the deterministic mock
+// embedder (the local backend with no cached model), so the assertion is
+// reproducible and no API key is needed. Setup uses `invoke()` through the live
+// webview IPC — the same path the UI uses — to avoid native file dialogs.
 //
 // Flow: configure stub LLM + enable enrichment → index a lore PDF whose text
 // names a seed ("Commander Varn") and a related faction ("The Iron Fist") →
