@@ -6,7 +6,11 @@
 //! `[[Free League]]` link ever written keeps resolving), applies per-field
 //! choices, marks the codex article stale, and soft-deletes the loser LAST.
 
-use chronacle_extraction::entity_service::{self, FieldChoice, MergeChoices};
+use chronacle_extraction::codex_service::run_lint_campaign;
+use chronacle_extraction::entity_service::{
+    self, EntityInput, EntityKind, FieldChoice, MergeChoices,
+};
+use chronacle_extraction::wikilink::{parse_and_sync_wikilinks, WikilinkScope};
 
 async fn db() -> surrealdb::Surreal<surrealdb::engine::local::Db> {
     let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
@@ -283,6 +287,247 @@ async fn merge_succeeds_when_the_kept_field_is_empty_on_both_sides() {
     assert_eq!(
         notes[0], None,
         "the survivor's notes must stay NULL, not crash the write"
+    );
+}
+
+// ── Soft-deleted-loser regression (tranche 6) ───────────────────────────────
+//
+// `query_all_entity_names`/`query_all_entity_notes` in `wikilink::query` feed
+// wikilink resolution (tier-1/2/3 + tier-4 fuzzy, alias-collision lint) and
+// the duplicate/staleness lint detectors. Before the fix, those SELECTs had
+// no `vault_deleted != true` filter, so a merge's soft-deleted loser stayed
+// visible everywhere: a `[[Free League]]` link would still resolve to the
+// dead loser row (tier-1 exact match beating the survivor's tier-2 alias),
+// and the lint pass would re-flag the pair the merge just resolved.
+
+fn make_faction(name: &str) -> EntityInput {
+    EntityInput {
+        name: name.to_string(),
+        aliases: None,
+        summary: None,
+        notes: None,
+        date_start: None,
+        date_end: None,
+        is_ongoing: None,
+        sequence_index: None,
+        era: None,
+        duration_label: None,
+        session_id: None,
+        player_name: None,
+        character_class: None,
+        character_level: None,
+        status: None,
+    }
+}
+
+async fn create_campaign(db: &surrealdb::Surreal<surrealdb::engine::local::Db>) -> String {
+    #[derive(serde::Deserialize)]
+    struct Row {
+        id: surrealdb::sql::Thing,
+    }
+    let mut resp = db
+        .query(
+            "CREATE campaign SET name='Test Campaign', system='D&D 5e', \
+             created_at=time::now(), updated_at=time::now()",
+        )
+        .await
+        .unwrap();
+    let rows: Vec<Row> = resp.take(0).unwrap();
+    rows.into_iter().next().unwrap().id.id.to_raw()
+}
+
+/// MERGE -> RESOLUTION seam: after merging the loser into the survivor, a
+/// `[[Free League]]` wikilink must resolve to the SURVIVOR, never the
+/// soft-deleted loser.
+#[tokio::test]
+async fn wikilink_to_a_merged_away_name_resolves_to_the_survivor_not_the_soft_deleted_loser() {
+    let db = db().await;
+    let campaign_id = create_campaign(&db).await;
+
+    let survivor = entity_service::create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Faction,
+        make_faction("The Free League"),
+    )
+    .await
+    .expect("create survivor");
+    let loser = entity_service::create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Faction,
+        make_faction("Free League"),
+    )
+    .await
+    .expect("create loser");
+
+    // Give each side an edge, matching the "with an edge on each" seeding
+    // shape used elsewhere in this file.
+    db.query("CREATE npc:x SET name = 'X'; CREATE npc:y SET name = 'Y';")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    entity_service::relate(
+        &db,
+        &survivor.id,
+        "faction",
+        "x",
+        "npc",
+        "allied_with",
+        None,
+    )
+    .await
+    .expect("seed survivor edge");
+    entity_service::relate(&db, &loser.id, "faction", "y", "npc", "enemy_of", None)
+        .await
+        .expect("seed loser edge");
+
+    let survivor_full_id = format!("faction:{}", survivor.id);
+    let loser_full_id = format!("faction:{}", loser.id);
+
+    entity_service::merge(
+        &db,
+        &survivor_full_id,
+        &loser_full_id,
+        MergeChoices {
+            summary: FieldChoice::KeepSurvivor,
+            notes: FieldChoice::KeepSurvivor,
+        },
+    )
+    .await
+    .expect("merge");
+
+    // A fresh source entity links back with the loser's old name.
+    let source = entity_service::create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "SourceNPC".to_string(),
+            aliases: None,
+            summary: None,
+            notes: None,
+            date_start: None,
+            date_end: None,
+            is_ongoing: None,
+            sequence_index: None,
+            era: None,
+            duration_label: None,
+            session_id: None,
+            player_name: None,
+            character_class: None,
+            character_level: None,
+            status: None,
+        },
+    )
+    .await
+    .expect("create source npc");
+
+    let result = parse_and_sync_wikilinks(
+        &db,
+        "npc",
+        &source.id,
+        "We deal with [[Free League]] now.",
+        WikilinkScope::Campaign {
+            campaign_id: &campaign_id,
+        },
+    )
+    .await
+    .expect("resolve wikilink");
+
+    assert_eq!(
+        result,
+        vec![survivor_full_id.clone()],
+        "the [[Free League]] link must resolve to the survivor {survivor_full_id}, \
+         never the soft-deleted loser {loser_full_id}"
+    );
+}
+
+/// MERGE -> LINT seam: after the merge, a lint pass must produce NO
+/// `duplicate_entity` and NO `alias_collision` finding for the merged pair —
+/// the loser is gone, so there is nothing left to pair against.
+#[tokio::test]
+async fn lint_pass_after_merge_does_not_resurrect_findings_for_the_soft_deleted_loser() {
+    let db = db().await;
+    let campaign_id = create_campaign(&db).await;
+
+    let survivor = entity_service::create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Faction,
+        make_faction("The Free League"),
+    )
+    .await
+    .expect("create survivor");
+    let loser = entity_service::create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Faction,
+        make_faction("Free League"),
+    )
+    .await
+    .expect("create loser");
+
+    let survivor_full_id = format!("faction:{}", survivor.id);
+    let loser_full_id = format!("faction:{}", loser.id);
+
+    entity_service::merge(
+        &db,
+        &survivor_full_id,
+        &loser_full_id,
+        MergeChoices {
+            summary: FieldChoice::KeepSurvivor,
+            notes: FieldChoice::KeepSurvivor,
+        },
+    )
+    .await
+    .expect("merge");
+
+    run_lint_campaign(&db, &campaign_id)
+        .await
+        .expect("lint pass");
+
+    #[derive(Debug, serde::Deserialize)]
+    struct Row {
+        kind: String,
+        payload: serde_json::Value,
+    }
+    let findings: Vec<Row> = db
+        .query("SELECT kind, payload FROM lint_finding WHERE resolved_at = NONE")
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap();
+
+    let touches_the_merged_pair = |payload: &serde_json::Value| {
+        let ids: Vec<String> = payload
+            .as_object()
+            .into_iter()
+            .flat_map(|o| o.values())
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect();
+        ids.iter()
+            .any(|id| id == &loser_full_id || id == &survivor_full_id)
+    };
+
+    let bad: Vec<&Row> = findings
+        .iter()
+        .filter(|r| {
+            (r.kind == "duplicate_entity" || r.kind == "alias_collision")
+                && touches_the_merged_pair(&r.payload)
+        })
+        .collect();
+
+    assert!(
+        bad.is_empty(),
+        "lint must not resurrect duplicate_entity/alias_collision findings for \
+         the merged pair, got {bad:?}",
     );
 }
 
