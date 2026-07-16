@@ -29,3 +29,10 @@ Feature: Codex write-back review
     Given the maintenance inbox has a duplicate-entity finding for "Korim"
     When the GM opens the findings tab
     Then the finding "Possible duplicate" is listed with "Korim"
+
+  Scenario: A naming conflict is resolved by assigning the term to one entity
+    Given the inbox has a naming conflict for "consortium" between "Merchant Consortium" and "Trade Consortium"
+    When the GM opens the findings tab
+    Then the finding "Naming conflict" is listed with "Merchant Consortium"
+    When the GM keeps the term on "Merchant Consortium"
+    Then the resolve-collision command keeps "faction:a" and drops "faction:b"
