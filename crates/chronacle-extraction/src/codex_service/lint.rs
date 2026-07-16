@@ -613,6 +613,86 @@ async fn unresolved_count<C: Connection>(db: &surrealdb::Surreal<C>) -> Result<u
 
 // ── List / resolve ───────────────────────────────────────────────────────────
 
+/// Display identity for a finding party, looked up fresh at read time.
+struct Identity {
+    name: String,
+    #[allow(dead_code)]
+    aliases: Vec<String>,
+    summary: Option<String>,
+}
+
+/// Look up name/aliases/summary for a full record id (`kind:id`), skipping
+/// soft-deleted rows (`vault_deleted = true`). Returns `None` if the record is
+/// missing or deleted — the caller falls back to showing the raw id.
+async fn lookup_identity<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    full_id: &str,
+) -> Result<Option<Identity>, String> {
+    let Some((table, id)) = full_id.split_once(':') else {
+        return Ok(None);
+    };
+    #[derive(Deserialize)]
+    struct Row {
+        name: String,
+        #[serde(default)]
+        aliases: Vec<String>,
+        #[serde(default)]
+        summary: Option<String>,
+    }
+    let mut resp = db
+        .query(
+            "SELECT name, aliases, summary FROM type::thing($tb, $id) \
+             WHERE vault_deleted != true",
+        )
+        .bind(("tb", table.to_owned()))
+        .bind(("id", id.to_owned()))
+        .await
+        .map_err(|e| format!("Failed to look up entity: {e}"))?;
+    let rows: Vec<Row> = resp
+        .take(0)
+        .map_err(|e| format!("Failed to parse entity identity: {e}"))?;
+    Ok(rows.into_iter().next().map(|r| Identity {
+        name: r.name,
+        aliases: r.aliases,
+        summary: r.summary,
+    }))
+}
+
+/// Attach human-readable names (and, for alias collisions, a `*_is_name` flag)
+/// to a finding so the Maintenance UI can render conflicts without exposing raw
+/// record ids. Other kinds pass through untouched.
+async fn enrich_finding_display<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    finding: &mut LintFinding,
+) -> Result<(), String> {
+    if finding.kind != "alias_collision" && finding.kind != "duplicate_entity" {
+        return Ok(());
+    }
+    let key = finding
+        .payload
+        .get("alias")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
+    let Some(obj) = finding.payload.as_object_mut() else {
+        return Ok(());
+    };
+    for side in ["a", "b"] {
+        let Some(full_id) = obj.get(side).and_then(|v| v.as_str()).map(str::to_owned) else {
+            continue;
+        };
+        if let Some(identity) = lookup_identity(db, &full_id).await? {
+            obj.insert(format!("{side}_name"), json!(identity.name.clone()));
+            obj.insert(format!("{side}_summary"), json!(identity.summary));
+            // Only alias collisions carry a normalized key to compare against.
+            if let Some(k) = key.as_deref() {
+                let is_name = naming::normalize(&identity.name) == k;
+                obj.insert(format!("{side}_is_name"), json!(is_name));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// All unresolved findings, newest first.
 pub async fn list_lint_findings<C: Connection>(
     db: &surrealdb::Surreal<C>,
@@ -634,7 +714,7 @@ pub async fn list_lint_findings<C: Connection>(
     let rows: Vec<Row> = resp
         .take(0)
         .map_err(|e| format!("Failed to parse findings: {e}"))?;
-    Ok(rows
+    let mut findings: Vec<LintFinding> = rows
         .into_iter()
         .map(|r| LintFinding {
             id: r.id.id.to_raw(),
@@ -642,7 +722,11 @@ pub async fn list_lint_findings<C: Connection>(
             payload: r.payload,
             created_at: r.created_at.to_string(),
         })
-        .collect())
+        .collect();
+    for finding in &mut findings {
+        enrich_finding_display(db, finding).await?;
+    }
+    Ok(findings)
 }
 
 /// Mark one finding resolved.
