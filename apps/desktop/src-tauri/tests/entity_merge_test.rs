@@ -626,3 +626,90 @@ async fn merge_resolves_the_duplicate_entity_finding_for_the_pair() {
         "the duplicate_entity finding for the merged pair must be resolved"
     );
 }
+
+/// MERGE -> pre-existing finding seam: a naming-conflict (`alias_collision`)
+/// finding recorded BEFORE the merge must be resolved by the merge. The linter
+/// dedups and its entity query skips soft-deleted rows, so a fresh pass never
+/// re-creates this finding once the loser is soft-deleted — if merge doesn't
+/// clear the pre-existing one it lingers forever, rendering the deleted party
+/// as an unresolvable raw record id in the Maintenance inbox.
+#[tokio::test]
+async fn merge_resolves_a_preexisting_alias_collision_finding() {
+    let db = db().await;
+    let campaign_id = create_campaign(&db).await;
+
+    // Two factions whose names normalize to the same key ("consortium").
+    let survivor = entity_service::create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Faction,
+        make_faction("Consortium"),
+    )
+    .await
+    .expect("create survivor");
+    let loser = entity_service::create(
+        &db,
+        Some(&campaign_id),
+        None,
+        EntityKind::Faction,
+        make_faction("The Consortium"),
+    )
+    .await
+    .expect("create loser");
+    let survivor_full_id = format!("faction:{}", survivor.id);
+    let loser_full_id = format!("faction:{}", loser.id);
+
+    // Detect the conflict FIRST, while both entities are alive — this records
+    // the `alias_collision` finding the GM later resolves by merging.
+    run_lint_campaign(&db, &campaign_id)
+        .await
+        .expect("first lint pass");
+
+    #[derive(serde::Deserialize)]
+    struct IdRow {
+        #[allow(dead_code)]
+        id: surrealdb::sql::Thing,
+    }
+    let open_before: Vec<IdRow> = db
+        .query(
+            "SELECT id FROM lint_finding \
+             WHERE kind = 'alias_collision' AND resolved_at = NONE",
+        )
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap();
+    assert_eq!(
+        open_before.len(),
+        1,
+        "precondition: exactly one open alias_collision finding before merge"
+    );
+
+    entity_service::merge(
+        &db,
+        &survivor_full_id,
+        &loser_full_id,
+        MergeChoices {
+            summary: FieldChoice::KeepSurvivor,
+            notes: FieldChoice::KeepSurvivor,
+        },
+    )
+    .await
+    .expect("merge");
+
+    let open_after: Vec<IdRow> = db
+        .query(
+            "SELECT id FROM lint_finding \
+             WHERE kind = 'alias_collision' AND resolved_at = NONE",
+        )
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap();
+    assert!(
+        open_after.is_empty(),
+        "merge must resolve the pre-existing alias_collision finding that \
+         references the now soft-deleted loser"
+    );
+}
