@@ -445,4 +445,18 @@ describe('MaintenanceView naming-conflict card', () => {
     expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:c1');
     expect(m.resolveAliasCollision).not.toHaveBeenCalled();
   });
+
+  it('hides both Keep buttons when a party is deleted (no enriched name)', async () => {
+    // b_name absent → entity B was soft-deleted; enrichment couldn't resolve it.
+    m.getLintFindings.mockResolvedValue([
+      collision({ b_name: undefined, b_is_name: undefined }),
+    ]);
+    render(MaintenanceView, {});
+    await fireEvent.click(await screen.findByRole('tab', { name: /Findings/ }));
+    await screen.findByText('Merchant Consortium');
+    expect(screen.queryByRole('button', { name: /^Keep on/ })).not.toBeInTheDocument();
+    // Dismiss + Merge still available.
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Merge…' })).toBeInTheDocument();
+  });
 });
