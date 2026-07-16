@@ -802,3 +802,34 @@ async fn resolve_alias_collision_refuses_a_soft_deleted_keep() {
     let remaining = list_lint_findings(&db).await.unwrap();
     assert!(remaining.iter().any(|x| x.kind == "alias_collision"));
 }
+
+/// A `stale_article` finding names its entity only in `payload.entity` (a raw
+/// record id). Enrichment must add `entity_name` so the Maintenance card can
+/// say WHICH article is stale instead of a bare "stale or uncompiled".
+#[tokio::test]
+async fn list_findings_enriches_stale_article_with_entity_name() {
+    use crate::codex_service::list_lint_findings;
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    db.query(
+        "CREATE npc:`a` SET name='Grix the Elder', summary='A merchant', notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         CREATE lint_finding SET kind='stale_article', \
+             payload={ entity: 'npc:a', reason: 'stale or uncompiled' }, \
+             created_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+
+    let findings = list_lint_findings(&db).await.unwrap();
+    let f = findings
+        .iter()
+        .find(|f| f.kind == "stale_article")
+        .expect("stale finding present");
+    assert_eq!(
+        f.payload.get("entity_name").and_then(|v| v.as_str()),
+        Some("Grix the Elder")
+    );
+}

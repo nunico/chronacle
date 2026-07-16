@@ -659,19 +659,34 @@ async fn lookup_identity<C: Connection>(
     }))
 }
 
-/// Attach human-readable names (and, for alias collisions, a `*_is_name` flag)
-/// to a finding so the Maintenance UI can render conflicts without exposing raw
-/// record ids. Other kinds pass through untouched. `cache` memoizes lookups by
-/// full id across the whole `list_lint_findings` call so a repeated party
-/// (e.g. one entity appearing in several findings) is fetched only once.
+/// Look up an entity's identity, memoized by full id for the whole
+/// `list_lint_findings` call so a repeated party (one entity appearing in
+/// several findings) is fetched only once.
+async fn cached_lookup<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    cache: &mut HashMap<String, Option<Identity>>,
+    full_id: &str,
+) -> Result<Option<Identity>, String> {
+    if let Some(cached) = cache.get(full_id) {
+        return Ok(cached.clone());
+    }
+    let looked_up = lookup_identity(db, full_id).await?;
+    cache.insert(full_id.to_owned(), looked_up.clone());
+    Ok(looked_up)
+}
+
+/// Attach human-readable names to a finding's entity-party fields so the
+/// Maintenance UI can render findings without exposing raw record ids:
+/// two-party findings (`alias_collision`, `duplicate_entity`) get
+/// `{a,b}_name`/`{a,b}_summary` (plus `{a,b}_is_name` for alias collisions),
+/// and single-entity findings (`stale_article`, `broken_wikilink`) get
+/// `entity_name`. Kinds whose payload has none of those fields pass through
+/// untouched.
 async fn enrich_finding_display<C: Connection>(
     db: &surrealdb::Surreal<C>,
     finding: &mut LintFinding,
     cache: &mut HashMap<String, Option<Identity>>,
 ) -> Result<(), String> {
-    if finding.kind != "alias_collision" && finding.kind != "duplicate_entity" {
-        return Ok(());
-    }
     let key = finding
         .payload
         .get("alias")
@@ -680,18 +695,12 @@ async fn enrich_finding_display<C: Connection>(
     let Some(obj) = finding.payload.as_object_mut() else {
         return Ok(());
     };
+    // Two-party findings name their parties in `a`/`b`.
     for side in ["a", "b"] {
         let Some(full_id) = obj.get(side).and_then(|v| v.as_str()).map(str::to_owned) else {
             continue;
         };
-        let identity = if let Some(cached) = cache.get(&full_id) {
-            cached.clone()
-        } else {
-            let looked_up = lookup_identity(db, &full_id).await?;
-            cache.insert(full_id.clone(), looked_up.clone());
-            looked_up
-        };
-        if let Some(identity) = identity {
+        if let Some(identity) = cached_lookup(db, cache, &full_id).await? {
             obj.insert(format!("{side}_name"), json!(identity.name.clone()));
             obj.insert(format!("{side}_summary"), json!(identity.summary));
             // Only alias collisions carry a normalized key to compare against.
@@ -699,6 +708,16 @@ async fn enrich_finding_display<C: Connection>(
                 let is_name = naming::normalize(&identity.name) == k;
                 obj.insert(format!("{side}_is_name"), json!(is_name));
             }
+        }
+    }
+    // Single-entity findings name their party in `entity`.
+    if let Some(full_id) = obj
+        .get("entity")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+    {
+        if let Some(identity) = cached_lookup(db, cache, &full_id).await? {
+            obj.insert("entity_name".to_string(), json!(identity.name));
         }
     }
     Ok(())

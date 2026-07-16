@@ -208,6 +208,13 @@
     return entityRef(f.payload[side])?.id ?? String(f.payload[side]);
   }
 
+  /** Enriched name for a single-entity finding's `entity` field; id fallback. */
+  function entityName(f: LintFinding): string {
+    const name = f.payload.entity_name;
+    if (typeof name === 'string' && name) return name;
+    return entityRef(f.payload.entity)?.id ?? String(f.payload.entity ?? '');
+  }
+
   function openMerge(f: LintFinding) {
     const a = entityRef(f.payload.a);
     const b = entityRef(f.payload.b);
@@ -401,11 +408,13 @@
                         disabled={busy === f.id}
                         onclick={() => resolveFinding(f.id)}
                       >
-                        Mark resolved
+                        Dismiss
                       </button>
                     </div>
                   {:else if kind === 'stale_article'}
-                    <p class="finding-detail">{f.payload.reason}</p>
+                    <p class="finding-detail">
+                      <strong>{entityName(f)}</strong> — {f.payload.reason}
+                    </p>
                     <div class="finding-actions">
                       <button
                         type="button"
@@ -420,7 +429,7 @@
                         disabled={busy === f.id}
                         onclick={() => resolveFinding(f.id)}
                       >
-                        Mark resolved
+                        Dismiss
                       </button>
                     </div>
                   {:else if kind === 'scope_violation'}
@@ -441,7 +450,7 @@
                         disabled={busy === f.id}
                         onclick={() => resolveFinding(f.id)}
                       >
-                        Mark resolved
+                        Dismiss
                       </button>
                     </div>
                   {:else if kind === 'duplicate_entity'}
@@ -475,7 +484,7 @@
                         disabled={busy === f.id}
                         onclick={() => resolveFinding(f.id)}
                       >
-                        Mark resolved
+                        Dismiss
                       </button>
                     </div>
                   {:else if kind === 'alias_collision'}
@@ -556,7 +565,7 @@
                         disabled={busy === f.id}
                         onclick={() => resolveFinding(f.id)}
                       >
-                        Mark resolved
+                        Dismiss
                       </button>
                     </div>
                   {/if}
