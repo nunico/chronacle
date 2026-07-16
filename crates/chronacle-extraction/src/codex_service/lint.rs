@@ -617,8 +617,6 @@ async fn unresolved_count<C: Connection>(db: &surrealdb::Surreal<C>) -> Result<u
 #[derive(Clone)]
 struct Identity {
     name: String,
-    // consumed by resolve_alias_collision (Task 2) — not read here yet
-    #[allow(dead_code)]
     aliases: Vec<String>,
     summary: Option<String>,
 }
@@ -741,6 +739,73 @@ pub async fn list_lint_findings<C: Connection>(
         enrich_finding_display(db, finding, &mut identity_cache).await?;
     }
     Ok(findings)
+}
+
+/// Resolve a naming conflict by keeping the disputed term on `keep_id` and
+/// stripping it from `drop_id`. `drop_id` must hold the term as an *alias*; if
+/// it is that entity's primary name this errors and mutates nothing (a name
+/// cannot be removed — the GM must merge or rename instead). `keep_id` is
+/// validated to be the finding's other party but needs no mutation.
+pub async fn resolve_alias_collision<C: Connection>(
+    db: &surrealdb::Surreal<C>,
+    finding_id: &str,
+    keep_id: &str,
+    drop_id: &str,
+) -> Result<(), String> {
+    #[derive(Deserialize)]
+    struct Row {
+        payload: serde_json::Value,
+    }
+    let mut resp = db
+        .query("SELECT payload FROM type::thing('lint_finding', $id)")
+        .bind(("id", finding_id.to_owned()))
+        .await
+        .map_err(|e| format!("Failed to load finding: {e}"))?;
+    let rows: Vec<Row> = resp
+        .take(0)
+        .map_err(|e| format!("Failed to parse finding: {e}"))?;
+    let payload = rows
+        .into_iter()
+        .next()
+        .ok_or_else(|| "Finding not found".to_string())?
+        .payload;
+
+    let key = payload
+        .get("alias")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Finding has no alias key".to_string())?;
+    let a = payload.get("a").and_then(|v| v.as_str());
+    let b = payload.get("b").and_then(|v| v.as_str());
+    let valid = matches!(
+        (a, b),
+        (Some(x), Some(y))
+            if (x == keep_id && y == drop_id) || (x == drop_id && y == keep_id)
+    );
+    if !valid {
+        return Err("keep_id/drop_id do not match this finding".into());
+    }
+
+    let identity = lookup_identity(db, drop_id)
+        .await?
+        .ok_or_else(|| "Losing entity no longer exists".to_string())?;
+
+    // Find the loser's original-cased alias whose normalized form is the key.
+    let original = identity
+        .aliases
+        .iter()
+        .find(|al| naming::normalize(al) == key);
+    let Some(original) = original else {
+        // Not an alias — it must be the primary name (or a stale finding).
+        if naming::normalize(&identity.name) == key {
+            return Err("Cannot strip a primary name; merge or rename instead".into());
+        }
+        return Err("Losing entity does not claim this term".into());
+    };
+
+    crate::entity_service::remove_alias(db, drop_id, original)
+        .await
+        .map_err(|e| e.to_string())?;
+    resolve_lint_finding(db, finding_id).await
 }
 
 /// Mark one finding resolved.

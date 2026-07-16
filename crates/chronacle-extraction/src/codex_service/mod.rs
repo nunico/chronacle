@@ -27,8 +27,8 @@ mod rules_tests;
 pub(crate) use compile::embed_entity_with_article;
 pub use compile::{compile_collection, compile_entity};
 pub use lint::{
-    list_lint_findings, resolve_lint_finding, run_lint_campaign, run_lint_collection, LintFinding,
-    LintSummary,
+    list_lint_findings, resolve_alias_collision, resolve_lint_finding, run_lint_campaign,
+    run_lint_collection, LintFinding, LintSummary,
 };
 pub use proposals::{
     accept_proposal, distill_chat_answer, distill_session_notes, list_proposals,
