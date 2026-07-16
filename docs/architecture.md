@@ -1448,11 +1448,32 @@ required together:
 3. **Surfaces an `auto_alias` finding.** Every tier-4 write is reviewable
    and undoable in Maintenance; nothing happens invisibly.
 
-`DEFAULT_THRESHOLD = 0.72`. This value is **provisional and tunable** — it
-was set from the design spec's table-driven similarity tests plus a
-read-only dry-run against real campaign data, not derived analytically.
-Expect it to move as more real-world data accumulates; the dry-run harness
-exists specifically so it can be re-tuned with evidence rather than intuition.
+`DEFAULT_THRESHOLD = 0.90`, **tuned against real campaign data, not derived
+analytically.** A read-only dry-run over a real 21-entity campaign scored every
+same-table name pair. The five pairs above the original provisional 0.72 were:
+
+| Score | Pair                                         | Reality                       |
+| ----- | -------------------------------------------- | ----------------------------- |
+| 1.000 | (faction) The Legion / Legion                | true duplicate                |
+| 1.000 | (faction) Syndicate / The Syndicate          | true duplicate                |
+| 1.000 | (faction) The Consortium / Consortium        | true duplicate                |
+| 0.909 | (npc) The Quassars / Johar Quassar           | **false** — family vs. member |
+| 0.880 | (faction) Chelebs-Menau family / The Chelebs | ambiguous — GM's call         |
+
+Two findings inverted the initial assumption. First, every _genuine_ duplicate
+was an article/plural variant that normalizes to an **identical** key — so it is
+caught by stage-1 grouping (below), which is **independent of the threshold**.
+Second, the fuzzy 0.85–0.92 band was dominated by **family/member false
+positives**: "The Quassars" (a family) scores 0.909 against "Johar Quassar" (a
+person in it) because the containment bonus fires on the shared word, and
+lexical similarity fundamentally cannot distinguish "X Family" from "Y X". So a
+_higher_ threshold loses no real duplicate on this data while dropping both false
+positives. Raising 0.72 → 0.90 does exactly that. The 0.72–0.90 band is not
+discarded — it becomes a reviewable "did you mean?" suggestion (candidates use
+`DEFAULT_THRESHOLD * 0.8`), never a silent auto-merge or auto-link. This upholds
+the guiding asymmetry: prefer a MISSED match (degrades to a suggestion) over a
+FALSE one (silently corrupts the graph). The value remains tunable as more
+real-world data accumulates.
 
 **Duplicate detection is two-stage.** `lint_duplicates` first groups on the
 normalized name (catching "Free League" / "The Free League" with no scoring
