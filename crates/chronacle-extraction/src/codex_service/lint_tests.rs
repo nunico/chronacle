@@ -674,3 +674,78 @@ async fn list_findings_enriches_duplicate_entity_with_names_but_no_is_name_flag(
     assert!(f.payload.get("a_is_name").is_none());
     assert!(f.payload.get("b_is_name").is_none());
 }
+
+/// Assigning the term to `keep` strips it from `drop` and resolves the finding.
+#[tokio::test]
+async fn resolve_alias_collision_strips_the_alias_from_the_loser() {
+    use crate::codex_service::{list_lint_findings, resolve_alias_collision};
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    db.query(
+        "CREATE npc:`a` SET name='Consortium', summary=NULL, notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         CREATE npc:`b` SET name='Trade Guild', aliases=['Consortium'], summary=NULL, \
+             notes=NULL, created_at=time::now(), updated_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`a` SET created_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`b` SET created_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+    run_lint_campaign(&db, "camp1").await.unwrap();
+    let f = list_lint_findings(&db).await.unwrap();
+    let f = f.iter().find(|f| f.kind == "alias_collision").unwrap();
+
+    // `b` holds the term as an alias, so it is the valid drop target.
+    resolve_alias_collision(&db, &f.id, "npc:a", "npc:b")
+        .await
+        .unwrap();
+
+    // Alias gone from b, and the finding is resolved (no longer listed).
+    #[derive(serde::Deserialize)]
+    struct Row {
+        aliases: Vec<String>,
+    }
+    let mut resp = db.query("SELECT aliases FROM npc:`b`").await.unwrap();
+    let rows: Vec<Row> = resp.take(0).unwrap();
+    assert!(
+        rows[0].aliases.is_empty(),
+        "alias must be removed from the loser"
+    );
+    let remaining = list_lint_findings(&db).await.unwrap();
+    assert!(remaining.iter().all(|x| x.kind != "alias_collision"));
+}
+
+/// The command must refuse to strip a term that is the loser's PRIMARY NAME —
+/// a name cannot be removed. Nothing is mutated.
+#[tokio::test]
+async fn resolve_alias_collision_refuses_to_strip_a_primary_name() {
+    use crate::codex_service::{list_lint_findings, resolve_alias_collision};
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    // Both entities are literally NAMED the same normalized term.
+    db.query(
+        "CREATE npc:`a` SET name='Consortium', summary=NULL, notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         CREATE npc:`b` SET name='Consortium', summary=NULL, notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`a` SET created_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`b` SET created_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+    run_lint_campaign(&db, "camp1").await.unwrap();
+    let f = list_lint_findings(&db).await.unwrap();
+    let f = f.iter().find(|f| f.kind == "alias_collision").unwrap();
+
+    let err = resolve_alias_collision(&db, &f.id, "npc:a", "npc:b")
+        .await
+        .unwrap_err();
+    assert!(err.contains("primary name"), "got: {err}");
+    // Finding still open — nothing resolved.
+    let remaining = list_lint_findings(&db).await.unwrap();
+    assert!(remaining.iter().any(|x| x.kind == "alias_collision"));
+}
