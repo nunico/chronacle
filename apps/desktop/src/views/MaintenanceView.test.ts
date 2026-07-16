@@ -23,6 +23,7 @@ vi.mock('../lib/commands', () => ({
   compileEntity: vi.fn().mockResolvedValue(true),
   confirmAliasSuggestion: vi.fn().mockResolvedValue(undefined),
   undoAutoAlias: vi.fn().mockResolvedValue(undefined),
+  resolveAliasCollision: vi.fn().mockResolvedValue(undefined),
   getEntity: vi.fn(),
   getEntityRelations: vi.fn().mockResolvedValue([]),
   mergeEntities: vi.fn().mockResolvedValue(undefined),
@@ -373,5 +374,75 @@ describe('MaintenanceView', () => {
         notes: 'keepSurvivor',
       }),
     );
+  });
+});
+
+describe('MaintenanceView naming-conflict card', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    m.getProposals.mockResolvedValue([]);
+    m.getLintFindings.mockResolvedValue([]);
+    m.resolveLintFinding.mockResolvedValue(undefined);
+    m.resolveAliasCollision.mockResolvedValue(undefined);
+  });
+
+  function collision(overrides = {}) {
+    return finding({
+      id: 'lint_finding:c1',
+      kind: 'alias_collision',
+      payload: {
+        alias: 'consortium',
+        a: 'faction:a',
+        b: 'faction:b',
+        a_name: 'Merchant Consortium',
+        b_name: 'Trade Consortium',
+        a_is_name: false,
+        b_is_name: false,
+        ...overrides,
+      },
+    });
+  }
+
+  it('renders entity names, not raw record ids', async () => {
+    m.getLintFindings.mockResolvedValue([collision()]);
+    render(MaintenanceView, {});
+    await fireEvent.click(await screen.findByRole('tab', { name: /Findings/ }));
+    expect(await screen.findByText('Merchant Consortium')).toBeInTheDocument();
+    expect(screen.getByText('Trade Consortium')).toBeInTheDocument();
+    expect(screen.queryByText('faction:a')).not.toBeInTheDocument();
+  });
+
+  it('assigns the term to one entity and strips the other', async () => {
+    m.getLintFindings.mockResolvedValue([collision()]);
+    render(MaintenanceView, {});
+    await fireEvent.click(await screen.findByRole('tab', { name: /Findings/ }));
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Keep on Merchant Consortium' }),
+    );
+    expect(m.resolveAliasCollision).toHaveBeenCalledWith(
+      'lint_finding:c1',
+      'faction:a',
+      'faction:b',
+    );
+  });
+
+  it('hides the Keep button on the side whose term is its primary name', async () => {
+    m.getLintFindings.mockResolvedValue([collision({ a_is_name: true })]);
+    render(MaintenanceView, {});
+    await fireEvent.click(await screen.findByRole('tab', { name: /Findings/ }));
+    await screen.findByText('Merchant Consortium');
+    expect(
+      screen.queryByRole('button', { name: 'Keep on Trade Consortium' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Keep on Merchant Consortium' })).toBeInTheDocument();
+  });
+
+  it('Dismiss resolves the finding without assigning', async () => {
+    m.getLintFindings.mockResolvedValue([collision()]);
+    render(MaintenanceView, {});
+    await fireEvent.click(await screen.findByRole('tab', { name: /Findings/ }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+    expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:c1');
+    expect(m.resolveAliasCollision).not.toHaveBeenCalled();
   });
 });
