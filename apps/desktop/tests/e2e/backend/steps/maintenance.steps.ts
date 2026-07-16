@@ -165,6 +165,54 @@ Then(
   },
 );
 
+Given(
+  'the inbox has a naming conflict for {string} between {string} and {string}',
+  async ({ page }, term: string, nameA: string, nameB: string) => {
+    await installIpcMock(page, {
+      get_proposals: [],
+      get_lint_findings: [
+        {
+          id: 'lint3',
+          kind: 'alias_collision',
+          payload: {
+            alias: term,
+            a: 'faction:a',
+            b: 'faction:b',
+            a_name: nameA,
+            b_name: nameB,
+            a_is_name: false,
+            b_is_name: false,
+          },
+          created_at: '2026-07-06T00:00:00Z',
+        },
+      ],
+      get_maintenance_counts: { pending_proposals: 0, unresolved_findings: 1 },
+      resolve_lint_finding: null,
+      resolve_alias_collision: null,
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: /Maintenance/ }).click();
+  },
+);
+
+When('the GM keeps the term on {string}', async ({ page }, name: string) => {
+  await page.getByRole('button', { name: `Keep on ${name}` }).click();
+});
+
+Then(
+  'the resolve-collision command keeps {string} and drops {string}',
+  async ({ page }, keepId: string, dropId: string) => {
+    const calls = await getIpcCalls(page);
+    const call = calls.find(
+      (c) =>
+        c.cmd === 'resolve_alias_collision' &&
+        c.args?.keepId === keepId &&
+        c.args?.dropId === dropId,
+    );
+    expect(call).toBeDefined();
+  },
+);
+
 When('the GM marks the finding resolved', async ({ page }) => {
   await page.getByRole('button', { name: 'Mark resolved' }).first().click();
 });
