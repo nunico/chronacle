@@ -163,6 +163,34 @@ pub(crate) fn spawn_outbound(
     (Arc::new(producer), task)
 }
 
+/// Point `ORT_DYLIB_PATH` at the ONNX Runtime library this shell ships.
+///
+/// The embedding layer (`chronacle-providers`) loads ONNX Runtime dynamically
+/// and decides its default backend from whether that lib is resolvable. It
+/// cannot find our bundled copy in a source checkout / `tauri build
+/// --no-bundle` build on its own: `build.rs` downloads the lib under *this*
+/// crate's `resources/onnxruntime`, but the provider crate's
+/// `CARGO_MANIFEST_DIR` points elsewhere. We resolve it here — where the macro
+/// is correct — and hand it over via the standard `ORT_DYLIB_PATH` the `ort`
+/// crate already honors.
+///
+/// No-op if the caller already set `ORT_DYLIB_PATH`, or the lib is absent (the
+/// provider then falls back to a packaged/system copy, or the cloud backend). A
+/// packaged app needs no help: the lib sits beside the executable.
+fn register_bundled_ort_dylib() {
+    if std::env::var_os("ORT_DYLIB_PATH").is_some() {
+        return;
+    }
+    let dev = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources/onnxruntime")
+        .join(chronacle_providers::embedding::ort_dylib_name());
+    if dev.exists() {
+        // Edition 2021: `set_var` is safe. Called at startup before worker
+        // threads touch the environment.
+        std::env::set_var("ORT_DYLIB_PATH", dev);
+    }
+}
+
 /// Locate the bundled pdfium dynamic library.
 ///
 /// In `cargo tauri dev` the binary lives under `target/`, so we resolve via
@@ -267,6 +295,11 @@ pub async fn run() {
     let blob_store: Arc<dyn chronacle_providers::blob_store::BlobStore> = Arc::new(
         chronacle_providers::blob_store::LocalFileStore::new(pdfs_dir),
     );
+
+    // Point the embedding layer at the ONNX Runtime lib this shell ships before
+    // it probes for a local backend (below), so a source checkout / --no-bundle
+    // build resolves `local` instead of silently defaulting to the cloud.
+    register_bundled_ort_dylib();
 
     // Select the embedding backend from settings (local fastembed vs OpenAI
     // cloud). See `build_embedding_provider_from_map`.

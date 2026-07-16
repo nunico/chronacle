@@ -13,6 +13,38 @@ fn ort_dylib_name_matches_target_platform() {
     }
 }
 
+#[test]
+fn resolve_onnxruntime_library_path_honors_ort_dylib_path_env() {
+    use std::env;
+    // The seam the desktop shell relies on in a source checkout / --no-bundle
+    // build: it sets ORT_DYLIB_PATH so the provider can locate the lib whose
+    // path only the shell's (correct) CARGO_MANIFEST_DIR knows. An existing
+    // path wins; a bogus one is ignored so resolution falls through to the
+    // exe-adjacent / system candidates instead of returning a dead path.
+    let prev = env::var_os("ORT_DYLIB_PATH");
+
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    env::set_var("ORT_DYLIB_PATH", tmp.path());
+    assert_eq!(
+        local::resolve_onnxruntime_library_path().as_deref(),
+        Some(tmp.path()),
+        "an existing ORT_DYLIB_PATH should be resolved verbatim",
+    );
+
+    let bogus = std::path::Path::new("/nonexistent/onnxruntime/does-not-exist.so");
+    env::set_var("ORT_DYLIB_PATH", bogus);
+    assert_ne!(
+        local::resolve_onnxruntime_library_path().as_deref(),
+        Some(bogus),
+        "a non-existent ORT_DYLIB_PATH must not be returned",
+    );
+
+    match prev {
+        Some(v) => env::set_var("ORT_DYLIB_PATH", v),
+        None => env::remove_var("ORT_DYLIB_PATH"),
+    }
+}
+
 #[tokio::test]
 async fn test_mock_embed_query_returns_correct_dims() {
     let provider = MockEmbeddingProvider::new(768);
