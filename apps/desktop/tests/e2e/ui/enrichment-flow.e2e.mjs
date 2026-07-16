@@ -12,11 +12,7 @@
 // RELATIONAL first-pass text into the ENTITY-CENTRIC profile text.
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import {
-  startStubLlm,
-  PROFILE_SUMMARY,
-  RELATIONAL_SUMMARY,
-} from './stub-llm.mjs';
+import { startStubLlm, PROFILE_SUMMARY, RELATIONAL_SUMMARY } from './stub-llm.mjs';
 import {
   startTauriDriver,
   buildDriver,
@@ -25,9 +21,7 @@ import {
   waitForWebviewReady,
 } from './driver.mjs';
 
-const FIXTURE_PDF = fileURLToPath(
-  new URL('./fixtures/lore-iron-fist.pdf', import.meta.url),
-);
+const FIXTURE_PDF = fileURLToPath(new URL('./fixtures/lore-iron-fist.pdf', import.meta.url));
 
 describe('entity extraction — neighbor enrichment second pass', function () {
   this.timeout(180000); // model download + indexing + two LLM passes
@@ -60,6 +54,18 @@ describe('entity extraction — neighbor enrichment second pass', function () {
       value: 'true',
     });
     await invoke(driver, 'reconfigure_llm_provider');
+
+    // Force the LOCAL embedding backend. This spec exercises ingestion +
+    // extraction + enrichment, not embedding quality, so the deterministic
+    // mock embedder is exactly right — and it needs no API key. We must set
+    // this explicitly rather than lean on the default: the default resolves to
+    // `local` only where an ONNX Runtime library is present, and the
+    // `--no-bundle` Linux CI build has neither a bundled nor a system ORT, so
+    // the default silently flips to `openai` and ingestion fails with
+    // "OpenAI embedding API key is not configured". With `local` and no cached
+    // model, `build_embedding_provider_from_map` returns the mock embedder.
+    await invoke(driver, 'update_setting', { key: 'embedding_backend', value: 'local' });
+    await invoke(driver, 'reconfigure_embedding_provider');
 
     // 2. Index the lore PDF into a fresh collection (real ingestion pipeline;
     //    upload_source blocks until chunks are embedded).
@@ -96,13 +102,16 @@ describe('entity extraction — neighbor enrichment second pass', function () {
 
     // 5. The faction neighbor must exist with the ENTITY-CENTRIC summary from
     //    the profile pass — not the relational first-pass summary.
-    const fist = await pollUntil(async () => {
-      const factions = await invoke(driver, 'get_entities', {
-        campaignId: campaign.id,
-        kind: 'faction',
-      });
-      return factions.find((f) => f.name === 'The Iron Fist');
-    }, { timeoutMs: 30000, intervalMs: 1000 });
+    const fist = await pollUntil(
+      async () => {
+        const factions = await invoke(driver, 'get_entities', {
+          campaignId: campaign.id,
+          kind: 'faction',
+        });
+        return factions.find((f) => f.name === 'The Iron Fist');
+      },
+      { timeoutMs: 30000, intervalMs: 1000 },
+    );
 
     assert.equal(
       fist.summary,
