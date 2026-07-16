@@ -575,3 +575,56 @@ async fn resolve_lint_finding_sets_resolved_at() {
     let after = list_lint_findings(&db).await.unwrap();
     assert_eq!(after.len(), before - 1);
 }
+
+/// `list_lint_findings` must inject real names and a name-vs-alias flag so the
+/// Maintenance UI never shows raw record ids.
+#[tokio::test]
+async fn list_findings_enriches_alias_collision_with_names_and_flags() {
+    use crate::codex_service::list_lint_findings;
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    // `a`'s NAME normalizes to the key; `b` holds it only as an alias.
+    db.query(
+        "CREATE npc:`a` SET name='Consortium', summary='The old guild', notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         CREATE npc:`b` SET name='Trade Guild', aliases=['Consortium'], summary=NULL, \
+             notes=NULL, created_at=time::now(), updated_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`a` SET created_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`b` SET created_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+    run_lint_campaign(&db, "camp1").await.unwrap();
+
+    let findings = list_lint_findings(&db).await.unwrap();
+    let f = findings
+        .iter()
+        .find(|f| f.kind == "alias_collision")
+        .expect("collision finding present");
+
+    // Names present, ordered by whichever side is `a`/`b` in the payload.
+    let a_id = f.payload.get("a").and_then(|v| v.as_str()).unwrap();
+    let (a_name, a_is_name, b_name, b_is_name) = if a_id == "npc:a" {
+        ("Consortium", true, "Trade Guild", false)
+    } else {
+        ("Trade Guild", false, "Consortium", true)
+    };
+    assert_eq!(
+        f.payload.get("a_name").and_then(|v| v.as_str()),
+        Some(a_name)
+    );
+    assert_eq!(
+        f.payload.get("b_name").and_then(|v| v.as_str()),
+        Some(b_name)
+    );
+    assert_eq!(
+        f.payload.get("a_is_name").and_then(|v| v.as_bool()),
+        Some(a_is_name)
+    );
+    assert_eq!(
+        f.payload.get("b_is_name").and_then(|v| v.as_bool()),
+        Some(b_is_name)
+    );
+}
