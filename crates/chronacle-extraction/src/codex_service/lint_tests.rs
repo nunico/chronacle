@@ -749,3 +749,56 @@ async fn resolve_alias_collision_refuses_to_strip_a_primary_name() {
     let remaining = list_lint_findings(&db).await.unwrap();
     assert!(remaining.iter().any(|x| x.kind == "alias_collision"));
 }
+
+/// If the entity the GM chose to KEEP has since been soft-deleted, resolution
+/// must refuse — otherwise the alive entity's real alias gets stripped to
+/// "keep" the term on an entity that no longer exists (silent data loss).
+#[tokio::test]
+async fn resolve_alias_collision_refuses_a_soft_deleted_keep() {
+    use crate::codex_service::{list_lint_findings, resolve_alias_collision};
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    db.query(
+        "CREATE npc:`a` SET name='Consortium', summary=NULL, notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         CREATE npc:`b` SET name='Trade Guild', aliases=['Consortium'], summary=NULL, \
+             notes=NULL, created_at=time::now(), updated_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`a` SET created_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`b` SET created_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+    run_lint_campaign(&db, "camp1").await.unwrap();
+    let f = list_lint_findings(&db).await.unwrap();
+    let f = f.iter().find(|f| f.kind == "alias_collision").unwrap();
+
+    // Soft-delete the KEEP target (a) after the finding was recorded.
+    db.query("UPDATE npc:`a` SET vault_deleted = true")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+
+    // Keeping the term on the deleted `a` (dropping from alive `b`) must fail.
+    let err = resolve_alias_collision(&db, &f.id, "npc:a", "npc:b")
+        .await
+        .unwrap_err();
+    assert!(err.contains("no longer exists"), "got: {err}");
+
+    // The alive entity keeps its alias, and the finding stays open.
+    #[derive(serde::Deserialize)]
+    struct Row {
+        aliases: Vec<String>,
+    }
+    let mut resp = db.query("SELECT aliases FROM npc:`b`").await.unwrap();
+    let rows: Vec<Row> = resp.take(0).unwrap();
+    assert_eq!(
+        rows[0].aliases,
+        vec!["Consortium".to_string()],
+        "alive alias must be untouched"
+    );
+    let remaining = list_lint_findings(&db).await.unwrap();
+    assert!(remaining.iter().any(|x| x.kind == "alias_collision"));
+}

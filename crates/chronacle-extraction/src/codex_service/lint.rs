@@ -745,7 +745,9 @@ pub async fn list_lint_findings<C: Connection>(
 /// stripping it from `drop_id`. `drop_id` must hold the term as an *alias*; if
 /// it is that entity's primary name this errors and mutates nothing (a name
 /// cannot be removed — the GM must merge or rename instead). `keep_id` is
-/// validated to be the finding's other party but needs no mutation.
+/// validated to be the finding's other party and must still exist (not
+/// soft-deleted) — otherwise resolving would strip the alive entity's real
+/// alias to "keep" the term on an entity that no longer exists.
 ///
 /// Not atomic: `remove_alias` and `resolve_lint_finding` are two separate
 /// writes, so a transient DB failure between them could strip the alias while
@@ -788,6 +790,12 @@ pub async fn resolve_alias_collision<C: Connection>(
     );
     if !valid {
         return Err("keep_id/drop_id do not match this finding".into());
+    }
+
+    // The keep target must still exist — otherwise we'd strip the alive
+    // entity's alias to "keep" the term on a deleted one (data loss).
+    if lookup_identity(db, keep_id).await?.is_none() {
+        return Err("Entity to keep no longer exists".into());
     }
 
     let identity = lookup_identity(db, drop_id)
