@@ -483,6 +483,8 @@
                     {@const bName = partyName(f, 'b')}
                     {@const aIsName = f.payload.a_is_name === true}
                     {@const bIsName = f.payload.b_is_name === true}
+                    {@const aResolved = typeof f.payload.a_name === 'string'}
+                    {@const bResolved = typeof f.payload.b_name === 'string'}
                     <p class="finding-detail">
                       <strong>{String(f.payload.alias)}</strong> is claimed by two entities:
                     </p>
@@ -499,7 +501,7 @@
                       </div>
                     </div>
                     <div class="finding-actions">
-                      {#if !bIsName}
+                      {#if aResolved && bResolved && !bIsName}
                         <button
                           type="button"
                           disabled={busy === f.id}
@@ -509,7 +511,7 @@
                           Keep on {aName}
                         </button>
                       {/if}
-                      {#if !aIsName}
+                      {#if aResolved && bResolved && !aIsName}
                         <button
                           type="button"
                           disabled={busy === f.id}
