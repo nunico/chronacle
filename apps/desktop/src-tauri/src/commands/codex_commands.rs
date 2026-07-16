@@ -297,6 +297,24 @@ pub async fn resolve_lint_finding(
     chronacle_extraction::codex_service::resolve_lint_finding(&state.db, &id).await
 }
 
+/// Resolve a naming conflict: keep the disputed term on `keep_id` and strip it
+/// from `drop_id` (whose claim must be an alias, not its primary name).
+#[tauri::command]
+pub async fn resolve_alias_collision(
+    state: State<'_, Arc<AppState>>,
+    finding_id: String,
+    keep_id: String,
+    drop_id: String,
+) -> Result<(), String> {
+    chronacle_extraction::codex_service::resolve_alias_collision(
+        &state.db,
+        &finding_id,
+        &keep_id,
+        &drop_id,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,6 +331,7 @@ mod tests {
         let _ = run_lint as fn(_, _) -> _;
         let _ = get_lint_findings as fn(_) -> _;
         let _ = resolve_lint_finding as fn(_, _) -> _;
+        let _ = resolve_alias_collision as fn(_, _, _, _) -> _;
     }
 
     #[tokio::test]
