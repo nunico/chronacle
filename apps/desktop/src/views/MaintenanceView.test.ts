@@ -199,6 +199,39 @@ describe('MaintenanceView', () => {
     );
   });
 
+  // 9b. Compile shows a working indicator while the (slow) compile runs
+  it('shows a spinner and "Compiling…" while the article compiles', async () => {
+    let finishCompile: (v: boolean) => void = () => {};
+    m.compileEntity.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        finishCompile = resolve;
+      }),
+    );
+    m.getLintFindings.mockResolvedValue([
+      finding({
+        id: 'lint_finding:2',
+        kind: 'stale_article',
+        payload: { entity: 'npc:mira', entity_name: 'Mira', reason: 'stale or uncompiled' },
+      }),
+    ]);
+    render(MaintenanceView, { props: {} });
+    await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Compile' }));
+
+    // While the promise is pending, the button reports progress and is busy.
+    const compiling = await screen.findByRole('button', { name: /Compiling/ });
+    expect(compiling).toBeDisabled();
+    expect(compiling).toHaveAttribute('aria-busy', 'true');
+
+    // Let it finish so the finding resolves and the indicator clears.
+    m.getLintFindings.mockResolvedValue([]);
+    finishCompile(true);
+    await waitFor(() =>
+      expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:2'),
+    );
+  });
+
   // 10. scope_violation finding has "Delete edge" then resolves
   it('scope_violation finding deletes the edge then resolves the finding', async () => {
     m.getLintFindings.mockResolvedValue([

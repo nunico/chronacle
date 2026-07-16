@@ -32,6 +32,7 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let busy = $state<string | null>(null); // proposal/finding id being resolved
+  let compilingId = $state<string | null>(null); // stale finding whose article is compiling
   let checking = $state(false);
   let lintNote = $state<string | null>(null);
   let mergeTarget = $state<{
@@ -133,6 +134,7 @@
     const ref = entityRef(f.payload.entity);
     if (!ref) return;
     busy = f.id;
+    compilingId = f.id;
     try {
       await compileEntity(ref.kind, ref.id);
       await resolveLintFinding(f.id);
@@ -142,6 +144,7 @@
       error = String(e);
     } finally {
       busy = null;
+      compilingId = null;
     }
   }
 
@@ -419,9 +422,15 @@
                       <button
                         type="button"
                         disabled={busy === f.id}
+                        aria-busy={compilingId === f.id}
                         onclick={() => compileAndResolve(f)}
                       >
-                        Compile
+                        {#if compilingId === f.id}
+                          <span class="spinner" aria-hidden="true"></span>
+                          Compiling…
+                        {:else}
+                          Compile
+                        {/if}
                       </button>
                       <button
                         type="button"
@@ -721,6 +730,9 @@
   }
   .proposal-actions button,
   .finding-actions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     padding: 6px 14px;
     border-radius: var(--r-md);
     border: 1px solid var(--line);
@@ -728,6 +740,26 @@
     color: var(--bg-abyss);
     cursor: pointer;
     font-size: 0.85rem;
+  }
+  /* Indeterminate "working" ring, matching the ExtractionCard spinner but
+     tuned for contrast on the violet primary button (dark-on-violet). */
+  .finding-actions .spinner {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid rgba(11, 13, 23, 0.3);
+    border-top-color: var(--bg-abyss);
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .finding-actions .spinner {
+      animation-duration: 2s;
+    }
   }
   .proposal-actions button.btn-ghost,
   .finding-actions button.btn-ghost {
