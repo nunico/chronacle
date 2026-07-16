@@ -350,15 +350,26 @@ pub async fn merge<C: surrealdb::Connection>(
     //    reconcile sweep — never a raw DELETE, never a vault move.
     soft_delete(db, l_id, kind).await?;
 
-    // 6. Resolve the `duplicate_entity` finding that flagged this pair — the
-    //    Maintenance inbox should no longer surface it. The linter stores the
-    //    pair sorted, as full record ids, so match either ordering.
+    // 6. The loser is now soft-deleted, so ANY open finding that references it
+    //    is stale — a fresh lint pass excludes soft-deleted rows and dedups, so
+    //    it will never re-surface these. Resolve every open finding whose
+    //    payload names the loser ($l) in an entity-party field, so the inbox
+    //    stops showing it (e.g. as an unresolvable raw record id). This covers
+    //    the `duplicate_entity` finding that flagged this pair as well as the
+    //    `alias_collision`, `broken_wikilink`, `stale_article`, and
+    //    `scope_violation` findings that named the loser. Party fields differ
+    //    by kind (`a`/`b`, `entity`, `from`/`to`); `edge` is a relation id, not
+    //    an entity, so it is intentionally excluded. Absent fields read as
+    //    NONE, and `NONE = $l` is false, so one flat OR is safe across kinds.
+    //    A conflict that genuinely survives on the survivor (e.g. the loser's
+    //    alias now collides with a third entity) is re-detected next pass.
     db.query(
         "UPDATE lint_finding SET resolved_at = time::now() \
-         WHERE kind = 'duplicate_entity' AND resolved_at = NONE \
-         AND ((payload.a = $s AND payload.b = $l) OR (payload.a = $l AND payload.b = $s))",
+         WHERE resolved_at = NONE AND ( \
+             payload.a = $l OR payload.b = $l OR payload.entity = $l \
+             OR payload.from = $l OR payload.to = $l \
+         )",
     )
-    .bind(("s", survivor.to_owned()))
     .bind(("l", loser.to_owned()))
     .await
     .map_err(db_err)?
