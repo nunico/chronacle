@@ -1,7 +1,16 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import MaintenanceView from './MaintenanceView.svelte';
+import maintenanceSource from './MaintenanceView.svelte?raw';
 import type { CodexProposal, LintFinding } from '../lib/commands';
+
+describe('MaintenanceView scroll (regression: clipped findings)', () => {
+  it('.maintenance root is its own scroll container', () => {
+    const block = maintenanceSource.match(/\.maintenance\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(block).toMatch(/overflow-y:\s*auto/);
+    expect(block).toMatch(/height:\s*100%/);
+  });
+});
 
 vi.mock('../lib/commands', () => ({
   getProposals: vi.fn().mockResolvedValue([]),
