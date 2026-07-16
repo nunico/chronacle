@@ -12,6 +12,7 @@
     compileEntity,
     confirmAliasSuggestion,
     undoAutoAlias,
+    resolveAliasCollision,
     type CodexProposal,
     type LintFinding,
     type EntityKind,
@@ -185,6 +186,26 @@
     } finally {
       busy = null;
     }
+  }
+
+  async function resolveCollision(f: LintFinding, keepId: string, dropId: string) {
+    busy = f.id;
+    try {
+      await resolveAliasCollision(f.id, keepId, dropId);
+      await refresh();
+      onCountsChanged?.();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = null;
+    }
+  }
+
+  /** Prefer the enriched name; fall back to the record id for deleted parties. */
+  function partyName(f: LintFinding, side: 'a' | 'b'): string {
+    const name = f.payload[`${side}_name`];
+    if (typeof name === 'string' && name) return name;
+    return entityRef(f.payload[side])?.id ?? String(f.payload[side]);
   }
 
   function openMerge(f: LintFinding) {
@@ -426,9 +447,9 @@
                   {:else if kind === 'duplicate_entity'}
                     <p class="finding-detail">
                       Possible duplicate:
-                      <strong>{entityRef(f.payload.a)?.id ?? String(f.payload.a)}</strong>
+                      <strong>{partyName(f, 'a')}</strong>
                       and
-                      <strong>{entityRef(f.payload.b)?.id ?? String(f.payload.b)}</strong>
+                      <strong>{partyName(f, 'b')}</strong>
                     </p>
                     <div class="finding-actions">
                       <button type="button" disabled={busy === f.id} onclick={() => openMerge(f)}>
@@ -458,26 +479,62 @@
                       </button>
                     </div>
                   {:else if kind === 'alias_collision'}
+                    {@const aName = partyName(f, 'a')}
+                    {@const bName = partyName(f, 'b')}
+                    {@const aIsName = f.payload.a_is_name === true}
+                    {@const bIsName = f.payload.b_is_name === true}
                     <p class="finding-detail">
-                      <strong>{String(f.payload.alias)}</strong> is claimed by both
-                      <strong>{entityRef(f.payload.a)?.id ?? String(f.payload.a)}</strong>
-                      and
-                      <strong>{entityRef(f.payload.b)?.id ?? String(f.payload.b)}</strong>
+                      <strong>{String(f.payload.alias)}</strong> is claimed by two entities:
                     </p>
+                    <div class="conflict-parties">
+                      <div class="party">
+                        <span class="party-name">{aName}</span>
+                        <span class="party-kind">{entityRef(f.payload.a)?.kind ?? ''}</span>
+                        <span class="party-tag">{aIsName ? 'as name' : 'as alias'}</span>
+                      </div>
+                      <div class="party">
+                        <span class="party-name">{bName}</span>
+                        <span class="party-kind">{entityRef(f.payload.b)?.kind ?? ''}</span>
+                        <span class="party-tag">{bIsName ? 'as name' : 'as alias'}</span>
+                      </div>
+                    </div>
                     <div class="finding-actions">
+                      {#if !bIsName}
+                        <button
+                          type="button"
+                          disabled={busy === f.id}
+                          onclick={() =>
+                            resolveCollision(f, String(f.payload.a), String(f.payload.b))}
+                        >
+                          Keep on {aName}
+                        </button>
+                      {/if}
+                      {#if !aIsName}
+                        <button
+                          type="button"
+                          disabled={busy === f.id}
+                          onclick={() =>
+                            resolveCollision(f, String(f.payload.b), String(f.payload.a))}
+                        >
+                          Keep on {bName}
+                        </button>
+                      {/if}
+                      <button type="button" disabled={busy === f.id} onclick={() => openMerge(f)}>
+                        Merge…
+                      </button>
                       <button
                         type="button"
                         disabled={busy === f.id}
                         onclick={() => void openEntityRef(f.payload.a)}
                       >
-                        Open A
+                        Open {aName}
                       </button>
                       <button
                         type="button"
                         disabled={busy === f.id}
                         onclick={() => void openEntityRef(f.payload.b)}
                       >
-                        Open B
+                        Open {bName}
                       </button>
                       <button
                         type="button"
@@ -485,7 +542,7 @@
                         disabled={busy === f.id}
                         onclick={() => resolveFinding(f.id)}
                       >
-                        Mark resolved
+                        Dismiss
                       </button>
                     </div>
                   {:else}
@@ -694,6 +751,33 @@
     color: var(--fg-2);
     font-size: 0.85rem;
     margin: 0 0 10px;
+  }
+  .conflict-parties {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .party {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .party-name {
+    color: var(--fg-1);
+    font-weight: 600;
+  }
+  .party-kind {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: var(--fg-3);
+  }
+  .party-tag {
+    font-size: 0.7rem;
+    color: var(--fg-3);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1px 8px;
   }
   .muted {
     color: var(--fg-3);
