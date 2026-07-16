@@ -152,8 +152,8 @@ describe('MaintenanceView', () => {
     expect(screen.getByText('3 new findings · 5 open')).toBeTruthy();
   });
 
-  // 8. broken_wikilink finding has "Open entity" and "Mark resolved"
-  it('broken_wikilink finding opens the entity and can be marked resolved', async () => {
+  // 8. broken_wikilink finding has "Open entity" and "Dismiss"
+  it('broken_wikilink finding opens the entity and can be dismissed', async () => {
     const onOpenEntity = vi.fn();
     m.getLintFindings.mockResolvedValue([
       finding({
@@ -170,24 +170,26 @@ describe('MaintenanceView', () => {
     expect(onOpenEntity).toHaveBeenCalledWith('mira', 'npc');
 
     m.getLintFindings.mockResolvedValue([]);
-    await fireEvent.click(screen.getByRole('button', { name: 'Mark resolved' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     await waitFor(() =>
       expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:1'),
     );
   });
 
-  // 9. stale_article finding has "Compile" then resolves
-  it('stale_article finding compiles the entity then resolves the finding', async () => {
+  // 9. stale_article finding names the entity, has "Compile" then resolves
+  it('stale_article finding names the entity, compiles it, then resolves', async () => {
     m.getLintFindings.mockResolvedValue([
       finding({
         id: 'lint_finding:2',
         kind: 'stale_article',
-        payload: { entity: 'npc:mira', reason: 'stale or uncompiled' },
+        payload: { entity: 'npc:mira', entity_name: 'Mira', reason: 'stale or uncompiled' },
       }),
     ]);
     render(MaintenanceView, { props: {} });
     await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
-    await screen.findByText('stale or uncompiled');
+    // The card names which article is stale, not just the bare reason.
+    await screen.findByText('Mira');
+    expect(screen.getByText(/stale or uncompiled/)).toBeInTheDocument();
 
     m.getLintFindings.mockResolvedValue([]);
     await fireEvent.click(screen.getByRole('button', { name: 'Compile' }));

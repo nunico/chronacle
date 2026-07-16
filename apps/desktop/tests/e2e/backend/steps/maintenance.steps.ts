@@ -214,7 +214,7 @@ Then(
 );
 
 When('the GM marks the finding resolved', async ({ page }) => {
-  await page.getByRole('button', { name: 'Mark resolved' }).first().click();
+  await page.getByRole('button', { name: 'Dismiss' }).first().click();
 });
 
 Then('the resolve command is sent for that finding', async ({ page }) => {
