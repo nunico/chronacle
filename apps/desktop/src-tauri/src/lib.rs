@@ -554,6 +554,7 @@ pub async fn run() {
             commands::run_lint,
             commands::get_lint_findings,
             commands::resolve_lint_finding,
+            commands::resolve_alias_collision,
             commands::get_vault_path,
             commands::set_vault_path,
             commands::vault_sync_now,
