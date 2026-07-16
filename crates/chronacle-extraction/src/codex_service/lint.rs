@@ -614,8 +614,10 @@ async fn unresolved_count<C: Connection>(db: &surrealdb::Surreal<C>) -> Result<u
 // ── List / resolve ───────────────────────────────────────────────────────────
 
 /// Display identity for a finding party, looked up fresh at read time.
+#[derive(Clone)]
 struct Identity {
     name: String,
+    // consumed by resolve_alias_collision (Task 2) — not read here yet
     #[allow(dead_code)]
     aliases: Vec<String>,
     summary: Option<String>,
@@ -628,9 +630,10 @@ async fn lookup_identity<C: Connection>(
     db: &surrealdb::Surreal<C>,
     full_id: &str,
 ) -> Result<Option<Identity>, String> {
-    let Some((table, id)) = full_id.split_once(':') else {
+    let Some((table, id)) = split_full_id(full_id) else {
         return Ok(None);
     };
+    let id = strip_backticks(id);
     #[derive(Deserialize)]
     struct Row {
         name: String,
@@ -645,7 +648,7 @@ async fn lookup_identity<C: Connection>(
              WHERE vault_deleted != true",
         )
         .bind(("tb", table.to_owned()))
-        .bind(("id", id.to_owned()))
+        .bind(("id", id))
         .await
         .map_err(|e| format!("Failed to look up entity: {e}"))?;
     let rows: Vec<Row> = resp
@@ -660,10 +663,13 @@ async fn lookup_identity<C: Connection>(
 
 /// Attach human-readable names (and, for alias collisions, a `*_is_name` flag)
 /// to a finding so the Maintenance UI can render conflicts without exposing raw
-/// record ids. Other kinds pass through untouched.
+/// record ids. Other kinds pass through untouched. `cache` memoizes lookups by
+/// full id across the whole `list_lint_findings` call so a repeated party
+/// (e.g. one entity appearing in several findings) is fetched only once.
 async fn enrich_finding_display<C: Connection>(
     db: &surrealdb::Surreal<C>,
     finding: &mut LintFinding,
+    cache: &mut HashMap<String, Option<Identity>>,
 ) -> Result<(), String> {
     if finding.kind != "alias_collision" && finding.kind != "duplicate_entity" {
         return Ok(());
@@ -680,7 +686,14 @@ async fn enrich_finding_display<C: Connection>(
         let Some(full_id) = obj.get(side).and_then(|v| v.as_str()).map(str::to_owned) else {
             continue;
         };
-        if let Some(identity) = lookup_identity(db, &full_id).await? {
+        let identity = if let Some(cached) = cache.get(&full_id) {
+            cached.clone()
+        } else {
+            let looked_up = lookup_identity(db, &full_id).await?;
+            cache.insert(full_id.clone(), looked_up.clone());
+            looked_up
+        };
+        if let Some(identity) = identity {
             obj.insert(format!("{side}_name"), json!(identity.name.clone()));
             obj.insert(format!("{side}_summary"), json!(identity.summary));
             // Only alias collisions carry a normalized key to compare against.
@@ -723,8 +736,9 @@ pub async fn list_lint_findings<C: Connection>(
             created_at: r.created_at.to_string(),
         })
         .collect();
+    let mut identity_cache: HashMap<String, Option<Identity>> = HashMap::new();
     for finding in &mut findings {
-        enrich_finding_display(db, finding).await?;
+        enrich_finding_display(db, finding, &mut identity_cache).await?;
     }
     Ok(findings)
 }

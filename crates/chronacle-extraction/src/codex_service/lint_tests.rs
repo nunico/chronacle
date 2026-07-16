@@ -628,3 +628,49 @@ async fn list_findings_enriches_alias_collision_with_names_and_flags() {
         Some(b_is_name)
     );
 }
+
+/// `duplicate_entity` findings get real names too, but never a `*_is_name`
+/// flag — that only makes sense for `alias_collision`, which carries a
+/// normalized `alias` key to compare against; `duplicate_entity` doesn't.
+#[tokio::test]
+async fn list_findings_enriches_duplicate_entity_with_names_but_no_is_name_flag() {
+    use crate::codex_service::list_lint_findings;
+    let db = setup_db().await;
+    seed_campaign(&db).await;
+    db.query(
+        "CREATE npc:`k1` SET name='Korim', summary='S', notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         CREATE npc:`k2` SET name='korim', summary='S', notes=NULL, \
+             created_at=time::now(), updated_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`k1` SET created_at=time::now();
+         RELATE collection:`own1`->in_collection->npc:`k2` SET created_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+    run_lint_campaign(&db, "camp1").await.unwrap();
+
+    let findings = list_lint_findings(&db).await.unwrap();
+    let f = findings
+        .iter()
+        .find(|f| f.kind == "duplicate_entity")
+        .expect("duplicate finding present");
+
+    let a_id = f.payload.get("a").and_then(|v| v.as_str()).unwrap();
+    let (a_name, b_name) = if a_id == "npc:k1" {
+        ("Korim", "korim")
+    } else {
+        ("korim", "Korim")
+    };
+    assert_eq!(
+        f.payload.get("a_name").and_then(|v| v.as_str()),
+        Some(a_name)
+    );
+    assert_eq!(
+        f.payload.get("b_name").and_then(|v| v.as_str()),
+        Some(b_name)
+    );
+    assert!(f.payload.get("a_is_name").is_none());
+    assert!(f.payload.get("b_is_name").is_none());
+}
