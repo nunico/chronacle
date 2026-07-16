@@ -746,6 +746,11 @@ pub async fn list_lint_findings<C: Connection>(
 /// it is that entity's primary name this errors and mutates nothing (a name
 /// cannot be removed — the GM must merge or rename instead). `keep_id` is
 /// validated to be the finding's other party but needs no mutation.
+///
+/// Not atomic: `remove_alias` and `resolve_lint_finding` are two separate
+/// writes, so a transient DB failure between them could strip the alias while
+/// leaving the finding open. Acceptable on the single-user embedded DB — the
+/// GM can just Dismiss a stuck finding.
 pub async fn resolve_alias_collision<C: Connection>(
     db: &surrealdb::Surreal<C>,
     finding_id: &str,
