@@ -861,6 +861,19 @@ export async function resolveLintFinding(id: string): Promise<void> {
   return invoke('resolve_lint_finding', { id });
 }
 
+/**
+ * Resolve a naming conflict: `keepId` retains the disputed term, `dropId` has
+ * it removed as an alias. Throws if `dropId` holds the term as its primary
+ * name (a name cannot be stripped).
+ */
+export async function resolveAliasCollision(
+  findingId: string,
+  keepId: string,
+  dropId: string,
+): Promise<void> {
+  return invoke('resolve_alias_collision', { findingId, keepId, dropId });
+}
+
 /** Delete one `relates_to` edge by its full record id (Maintenance resolve action). */
 export async function deleteRelation(edgeId: string): Promise<void> {
   return invoke('delete_relation', { edgeId });
