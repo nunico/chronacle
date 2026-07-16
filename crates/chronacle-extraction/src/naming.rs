@@ -27,10 +27,17 @@ pub enum MatchOutcome<'a> {
     Ambiguous(Vec<Candidate>),
 }
 
-/// Provisional. Tuned against real campaign data in Task 10 and recorded in
-/// ADR-012 with the evidence. Prefer a MISSED match (degrades to a suggestion)
-/// over a FALSE one (silently corrupts the graph).
-pub const DEFAULT_THRESHOLD: f64 = 0.72;
+/// Tuned against real campaign data (ADR-012). On a real 21-entity campaign,
+/// every genuine duplicate was an article/plural variant that normalizes to an
+/// *identical* key (caught by stage-1 grouping, independent of this threshold),
+/// while the fuzzy 0.85–0.92 band was entirely family/member false positives
+/// ("The Quassars" vs "Johar Quassar" = 0.909 — a family and a person in it,
+/// which lexical similarity cannot distinguish from a real variant). So the
+/// threshold is deliberately HIGH: fuzzy auto-resolve/auto-merge fire only on
+/// near-exact matches; the 0.72–0.90 band becomes a reviewable "did you mean?"
+/// suggestion (candidates use `DEFAULT_THRESHOLD * 0.8`). Prefer a MISSED match
+/// (degrades to a suggestion) over a FALSE one (silently corrupts the graph).
+pub const DEFAULT_THRESHOLD: f64 = 0.90;
 
 /// Case-fold, strip a leading "the", drop possessives, singularize a trailing
 /// plural, collapse punctuation and whitespace. Never used for storage — only
@@ -273,7 +280,7 @@ mod tests {
         let legion = normalize("The Legion");
         let rest = normalize("The Legionnaire's Rest");
         assert!(
-            similarity(&legion, &rest) < 0.72,
+            similarity(&legion, &rest) < DEFAULT_THRESHOLD,
             "distinct entities must not match"
         );
     }
