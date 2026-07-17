@@ -767,7 +767,8 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .compiling-status .spinner {
-      animation-duration: 2s;
+      animation-duration: 2s !important;
+      animation-iteration-count: infinite !important;
     }
   }
   .proposal-actions button.btn-ghost,
