@@ -2,8 +2,9 @@
 
 **Date:** 2026-07-17
 **Status:** Approved (design)
-**Area:** `apps/desktop` frontend (`WikiText`, `EntityManager`, `MaintenanceView`),
-`chronacle-extraction` wikilink/lint services, Tauri command layer.
+**Area:** `apps/desktop` frontend (`WikiText`, `EntityManager`, `EntityGraph`,
+`MaintenanceView`), `chronacle-extraction` wikilink/lint services, Tauri command
+layer.
 
 ## Problem
 
@@ -30,6 +31,8 @@ A link can therefore be backend-valid but still look unresolved in the article U
 
 - Let a GM click an unresolved wikilink in an article or notes preview and create
   the missing article/entity with the link text prefilled as the name.
+- Show unresolved wikilinks in the relationship graph as distinct missing-link
+  nodes that launch the same create-article flow when clicked.
 - When a suggestion exists, offer both valid resolutions: accept the suggestion or
   create a new article anyway.
 - Update Maintenance so missing-article findings no longer read as errors.
@@ -73,7 +76,8 @@ findings. Existing idempotence and deduplication rules stay in place.
 
 ### Shared create-from-wikilink flow
 
-Both article clicks and Maintenance use the same user flow:
+Article clicks, relationship-graph missing nodes, and Maintenance use the same
+user flow:
 
 1. User activates an unresolved wikilink.
 2. Chronacle opens a compact "Create article" chooser.
@@ -153,6 +157,52 @@ claim the same frontend key, do not pick either for article rendering. Leave the
 link unresolved so the GM can resolve the underlying alias collision in
 Maintenance.
 
+### Relationship graph rendering
+
+The relationship graph should show unresolved wikilinks alongside resolved entity
+relationships. Missing targets are rendered as synthetic graph nodes, not normal
+entities:
+
+```ts
+type MissingWikiLinkNode = {
+  id: `missing_wikilink:${string}`;
+  kind: "missing_wikilink";
+  name: string;
+  missing: true;
+  source_id: string;
+  source_kind: string;
+};
+```
+
+Backend graph assembly for `getEntityGraph(id, kind, depth)` scans the same text
+surfaces that lint checks for broken wikilinks: entity `notes` and
+`codex_article`. For each wikilink that does not resolve through the normal
+resolver in the current graph scope, the graph payload includes:
+
+- one synthetic missing node keyed by normalized link text and source entity id;
+- one edge from the source entity to that missing node with
+  `rel_type = "unresolved"`;
+- no synthetic node when the link already resolves to an entity, alias, or
+  normalized name.
+
+`EntityGraph.svelte` renders missing nodes visibly distinct from entity nodes:
+
+- dashed outline or hollow marker;
+- muted warning/accent color that is not reused for an entity kind;
+- label preserves the original link text, e.g. `[[Moon Gate]]`;
+- no expand affordance, because there is no persisted entity to expand.
+
+Clicking a missing node calls the same pending-create path as clicking the
+unresolved link in `WikiText`:
+
+```ts
+onMissingLinkClick?.(node.name);
+```
+
+After the GM creates the target article, refreshing or reopening the graph should
+replace the synthetic missing node with the real entity node and a normal
+`mentioned` relationship, via the existing inbound wikilink sync path.
+
 ### Maintenance card behavior
 
 The `broken_wikilink` branch in `MaintenanceView.svelte` is redesigned.
@@ -204,8 +254,8 @@ the existing inbound wikilink sync path, so prior forward references can become
 - Alias suggestion confirmation keeps existing behavior: if
   `confirmAliasSuggestion` fails because the alias now collides, show the error
   and keep the finding unresolved.
-- If a Maintenance finding references a deleted source entity, disable `Open
-source` and still allow `Create article` and `Dismiss`.
+- If a Maintenance finding references a deleted source entity, disable
+  `Open source` and still allow `Create article` and `Dismiss`.
 - If a missing link is clicked while another create/edit form is dirty, prompt
   before replacing the form state. The first implementation can use the existing
   form's cancel/close behavior if no dirty-state tracking exists, but it must not
@@ -228,6 +278,9 @@ source` and still allow `Create article` and `Dismiss`.
   `Create article`, not `Use suggestion`.
 - Creating from a Maintenance finding resolves the finding only after
   `createEntity` succeeds.
+- `EntityGraph` renders unresolved wikilinks as visually distinct missing nodes.
+- Clicking a missing graph node opens the same create chooser/form with the node
+  name prefilled.
 
 ### Backend tests
 
@@ -235,6 +288,10 @@ source` and still allow `Create article` and `Dismiss`.
   previous forward references become `mentioned` relations.
 - Existing lint behavior still records a no-candidate `broken_wikilink` payload
   with an empty `candidates` array.
+- `getEntityGraph` includes a synthetic missing node and `unresolved` edge for an
+  unresolved wikilink in `notes` or `codex_article`.
+- `getEntityGraph` does not include a synthetic missing node when the link
+  resolves through an entity name, alias, or normalized name.
 
 ### Acceptance Scenarios
 
@@ -259,4 +316,12 @@ Scenario: Treat no-candidate wikilinks as missing articles
   When the GM opens the finding
   Then the finding is labeled "Missing article"
   And the primary action is "Create article"
+
+Scenario: Create a missing article from the relationship graph
+  Given an NPC article contains the unresolved link "[[Moon Gate]]"
+  When the GM opens that NPC's relationship graph
+  Then the graph shows a distinct missing-link node named "[[Moon Gate]]"
+  When the GM clicks the missing-link node
+  And creates a Location named "Moon Gate"
+  Then the graph shows "Moon Gate" as a normal Location node
 ```
