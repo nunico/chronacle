@@ -418,29 +418,30 @@
                     <p class="finding-detail">
                       <strong>{entityName(f)}</strong> — {f.payload.reason}
                     </p>
-                    <div class="finding-actions">
-                      <button
-                        type="button"
-                        disabled={busy === f.id}
-                        aria-busy={compilingId === f.id}
-                        onclick={() => compileAndResolve(f)}
-                      >
-                        {#if compilingId === f.id}
-                          <span class="spinner" aria-hidden="true"></span>
-                          Compiling…
-                        {:else}
+                    {#if compilingId === f.id}
+                      <div class="compiling-status" role="status" aria-live="polite">
+                        <span class="spinner" aria-hidden="true"></span>
+                        Compiling…
+                      </div>
+                    {:else}
+                      <div class="finding-actions">
+                        <button
+                          type="button"
+                          disabled={busy === f.id}
+                          onclick={() => compileAndResolve(f)}
+                        >
                           Compile
-                        {/if}
-                      </button>
-                      <button
-                        type="button"
-                        class="btn-ghost"
-                        disabled={busy === f.id}
-                        onclick={() => resolveFinding(f.id)}
-                      >
-                        Dismiss
-                      </button>
-                    </div>
+                        </button>
+                        <button
+                          type="button"
+                          class="btn-ghost"
+                          disabled={busy === f.id}
+                          onclick={() => resolveFinding(f.id)}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    {/if}
                   {:else if kind === 'scope_violation'}
                     <p class="finding-detail">
                       {String(f.payload.from)} → {String(f.payload.to)}
@@ -728,6 +729,14 @@
     display: flex;
     gap: 8px;
   }
+  .compiling-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 33px;
+    color: var(--fg-2);
+    font-size: 0.85rem;
+  }
   .proposal-actions button,
   .finding-actions button {
     display: inline-flex;
@@ -741,14 +750,14 @@
     cursor: pointer;
     font-size: 0.85rem;
   }
-  /* Indeterminate "working" ring, matching the ExtractionCard spinner but
-     tuned for contrast on the violet primary button (dark-on-violet). */
-  .finding-actions .spinner {
+  .compiling-status .spinner {
+    display: inline-block;
+    flex: 0 0 auto;
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    border: 2px solid rgba(11, 13, 23, 0.3);
-    border-top-color: var(--bg-abyss);
+    border: 2px solid var(--line);
+    border-top-color: var(--violet-300);
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin {
@@ -757,7 +766,7 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .finding-actions .spinner {
+    .compiling-status .spinner {
       animation-duration: 2s;
     }
   }
