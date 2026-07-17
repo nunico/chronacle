@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/svelte';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import MaintenanceView from './MaintenanceView.svelte';
 import maintenanceSource from './MaintenanceView.svelte?raw';
 import type { CodexProposal, LintFinding } from '../lib/commands';
@@ -31,6 +31,21 @@ vi.mock('../lib/commands', () => ({
 
 import * as commands from '../lib/commands';
 const m = vi.mocked(commands);
+
+beforeAll(() => {
+  if (!Element.prototype.animate) {
+    Object.defineProperty(Element.prototype, 'animate', {
+      configurable: true,
+      value: vi.fn(
+        () =>
+          ({
+            finished: Promise.resolve(),
+            cancel: vi.fn(),
+          }) as unknown as Animation,
+      ),
+    });
+  }
+});
 
 function proposal(overrides: Partial<CodexProposal> = {}): CodexProposal {
   return {
@@ -233,6 +248,60 @@ describe('MaintenanceView', () => {
     expect(maintenanceSource).toMatch(/\.compiling-status\s*\{[^}]*display:\s*inline-flex/);
     expect(maintenanceSource).toMatch(/animation-duration:\s*2s\s*!important/);
     expect(maintenanceSource).toMatch(/animation-iteration-count:\s*infinite\s*!important/);
+  });
+
+  it('animates resolved rows out even when reduced motion is enabled', () => {
+    expect(maintenanceSource).toContain('out:cardOutro');
+    expect(maintenanceSource).toContain('fade(');
+    expect(maintenanceSource).toContain('slide(');
+    expect(maintenanceSource).toMatch(
+      /\.motion-list-card\s*\{[^}]*animation-duration:\s*280ms\s*!important/,
+    );
+    expect(maintenanceSource).toMatch(
+      /\.motion-list-card\s*\{[^}]*animation-iteration-count:\s*1\s*!important/,
+    );
+  });
+
+  it('keeps the findings list visible while refreshing after a resolved row', async () => {
+    let finishRefresh: (value: LintFinding[]) => void = () => {};
+    m.getLintFindings
+      .mockResolvedValueOnce([
+        finding({
+          id: 'lint_finding:1',
+          kind: 'broken_wikilink',
+          payload: { entity: 'npc:mira', link_text: 'Ghostfell' },
+        }),
+        finding({
+          id: 'lint_finding:2',
+          kind: 'broken_wikilink',
+          payload: { entity: 'npc:mira', link_text: 'Skybridge' },
+        }),
+      ])
+      .mockReturnValueOnce(
+        new Promise<LintFinding[]>((resolve) => {
+          finishRefresh = resolve;
+        }),
+      );
+    const onCountsChanged = vi.fn();
+    render(MaintenanceView, { props: { onCountsChanged } });
+    await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
+    await screen.findByText('Ghostfell');
+
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Dismiss' })[0]);
+    await waitFor(() => expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:1'));
+
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
+    expect(screen.getByText('Ghostfell')).toBeInTheDocument();
+    expect(screen.getByText('Skybridge')).toBeInTheDocument();
+
+    finishRefresh([
+      finding({
+        id: 'lint_finding:2',
+        kind: 'broken_wikilink',
+        payload: { entity: 'npc:mira', link_text: 'Skybridge' },
+      }),
+    ]);
+    await waitFor(() => expect(onCountsChanged).toHaveBeenCalled());
   });
 
   // 10. scope_violation finding has "Delete edge" then resolves
