@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
+  import { fade, slide, type TransitionConfig } from 'svelte/transition';
   import {
     getProposals,
     acceptProposal,
@@ -57,6 +58,18 @@
     alias_collision: 'Naming conflict',
   };
 
+  const CARD_OUTRO_MS = 280;
+
+  function cardOutro(node: Element): TransitionConfig {
+    const faded = fade(node, { duration: CARD_OUTRO_MS });
+    const slid = slide(node, { duration: CARD_OUTRO_MS });
+
+    return {
+      duration: CARD_OUTRO_MS,
+      css: (t, u) => `${slid.css?.(t, u) ?? ''}${faded.css?.(t, u) ?? ''}`,
+    };
+  }
+
   const findingsByKind = $derived.by(() => {
     const groups = new SvelteMap<string, LintFinding[]>();
     for (const f of findings) {
@@ -84,8 +97,8 @@
     return Array.isArray(c) ? (c as AliasCandidate[]) : [];
   }
 
-  async function refresh() {
-    loading = true;
+  async function refresh({ showLoading = false }: { showLoading?: boolean } = {}) {
+    if (showLoading) loading = true;
     error = null;
     try {
       const [p, f] = await Promise.all([getProposals('pending'), getLintFindings()]);
@@ -245,7 +258,7 @@
     }
   }
 
-  onMount(() => void refresh());
+  onMount(() => void refresh({ showLoading: true }));
 </script>
 
 <div class="maintenance">
@@ -294,7 +307,7 @@
     {:else}
       <ul class="proposal-list">
         {#each proposals as p (p.id)}
-          <li class="proposal-card">
+          <li class="proposal-card motion-list-card" out:cardOutro>
             <div class="proposal-head">
               <span class="chip-kind">{KIND_LABELS[p.kind] ?? p.kind}</span>
               <span class="target-name">{p.target_name ?? p.payload.name ?? '(new)'}</span>
@@ -347,7 +360,7 @@
               </summary>
               <ul class="finding-list">
                 {#each items as f (f.id)}
-                  <li class="finding-card">
+                  <li class="finding-card motion-list-card" out:cardOutro>
                     <p class="finding-detail">
                       <strong>{String(f.payload.alias)}</strong> was auto-linked to
                       <strong>{entityRef(f.payload.entity)?.id ?? String(f.payload.entity)}</strong>
@@ -377,7 +390,7 @@
             <h3 class="finding-kind-heading">{FINDING_LABELS[kind] ?? kind}</h3>
             <ul class="finding-list">
               {#each items as f (f.id)}
-                <li class="finding-card">
+                <li class="finding-card motion-list-card" out:cardOutro>
                   {#if kind === 'broken_wikilink'}
                     <p class="finding-detail">
                       Broken link to <strong>{f.payload.link_text}</strong>
@@ -675,6 +688,9 @@
     border-radius: var(--r-md);
     padding: 12px 14px;
   }
+  .motion-list-card {
+    will-change: opacity, height, margin, padding;
+  }
   .proposal-head {
     display: flex;
     align-items: center;
@@ -766,6 +782,10 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
+    .motion-list-card {
+      animation-duration: 280ms !important;
+      animation-iteration-count: 1 !important;
+    }
     .compiling-status .spinner {
       animation-duration: 2s !important;
       animation-iteration-count: infinite !important;
