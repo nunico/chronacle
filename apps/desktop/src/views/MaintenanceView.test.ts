@@ -171,9 +171,7 @@ describe('MaintenanceView', () => {
 
     m.getLintFindings.mockResolvedValue([]);
     await fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
-    await waitFor(() =>
-      expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:1'),
-    );
+    await waitFor(() => expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:1'));
   });
 
   // 9. stale_article finding names the entity, has "Compile" then resolves
@@ -194,9 +192,7 @@ describe('MaintenanceView', () => {
     m.getLintFindings.mockResolvedValue([]);
     await fireEvent.click(screen.getByRole('button', { name: 'Compile' }));
     await waitFor(() => expect(m.compileEntity).toHaveBeenCalledWith('npc', 'mira'));
-    await waitFor(() =>
-      expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:2'),
-    );
+    await waitFor(() => expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:2'));
   });
 
   // 9b. Compile shows a working indicator while the (slow) compile runs
@@ -219,17 +215,22 @@ describe('MaintenanceView', () => {
 
     await fireEvent.click(await screen.findByRole('button', { name: 'Compile' }));
 
-    // While the promise is pending, the button reports progress and is busy.
-    const compiling = await screen.findByRole('button', { name: /Compiling/ });
-    expect(compiling).toBeDisabled();
-    expect(compiling).toHaveAttribute('aria-busy', 'true');
+    // While the promise is pending, the action row is replaced by a styled status
+    // indicator instead of rendering the spinner inside a disabled WebKit button.
+    const compiling = await screen.findByRole('status');
+    expect(compiling).toHaveTextContent(/Compiling/);
+    expect(compiling.querySelector('.spinner')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Compile' })).not.toBeInTheDocument();
 
     // Let it finish so the finding resolves and the indicator clears.
     m.getLintFindings.mockResolvedValue([]);
     finishCompile(true);
-    await waitFor(() =>
-      expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:2'),
-    );
+    await waitFor(() => expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:2'));
+  });
+
+  it('styles the compiling status spinner outside the finding actions row', () => {
+    expect(maintenanceSource).toContain('.compiling-status .spinner');
+    expect(maintenanceSource).toMatch(/\.compiling-status\s*\{[^}]*display:\s*inline-flex/);
   });
 
   // 10. scope_violation finding has "Delete edge" then resolves
@@ -248,9 +249,7 @@ describe('MaintenanceView', () => {
     m.getLintFindings.mockResolvedValue([]);
     await fireEvent.click(screen.getByRole('button', { name: 'Delete edge' }));
     await waitFor(() => expect(m.deleteRelation).toHaveBeenCalledWith('relates_to:abc123'));
-    await waitFor(() =>
-      expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:3'),
-    );
+    await waitFor(() => expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:3'));
   });
 
   // 11. duplicate_entity finding has two "Open" actions (a and b)
@@ -304,7 +303,11 @@ describe('MaintenanceView', () => {
   // 13. broken_wikilink without candidates never shows "did you mean?"
   it('does not show "did you mean?" when the finding has no candidates', async () => {
     m.getLintFindings.mockResolvedValue([
-      finding({ id: 'lint6', kind: 'broken_wikilink', payload: { entity: 'npc:mira', link_text: 'Ghostfell' } }),
+      finding({
+        id: 'lint6',
+        kind: 'broken_wikilink',
+        payload: { entity: 'npc:mira', link_text: 'Ghostfell' },
+      }),
     ]);
     render(MaintenanceView, { props: {} });
     await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
@@ -320,7 +323,12 @@ describe('MaintenanceView', () => {
       finding({
         id: 'lint7',
         kind: 'auto_alias',
-        payload: { entity: 'faction:q', alias: 'The Quassars', similarity: 0.9, source: 'npc:mira' },
+        payload: {
+          entity: 'faction:q',
+          alias: 'The Quassars',
+          similarity: 0.9,
+          source: 'npc:mira',
+        },
       }),
     ]);
     render(MaintenanceView, { props: {} });
@@ -483,9 +491,7 @@ describe('MaintenanceView naming-conflict card', () => {
 
   it('hides both Keep buttons when a party is deleted (no enriched name)', async () => {
     // b_name absent → entity B was soft-deleted; enrichment couldn't resolve it.
-    m.getLintFindings.mockResolvedValue([
-      collision({ b_name: undefined, b_is_name: undefined }),
-    ]);
+    m.getLintFindings.mockResolvedValue([collision({ b_name: undefined, b_is_name: undefined })]);
     render(MaintenanceView, {});
     await fireEvent.click(await screen.findByRole('tab', { name: /Findings/ }));
     await screen.findByText('Merchant Consortium');
