@@ -231,6 +231,8 @@ describe('MaintenanceView', () => {
   it('styles the compiling status spinner outside the finding actions row', () => {
     expect(maintenanceSource).toContain('.compiling-status .spinner');
     expect(maintenanceSource).toMatch(/\.compiling-status\s*\{[^}]*display:\s*inline-flex/);
+    expect(maintenanceSource).toMatch(/animation-duration:\s*2s\s*!important/);
+    expect(maintenanceSource).toMatch(/animation-iteration-count:\s*infinite\s*!important/);
   });
 
   // 10. scope_violation finding has "Delete edge" then resolves
