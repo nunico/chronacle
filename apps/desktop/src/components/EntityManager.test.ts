@@ -316,6 +316,25 @@ describe('EntityManager', () => {
     expect(screen.queryByDisplayValue(/Mira runs the/)).toBeNull();
   });
 
+  it('reports unresolved wikilink clicks from the codex article', async () => {
+    const onMissingLinkClick = vi.fn();
+    const node: GraphNode = {
+      ...mockNpc(),
+      codex_article: 'Mira knows the [[Moon Gate]].',
+      codex_stale: false,
+    };
+    vi.mocked(commands.getEntities).mockResolvedValue([node]);
+    render(EntityManager, {
+      props: { campaignId: 'camp1', kind: 'npc', onMissingLinkClick },
+    });
+    await waitFor(() => expect(screen.getByText('Torvin')).toBeTruthy());
+    await fireEvent.click(screen.getByText('Torvin'));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Create article for Moon Gate' }));
+
+    expect(onMissingLinkClick).toHaveBeenCalledWith('Moon Gate');
+  });
+
   it('recompile button calls compileEntity with kind and id', async () => {
     const node: GraphNode = {
       ...mockNpc(),
