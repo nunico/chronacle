@@ -41,6 +41,70 @@ fn svc_for(
     ))
 }
 
+async fn subscribe_ready_for_dir(
+    root: &std::path::Path,
+    watched_dir: &std::path::Path,
+) -> tokio::sync::mpsc::Receiver<chronacle_core::VaultEvent> {
+    let watcher = chronacle_providers::vault_watcher::NotifyWatcher::with_debounce(
+        root,
+        std::time::Duration::from_millis(100),
+    );
+    let mut rx = chronacle_core::VaultWatcher::subscribe(&watcher).await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let probe = watched_dir.join(".chronacle-watch-ready.md");
+    let probe_key = probe
+        .strip_prefix(root)
+        .unwrap()
+        .to_string_lossy()
+        .replace('\\', "/");
+
+    std::fs::write(&probe, "probe").unwrap();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let ev = tokio::time::timeout(remaining, rx.recv())
+            .await
+            .expect("watcher upsert probe within 5s")
+            .expect("open channel");
+        if ev == chronacle_core::VaultEvent::Upsert(probe_key.clone()) {
+            break;
+        }
+    }
+
+    std::fs::remove_file(&probe).unwrap();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let ev = tokio::time::timeout(remaining, rx.recv())
+            .await
+            .expect("watcher remove probe within 5s")
+            .expect("open channel");
+        if ev == chronacle_core::VaultEvent::Remove(probe_key.clone()) {
+            break;
+        }
+    }
+
+    rx
+}
+
+async fn wait_for_vault_event(
+    rx: &mut tokio::sync::mpsc::Receiver<chronacle_core::VaultEvent>,
+    expected: chronacle_core::VaultEvent,
+    message: &str,
+) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let ev = tokio::time::timeout(remaining, rx.recv())
+            .await
+            .unwrap_or_else(|_| panic!("{message}"))
+            .expect("open channel");
+        if ev == expected {
+            break;
+        }
+    }
+}
+
 #[tokio::test]
 async fn switching_to_a_fresh_dir_after_clearing_bases_exports_cleanly() {
     let db = db().await;
@@ -427,16 +491,9 @@ async fn a_vault_edit_flows_into_the_db_via_the_watcher() {
     let svc = svc_for(&db, dir.path());
     svc.reconcile().await.expect("export");
 
-    let watcher = chronacle_providers::vault_watcher::NotifyWatcher::with_debounce(
-        dir.path(),
-        std::time::Duration::from_millis(100),
-    );
-    let mut rx = chronacle_core::VaultWatcher::subscribe(&watcher).await;
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-    let path = dir
-        .path()
-        .join("campaigns/sov/entities/npc")
+    let entity_dir = dir.path().join("campaigns/sov/entities/npc");
+    let mut rx = subscribe_ready_for_dir(dir.path(), &entity_dir).await;
+    let path = entity_dir
         .read_dir()
         .unwrap()
         .next()
@@ -495,12 +552,7 @@ async fn our_own_sidecar_cleanup_is_not_mistaken_for_the_gms_resolution_signal()
         .unwrap()
         .path();
 
-    let watcher = chronacle_providers::vault_watcher::NotifyWatcher::with_debounce(
-        dir.path(),
-        std::time::Duration::from_millis(100),
-    );
-    let mut rx = chronacle_core::VaultWatcher::subscribe(&watcher).await;
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let mut rx = subscribe_ready_for_dir(dir.path(), path.parent().unwrap()).await;
 
     // Diverge both sides to freeze a conflict; the DB render lands in the
     // sidecar.
@@ -576,12 +628,7 @@ async fn a_gms_sidecar_deletion_is_not_masked_and_still_resolves_the_conflict() 
         .unwrap()
         .path();
 
-    let watcher = chronacle_providers::vault_watcher::NotifyWatcher::with_debounce(
-        dir.path(),
-        std::time::Duration::from_millis(100),
-    );
-    let mut rx = chronacle_core::VaultWatcher::subscribe(&watcher).await;
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let mut rx = subscribe_ready_for_dir(dir.path(), path.parent().unwrap()).await;
 
     // Diverge both sides to freeze a conflict (Chronacle writes the sidecar —
     // its own write, not under test here).
@@ -599,21 +646,22 @@ async fn a_gms_sidecar_deletion_is_not_masked_and_still_resolves_the_conflict() 
         path.file_stem().unwrap().to_str().unwrap()
     ));
     let sidecar_key = "campaigns/sov/entities/npc/seraphina.conflict.md";
+    wait_for_vault_event(
+        &mut rx,
+        chronacle_core::VaultEvent::Upsert(sidecar_key.to_string()),
+        "a sidecar upsert event within 5s",
+    )
+    .await;
 
     // The GM resolves by deleting the sidecar themselves.
     std::fs::remove_file(&sidecar).unwrap();
 
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        let ev = tokio::time::timeout(remaining, rx.recv())
-            .await
-            .expect("a remove event for the sidecar within 5s")
-            .expect("open channel");
-        if ev == chronacle_core::VaultEvent::Remove(sidecar_key.to_string()) {
-            break;
-        }
-    }
+    wait_for_vault_event(
+        &mut rx,
+        chronacle_core::VaultEvent::Remove(sidecar_key.to_string()),
+        "a remove event for the sidecar within 5s",
+    )
+    .await;
 
     // Mimic the consumer loop: not our delete -> relevant -> reconcile.
     assert!(

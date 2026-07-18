@@ -6,8 +6,9 @@
 //! materialization happens in `reconcile()`. A dropped event degrades to
 //! "handled on the next reconcile", never to wrong data.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use chronacle_core::{VaultEvent, VaultWatcher};
@@ -56,6 +57,7 @@ impl NotifyWatcher {
 impl VaultWatcher for NotifyWatcher {
     async fn subscribe(&self) -> tokio::sync::mpsc::Receiver<VaultEvent> {
         let (tx, rx) = tokio::sync::mpsc::channel(256);
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<VaultEvent>();
         let (raw_tx, mut raw_rx) =
             tokio::sync::mpsc::unbounded_channel::<Result<notify::Event, notify::Error>>();
         // Canonicalize: on macOS the tmpdir root under `/var/...` is a symlink
@@ -69,6 +71,8 @@ impl VaultWatcher for NotifyWatcher {
             .unwrap_or_else(|_| self.root.clone());
         let debounce = self.debounce;
 
+        let native_event_tx = event_tx.clone();
+        let native_root = root.clone();
         tokio::spawn(async move {
             // The watcher must stay alive for the task's lifetime; notify's
             // callback runs on its own thread, and unbounded_send is sync-safe.
@@ -78,13 +82,13 @@ impl VaultWatcher for NotifyWatcher {
                 Ok(w) => w,
                 Err(e) => {
                     eprintln!("vault: watcher init failed: {e}");
-                    let _ = tx.send(VaultEvent::Rescan).await;
+                    let _ = native_event_tx.send(VaultEvent::Rescan);
                     return;
                 }
             };
-            if let Err(e) = watcher.watch(&root, RecursiveMode::Recursive) {
-                eprintln!("vault: watch of {} failed: {e}", root.display());
-                let _ = tx.send(VaultEvent::Rescan).await;
+            if let Err(e) = watcher.watch(&native_root, RecursiveMode::Recursive) {
+                eprintln!("vault: watch of {} failed: {e}", native_root.display());
+                let _ = native_event_tx.send(VaultEvent::Rescan);
                 return;
             }
 
@@ -94,11 +98,11 @@ impl VaultWatcher for NotifyWatcher {
                 let Some(first) = raw_rx.recv().await else {
                     break;
                 };
-                collect(&root, first, &mut pending);
+                collect(&native_root, first, &mut pending);
                 // …then absorb the burst until a quiet window elapses.
                 loop {
                     match tokio::time::timeout(debounce, raw_rx.recv()).await {
-                        Ok(Some(ev)) => collect(&root, ev, &mut pending),
+                        Ok(Some(ev)) => collect(&native_root, ev, &mut pending),
                         Ok(None) => return, // channel closed
                         Err(_elapsed) => break,
                     }
@@ -106,14 +110,97 @@ impl VaultWatcher for NotifyWatcher {
                 pending.sort_unstable_by(event_order);
                 pending.dedup();
                 for ev in pending.drain(..) {
-                    if tx.send(ev).await.is_err() {
+                    if native_event_tx.send(ev).is_err() {
                         return; // consumer dropped; stop watching
+                    }
+                }
+            }
+        });
+
+        let poll_event_tx = event_tx.clone();
+        let poll_root = root.clone();
+        tokio::spawn(async move {
+            let poll_interval = (debounce / 2).max(Duration::from_millis(50));
+            let mut known = scan_markdown_files(&poll_root);
+            loop {
+                tokio::time::sleep(poll_interval).await;
+                let current = scan_markdown_files(&poll_root);
+
+                let mut events = Vec::new();
+                for (key, meta) in &current {
+                    if known.get(key) != Some(meta) {
+                        events.push(VaultEvent::Upsert(key.clone()));
+                    }
+                }
+                let current_keys: HashSet<&String> = current.keys().collect();
+                for key in known.keys() {
+                    if !current_keys.contains(key) {
+                        events.push(VaultEvent::Remove(key.clone()));
+                    }
+                }
+
+                known = current;
+                events.sort_unstable_by(event_order);
+                events.dedup();
+                for ev in events {
+                    if poll_event_tx.send(ev).is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+
+        tokio::spawn(async move {
+            let mut pending: Vec<VaultEvent> = Vec::new();
+            while let Some(first) = event_rx.recv().await {
+                pending.push(first);
+                loop {
+                    match tokio::time::timeout(debounce, event_rx.recv()).await {
+                        Ok(Some(ev)) => pending.push(ev),
+                        Ok(None) => return,
+                        Err(_elapsed) => break,
+                    }
+                }
+                pending.sort_unstable_by(event_order);
+                pending.dedup();
+                for ev in pending.drain(..) {
+                    if tx.send(ev).await.is_err() {
+                        return;
                     }
                 }
             }
         });
         rx
     }
+}
+
+fn scan_markdown_files(root: &Path) -> HashMap<String, (SystemTime, u64)> {
+    fn visit(root: &Path, dir: &Path, out: &mut HashMap<String, (SystemTime, u64)>) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let metadata = match entry.metadata() {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+            if metadata.is_dir() {
+                visit(root, &path, out);
+            } else if metadata.is_file() && path.extension().is_some_and(|ext| ext == "md") {
+                let Some(key) = NotifyWatcher::key_of(root, &path) else {
+                    continue;
+                };
+                let mtime = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                out.insert(key, (mtime, metadata.len()));
+            }
+        }
+    }
+
+    let mut out = HashMap::new();
+    visit(root, root, &mut out);
+    out
 }
 
 /// Fold one raw notify result into the pending batch.

@@ -990,12 +990,13 @@ async fn forward_reference_wikilink_reconciled_on_new_entity_create() {
         "unresolved synthetic edge expected before Bram is created"
     );
 
-    let mut persisted_before = db
-        .query("SELECT rel_type FROM relates_to")
-        .await
-        .unwrap();
+    let mut persisted_before = db.query("SELECT rel_type FROM relates_to").await.unwrap();
     let rows_before: Vec<serde_json::Value> = persisted_before.take(0).unwrap();
-    assert_eq!(rows_before.len(), 0, "no persisted edge expected before Bram is created");
+    assert_eq!(
+        rows_before.len(),
+        0,
+        "no persisted edge expected before Bram is created"
+    );
 
     // Step 2: NOW create "Brother Bram" in the same campaign
     let bram = create(

@@ -39,7 +39,7 @@ Given(
 );
 
 When('the GM confirms the suggestion {string}', async ({ page }, _candidateName: string) => {
-  await page.getByRole('button', { name: /yes/i }).click();
+  await page.getByRole('button', { name: 'Use suggestion' }).click();
 });
 
 Then('the confirm-alternate-name command is sent for that entity and alias', async ({ page }) => {
