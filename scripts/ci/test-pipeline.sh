@@ -141,6 +141,6 @@ awk '
   END { exit !(seen && found) }
 ' .github/workflows/release.yml \
   || fail 'release packaging must enable rocksdb'
-rg -q 'cargo test -p Chronacle --features rocksdb --test rocksdb_persistence' \
+rg -q '^[[:space:]]*run: cargo test -p Chronacle --features rocksdb[[:space:]]*$' \
   .github/workflows/release.yml \
-  || fail 'release validation must exercise RocksDB persistence'
+  || fail 'release validation must exercise the RocksDB-enabled desktop suite'

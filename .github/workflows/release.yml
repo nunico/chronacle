@@ -79,8 +79,8 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
-      - name: Test RocksDB persistence
-        run: cargo test -p Chronacle --features rocksdb --test rocksdb_persistence
+      - name: Test RocksDB-enabled desktop suite
+        run: cargo test -p Chronacle --features rocksdb
 
       - name: Typecheck
         working-directory: apps/desktop
