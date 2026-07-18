@@ -14,6 +14,7 @@
     getEntityCounts,
     getSessions,
     getMaintenanceCounts,
+    resolveLintFinding,
     type Campaign,
     type Collection,
     type EmbeddingModelMismatch,
@@ -59,7 +60,15 @@
     Object.entries(ENTITY_KIND_MAP).map(([cat, kind]) => [kind, cat]),
   ) as Record<EntityKind, NoteCategoryId>;
 
+  type PendingCreate = {
+    kind: EntityKind;
+    name: string;
+    sourceFindingId?: string;
+  };
+
   let pendingOpen = $state<{ id: string; kind: EntityKind } | null>(null);
+  let pendingCreate = $state<PendingCreate | null>(null);
+  let createChooser = $state<{ name: string; sourceFindingId?: string } | null>(null);
   let graphFor = $state<{ id: string; kind: string } | null>(null);
 
   function openEntity(id: string, kind: EntityKind) {
@@ -67,6 +76,16 @@
     if (!cat) return;
     pendingOpen = { id, kind };
     view = { kind: 'notebook', category: cat };
+  }
+
+  function openCreateKindChooser(name: string, sourceFindingId?: string) {
+    createChooser = { name, sourceFindingId };
+  }
+
+  function createFromWikilink(name: string, kind: EntityKind, sourceFindingId?: string) {
+    pendingCreate = { kind, name, sourceFindingId };
+    view = { kind: 'notebook', category: KIND_TO_CATEGORY[kind] };
+    createChooser = null;
   }
 
   const ACTIVE_KEY = 'chronacle_active_campaign_id';
@@ -150,7 +169,7 @@
     // Don't fire while the GM is typing in a field.
     if (isEditableTarget(e.target)) return;
     // While a modal/picker owns the screen, let it have the keyboard.
-    if (switcherOpen || showPicker || graphFor) return;
+    if (switcherOpen || showPicker || graphFor || createChooser) return;
     // With the help overlay open, only `?` (toggle off) is live; Esc handled above.
     if (showHelp) {
       if (e.key === '?') {
@@ -630,6 +649,14 @@
         createNonce={entityCreateNonce}
         openId={pendingOpen && pendingOpen.kind === ENTITY_KIND_MAP[view.category] ? pendingOpen.id : null}
         onOpenIdConsumed={() => (pendingOpen = null)}
+        pendingCreate={pendingCreate && pendingCreate.kind === ENTITY_KIND_MAP[view.category]
+          ? pendingCreate
+          : null}
+        onPendingCreateConsumed={() => (pendingCreate = null)}
+        onPendingCreateSaved={async (findingId) => {
+          await resolveLintFinding(findingId);
+          await refreshMaintenanceCount();
+        }}
         onViewGraph={(n) => (graphFor = { id: n.id, kind: n.kind })}
         onOpenEntity={(id, kind) => openEntity(id, kind as EntityKind)}
       />
@@ -651,6 +678,47 @@
   </main>
 
   <Toast />
+
+  {#if createChooser}
+    <div class="picker-overlay">
+      <div
+        class="picker-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-link-title"
+        use:modalBehavior={{
+          onClose: () => {
+            createChooser = null;
+          },
+        }}
+      >
+        <h3 id="create-link-title">Create article for [[{createChooser.name}]]</h3>
+        <div class="kind-grid">
+          {#each Object.entries(KIND_TO_CATEGORY) as [kind] (kind)}
+            <button
+              type="button"
+              class="kind-choice"
+              onclick={() =>
+                createFromWikilink(
+                  createChooser?.name ?? '',
+                  kind as EntityKind,
+                  createChooser?.sourceFindingId,
+                )}
+            >
+              {kind.replaceAll('_', ' ')}
+            </button>
+          {/each}
+        </div>
+        <button
+          type="button"
+          class="picker-cancel-btn"
+          onclick={() => {
+            createChooser = null;
+          }}>Cancel</button
+        >
+      </div>
+    </div>
+  {/if}
 
   {#if graphFor}
     <div
@@ -860,6 +928,26 @@
     font-size: 13px;
     color: var(--fg-3);
     margin: 0;
+  }
+  .kind-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .kind-choice {
+    min-height: 36px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--bg-inset);
+    color: var(--fg-1);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    text-transform: capitalize;
+    cursor: pointer;
+  }
+  .kind-choice:hover {
+    border-color: var(--line-glow);
+    color: var(--arcane-300);
   }
   .picker-new {
     display: flex;

@@ -21,6 +21,8 @@
     sessions?: Session[]; // list of campaign sessions for event dropdown
     entityMap?: Map<string, { id: string; kind: string }>; // for wikilink autocomplete
     onOpenEntity?: (id: string, kind: string) => void;
+    initialName?: string;
+    ondirtychange?: (dirty: boolean) => void;
   }
 
   let {
@@ -32,12 +34,14 @@
     sessions = [],
     entityMap = new Map(),
     onOpenEntity,
+    initialName,
+    ondirtychange,
   }: Props = $props();
 
   // Writable $derived: each field seeds from `node` and recomputes when a
   // different entity is selected, while remaining editable via bind:value
   // (user edits override the derived until `node` changes again).
-  let name = $derived(node?.name ?? '');
+  let name = $derived(node?.name ?? initialName ?? '');
   let aliases = $derived(node?.aliases ?? []);
   let summary = $derived(node?.summary ?? '');
   let notes = $derived(node?.notes ?? '');
@@ -57,6 +61,71 @@
   let status = $derived(node?.status ?? '');
 
   let nameError = $state('');
+
+  function snapshot(fields: {
+    name: string;
+    aliases: string[];
+    summary: string;
+    notes: string;
+    dateStart: string;
+    dateEnd: string;
+    isOngoing: boolean;
+    sequenceIndex: string;
+    era: string;
+    durationLabel: string;
+    sessionId: string;
+    playerName: string;
+    characterClass: string;
+    characterLevel: string;
+    status: string;
+  }) {
+    return JSON.stringify(fields);
+  }
+
+  const initialSnapshot = $derived.by(() =>
+    snapshot({
+      name: node?.name ?? initialName ?? '',
+      aliases: node?.aliases ?? [],
+      summary: node?.summary ?? '',
+      notes: node?.notes ?? '',
+      dateStart: node?.date_start ?? '',
+      dateEnd: node?.date_end ?? '',
+      isOngoing: node?.is_ongoing ?? false,
+      sequenceIndex: node?.sequence_index?.toString() ?? '',
+      era: node?.era ?? '',
+      durationLabel: node?.duration_label ?? '',
+      sessionId: node?.session_id ?? '',
+      playerName: node?.player_name ?? '',
+      characterClass: node?.character_class ?? '',
+      characterLevel: node?.character_level?.toString() ?? '',
+      status: node?.status ?? '',
+    }),
+  );
+
+  function notifyDirty() {
+    const current = snapshot({
+      name,
+      aliases,
+      summary,
+      notes,
+      dateStart,
+      dateEnd,
+      isOngoing,
+      sequenceIndex,
+      era,
+      durationLabel,
+      sessionId,
+      playerName,
+      characterClass,
+      characterLevel,
+      status,
+    });
+    ondirtychange?.(current !== initialSnapshot);
+  }
+
+  $effect(() => {
+    notifyDirty();
+  });
 
   // Relationships section — only fetched for existing (saved) entities.
   let relations = $state<RelatedEntity[]>([]);
@@ -164,6 +233,8 @@
 
 <form
   aria-label="entity form"
+  oninput={notifyDirty}
+  onchange={notifyDirty}
   onsubmit={(e) => {
     e.preventDefault();
     handleSubmit();
