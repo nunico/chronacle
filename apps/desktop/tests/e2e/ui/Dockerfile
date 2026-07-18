@@ -43,7 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `cargo build --release` produces a binary that serves "asset not found:
 # index.html" at tauri://localhost. `tauri build` runs `beforeBuildCommand`
 # (pnpm build) itself, and also downloads the linux libpdfium.so via build.rs.
-RUN pnpm -C apps/desktop exec tauri build --no-bundle
+RUN pnpm -C apps/desktop exec tauri build --no-bundle --features rocksdb
 
 # Run under a private DBus session + virtual X display. Args (a spec glob)
 # override the default of running every spec.

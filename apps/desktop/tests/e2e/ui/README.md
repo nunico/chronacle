@@ -47,7 +47,7 @@ cargo install tauri-driver --locked       # once
 sudo apt-get install -y webkit2gtk-driver xvfb   # WebKitWebDriver + headless X
 
 pnpm install
-pnpm exec tauri build --no-bundle        # CLI build: embeds dist/ into the binary
+pnpm exec tauri build --no-bundle --features rocksdb # embeds dist/ + persistent database
 xvfb-run -a pnpm e2e:ui                  # or omit xvfb-run on a real display
 ```
 

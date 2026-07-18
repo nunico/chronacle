@@ -25,7 +25,7 @@ export function appBinary() {
   const bin = fileURLToPath(targetDir);
   if (!existsSync(bin)) {
     throw new Error(
-      `Built app not found at ${bin}. Run \`pnpm tauri build --debug\` (or a ` +
+      `Built app not found at ${bin}. Run \`pnpm tauri build --debug --features rocksdb\` (or a ` +
         `release build) before the UI E2E. See tests/e2e/ui/README.md.`,
     );
   }
