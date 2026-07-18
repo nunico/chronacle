@@ -94,6 +94,11 @@ The app needs relational storage (campaigns, sources, entities, sessions), vecto
 uses the configured OpenAI-compatible `/embeddings` endpoint and only accepts a
 model that produces 768-dimensional vectors.
 
+**Migration compatibility:** `embedding_mode` is canonical. At read time,
+Chronacle falls back to the existing `embedding_backend` only when
+`embedding_mode` is absent; when both are present, `embedding_mode` takes
+precedence. All new saves write `embedding_mode`.
+
 **Critical constraint:** The embedding model identity is baked into the vector
 index. Changing modes or any model identity requires an explicit full
 re-indexing; Chronacle must never mix vectors from the old and new identities.
@@ -111,6 +116,12 @@ enforced inside `FastEmbedProvider::embed_documents()` and
 `FastEmbedProvider::embed_query()`; callers MUST pass un-prefixed text. Missing
 prefixes silently degrade retrieval recall (the failure mode that motivated this
 change — see `docs/superpowers/plans/2026-05-31-rag-quality-improvements.md`).
+
+`multilingual-e5-base` has the same asymmetric retrieval contract: indexed
+passages require `passage: <text>` and user queries require `query: <text>`.
+These prefixes must be applied inside the provider so callers continue to pass
+un-prefixed text. Missing them silently degrades multilingual and cross-language
+retrieval.
 
 **ONNX Runtime provisioning.** `fastembed` is built with the `ort-load-dynamic`
 feature, so ONNX Runtime is loaded from a dynamic library at runtime rather than
