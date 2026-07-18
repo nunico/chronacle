@@ -59,6 +59,71 @@ describe('EntityManager', () => {
     expect(screen.getByLabelText('Name', { exact: true })).toBeTruthy();
   });
 
+  it('opens create form with pendingCreate name prefilled and consumes once', async () => {
+    const onPendingCreateConsumed = vi.fn();
+    render(EntityManager, {
+      props: {
+        campaignId: 'camp1',
+        kind: 'location',
+        pendingCreate: { kind: 'location', name: 'Moon Gate' },
+        onPendingCreateConsumed,
+      },
+    });
+
+    await waitFor(() => {
+      expect((screen.getByLabelText(/^name$/i) as HTMLInputElement).value).toBe('Moon Gate');
+    });
+    expect(onPendingCreateConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls onPendingCreateSaved after a Maintenance-origin pending create succeeds', async () => {
+    const created = {
+      ...mockNpc(),
+      id: 'loc1',
+      kind: 'location',
+      name: 'Moon Gate',
+    };
+    vi.mocked(commands.createEntity).mockResolvedValue(created);
+    const onPendingCreateSaved = vi.fn();
+    render(EntityManager, {
+      props: {
+        campaignId: 'camp1',
+        kind: 'location',
+        pendingCreate: {
+          kind: 'location',
+          name: 'Moon Gate',
+          sourceFindingId: 'lint_finding:1',
+        },
+        onPendingCreateSaved,
+      },
+    });
+
+    await waitFor(() => screen.getByLabelText(/^name$/i));
+    await fireEvent.submit(screen.getByRole('form'));
+
+    await waitFor(() => expect(commands.createEntity).toHaveBeenCalled());
+    expect(onPendingCreateSaved).toHaveBeenCalledWith('lint_finding:1');
+  });
+
+  it('does not replace a dirty open form with a pending create without confirmation', async () => {
+    const rendered = render(EntityManager, {
+      props: { campaignId: 'camp1', kind: 'npc' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: /new npc/i }));
+    await fireEvent.input(screen.getByLabelText(/^name$/i), {
+      target: { value: 'Unsaved NPC' },
+    });
+
+    await rendered.rerender({
+      campaignId: 'camp1',
+      kind: 'npc',
+      pendingCreate: { kind: 'npc', name: 'Moon Gate' },
+    });
+
+    expect((screen.getByLabelText(/^name$/i) as HTMLInputElement).value).toBe('Unsaved NPC');
+    expect(screen.getByRole('dialog', { name: /discard unsaved changes/i })).toBeTruthy();
+  });
+
   it('shows toast on DATABASE error from createEntity', async () => {
     vi.mocked(commands.createEntity).mockRejectedValue({
       code: 'DATABASE', message: 'disk full',

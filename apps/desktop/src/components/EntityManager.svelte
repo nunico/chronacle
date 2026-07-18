@@ -17,6 +17,13 @@
   import EntityForm from './EntityForm.svelte';
   import WikiText from './WikiText.svelte';
   import { modalBehavior } from '../lib/actions/modal';
+  import { buildWikiLinkEntityMap } from '../lib/wikilinks';
+
+  type PendingCreate = {
+    kind: EntityKind;
+    name: string;
+    sourceFindingId?: string;
+  };
 
   interface Props {
     campaignId: string;
@@ -32,9 +39,23 @@
     onViewGraph?: (node: GraphNode) => void;
     /// Called when the user clicks a related entity in the Relationships section.
     onOpenEntity?: (id: string, kind: string) => void;
+    pendingCreate?: PendingCreate | null;
+    onPendingCreateConsumed?: () => void;
+    onPendingCreateSaved?: (sourceFindingId: string) => void;
   }
 
-  let { campaignId, kind, createNonce = 0, openId = null, onOpenIdConsumed, onViewGraph, onOpenEntity }: Props = $props();
+  let {
+    campaignId,
+    kind,
+    createNonce = 0,
+    openId = null,
+    onOpenIdConsumed,
+    onViewGraph,
+    onOpenEntity,
+    pendingCreate = null,
+    onPendingCreateConsumed,
+    onPendingCreateSaved,
+  }: Props = $props();
 
   const KIND_LABEL: Record<EntityKind, string> = {
     npc: 'NPC',
@@ -57,6 +78,12 @@
   let entityMap = new SvelteMap<string, { id: string; kind: string }>();
   let sessions = $state<Session[]>([]);
   let recompiling = $state(false);
+  let pendingInitialName = $state<string | null>(null);
+  let pendingSourceFindingId = $state<string | null>(null);
+  let formDirty = $state(false);
+  let blockedPendingCreate = $state<PendingCreate | null>(null);
+  let consumedPendingCreate = $state<PendingCreate | null>(null);
+  let loadedScope = $state<string | null>(null);
 
   async function loadEntities() {
     loading = true;
@@ -85,7 +112,9 @@
         allKinds.map((k) => getEntities(campaignId, k).catch(() => [])),
       );
       entityMap.clear();
-      results.flat().forEach((node) => entityMap.set(node.name, { id: node.id, kind: node.kind }));
+      buildWikiLinkEntityMap(results.flat()).forEach((target, key) => {
+        entityMap.set(key, target);
+      });
     } catch {
       // ignore — entity map is best-effort
     }
@@ -102,9 +131,27 @@
   function openCreate() {
     formNode = null;
     formError = null;
+    pendingInitialName = null;
+    pendingSourceFindingId = null;
+    formDirty = false;
     showForm = true;
     buildEntityMap();
     if (kind === 'event') loadSessions();
+  }
+
+  function openPendingCreate(request: PendingCreate) {
+    if (showForm && formDirty) {
+      blockedPendingCreate = request;
+      return;
+    }
+    formNode = null;
+    formError = null;
+    pendingInitialName = request.name;
+    pendingSourceFindingId = request.sourceFindingId ?? null;
+    formDirty = false;
+    showForm = true;
+    buildEntityMap();
+    if (request.kind === 'event') loadSessions();
   }
 
   // The `c` shortcut bumps createNonce; open the create form.
@@ -128,6 +175,9 @@
   function openEdit(node: GraphNode) {
     formNode = node;
     formError = null;
+    pendingInitialName = null;
+    pendingSourceFindingId = null;
+    formDirty = false;
     showForm = true;
     buildEntityMap();
     if (kind === 'event') loadSessions();
@@ -142,7 +192,13 @@
       } else {
         const created = await createEntity(campaignId, kind, input);
         entities = [created, ...entities];
+        if (pendingSourceFindingId) {
+          onPendingCreateSaved?.(pendingSourceFindingId);
+        }
       }
+      pendingInitialName = null;
+      pendingSourceFindingId = null;
+      formDirty = false;
       showForm = false;
     } catch (e) {
       const err = e as EntityError;
@@ -197,10 +253,26 @@
 
   // Reset form and reload when kind or campaign changes
   $effect(() => {
+    const scope = `${campaignId}:${kind}`;
+    if (scope === loadedScope) return;
+    loadedScope = scope;
     showForm = false;
     formNode = null;
     formError = null;
+    pendingInitialName = null;
+    pendingSourceFindingId = null;
+    formDirty = false;
+    blockedPendingCreate = null;
     if (campaignId) loadEntities();
+  });
+
+  $effect(() => {
+    if (!pendingCreate || pendingCreate.kind !== kind || pendingCreate === consumedPendingCreate) {
+      return;
+    }
+    consumedPendingCreate = pendingCreate;
+    openPendingCreate(pendingCreate);
+    onPendingCreateConsumed?.();
   });
 </script>
 
@@ -245,7 +317,7 @@
 
     <!-- Form panel -->
     {#if showForm}
-      <div class="form-panel">
+      <div class="form-panel" oninput={() => (formDirty = true)} onchange={() => (formDirty = true)}>
         {#if formNode?.notes}
           <div class="notes-preview">
             <WikiText text={formNode.notes} entities={entityMap} />
@@ -285,12 +357,17 @@
           {kind}
           node={formNode}
           error={formError}
+          initialName={pendingInitialName ?? undefined}
+          ondirtychange={(dirty) => (formDirty = dirty)}
           sessions={kind === 'event' ? sessions : []}
           {entityMap}
           onsave={handleSave}
           oncancel={() => {
             showForm = false;
             formNode = null;
+            pendingInitialName = null;
+            pendingSourceFindingId = null;
+            formDirty = false;
           }}
           {onOpenEntity}
         />
@@ -324,6 +401,46 @@
             onclick={() => {
               deleteConfirm = null;
             }}>Cancel</button
+          >
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if blockedPendingCreate}
+    <div
+      class="overlay"
+      use:modalBehavior={{
+        onClose: () => {
+          blockedPendingCreate = null;
+        },
+      }}
+    >
+      <div
+        class="confirm-box"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pending-create-title"
+      >
+        <h3 id="pending-create-title">Discard unsaved changes?</h3>
+        <p>Creating [[{blockedPendingCreate.name}]] will replace the current form.</p>
+        <div class="actions">
+          <button
+            type="button"
+            class="btn-danger"
+            onclick={() => {
+              const request = blockedPendingCreate;
+              blockedPendingCreate = null;
+              formDirty = false;
+              if (request) openPendingCreate(request);
+            }}>Discard and create</button
+          >
+          <button
+            type="button"
+            class="btn-ghost"
+            onclick={() => {
+              blockedPendingCreate = null;
+            }}>Keep editing</button
           >
         </div>
       </div>
