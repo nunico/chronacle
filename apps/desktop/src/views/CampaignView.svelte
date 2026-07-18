@@ -513,12 +513,18 @@
   </div>
 
   {#if deleteTarget}
-    <div class="modal-overlay" role="presentation" onclick={() => (deleteTarget = null)}>
+    <div
+      class="modal-overlay"
+      role="presentation"
+      onclick={(e) => {
+        if (e.target === e.currentTarget) deleteTarget = null;
+      }}
+    >
       <div
         class="modal"
         role="dialog"
         aria-label="Delete campaign"
-        onclick={(e) => e.stopPropagation()}
+        tabindex="-1"
       >
         <h3>Delete "{deleteTarget.name}"?</h3>
         <p>

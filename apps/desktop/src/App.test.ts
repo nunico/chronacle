@@ -24,6 +24,7 @@ const getLlmProviderStatus = vi.fn();
 const getCustomProviders = vi.fn();
 const getEmbeddingModelMismatch = vi.fn();
 const reindexAllSources = vi.fn();
+const getMaintenanceCounts = vi.fn();
 
 vi.mock('./lib/commands', () => ({
   getEmbeddingProviderStatus: (...a: unknown[]) => getEmbeddingProviderStatus(...a),
@@ -36,6 +37,7 @@ vi.mock('./lib/commands', () => ({
   getCustomProviders: (...a: unknown[]) => getCustomProviders(...a),
   getEmbeddingModelMismatch: (...a: unknown[]) => getEmbeddingModelMismatch(...a),
   reindexAllSources: (...a: unknown[]) => reindexAllSources(...a),
+  getMaintenanceCounts: (...a: unknown[]) => getMaintenanceCounts(...a),
   getMruCollectionId: vi.fn().mockReturnValue(null),
   setMruCollectionId: vi.fn(),
 }));
@@ -70,6 +72,7 @@ describe('App — model-download gate', () => {
     getCustomProviders.mockResolvedValue([]);
     getEmbeddingModelMismatch.mockResolvedValue({ active_model: 'mock', stale: [] });
     reindexAllSources.mockResolvedValue(0);
+    getMaintenanceCounts.mockResolvedValue({ pending_proposals: 0, unresolved_findings: 0 });
   });
 
   it('shows the ModelDownload gate before the model is ready', async () => {
@@ -82,25 +85,31 @@ describe('App — model-download gate', () => {
   });
 
   it('renders the Shell once the model is ready', async () => {
-    getEmbeddingProviderStatus.mockResolvedValue({
-      backend: 'local',
-      model: 'nomic-embed-text-v1.5',
-      dimension: 768,
-      api_key_configured: false,
-      local_available: true,
-      local_cached: true,
-    });
-    render(App);
-    await waitFor(() => {
-      expect(screen.getByLabelText('Campaign rail')).toBeTruthy();
-    });
-    // Oracle nav item is present
-    expect(screen.getByRole('button', { name: /Oracle/i })).toBeTruthy();
-    // Campaign & sources footer button
-    expect(
-      screen.getByRole('button', { name: /Campaign.*&.*sources/i }),
-    ).toBeTruthy();
-    // Settings icon-only button by aria-label
-    expect(screen.getByRole('button', { name: /^Settings$/i })).toBeTruthy();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      getEmbeddingProviderStatus.mockResolvedValue({
+        backend: 'local',
+        model: 'nomic-embed-text-v1.5',
+        dimension: 768,
+        api_key_configured: false,
+        local_available: true,
+        local_cached: true,
+      });
+      render(App);
+      await waitFor(() => {
+        expect(screen.getByLabelText('Campaign rail')).toBeTruthy();
+      });
+      // Oracle nav item is present
+      expect(screen.getByRole('button', { name: /Oracle/i })).toBeTruthy();
+      // Campaign & sources footer button
+      expect(
+        screen.getByRole('button', { name: /Campaign.*&.*sources/i }),
+      ).toBeTruthy();
+      // Settings icon-only button by aria-label
+      expect(screen.getByRole('button', { name: /^Settings$/i })).toBeTruthy();
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
