@@ -84,7 +84,7 @@ scripts/ci/local-pr.sh                           # authoritative Docker PR gate
 pnpm -C apps/desktop dev && pnpm -C apps/desktop typecheck && pnpm -C apps/desktop lint
 pnpm -C apps/desktop test:run                      # Vitest CI mode
 pnpm -C apps/desktop test:coverage
-pnpm -C apps/desktop exec playwright test tests/e2e/backend/
+scripts/ci/acceptance.sh                           # generates BDD specs, then runs Playwright
 pnpm -C apps/desktop run e2e:ui                    # requires built Tauri app (tauri build --no-bundle)
 
 # Full app
