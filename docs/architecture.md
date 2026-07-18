@@ -402,7 +402,7 @@ Tool: **Playwright** against the backend service layer (backend E2E) and optiona
 
 ```bash
 # Backend E2E (service-layer, no UI)
-pnpm -C apps/desktop exec playwright test tests/e2e/backend/
+scripts/ci/acceptance.sh
 
 # Full UI E2E (requires built app: pnpm -C apps/desktop exec tauri build --no-bundle)
 pnpm -C apps/desktop run e2e:ui
@@ -476,7 +476,8 @@ pre-commit:
       run: eslint {staged_files}
 ```
 
-Hooks are enforced locally and mirrored in CI — local and CI must be identical.
+Hooks are a fast local subset of the CI checks. For full pull-request parity, run
+`scripts/ci/local-pr.sh` successfully before creating a PR.
 
 ### CI Pipeline (GitHub Actions)
 
