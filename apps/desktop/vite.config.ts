@@ -7,7 +7,6 @@ const isTest = !!process.env.VITEST;
 export default defineConfig({
   plugins: [
     svelte({
-      hot: !isTest,
       // In the test environment, skip vitePreprocess so that Vite's
       // PartialEnvironment (which requires a real Vite server context) is not
       // invoked. The Svelte compiler handles <style> blocks natively.

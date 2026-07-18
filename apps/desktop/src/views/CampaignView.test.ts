@@ -217,7 +217,8 @@ describe('CampaignView', () => {
   }
 
   it('delete opens a dialog offering cascade and convert', async () => {
-    await openDeleteDialog();
+    const dialog = await openDeleteDialog();
+    expect(dialog.getAttribute('tabindex')).toBe('-1');
     expect(screen.getByText('Delete campaign and its notes')).toBeTruthy();
     expect(screen.getByText('Keep notes as a regular collection')).toBeTruthy();
     expect(m.deleteCampaign).not.toHaveBeenCalled();
