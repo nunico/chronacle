@@ -96,8 +96,9 @@ model that produces 768-dimensional vectors.
 
 **Migration compatibility:** `embedding_mode` is canonical. At read time,
 Chronacle falls back to the existing `embedding_backend` only when
-`embedding_mode` is absent; when both are present, `embedding_mode` takes
-precedence. All new saves write `embedding_mode`.
+`embedding_mode` is absent: legacy `local` maps to `local_nomic`, and legacy
+`openai` or `cloud` maps to `cloud`. When both settings are present,
+`embedding_mode` takes precedence. All new saves write `embedding_mode`.
 
 **Critical constraint:** The embedding model identity is baked into the vector
 index. Changing modes or any model identity requires an explicit full
