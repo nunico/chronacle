@@ -9,7 +9,7 @@ Feature: Alternate names and duplicates
   Scenario: Confirming a suggested alternate name fixes the link
     Given the maintenance inbox has a broken-wikilink finding for "[[The Quassars]]" that could mean "The Quassar Family"
     When the GM opens the findings tab
-    Then the finding "Broken wikilink" is listed with "The Quassar Family"
+    Then the finding "Possible name mismatch" is listed with "The Quassar Family"
     When the GM confirms the suggestion "The Quassar Family"
     Then the confirm-alternate-name command is sent for that entity and alias
 
