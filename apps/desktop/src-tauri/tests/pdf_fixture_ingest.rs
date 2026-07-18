@@ -1,3 +1,5 @@
+#![cfg(feature = "rocksdb")]
+
 //! Diverse-fixture ingest integration coverage.
 //!
 //! Architecture mandate (`docs/architecture.md:850`): "integration: full ingest

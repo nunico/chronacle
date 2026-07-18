@@ -4,6 +4,7 @@
 /// SurrealDB instance. They do **not** go through Tauri IPC — that is
 /// covered by the E2E test suite.
 use chronacle_db as schema;
+#[cfg(feature = "rocksdb")]
 use std::sync::{Arc, RwLock};
 
 /// Helper: set up an in-memory SurrealDB with the Phase 1 schema applied.
@@ -287,6 +288,7 @@ fn pdfium_lib_path() -> std::path::PathBuf {
 }
 
 #[tokio::test]
+#[cfg(feature = "rocksdb")]
 async fn test_full_ingest_and_query_cycle() {
     use chronacle_ingestion::ingestion_service;
     use chronacle_providers::blob_store::BlobStore;
@@ -655,8 +657,10 @@ async fn test_custom_provider_update() {
 
 /// An embedding provider that always fails — used to drive `ingest_source`
 /// down its error path so the test can verify `mark_failed_and_cleanup`.
+#[cfg(feature = "rocksdb")]
 struct FailingEmbeddingProvider;
 
+#[cfg(feature = "rocksdb")]
 #[async_trait::async_trait]
 impl chronacle_providers::embedding::EmbeddingProvider for FailingEmbeddingProvider {
     async fn embed_documents(
@@ -695,6 +699,7 @@ impl chronacle_providers::embedding::EmbeddingProvider for FailingEmbeddingProvi
 /// failure" — without this, a failed ingest leaves the source row stuck in
 /// `'indexing'` and orphan chunks accumulate across retries.
 #[tokio::test]
+#[cfg(feature = "rocksdb")]
 async fn ingestion_failure_marks_source_failed_and_cleans_chunks() {
     use chronacle_ingestion::ingestion_service;
     use chronacle_providers::blob_store::BlobStore;

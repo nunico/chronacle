@@ -1,3 +1,5 @@
+#![cfg(feature = "rocksdb")]
+
 //! Regression test for the GM agent's reply quality.
 //!
 //! Constructs a small in-memory document about an invented fictional setting,
