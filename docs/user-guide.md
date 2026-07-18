@@ -306,7 +306,7 @@ The number badge next to **Maintenance** in the rail tells you how many things a
 
 Proposals aren't the only thing that shows up in the Maintenance inbox. As your Codex grows — more articles, more entities, more cross-references between them — small inconsistencies naturally creep in, the same way they would in a hand-kept campaign binder. The **Findings** tab (next to Proposals, inside Maintenance) is where Chronacle surfaces those for you to look at, grouped by kind:
 
-- **Broken wikilink** — an article links to another entity by name (like `[[Korim]]`), but nothing with that name matches. Often it's just a variant spelling, so Chronacle offers a **"Did you mean _Korimar_?"** suggestion — one click records the variant as an alternate name and the link resolves from then on (see **Names and duplicates** below). If there's no good suggestion, click **Open entity** to fix the wording yourself, or **Mark resolved** if it's a false alarm.
+- **Wikilinks** — an article links to a name Chronacle can't resolve yet. If it looks like a variant spelling, Chronacle offers a suggested match; if it looks like something you haven't created yet, you can create the missing article from there. You can also dismiss the finding if you don't want to act on it now.
 - **Possible duplicate** — two entities look like they might be the same thing (near-identical names, most often). Click **Merge** to fold them into one, keeping every relationship from both and turning the old name into an alternate name so existing links keep working; or **Open A** / **Open B** to compare first, or **Mark resolved** if they really are two different things. The **Names and duplicates** chapter below walks through what merging does.
 - **Stale article** — an article was compiled from source material that's since changed (a book was re-ingested, or new pages were added to a collection) and hasn't been recompiled since. Click **Compile** to bring it up to date in place — this behaves exactly like compiling from the collection's Rules tab — or **Mark resolved** if you'd rather leave the older version as-is for now.
 - **Scope violation** — a link crosses a boundary it shouldn't, most often a campaign-specific entity referencing something that belongs to a different campaign (or the reverse). Click **Delete edge** to remove just that cross-reference without touching either article, or **Mark resolved** if the link is intentional.
@@ -351,13 +351,13 @@ ask you next time instead of deciding.
 
 **Links Chronacle isn't sure about**
 
-When a link doesn't match anything and there's no obvious answer, it shows up in
-Maintenance as a broken link — as it does today — but now with a suggestion:
-_"[[The Quassars]] — did you mean **The Quassar Family**?"_ One click and the
-name is added, the link works, and every other link using that name works too.
-
-If the suggestion is wrong, ignore it. A broken link is only a broken link; it
-never invents a connection you didn't ask for.
+An unresolved link can also be intentional. You might write `[[Moon Gate]]`
+before you've made a Moon Gate article, just to mark that it should exist later.
+Chronacle treats that as a useful placeholder: when you click the unresolved
+link in an article, or the matching missing node in the relationship graph, you
+can choose what kind of article to create and start with the name already filled
+in. If Chronacle also has a likely match, you can either use that suggestion or
+create a separate new article instead.
 
 **Merging two entries that are the same thing**
 
