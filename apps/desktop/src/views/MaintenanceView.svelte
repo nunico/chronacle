@@ -24,8 +24,10 @@
     onCountsChanged?: () => void;
     activeCampaignId?: string | null;
     onOpenEntity?: (id: string, kind: string) => void;
+    onCreateMissingArticle?: (name: string, sourceFindingId: string) => void;
   }
-  let { onCountsChanged, activeCampaignId, onOpenEntity }: Props = $props();
+  let { onCountsChanged, activeCampaignId, onOpenEntity, onCreateMissingArticle }: Props =
+    $props();
 
   let tab = $state<'proposals' | 'findings'>('proposals');
   let proposals = $state<CodexProposal[]>([]);
@@ -52,7 +54,7 @@
   const FINDING_LABELS: Record<string, string> = {
     orphaned_edge: 'Orphaned edge',
     scope_violation: 'Scope violation',
-    broken_wikilink: 'Broken wikilink',
+    broken_wikilink: 'Wikilinks',
     stale_article: 'Stale article',
     duplicate_entity: 'Possible duplicate',
     alias_collision: 'Naming conflict',
@@ -95,6 +97,14 @@
   function candidatesOf(f: LintFinding): AliasCandidate[] {
     const c = f.payload.candidates;
     return Array.isArray(c) ? (c as AliasCandidate[]) : [];
+  }
+
+  function hasCandidates(f: LintFinding): boolean {
+    return candidatesOf(f).length > 0;
+  }
+
+  function brokenWikilinkLabel(f: LintFinding): string {
+    return hasCandidates(f) ? 'Possible name mismatch' : 'Missing article';
   }
 
   async function refresh({ showLoading = false }: { showLoading?: boolean } = {}) {
@@ -392,13 +402,16 @@
               {#each items as f (f.id)}
                 <li class="finding-card motion-list-card" out:cardOutro>
                   {#if kind === 'broken_wikilink'}
+                    <div class="proposal-head">
+                      <span class="chip-kind">{brokenWikilinkLabel(f)}</span>
+                    </div>
                     <p class="finding-detail">
-                      Broken link to <strong>{f.payload.link_text}</strong>
+                      [[{String(f.payload.link_text)}]] in {entityName(f)}
                     </p>
                     {#if candidatesOf(f).length > 0}
                       {@const candidate = candidatesOf(f)[0]}
                       <p class="finding-detail">
-                        Did you mean <strong>{candidate.name}</strong>?
+                        Suggested match: <strong>{candidate.name}</strong>
                       </p>
                     {/if}
                     <div class="finding-actions">
@@ -408,15 +421,23 @@
                           disabled={busy === f.id}
                           onclick={() => confirmSuggestion(f, candidatesOf(f)[0])}
                         >
-                          Yes
+                          Use suggestion
                         </button>
                       {/if}
                       <button
                         type="button"
                         disabled={busy === f.id}
+                        onclick={() =>
+                          onCreateMissingArticle?.(String(f.payload.link_text), f.id)}
+                      >
+                        Create article
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy === f.id}
                         onclick={() => void openEntityRef(f.payload.entity)}
                       >
-                        Open entity
+                        Open source
                       </button>
                       <button
                         type="button"

@@ -153,7 +153,7 @@ describe('MaintenanceView', () => {
     ]);
     render(MaintenanceView, { props: {} });
     await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
-    await waitFor(() => expect(screen.getByText('Broken wikilink')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Wikilinks')).toBeTruthy());
     expect(screen.getByText('Possible duplicate')).toBeTruthy();
   });
 
@@ -167,21 +167,21 @@ describe('MaintenanceView', () => {
     expect(screen.getByText('3 new findings · 5 open')).toBeTruthy();
   });
 
-  // 8. broken_wikilink finding has "Open entity" and "Dismiss"
-  it('broken_wikilink finding opens the entity and can be dismissed', async () => {
+  // 8. broken_wikilink finding has "Open source" and "Dismiss"
+  it('broken_wikilink finding opens the source and can be dismissed', async () => {
     const onOpenEntity = vi.fn();
     m.getLintFindings.mockResolvedValue([
       finding({
         id: 'lint_finding:1',
         kind: 'broken_wikilink',
-        payload: { entity: 'npc:mira', link_text: 'Ghostfell' },
+        payload: { entity: 'npc:mira', entity_name: 'Mira', link_text: 'Ghostfell' },
       }),
     ]);
     render(MaintenanceView, { props: { onOpenEntity } });
     await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
-    await screen.findByText('Ghostfell');
+    await screen.findByText('[[Ghostfell]] in Mira');
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Open entity' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Open source' }));
     expect(onOpenEntity).toHaveBeenCalledWith('mira', 'npc');
 
     m.getLintFindings.mockResolvedValue([]);
@@ -285,14 +285,14 @@ describe('MaintenanceView', () => {
     const onCountsChanged = vi.fn();
     render(MaintenanceView, { props: { onCountsChanged } });
     await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
-    await screen.findByText('Ghostfell');
+    await screen.findByText('[[Ghostfell]] in mira');
 
     await fireEvent.click(screen.getAllByRole('button', { name: 'Dismiss' })[0]);
     await waitFor(() => expect(m.resolveLintFinding).toHaveBeenCalledWith('lint_finding:1'));
 
     expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-    expect(screen.getByText('Ghostfell')).toBeInTheDocument();
-    expect(screen.getByText('Skybridge')).toBeInTheDocument();
+    expect(screen.getByText('[[Ghostfell]] in mira')).toBeInTheDocument();
+    expect(screen.getByText('[[Skybridge]] in mira')).toBeInTheDocument();
 
     finishRefresh([
       finding({
@@ -343,14 +343,39 @@ describe('MaintenanceView', () => {
     expect(onOpenEntity).toHaveBeenCalledWith('k2', 'npc');
   });
 
-  // 12. broken_wikilink with candidates shows a "did you mean?" suggestion
-  it('shows a "did you mean?" suggestion and confirms it as an alternate name', async () => {
+  it('renders candidate-backed wikilinks as possible name mismatches', async () => {
+    const onCreateMissingArticle = vi.fn();
     m.getLintFindings.mockResolvedValue([
       finding({
         id: 'lint5',
         kind: 'broken_wikilink',
         payload: {
           entity: 'npc:mira',
+          entity_name: 'Mira',
+          link_text: 'The Quassars',
+          candidates: [{ id: 'faction:q', name: 'The Quassar Family', similarity: 0.92 }],
+        },
+      }),
+    ]);
+    render(MaintenanceView, { props: { onCreateMissingArticle } });
+    await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
+
+    expect(await screen.findByText('Possible name mismatch')).toBeInTheDocument();
+    expect(screen.getByText('[[The Quassars]] in Mira')).toBeInTheDocument();
+    expect(screen.getByText('The Quassar Family')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use suggestion' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Create article' }));
+    expect(onCreateMissingArticle).toHaveBeenCalledWith('The Quassars', 'lint5');
+  });
+
+  it('confirms a candidate-backed wikilink as an alternate name', async () => {
+    m.getLintFindings.mockResolvedValue([
+      finding({
+        id: 'lint5',
+        kind: 'broken_wikilink',
+        payload: {
+          entity: 'npc:mira',
+          entity_name: 'Mira',
           link_text: 'The Quassars',
           candidates: [{ id: 'faction:q', name: 'The Quassar Family', similarity: 0.92 }],
         },
@@ -358,12 +383,10 @@ describe('MaintenanceView', () => {
     ]);
     render(MaintenanceView, { props: {} });
     await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
-
-    expect(await screen.findByText(/did you mean/i)).toBeInTheDocument();
-    expect(screen.getByText('The Quassar Family')).toBeInTheDocument();
+    await screen.findByText('Possible name mismatch');
 
     m.getLintFindings.mockResolvedValue([]);
-    await fireEvent.click(screen.getByRole('button', { name: /yes/i }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Use suggestion' }));
 
     await waitFor(() =>
       expect(m.confirmAliasSuggestion).toHaveBeenCalledWith('faction:q', 'The Quassars'),
@@ -371,21 +394,28 @@ describe('MaintenanceView', () => {
     await waitFor(() => expect(m.resolveLintFinding).toHaveBeenCalledWith('lint5'));
   });
 
-  // 13. broken_wikilink without candidates never shows "did you mean?"
-  it('does not show "did you mean?" when the finding has no candidates', async () => {
+  it('renders no-candidate wikilinks as missing articles', async () => {
+    const onCreateMissingArticle = vi.fn();
     m.getLintFindings.mockResolvedValue([
       finding({
         id: 'lint6',
         kind: 'broken_wikilink',
-        payload: { entity: 'npc:mira', link_text: 'Ghostfell' },
+        payload: {
+          entity: 'npc:mira',
+          entity_name: 'Mira',
+          link_text: 'Ashen Ferry',
+          candidates: [],
+        },
       }),
     ]);
-    render(MaintenanceView, { props: {} });
+    render(MaintenanceView, { props: { onCreateMissingArticle } });
     await fireEvent.click(screen.getByRole('tab', { name: 'Findings' }));
-    await screen.findByText('Ghostfell');
 
-    expect(screen.queryByText(/did you mean/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /yes/i })).not.toBeInTheDocument();
+    expect(await screen.findByText('Missing article')).toBeInTheDocument();
+    expect(screen.getByText('[[Ashen Ferry]] in Mira')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use suggestion' })).toBeNull();
+    await fireEvent.click(screen.getByRole('button', { name: 'Create article' }));
+    expect(onCreateMissingArticle).toHaveBeenCalledWith('Ashen Ferry', 'lint6');
   });
 
   // 14. auto_alias findings render as a collapsed, reviewable-not-required list with Undo
