@@ -76,21 +76,30 @@ The app needs relational storage (campaigns, sources, entities, sessions), vecto
 
 ---
 
-## ADR-003: Embeddings — fastembed-rs (Bundled Local Model)
+## ADR-003: Embeddings — 768-Dimension Local and Cloud Modes
 
 **Status:** Proposed
 
-### Options Considered
+### Supported Modes
 
-| Option                                   | Quality        | Setup                  | Offline |
-| ---------------------------------------- | -------------- | ---------------------- | ------- |
-| OpenAI `text-embedding-3-small`          | Excellent      | API key                | No      |
-| Ollama embedding model                   | Good           | Requires Ollama        | Yes     |
-| `fastembed-rs` (`nomic-embed-text-v1.5`) | Good (768-dim) | Downloads on first run | Yes     |
+| Mode               | Provider/model                     | Language capability                                        | Dimensions  |
+| ------------------ | ---------------------------------- | ---------------------------------------------------------- | ----------- |
+| Local small        | `nomic-embed-text-v1.5`            | English-focused                                            | 768         |
+| Local multilingual | `multilingual-e5-base`             | Offline German/French/Spanish and cross-language retrieval | 768         |
+| Cloud              | Configured OpenAI-compatible model | Provider/model dependent                                   | Must be 768 |
 
-**Decision:** `fastembed-rs` as the default. Optional override to use cloud embedding API in settings.
+**Decision:** Settings explicitly select one of three embedding modes:
+`local_nomic`, `local_multilingual`, or `cloud`. The two local modes use
+`fastembed-rs` and download their selected model on first use. The cloud mode
+uses the configured OpenAI-compatible `/embeddings` endpoint and only accepts a
+model that produces 768-dimensional vectors.
 
-**Critical constraint:** The embedding model is baked into the vector index. Switching models requires full re-indexing. The settings screen must warn the user and provide a batch re-index workflow: show which sources are affected, allow one-click re-index with progress, and clean up orphaned old chunks.
+**Critical constraint:** The embedding model identity is baked into the vector
+index. Changing modes or any model identity requires an explicit full
+re-indexing; Chronacle must never mix vectors from the old and new identities.
+The settings screen must warn the user and provide a batch re-index workflow:
+show which sources are affected, allow one-click re-index with progress, and
+clean up orphaned old chunks.
 
 Store the model identifier alongside each table in SurrealDB so a mismatch is detectable at startup. The re-index orchestration handles: (1) detecting affected sources, (2) queuing them for re-indexing, (3) purging old chunks, and (4) streaming progress per source so the GM can see where the process stands.
 
@@ -125,20 +134,16 @@ embeddings, same nomic model and 768-dim, with no re-indexing. This library is
 **unpinned** (we don't control its version), so the bundled path remains the
 version-controlled default; the system fallback is best-effort. `ort` would also
 discover such a library on its own via the dynamic-loader search path, but probing
-explicitly lets `local_embeddings_available()` report it so the UI picks `local`
-rather than steering to the cloud.
+explicitly lets `local_embeddings_available()` report it so the UI can offer
+the selected local embedding mode rather than steering to the cloud.
 
-**Cloud embedding backend.** The `embedding_backend` setting selects `local`
-(fastembed) or `openai` (any OpenAI-compatible `/embeddings` endpoint, configured
-via `embedding_model` / `embedding_api_key` / `embedding_base_url`). The cloud
-provider requests `dimensions: 768` (OpenAI v3 Matryoshka) so its output matches
-the `MTREE DIMENSION 768` indexes with **no schema migration** — switching
-backends only requires re-indexing, handled by the existing `embed_model`
-mismatch detection + `reindex_all_sources`. When `embedding_backend` is unset the
-default is `local` where ONNX Runtime is bundled and `openai` where it is not, so
-Intel Macs (and anyone who would rather not download the local model) steer to the
-cloud automatically. `OpenAiEmbeddingProvider` is symmetric — no nomic
-document/query prefixes — and is hot-swappable via `reconfigure_embedding_provider`.
+**Cloud embedding mode.** `embedding_mode = cloud` selects any
+OpenAI-compatible `/embeddings` endpoint configured through `embedding_model`,
+`embedding_api_key`, and `embedding_base_url`. The configured model must produce
+768 dimensions so its output matches the `MTREE DIMENSION 768` indexes with no
+schema migration. Its identity is still distinct from either local model, so
+switching to or from cloud requires the same explicit re-index flow driven by
+`embed_model` mismatch detection and `reindex_all_sources`.
 
 ---
 
@@ -840,8 +845,9 @@ DEFINE FIELD notes ON relates_to TYPE string;
 DEFINE TABLE setting SCHEMAFULL;
 DEFINE FIELD value ON setting TYPE string;
 -- Keys: llm_provider, llm_model, llm_api_key (encrypted at rest),
---       llm_base_url, embedding_backend, active_campaign_id,
---       vault_sync_path
+--       llm_base_url, embedding_mode (local_nomic | local_multilingual | cloud),
+--       embedding_model, embedding_api_key (encrypted at rest), embedding_base_url,
+--       ui_locale (auto | en | de | fr | es), active_campaign_id, vault_sync_path
 ```
 
 **Note on timestamps:** All datetime fields use SurrealDB's `datetime` type (RFC 3339 / ISO 8601). This avoids the ambiguity of Unix epoch integers (seconds vs milliseconds) and is forward-compatible with SurrealDB Cloud. The vault sync frontmatter uses the same format.
