@@ -74,6 +74,12 @@ cargo test -p <crate> --test '*'                   # integration only for a spec
 cargo audit && cargo deny check
 cargo llvm-cov --workspace --html
 
+# Shared pull-request jobs (run from the workspace root)
+scripts/ci/backend-quality.sh                    # Backend quality
+scripts/ci/frontend-quality.sh                   # Frontend quality
+scripts/ci/acceptance.sh                         # Acceptance tests
+scripts/ci/local-pr.sh                           # authoritative Docker PR gate
+
 # Frontend (commands target apps/desktop)
 pnpm -C apps/desktop dev && pnpm -C apps/desktop typecheck && pnpm -C apps/desktop lint
 pnpm -C apps/desktop test:run                      # Vitest CI mode
@@ -82,9 +88,18 @@ pnpm -C apps/desktop exec playwright test tests/e2e/backend/
 pnpm -C apps/desktop run e2e:ui                    # requires built Tauri app (tauri build --no-bundle)
 
 # Full app
-pnpm -C apps/desktop tauri dev                     # dev with hot-reload
-pnpm -C apps/desktop exec tauri build              # production bundle (or: mise run build)
+pnpm -C apps/desktop tauri dev --features rocksdb  # dev with persistent storage
+pnpm -C apps/desktop exec tauri build --features rocksdb # production bundle (or: mise run build)
 ```
+
+The workspace defaults to SurrealDB's memory-only backend for normal builds and tests. The desktop
+`rocksdb` feature is explicit: use it for Tauri development/builds and persistence-specific tests
+such as `cargo test -p Chronacle --features rocksdb --test rocksdb_persistence`.
+
+**Before creating any Chronacle PR, agents must successfully run `scripts/ci/local-pr.sh`.** It is
+the authoritative pre-PR command and executes the Backend quality, Frontend quality, and Acceptance
+tests scripts in the repository's Docker toolchain. Its scope is the PR gates only: it does not run
+merge-only coverage, release builds, or the separate real-app `tauri-driver` UI E2E workflow.
 
 ## License
 
@@ -157,7 +172,8 @@ Formatting and linting are enforced by tooling and run automatically via `leftho
 - PR description must state: **what** changed, **why**, and **how it was tested** (commands run). Link the relevant `docs/superpowers/` plan or spec.
 - Tests ship in the same PR as the feature — never a follow-up (see Testing).
 - New or changed user-visible behaviour must add or update `.feature` acceptance scenarios in the same PR (ADR-011).
-- Green CI is required: backend Playwright E2E, unit/integration, lint, and `cargo deny check` all pass before merge.
+- Green CI is required: Backend quality, Frontend quality, and Acceptance tests all pass before
+  merge. Agents must run `scripts/ci/local-pr.sh` successfully before creating a PR.
 - New `Cargo.toml` dependencies require an ADR and an entry in the architecture doc's "Crate & Tool Summary" (see Hard constraints).
 
 ## Security & boundaries
