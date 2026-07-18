@@ -446,6 +446,9 @@ export interface GraphNodeRef {
   id: string;
   kind: string;
   name: string;
+  missing?: boolean;
+  source_id?: string;
+  source_kind?: string;
 }
 
 export interface GraphEdge {

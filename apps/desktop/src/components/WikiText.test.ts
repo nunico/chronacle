@@ -33,6 +33,29 @@ describe('WikiText', () => {
     expect(container).toBeTruthy();
   });
 
+  it('calls onMissingLinkClick when an unmatched wikilink button is clicked', async () => {
+    const onMissingLinkClick = vi.fn();
+    render(WikiText, {
+      props: {
+        text: 'Go to [[Moon Gate]]',
+        entities: new Map(),
+        onMissingLinkClick,
+      },
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Create article for Moon Gate' }));
+    expect(onMissingLinkClick).toHaveBeenCalledWith('Moon Gate');
+  });
+
+  it('keeps unmatched wikilinks inert when no missing-link callback is provided', () => {
+    render(WikiText, {
+      props: { text: 'Go to [[Moon Gate]]', entities: new Map() },
+    });
+
+    expect(screen.queryByRole('button', { name: 'Create article for Moon Gate' })).toBeNull();
+    expect(screen.getByText(/\[\[Moon Gate\]\]/)).toBeTruthy();
+  });
+
   it('case-insensitive entity lookup', () => {
     const entities = new Map([['torvin', { id: 'abc123', kind: 'npc' }]]);
     render(WikiText, {
