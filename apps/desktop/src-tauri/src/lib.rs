@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 pub mod commands;
+#[cfg(test)]
+mod runtime_downloads;
 pub mod services;
 
 use chronacle_providers::embedding::EmbeddingProvider;
@@ -177,6 +179,7 @@ pub(crate) fn spawn_outbound(
 /// No-op if the caller already set `ORT_DYLIB_PATH`, or the lib is absent (the
 /// provider then falls back to a packaged/system copy, or the cloud backend). A
 /// packaged app needs no help: the lib sits beside the executable.
+#[cfg(feature = "rocksdb")]
 fn register_bundled_ort_dylib() {
     if std::env::var_os("ORT_DYLIB_PATH").is_some() {
         return;
@@ -196,6 +199,7 @@ fn register_bundled_ort_dylib() {
 /// In `cargo tauri dev` the binary lives under `target/`, so we resolve via
 /// `CARGO_MANIFEST_DIR` (set at compile time). In a bundled app the dylib is
 /// shipped alongside the executable in the platform-specific resource path.
+#[cfg(feature = "rocksdb")]
 fn pdfium_library_path() -> std::path::PathBuf {
     let name = if cfg!(target_os = "macos") {
         "libpdfium.dylib"
@@ -249,6 +253,7 @@ fn app_data_dir() -> std::path::PathBuf {
 /// Returns the canonical app data directory and the database handle. Callers
 /// may use the returned `(data_dir, db)` tuple directly without recomputing
 /// paths.
+#[cfg(feature = "rocksdb")]
 async fn init_database() -> (
     std::path::PathBuf,
     surrealdb::Surreal<surrealdb::engine::any::Any>,
@@ -279,6 +284,7 @@ async fn init_database() -> (
 /// 3. Constructs the service layer with trait-object dependencies.
 /// 4. Registers IPC command handlers and starts the Tauri event loop.
 #[tokio::main]
+#[cfg(feature = "rocksdb")]
 pub async fn run() {
     let (data_dir, db) = init_database().await;
 
@@ -565,6 +571,7 @@ pub async fn run() {
 }
 
 /// Read all settings from the database into a flat map (empty on error).
+#[cfg(feature = "rocksdb")]
 pub(crate) async fn read_settings_map(
     db: &surrealdb::Surreal<surrealdb::engine::any::Any>,
 ) -> HashMap<String, String> {
@@ -575,6 +582,7 @@ pub(crate) async fn read_settings_map(
 }
 
 /// Read LLM settings from the database and construct the correct provider.
+#[cfg(feature = "rocksdb")]
 async fn build_llm_provider_from_db(
     db: &surrealdb::Surreal<surrealdb::engine::any::Any>,
 ) -> Arc<dyn LlmProvider> {
@@ -583,6 +591,7 @@ async fn build_llm_provider_from_db(
 }
 
 /// Read settings from the database and construct the embedding provider.
+#[cfg(feature = "rocksdb")]
 pub(crate) async fn build_embedding_provider_from_db(
     db: &surrealdb::Surreal<surrealdb::engine::any::Any>,
     data_dir: &std::path::Path,

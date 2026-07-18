@@ -1,3 +1,5 @@
+#![cfg(feature = "rocksdb")]
+
 //! Retrieval recall@5 measurement harness for Phase 1.
 //!
 //! Architecture mandate (`docs/architecture.md:785,888`): Phase 1 evaluates

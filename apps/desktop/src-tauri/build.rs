@@ -3,10 +3,27 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+#[path = "src/runtime_downloads.rs"]
+mod runtime_downloads;
+
 fn main() {
     tauri_build::build();
-    download_pdfium();
-    download_onnxruntime();
+    println!("cargo:rerun-if-env-changed=CHRONACLE_SKIP_RUNTIME_DOWNLOADS");
+    println!("cargo:rerun-if-env-changed=CHRONACLE_SKIP_PDFIUM_DOWNLOAD");
+    println!("cargo:rerun-if-env-changed=CHRONACLE_SKIP_ORT_DOWNLOAD");
+
+    let decision = runtime_downloads::download_decision(
+        env::var_os("CARGO_FEATURE_ROCKSDB").is_some(),
+        env::var_os("CHRONACLE_SKIP_RUNTIME_DOWNLOADS").is_some(),
+        env::var_os("CHRONACLE_SKIP_PDFIUM_DOWNLOAD").is_some(),
+        env::var_os("CHRONACLE_SKIP_ORT_DOWNLOAD").is_some(),
+    );
+    if decision.pdfium {
+        download_pdfium();
+    }
+    if decision.onnxruntime {
+        download_onnxruntime();
+    }
 }
 
 /// Download a pdfium dynamic library for the current target into
@@ -42,7 +59,6 @@ fn download_pdfium() {
     let lib_path = resources_dir.join(lib_name);
 
     println!("cargo:rerun-if-changed=resources/pdfium/{lib_name}");
-    println!("cargo:rerun-if-env-changed=CHRONACLE_SKIP_PDFIUM_DOWNLOAD");
 
     if lib_path.exists() {
         return;
@@ -131,7 +147,6 @@ fn download_onnxruntime() {
     let lib_path = resources_dir.join(lib_name);
 
     println!("cargo:rerun-if-changed=resources/onnxruntime/{lib_name}");
-    println!("cargo:rerun-if-env-changed=CHRONACLE_SKIP_ORT_DOWNLOAD");
 
     if lib_path.exists() {
         return;

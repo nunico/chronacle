@@ -27,13 +27,13 @@ depends = ['pnpm-install']
 [tasks.dev]
 description = 'Run application in DEV mode'
 dir = '{{config_root}}/apps/desktop'
-run = 'tauri dev'
+run = 'tauri dev --features rocksdb'
 depends = ['pnpm-install']
 
 [tasks.build]
 description = 'Build application package'
 dir = '{{config_root}}/apps/desktop'
-run = 'node --run build'
+run = 'tauri build --features rocksdb'
 depends = ['pnpm-install']
 
 [settings]
