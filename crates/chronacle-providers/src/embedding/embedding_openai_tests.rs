@@ -1,4 +1,4 @@
-use super::openai::normalize_openai_base_url;
+use super::openai::{decode_openai_embeddings_response, normalize_openai_base_url};
 use super::*;
 
 #[test]
@@ -41,51 +41,39 @@ async fn openai_empty_key_is_a_configuration_error() {
     assert!(matches!(err, EmbeddingError::Init(_)), "got {err:?}");
 }
 
-#[tokio::test]
-async fn openai_embed_orders_by_index_and_checks_dim() {
-    use std::io::{Read, Write};
-
-    // Minimal one-shot HTTP stub returning two embeddings out of order.
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut scratch = [0u8; 8192];
-        let _ = stream.read(&mut scratch); // drain request; body is tiny
-        let v0: Vec<f32> = vec![0.1; CLOUD_EMBED_DIM];
-        let v1: Vec<f32> = vec![0.2; CLOUD_EMBED_DIM];
-        let json = serde_json::json!({
-            "data": [
-                { "index": 1, "embedding": v1 },
-                { "index": 0, "embedding": v0 },
-            ]
-        })
-        .to_string();
-        let resp = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            json.len(),
-            json
-        );
-        stream.write_all(resp.as_bytes()).unwrap();
-        stream.flush().unwrap();
-    });
-
-    let provider = OpenAiEmbeddingProvider::new(
-        "test-key".into(),
-        "text-embedding-3-small".into(),
-        format!("http://{addr}"),
-    );
-    let out = provider
-        .embed_documents(vec!["a".into(), "b".into()])
-        .await
-        .unwrap();
-    server.join().unwrap();
+#[test]
+fn openai_embed_orders_by_index_and_checks_dim() {
+    let v0: Vec<f32> = vec![0.1; CLOUD_EMBED_DIM];
+    let v1: Vec<f32> = vec![0.2; CLOUD_EMBED_DIM];
+    let out = decode_openai_embeddings_response(serde_json::json!({
+        "data": [
+            { "index": 1, "embedding": v1 },
+            { "index": 0, "embedding": v0 },
+        ]
+    }))
+    .unwrap();
 
     assert_eq!(out.len(), 2);
     assert_eq!(out[0].len(), CLOUD_EMBED_DIM);
     // Sorted by index: 0 -> 0.1, 1 -> 0.2.
     assert!((out[0][0] - 0.1).abs() < 1e-6);
     assert!((out[1][0] - 0.2).abs() < 1e-6);
+}
+
+#[test]
+fn openai_embed_rejects_wrong_dimensions() {
+    let err = decode_openai_embeddings_response(serde_json::json!({
+        "data": [
+            { "index": 0, "embedding": [0.1, 0.2] },
+        ]
+    }))
+    .unwrap_err();
+
+    assert!(matches!(err, EmbeddingError::Embed(_)), "got {err:?}");
+    assert!(
+        err.to_string().contains("expected 768-dim vectors"),
+        "got {err:?}"
+    );
 }
 
 #[tokio::test]

@@ -85,33 +85,45 @@ impl OpenAiEmbeddingProvider {
             )));
         }
 
-        #[derive(serde::Deserialize)]
-        struct Item {
-            embedding: Vec<f32>,
-            index: usize,
-        }
-        #[derive(serde::Deserialize)]
-        struct Body {
-            data: Vec<Item>,
-        }
-
-        let mut parsed: Body = resp
+        let body = resp
             .json()
             .await
             .map_err(|e| EmbeddingError::Embed(format!("failed to parse embeddings: {e}")))?;
-        // The API does not guarantee order; sort by the echoed input index.
-        parsed.data.sort_by_key(|d| d.index);
 
-        if let Some(first) = parsed.data.first() {
-            if first.embedding.len() != CLOUD_EMBED_DIM {
-                return Err(EmbeddingError::Embed(format!(
-                    "expected {CLOUD_EMBED_DIM}-dim vectors, got {}",
-                    first.embedding.len()
-                )));
-            }
-        }
-        Ok(parsed.data.into_iter().map(|d| d.embedding).collect())
+        decode_openai_embeddings_response(body)
     }
+}
+
+#[derive(serde::Deserialize)]
+struct OpenAiEmbeddingItem {
+    embedding: Vec<f32>,
+    index: usize,
+}
+
+#[derive(serde::Deserialize)]
+struct OpenAiEmbeddingsResponse {
+    data: Vec<OpenAiEmbeddingItem>,
+}
+
+pub(super) fn decode_openai_embeddings_response(
+    body: serde_json::Value,
+) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+    let mut parsed: OpenAiEmbeddingsResponse = serde_json::from_value(body)
+        .map_err(|e| EmbeddingError::Embed(format!("failed to parse embeddings: {e}")))?;
+
+    // The API does not guarantee order; sort by the echoed input index.
+    parsed.data.sort_by_key(|d| d.index);
+
+    for item in &parsed.data {
+        if item.embedding.len() != CLOUD_EMBED_DIM {
+            return Err(EmbeddingError::Embed(format!(
+                "expected {CLOUD_EMBED_DIM}-dim vectors, got {}",
+                item.embedding.len()
+            )));
+        }
+    }
+
+    Ok(parsed.data.into_iter().map(|d| d.embedding).collect())
 }
 
 #[async_trait]
