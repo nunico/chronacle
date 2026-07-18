@@ -293,6 +293,12 @@ pub struct GraphNodeRef {
     pub id: String,
     pub kind: String, // table name: npc, location, …
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_kind: Option<String>,
 }
 
 /// A directed `relates_to` edge between two nodes.

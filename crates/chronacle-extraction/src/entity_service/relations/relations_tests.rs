@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use super::edge;
-use super::{relate, relate_collapsing};
+use super::{get_entity_graph, relate, relate_collapsing};
 use crate::entity_service::{create, EntityInput, EntityKind, GraphEdge};
 
 #[test]
@@ -245,4 +245,100 @@ async fn relate_collapsing_keeps_lone_mentioned_and_coexisting_specifics() {
         rel_types_between(&db, &a, &b).await,
         vec!["allied_with", "enemy_of"]
     );
+}
+
+#[tokio::test]
+async fn graph_includes_missing_wikilink_node_from_notes() {
+    let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+        .await
+        .unwrap();
+    db.use_ns("test").use_db("test").await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
+    db.query(
+        "CREATE campaign:camp1 SET name='Test', system='5e', \
+         created_at=time::now(), updated_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+    let npc = create(
+        &db,
+        Some("camp1"),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Mira".to_string(),
+            notes: Some("Ask [[Moon Gate]] about this.".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let graph = get_entity_graph(&db, &npc.id, "npc", 1).await.unwrap();
+
+    assert!(graph.nodes.iter().any(|n| {
+        n.kind == "missing_wikilink"
+            && n.name == "Moon Gate"
+            && n.missing == Some(true)
+            && n.source_id.as_deref() == Some(npc.id.as_str())
+    }));
+    assert!(graph.edges.iter().any(|e| {
+        e.from_id == npc.id
+            && e.from_kind == "npc"
+            && e.to_kind == "missing_wikilink"
+            && e.rel_type == "unresolved"
+    }));
+}
+
+#[tokio::test]
+async fn graph_skips_missing_node_when_wikilink_resolves_by_alias() {
+    let db = surrealdb::Surreal::new::<surrealdb::engine::local::Mem>(())
+        .await
+        .unwrap();
+    db.use_ns("test").use_db("test").await.unwrap();
+    chronacle_db::run_migrations(&db).await.unwrap();
+    db.query(
+        "CREATE campaign:camp1 SET name='Test', system='5e', \
+         created_at=time::now(), updated_at=time::now();",
+    )
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+    let target = create(
+        &db,
+        Some("camp1"),
+        None,
+        EntityKind::Location,
+        EntityInput {
+            name: "The Moon Gate".to_string(),
+            aliases: Some(vec!["Selene Door".to_string()]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let npc = create(
+        &db,
+        Some("camp1"),
+        None,
+        EntityKind::Npc,
+        EntityInput {
+            name: "Mira".to_string(),
+            notes: Some("Ask [[Selene Door]] about this.".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let graph = get_entity_graph(&db, &npc.id, "npc", 1).await.unwrap();
+
+    assert!(!graph.nodes.iter().any(|n| n.kind == "missing_wikilink"));
+    assert!(graph
+        .nodes
+        .iter()
+        .any(|n| n.id == target.id && n.kind == "location"));
 }
