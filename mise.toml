@@ -36,5 +36,9 @@ dir = '{{config_root}}/apps/desktop'
 run = 'tauri build --features rocksdb'
 depends = ['pnpm-install']
 
+[tasks.ci-pr]
+description = 'Run the complete pull-request gate in Docker'
+run = 'scripts/ci/local-pr.sh'
+
 [settings]
 experimental = true

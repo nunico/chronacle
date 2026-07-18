@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1.7
+
+FROM rust:1.95-bookworm AS ci-base
+
+ENV CARGO_INCREMENTAL=0 \
+    CARGO_TERM_COLOR=always \
+    PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl gnupg \
+      libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+      libayatana-appindicator3-dev \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install --global pnpm@11.5.1 \
+    && cargo install cargo-deny --locked \
+    && pnpm config set store-dir /pnpm/store \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rustup component add rustfmt clippy
+
+WORKDIR /app
+
+# Keep JavaScript dependency provisioning cached when application source changes.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/desktop/package.json apps/desktop/package.json
+RUN --mount=type=cache,id=chronacle-pnpm-store,target=/pnpm/store \
+    pnpm install --frozen-lockfile --config.minimum-release-age=0
+
+COPY . .
+
+FROM ci-base AS backend-quality
+RUN --mount=type=cache,id=chronacle-cargo-registry,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=chronacle-cargo-git,target=/usr/local/cargo/git \
+    --mount=type=cache,id=chronacle-target,target=/app/target \
+    scripts/ci/backend-quality.sh
+RUN touch /backend-quality.ok
+
+FROM ci-base AS frontend-quality
+COPY --from=backend-quality /backend-quality.ok /
+RUN --mount=type=cache,id=chronacle-pnpm-store,target=/pnpm/store \
+    scripts/ci/frontend-quality.sh
+RUN touch /frontend-quality.ok
+
+FROM ci-base AS acceptance
+COPY --from=frontend-quality /frontend-quality.ok /
+RUN --mount=type=cache,id=chronacle-pnpm-store,target=/pnpm/store \
+    --mount=type=cache,id=chronacle-playwright,target=/root/.cache/ms-playwright \
+    pnpm -C apps/desktop exec playwright install --with-deps chromium
+RUN --mount=type=cache,id=chronacle-pnpm-store,target=/pnpm/store \
+    --mount=type=cache,id=chronacle-playwright,target=/root/.cache/ms-playwright \
+    scripts/ci/acceptance.sh
+RUN touch /acceptance.ok
+
+FROM scratch AS pr-gate
+COPY --from=backend-quality /backend-quality.ok /
+COPY --from=frontend-quality /frontend-quality.ok /
+COPY --from=acceptance /acceptance.ok /
