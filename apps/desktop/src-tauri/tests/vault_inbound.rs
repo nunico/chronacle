@@ -572,6 +572,12 @@ async fn our_own_sidecar_cleanup_is_not_mistaken_for_the_gms_resolution_signal()
     ));
     let sidecar_key = "campaigns/sov/entities/npc/seraphina.conflict.md";
     let sidecar_content = std::fs::read_to_string(&sidecar).unwrap();
+    wait_for_vault_event(
+        &mut rx,
+        chronacle_core::VaultEvent::Upsert(sidecar_key.to_string()),
+        "a sidecar upsert event within 5s",
+    )
+    .await;
 
     // The conflict evaporates on its own: overwrite the primary file with
     // exactly the DB's current render (the sidecar's content) — no GM
@@ -584,20 +590,14 @@ async fn our_own_sidecar_cleanup_is_not_mistaken_for_the_gms_resolution_signal()
     assert_eq!(report.conflicts, 0, "the conflict evaporated");
 
     // Reconcile deletes the sidecar itself as part of that cleanup, arming
-    // the delete guard first. Drain the watcher until it observes the
-    // resulting Remove event (other Upsert events from the file edits above
-    // may also arrive; they are not the point of this assertion).
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        let ev = tokio::time::timeout(remaining, rx.recv())
-            .await
-            .expect("a remove event for the sidecar within 5s")
-            .expect("open channel");
-        if ev == chronacle_core::VaultEvent::Remove(sidecar_key.to_string()) {
-            break;
-        }
-    }
+    // the delete guard first. Wait for the watcher to observe the resulting
+    // Remove event; other events from the file edits above are ignored.
+    wait_for_vault_event(
+        &mut rx,
+        chronacle_core::VaultEvent::Remove(sidecar_key.to_string()),
+        "a remove event for the sidecar within 5s",
+    )
+    .await;
 
     // Mimic the consumer loop's Remove handling: this must be recognised as
     // our own cleanup, not a GM resolution signal.
