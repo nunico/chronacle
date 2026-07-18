@@ -10,6 +10,8 @@ rg -q '^surrealdb = \{ version = "2", default-features = false, features = \["kv
   || fail 'workspace SurrealDB must be memory-only'
 rg -q '^scripts/ci/test-pipeline\.sh$' scripts/ci/backend-quality.sh \
   || fail 'backend quality must enforce the pipeline contract'
+rg -q '^[[:space:]]+ripgrep \\$' Dockerfile.ci \
+  || fail 'CI Docker image must install ripgrep for pipeline contracts'
 ! rg -q '^pdfium-render =' apps/desktop/src-tauri/Cargo.toml \
   || fail 'desktop must not activate pdfium-render directly'
 
