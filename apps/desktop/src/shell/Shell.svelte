@@ -635,6 +635,7 @@
         onCountsChanged={refreshMaintenanceCount}
         {activeCampaignId}
         onOpenEntity={(id, kind) => openEntity(id, kind as EntityKind)}
+        onCreateMissingArticle={(name, findingId) => openCreateKindChooser(name, findingId)}
       />
     {:else if typeof view === 'object' && view.category === 'sessions' && activeCampaignId}
       <SessionLogView campaignId={activeCampaignId} />
