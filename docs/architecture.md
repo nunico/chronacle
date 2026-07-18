@@ -404,7 +404,7 @@ Tool: **Playwright** against the backend service layer (backend E2E) and optiona
 # Backend E2E (service-layer, no UI)
 scripts/ci/acceptance.sh
 
-# Full UI E2E (requires built app: pnpm -C apps/desktop exec tauri build --no-bundle)
+# Full UI E2E (build first: pnpm -C apps/desktop exec tauri build --no-bundle --features rocksdb)
 pnpm -C apps/desktop run e2e:ui
 ```
 
@@ -501,7 +501,7 @@ On every PR:
 On merge to main:
   ├── All of the above
   ├── cargo llvm-cov --workspace --html (coverage report artifact)
-  ├── cargo build --workspace --release
+  ├── pnpm -C apps/desktop exec tauri build --no-bundle --features rocksdb
   └── separate E2E UI workflow (tauri-driver on Linux)
 ```
 

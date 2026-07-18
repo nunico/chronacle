@@ -8,6 +8,8 @@ fail() {
 
 rg -q '^surrealdb = \{ version = "2", default-features = false, features = \["kv-mem"\] \}$' Cargo.toml \
   || fail 'workspace SurrealDB must be memory-only'
+rg -q '^scripts/ci/test-pipeline\.sh$' scripts/ci/backend-quality.sh \
+  || fail 'backend quality must enforce the pipeline contract'
 ! rg -q '^pdfium-render =' apps/desktop/src-tauri/Cargo.toml \
   || fail 'desktop must not activate pdfium-render directly'
 
@@ -119,3 +121,26 @@ for stage in backend-quality frontend-quality acceptance; do
   docker_stage_runs_stage "$stage" \
     || fail "$stage Docker target does not use its shared entrypoint"
 done
+
+rg -q 'run: pnpm -C apps/desktop exec tauri build --no-bundle --features rocksdb' \
+  .github/workflows/ci.yml \
+  || fail 'main production build must build the desktop app with rocksdb'
+rg -q 'run: pnpm exec tauri build --no-bundle --features rocksdb' \
+  .github/workflows/e2e-ui.yml \
+  || fail 'UI E2E workflow build must enable rocksdb'
+rg -q '^RUN pnpm -C apps/desktop exec tauri build --no-bundle --features rocksdb$' \
+  apps/desktop/tests/e2e/ui/Dockerfile \
+  || fail 'UI E2E container build must enable rocksdb'
+
+awk '
+  /uses: tauri-apps\/tauri-action@/ { in_action = 1; seen = 1; next }
+  in_action && /^[[:space:]]+with:/ { in_with = 1; next }
+  in_action && in_with && /^[[:space:]]+args:[[:space:]]+--features rocksdb[[:space:]]*$/ {
+    found = 1
+  }
+  END { exit !(seen && found) }
+' .github/workflows/release.yml \
+  || fail 'release packaging must enable rocksdb'
+rg -q 'cargo test -p Chronacle --features rocksdb --test rocksdb_persistence' \
+  .github/workflows/release.yml \
+  || fail 'release validation must exercise RocksDB persistence'

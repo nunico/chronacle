@@ -79,6 +79,9 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      - name: Test RocksDB persistence
+        run: cargo test -p Chronacle --features rocksdb --test rocksdb_persistence
+
       - name: Typecheck
         working-directory: apps/desktop
         run: pnpm typecheck
@@ -138,6 +141,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: apps/desktop
+          args: --features rocksdb
           tagName: ${{ github.ref_name }}
           releaseName: Chronacle ${{ github.ref_name }}
           releaseDraft: false

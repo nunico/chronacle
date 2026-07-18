@@ -85,7 +85,7 @@ pnpm -C apps/desktop dev && pnpm -C apps/desktop typecheck && pnpm -C apps/deskt
 pnpm -C apps/desktop test:run                      # Vitest CI mode
 pnpm -C apps/desktop test:coverage
 scripts/ci/acceptance.sh                           # generates BDD specs, then runs Playwright
-pnpm -C apps/desktop run e2e:ui                    # requires built Tauri app (tauri build --no-bundle)
+pnpm -C apps/desktop run e2e:ui                    # build first with: tauri build --no-bundle --features rocksdb
 
 # Full app
 pnpm -C apps/desktop tauri dev --features rocksdb  # dev with persistent storage
