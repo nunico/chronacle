@@ -57,6 +57,7 @@ apps/desktop/src-tauri/resources/onnxruntime/*
 
 # graphify
 graphify-out/
+.worktrees/
 # Superpowers brainstorming companion (local mockups)
 .superpowers/
 
