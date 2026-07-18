@@ -482,27 +482,48 @@ Hooks are enforced locally and mirrored in CI — local and CI must be identical
 
 ```
 On every PR:
-  ├── rust-check
-  │     ├── cargo fmt --all --check
-  │     ├── cargo clippy --workspace --all-targets -- -D warnings
-  │     ├── cargo audit
-  │     └── cargo test --workspace (unit + integration)
-  ├── frontend-check
-  │     ├── prettier --check
-  │     ├── eslint
-  │     ├── pnpm -C apps/desktop typecheck
-  │     └── pnpm -C apps/desktop test:run (Vitest)
-  └── e2e-backend
-        └── pnpm -C apps/desktop exec playwright test tests/e2e/backend/
+  ├── Backend quality
+  │     └── scripts/ci/backend-quality.sh
+  │           ├── cargo fmt --all --check
+  │           ├── cargo clippy --workspace --all-targets -- -D warnings
+  │           ├── cargo test --workspace
+  │           └── cargo deny check
+  ├── Frontend quality
+  │     └── scripts/ci/frontend-quality.sh
+  │           ├── pnpm -C apps/desktop typecheck
+  │           ├── pnpm -C apps/desktop lint
+  │           └── pnpm -C apps/desktop test:run
+  └── Acceptance tests
+        └── scripts/ci/acceptance.sh
+              └── pnpm -C apps/desktop run e2e:backend
 
 On merge to main:
   ├── All of the above
-  ├── e2e-ui (tauri-driver via pnpm -C apps/desktop run e2e:ui, matrix: ubuntu, windows, macos)
-  ├── cargo-llvm-cov --workspace (coverage report artifact)
-  └── build-artifacts (installers for all platforms)
+  ├── cargo llvm-cov --workspace --html (coverage report artifact)
+  ├── cargo build --workspace --release
+  └── separate E2E UI workflow (tauri-driver on Linux)
 ```
 
-All CI steps are defined as reusable composite actions so they're runnable locally via `act`.
+The GitHub jobs invoke the same named repository scripts used by the local Docker gate. Frontend
+quality and Acceptance tests each restore the pnpm store via `actions/setup-node`; the Docker gate
+mounts one BuildKit pnpm-store cache into dependency installation and both stages.
+
+The authoritative pre-PR command is:
+
+```bash
+scripts/ci/local-pr.sh
+```
+
+It builds `Dockerfile.ci`'s `pr-gate` target, which runs Backend quality, Frontend quality, and
+Acceptance tests using the repository commands shown above. Agents must run it successfully before
+creating a Chronacle PR. This gate deliberately excludes merge-only coverage and release builds,
+and the separate real-app `tauri-driver` UI E2E workflow.
+
+Normal workspace builds and tests use SurrealDB's memory-only feature. Persistent RocksDB is an
+explicit desktop feature so it does not lengthen the PR backend gate: `mise run dev` and
+`mise run build` pass `--features rocksdb`, as must direct Tauri development/build commands.
+Persistence-specific tests opt in explicitly, for example
+`cargo test -p Chronacle --features rocksdb --test rocksdb_persistence`.
 
 ---
 

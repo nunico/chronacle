@@ -96,13 +96,13 @@ cd chronacle
 # Install frontend dependencies (installs the workspace; apps/desktop is a pnpm workspace package)
 pnpm install
 
-# Run in development mode (hot-reload frontend + debug backend)
-pnpm -C apps/desktop tauri dev
-# Alternatively: mise run dev
+# Run in development mode (hot-reload frontend + persistent RocksDB backend)
+pnpm -C apps/desktop tauri dev --features rocksdb
+# Alternatively: mise run dev (uses the same rocksdb feature)
 
 # Build a production release
-pnpm -C apps/desktop exec tauri build
-# Alternatively: mise run build
+pnpm -C apps/desktop exec tauri build --features rocksdb
+# Alternatively: mise run build (uses the same rocksdb feature)
 ```
 
 ---
@@ -122,6 +122,14 @@ cargo audit                                      # Security audit
 cargo deny check                                 # License + dependency check
 ```
 
+The workspace's default SurrealDB feature is memory-only, which keeps normal backend builds and
+tests fast. Enable the desktop crate's `rocksdb` feature only when exercising the persistent app
+runtime, for example:
+
+```bash
+cargo test -p Chronacle --features rocksdb --test rocksdb_persistence
+```
+
 ### Frontend
 
 ```bash
@@ -130,15 +138,35 @@ pnpm -C apps/desktop typecheck           # TypeScript type checking
 pnpm -C apps/desktop lint                # ESLint
 pnpm -C apps/desktop test:run            # Vitest (CI mode)
 pnpm -C apps/desktop test:coverage       # With coverage
-pnpm -C apps/desktop exec playwright test tests/e2e/backend/   # E2E backend tests
+scripts/ci/acceptance.sh                     # Playwright backend acceptance tests
 ```
 
 ### Full App
 
 ```bash
-pnpm -C apps/desktop tauri dev           # Dev with hot-reload
-pnpm -C apps/desktop exec tauri build    # Production bundle
+pnpm -C apps/desktop tauri dev --features rocksdb           # Dev with persistence
+pnpm -C apps/desktop exec tauri build --features rocksdb    # Production bundle
 ```
+
+### Pull-request validation
+
+CI and local validation share three named repository scripts:
+
+- `scripts/ci/backend-quality.sh` — Rust formatting, Clippy, workspace tests, and `cargo deny`
+- `scripts/ci/frontend-quality.sh` — Svelte checks, ESLint, and Vitest
+- `scripts/ci/acceptance.sh` — Playwright backend acceptance tests
+
+Before creating a Chronacle pull request, run the authoritative PR gate successfully from the
+repository root:
+
+```bash
+scripts/ci/local-pr.sh
+```
+
+This builds the Docker `pr-gate` target and runs the same three scripts as the pull-request jobs.
+BuildKit caches Cargo data, build output, Playwright Chromium, and a shared pnpm store across the
+frontend and acceptance stages. The local PR gate intentionally excludes merge-only coverage and
+release builds, and the separate real-app `tauri-driver` UI E2E workflow.
 
 ---
 
