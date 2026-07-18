@@ -42,6 +42,7 @@
     pendingCreate?: PendingCreate | null;
     onPendingCreateConsumed?: () => void;
     onPendingCreateSaved?: (sourceFindingId: string) => void;
+    onMissingLinkClick?: (name: string) => void;
   }
 
   let {
@@ -55,6 +56,7 @@
     pendingCreate = null,
     onPendingCreateConsumed,
     onPendingCreateSaved,
+    onMissingLinkClick,
   }: Props = $props();
 
   const KIND_LABEL: Record<EntityKind, string> = {
@@ -320,7 +322,7 @@
       <div class="form-panel" oninput={() => (formDirty = true)} onchange={() => (formDirty = true)}>
         {#if formNode?.notes}
           <div class="notes-preview">
-            <WikiText text={formNode.notes} entities={entityMap} />
+            <WikiText text={formNode.notes} entities={entityMap} {onMissingLinkClick} />
           </div>
         {/if}
         {#if formNode}
@@ -346,6 +348,7 @@
                   text={formNode.codex_article}
                   entities={entityMap}
                   onEntityClick={onOpenEntity}
+                  {onMissingLinkClick}
                 />
               {:else}
                 <p class="muted">No article compiled yet</p>

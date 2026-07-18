@@ -13,8 +13,9 @@
     entityKind: string;
     onClose?: () => void;
     onOpenEntity?: (node: GraphNodeRef) => void; // click-through: open in the manager
+    onMissingLinkClick?: (name: string) => void;
   }
-  const { entityId, entityKind, onClose, onOpenEntity }: Props = $props();
+  const { entityId, entityKind, onClose, onOpenEntity, onMissingLinkClick }: Props = $props();
 
   type SimNode = GraphNodeRef & SimulationNodeDatum;
   // d3-force mutates source/target from string ids to node objects after simulation starts.
@@ -136,7 +137,14 @@
         notes: null as null,
       }));
       const currentGraph: EntityGraph = {
-        nodes: nodes.map((n) => ({ id: n.id, kind: n.kind, name: n.name })),
+        nodes: nodes.map((n) => ({
+          id: n.id,
+          kind: n.kind,
+          name: n.name,
+          missing: n.missing,
+          source_id: n.source_id,
+          source_kind: n.source_kind,
+        })),
         edges: currentEdges,
       };
       const merged = mergeGraph(currentGraph, g);
@@ -168,6 +176,10 @@
   // positionedNodes are snapshot copies; fx/fy must be set on the live node in nodes[].
   function liveNode(id: string): SimNode | undefined {
     return nodes.find((x) => x.id === id);
+  }
+
+  function isMissingNode(n: GraphNodeRef | SimNode): boolean {
+    return n.missing === true || n.kind === 'missing_wikilink';
   }
 
   // ── Node drag-to-pin ────────────────────────────────────────────────────────
@@ -277,7 +289,12 @@
     }
     event.stopPropagation();
     const n = liveNode(id);
-    if (n) void recenter(n.id, n.kind);
+    if (!n) return;
+    if (isMissingNode(n)) {
+      onMissingLinkClick?.(n.name);
+      return;
+    }
+    void recenter(n.id, n.kind);
   }
 
   // Called by Svelte when container dimensions change (bind:clientWidth/clientHeight).
@@ -372,8 +389,10 @@
         -->
         <g
           class="node"
+          class:node--missing={isMissingNode(n)}
           data-id={n.id}
           data-name={n.name}
+          data-missing={isMissingNode(n) ? 'true' : undefined}
           transform={`translate(${n.x},${n.y}) scale(${1 / zoom})`}
           style="cursor: pointer;"
           onpointerdown={(e) => onNodePointerDown(e, n.id)}
@@ -383,9 +402,13 @@
           <circle
             cx={0}
             cy={0}
-            r={n.id === centerId ? 16 : 10}
-            class={n.id === centerId ? 'node-circle node-circle--center' : 'node-circle'}
-            fill={kindColor(n.kind)}
+            r={isMissingNode(n) ? 12 : n.id === centerId ? 16 : 10}
+            class={[
+              'node-circle',
+              n.id === centerId && 'node-circle--center',
+              isMissingNode(n) && 'node-circle--missing',
+            ]}
+            fill={isMissingNode(n) ? 'transparent' : kindColor(n.kind)}
           />
           <!-- Name label: offset below the node center in constant local px. -->
           <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -395,11 +418,18 @@
             class="node-label"
             text-anchor="middle"
             onpointerdown={(e) => e.stopPropagation()}
-            onclick={(e) => { e.stopPropagation(); onOpenEntity?.(n); }}
+            onclick={(e) => {
+              e.stopPropagation();
+              if (isMissingNode(n)) {
+                onMissingLinkClick?.(n.name);
+              } else {
+                onOpenEntity?.(n);
+              }
+            }}
             style="cursor: pointer;"
-          >{n.name}</text>
+          >{isMissingNode(n) ? `[[${n.name}]]` : n.name}</text>
           <!-- Expand affordance: constant-size button at fixed local offset from node center. -->
-          {#if n.id !== centerId}
+          {#if n.id !== centerId && !isMissingNode(n)}
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <g
@@ -498,6 +528,12 @@
     stroke-width: 2.5;
     filter: drop-shadow(0 0 8px rgba(123, 92, 255, 0.55));
   }
+  .node-circle--missing {
+    stroke: var(--warning, #f8c35b);
+    stroke-width: 2;
+    stroke-dasharray: 4 3;
+    filter: drop-shadow(0 0 5px rgba(248, 195, 91, 0.25));
+  }
 
   /* ── Node labels ───────────────────────────────────────────────────────────── */
   .node-label {
@@ -514,6 +550,10 @@
   }
   .node-label:hover {
     fill: var(--violet-400);
+  }
+  .node--missing .node-label {
+    fill: var(--warning, #f8c35b);
+    font-style: italic;
   }
 
   /* ── Expand button (circular affordance) ───────────────────────────────────── */

@@ -124,4 +124,44 @@ describe('EntityGraph', () => {
     expect(await screen.findByText('Town')).toBeTruthy();
     expect(m.getEntityGraph).toHaveBeenCalledWith('keep', 'location', 1);
   });
+
+  it('renders missing wikilink nodes distinctly and opens create flow on click', async () => {
+    const onMissingLinkClick = vi.fn();
+    m.getEntityGraph.mockResolvedValueOnce({
+      nodes: [
+        { id: 'mira', kind: 'npc', name: 'Mira' },
+        {
+          id: 'missing_wikilink:npc:mira:moon gate',
+          kind: 'missing_wikilink',
+          name: 'Moon Gate',
+          missing: true,
+          source_id: 'mira',
+          source_kind: 'npc',
+        },
+      ],
+      edges: [
+        {
+          from_id: 'mira',
+          from_kind: 'npc',
+          to_id: 'missing_wikilink:npc:mira:moon gate',
+          to_kind: 'missing_wikilink',
+          rel_type: 'unresolved',
+          notes: null,
+        },
+      ],
+    });
+
+    const { container } = render(EntityGraph, {
+      entityId: 'mira',
+      entityKind: 'npc',
+      onMissingLinkClick,
+    });
+
+    expect(await screen.findByText('[[Moon Gate]]')).toBeTruthy();
+    const missingNode = container.querySelector('[data-missing="true"]') as Element;
+    expect(missingNode).toBeTruthy();
+
+    await fireEvent.click(missingNode);
+    expect(onMissingLinkClick).toHaveBeenCalledWith('Moon Gate');
+  });
 });

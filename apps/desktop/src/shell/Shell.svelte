@@ -660,6 +660,7 @@
         }}
         onViewGraph={(n) => (graphFor = { id: n.id, kind: n.kind })}
         onOpenEntity={(id, kind) => openEntity(id, kind as EntityKind)}
+        onMissingLinkClick={(name) => openCreateKindChooser(name)}
       />
     {:else if ENTITY_KIND_MAP[view.category]}
       <div class="no-campaign-msg">
@@ -740,6 +741,7 @@
             graphFor = null;
             openEntity(n.id, n.kind as EntityKind);
           }}
+          onMissingLinkClick={(name) => openCreateKindChooser(name)}
         />
       </div>
     </div>
