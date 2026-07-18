@@ -19,11 +19,11 @@
   import { modalBehavior } from '../lib/actions/modal';
   import { buildWikiLinkEntityMap } from '../lib/wikilinks';
 
-  type PendingCreate = {
+  interface PendingCreate {
     kind: EntityKind;
     name: string;
     sourceFindingId?: string;
-  };
+  }
 
   interface Props {
     campaignId: string;

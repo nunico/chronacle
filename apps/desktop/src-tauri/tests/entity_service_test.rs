@@ -971,13 +971,31 @@ async fn forward_reference_wikilink_reconciled_on_new_entity_create() {
     .await
     .unwrap();
 
-    // At this point "Brother Bram" doesn't exist, so no edge should be formed yet.
+    // At this point "Brother Bram" doesn't exist, so no persisted relation
+    // exists yet, but the graph still exposes the unresolved forward reference
+    // as a synthetic missing wikilink node.
     let graph_before = get_entity_graph(&db, &entity_a.id, "npc", 1).await.unwrap();
-    assert_eq!(
-        graph_before.edges.len(),
-        0,
-        "no edge expected before Bram is created"
+    let missing_node = graph_before
+        .nodes
+        .iter()
+        .find(|n| n.kind == "missing_wikilink" && n.name == "Brother Bram");
+    assert!(
+        missing_node.is_some(),
+        "unresolved forward reference should appear as a missing wikilink node"
     );
+    assert!(
+        graph_before.edges.iter().any(|e| e.from_id == entity_a.id
+            && e.to_kind == "missing_wikilink"
+            && e.rel_type == "unresolved"),
+        "unresolved synthetic edge expected before Bram is created"
+    );
+
+    let mut persisted_before = db
+        .query("SELECT rel_type FROM relates_to")
+        .await
+        .unwrap();
+    let rows_before: Vec<serde_json::Value> = persisted_before.take(0).unwrap();
+    assert_eq!(rows_before.len(), 0, "no persisted edge expected before Bram is created");
 
     // Step 2: NOW create "Brother Bram" in the same campaign
     let bram = create(

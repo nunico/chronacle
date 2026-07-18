@@ -18,10 +18,10 @@ Feature: Codex write-back review
     When the GM rejects the remaining proposal
     Then the reject command is sent for that proposal
 
-  Scenario: A broken wikilink surfaces as a finding the GM can act on
+  Scenario: A missing wikilink surfaces as a finding the GM can act on
     Given the maintenance inbox has a broken-wikilink finding for "[[Nonexistent]]"
     When the GM opens the findings tab
-    Then the finding "Broken wikilink" is listed with "Nonexistent"
+    Then the finding "Missing article" is listed with "Nonexistent"
     When the GM marks the finding resolved
     Then the resolve command is sent for that finding
 

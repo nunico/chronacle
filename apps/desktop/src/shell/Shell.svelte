@@ -60,11 +60,11 @@
     Object.entries(ENTITY_KIND_MAP).map(([cat, kind]) => [kind, cat]),
   ) as Record<EntityKind, NoteCategoryId>;
 
-  type PendingCreate = {
+  interface PendingCreate {
     kind: EntityKind;
     name: string;
     sourceFindingId?: string;
-  };
+  }
 
   let pendingOpen = $state<{ id: string; kind: EntityKind } | null>(null);
   let pendingCreate = $state<PendingCreate | null>(null);
@@ -648,7 +648,9 @@
         campaignId={activeCampaignId}
         kind={ENTITY_KIND_MAP[view.category] as EntityKind}
         createNonce={entityCreateNonce}
-        openId={pendingOpen && pendingOpen.kind === ENTITY_KIND_MAP[view.category] ? pendingOpen.id : null}
+        openId={pendingOpen && pendingOpen.kind === ENTITY_KIND_MAP[view.category]
+          ? pendingOpen.id
+          : null}
         onOpenIdConsumed={() => (pendingOpen = null)}
         pendingCreate={pendingCreate && pendingCreate.kind === ENTITY_KIND_MAP[view.category]
           ? pendingCreate
@@ -729,8 +731,12 @@
       aria-modal="true"
       aria-label="Entity relationships"
       tabindex="-1"
-      onclick={(e) => { if (e.target === e.currentTarget) graphFor = null; }}
-      onkeydown={() => { /* Esc is handled by modalBehavior on the inner panel */ }}
+      onclick={(e) => {
+        if (e.target === e.currentTarget) graphFor = null;
+      }}
+      onkeydown={() => {
+        /* Esc is handled by modalBehavior on the inner panel */
+      }}
     >
       <div class="graph-panel" use:modalBehavior={{ onClose: () => (graphFor = null) }}>
         <EntityGraph
@@ -741,7 +747,10 @@
             graphFor = null;
             openEntity(n.id, n.kind as EntityKind);
           }}
-          onMissingLinkClick={(name) => openCreateKindChooser(name)}
+          onMissingLinkClick={(name) => {
+            graphFor = null;
+            openCreateKindChooser(name);
+          }}
         />
       </div>
     </div>
