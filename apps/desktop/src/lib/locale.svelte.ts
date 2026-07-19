@@ -18,6 +18,7 @@ function normalizePreference(value: string | null | undefined): UiLocalePreferen
 
 let detectedLocale = $state<SupportedLocale>(normalizeLocale(navigatorLocale()));
 let preference = $state<UiLocalePreference>('auto');
+let localeVersion = 0;
 
 export const i18n = createI18n(untrack(() => detectedLocale));
 const _dateFormatter = $derived(new Intl.DateTimeFormat(i18n.locale));
@@ -31,11 +32,14 @@ export function uiLocalePreference(): UiLocalePreference {
 }
 
 export function setUiLocalePreference(value: string | null | undefined): void {
+  localeVersion += 1;
   preference = normalizePreference(value);
   applyLocale();
 }
 
 export async function initLocale(): Promise<void> {
+  const requestVersion = ++localeVersion;
+
   try {
     const osLocale = await locale();
     if (osLocale) detectedLocale = normalizeLocale(osLocale);
@@ -47,7 +51,7 @@ export async function initLocale(): Promise<void> {
 
   try {
     const settings = await getSettings();
-    setUiLocalePreference(settings['ui_locale']);
+    if (requestVersion === localeVersion) setUiLocalePreference(settings['ui_locale']);
   } catch {
     // Settings are unavailable during startup failures and browser-based tests.
   }

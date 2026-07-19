@@ -33,6 +33,7 @@
   let baseUrl = $state('');
   let enrichNeighbors = $state(false);
   let uiLocale = $state<UiLocalePreference>(uiLocalePreference());
+  let uiLocaleSaveVersion = 0;
 
   let isSaving = $state(false);
   let isConnecting = $state(false);
@@ -186,10 +187,16 @@
   }
 
   async function saveUiLocale(): Promise<void> {
+    const previousPreference = uiLocalePreference();
+    const saveVersion = ++uiLocaleSaveVersion;
     setUiLocalePreference(uiLocale);
     try {
       await updateSetting('ui_locale', uiLocale);
     } catch (e) {
+      if (saveVersion === uiLocaleSaveVersion) {
+        uiLocale = previousPreference;
+        setUiLocalePreference(previousPreference);
+      }
       showError(`Failed to save language: ${e}`);
     }
   }
