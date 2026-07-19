@@ -548,19 +548,16 @@
     </div>
   </section>
 
-  <p class="hint">
-    Need to upload rulebook PDFs? Use the main chat view. Once PDFs are indexed, ask questions and
-    Chronacle will cite the sources.
-  </p>
+  <p class="hint">{i18n.t('settingsPage.uploadHint')}</p>
 
   <hr />
 
   <section class="config-section custom-providers-section">
-    <h3>Custom Providers</h3>
-    <p class="hint">Register API-compatible providers (OpenRouter, Groq, etc.)</p>
+    <h3>{i18n.t('settingsPage.customProviders')}</h3>
+    <p class="hint">{i18n.t('settingsPage.customProvidersHint')}</p>
 
     {#if customProviders.length === 0 && !showAddProvider}
-      <p class="empty-state">No custom providers configured yet.</p>
+      <p class="empty-state">{i18n.t('settingsPage.noCustomProviders')}</p>
     {/if}
 
     {#each customProviders as cp (cp.id)}
@@ -568,27 +565,33 @@
         <div class="provider-header">
           <strong>{cp.name}</strong>
           <span class="type-badge"
-            >{cp.provider_type === 'openai' ? 'OpenAI-compatible' : 'Anthropic-compatible'}</span
+            >{cp.provider_type === 'openai'
+              ? i18n.t('settingsPage.openAiCompatible')
+              : i18n.t('settingsPage.anthropicCompatible')}</span
           >
-          <button class="small-btn" onclick={() => handleDeleteProvider(cp.id)}>Delete</button>
+          <Button variant="danger" onclick={() => handleDeleteProvider(cp.id)}
+            >{i18n.t('settingsPage.deleteProvider')}</Button
+          >
         </div>
         <div class="provider-detail">
-          <span class="label">Base URL:</span>
+          <span class="label">{i18n.t('settingsPage.baseUrl')}:</span>
           <code>{cp.base_url}</code>
         </div>
         <div class="provider-detail">
-          <span class="label">Models:</span>
+          <span class="label">{i18n.t('settingsPage.models')}:</span>
           {#if (providerModelsMap.get(cp.id)?.length ?? 0) === 0}
-            <span class="text-muted">No models added</span>
+            <span class="text-muted">{i18n.t('settingsPage.noModels')}</span>
           {:else}
             <ul class="model-list">
               {#each providerModelsMap.get(cp.id) ?? [] as modelEntry (modelEntry.id)}
                 <li>
                   <span class="model-display">{modelEntry.display_name}</span>
                   <code class="model-id">{modelEntry.model_id}</code>
-                  <button
-                    class="small-btn danger"
-                    onclick={() => handleRemoveModel(modelEntry.id, cp.id)}>×</button
+                  <Button
+                    variant="danger"
+                    iconOnly
+                    ariaLabel={i18n.t('settingsPage.removeModel')}
+                    onclick={() => handleRemoveModel(modelEntry.id, cp.id)}>×</Button
                   >
                 </li>
               {/each}
@@ -598,45 +601,51 @@
 
         {#if editingProviderModels === cp.id}
           <div class="add-model-form">
-            <input type="text" placeholder="Model ID (e.g. gpt-4o)" bind:value={newModelId} />
             <input
               type="text"
-              placeholder="Display name (e.g. GPT-4o)"
+              placeholder={i18n.t('settingsPage.modelIdPlaceholder')}
+              bind:value={newModelId}
+            />
+            <input
+              type="text"
+              placeholder={i18n.t('settingsPage.modelDisplayNamePlaceholder')}
               bind:value={newModelDisplayName}
             />
-            <button class="small-btn primary" onclick={() => handleAddModel(cp.id)}>Add</button>
+            <Button onclick={() => handleAddModel(cp.id)}>{i18n.t('common.add')}</Button>
           </div>
         {/if}
-        <button
-          class="small-btn"
+        <Button
+          variant="secondary"
           onclick={() => {
             editingProviderModels = editingProviderModels === cp.id ? null : cp.id;
             newModelId = '';
             newModelDisplayName = '';
           }}
         >
-          {editingProviderModels === cp.id ? 'Cancel' : '+ Add Model'}
-        </button>
+          {editingProviderModels === cp.id
+            ? i18n.t('common.cancel')
+            : i18n.t('settingsPage.addModel')}
+        </Button>
       </div>
     {/each}
 
     {#if showAddProvider}
       <div class="add-provider-form">
-        <label for="new-provider-name">Provider Name</label>
+        <label for="new-provider-name">{i18n.t('settingsPage.providerName')}</label>
         <input
           id="new-provider-name"
           type="text"
           bind:value={newProviderName}
-          placeholder="e.g. OpenRouter"
+          placeholder={i18n.t('settingsPage.providerNamePlaceholder')}
         />
 
-        <label for="new-provider-type">API Compatibility</label>
+        <label for="new-provider-type">{i18n.t('settingsPage.apiCompatibility')}</label>
         <select id="new-provider-type" bind:value={newProviderType}>
-          <option value="openai">OpenAI-compatible</option>
-          <option value="anthropic">Anthropic-compatible</option>
+          <option value="openai">{i18n.t('settingsPage.openAiCompatible')}</option>
+          <option value="anthropic">{i18n.t('settingsPage.anthropicCompatible')}</option>
         </select>
 
-        <label for="new-provider-url">Base URL</label>
+        <label for="new-provider-url">{i18n.t('settingsPage.baseUrl')}</label>
         <input
           id="new-provider-url"
           type="text"
@@ -644,7 +653,7 @@
           placeholder="https://openrouter.ai/api/v1"
         />
 
-        <label for="new-provider-key">API Key (optional)</label>
+        <label for="new-provider-key">{i18n.t('settingsPage.apiKeyOptional')}</label>
         <input
           id="new-provider-key"
           type="password"
@@ -653,62 +662,57 @@
         />
 
         <div class="form-actions">
-          <button
+          <Button
+            variant="secondary"
             onclick={() => {
               showAddProvider = false;
-            }}>Cancel</button
+            }}>{i18n.t('common.cancel')}</Button
           >
-          <button class="primary" onclick={handleAddProvider}>Save Provider</button>
+          <Button onclick={handleAddProvider}>{i18n.t('settingsPage.saveProvider')}</Button>
         </div>
       </div>
     {:else}
-      <button
-        class="small-btn primary"
+      <Button
         onclick={() => {
           showAddProvider = true;
-        }}>+ Add Custom Provider</button
+        }}>{i18n.t('settingsPage.addCustomProvider')}</Button
       >
     {/if}
   </section>
 
   <section class="config-section">
-    <h3>Embedding Provider</h3>
-    <p class="muted">
-      How document and query text is turned into vectors for search. The local model runs offline;
-      the cloud option uses an OpenAI-compatible API at 768 dimensions (matching the local index, so
-      switching only requires re-indexing).
-    </p>
+    <h3>{i18n.t('settingsPage.embeddingProvider')}</h3>
+    <p class="muted">{i18n.t('settingsPage.embeddingDescription')}</p>
 
     {#if embeddingStatus}
       <div class="status-grid">
-        <span class="label">Active</span>
+        <span class="label">{i18n.t('settingsPage.active')}</span>
         <span class="value"
-          >{embeddingStatus.backend === 'openai' ? 'Cloud (OpenAI)' : 'Local (fastembed)'}</span
+          >{embeddingStatus.backend === 'openai'
+            ? i18n.t('settingsPage.cloudEmbedding')
+            : i18n.t('settingsPage.localEmbedding')}</span
         >
-        <span class="label">Model</span>
+        <span class="label">{i18n.t('settingsPage.model')}</span>
         <span class="value">{embeddingStatus.model}</span>
-        <span class="label">Dimension</span>
+        <span class="label">{i18n.t('settingsPage.dimension')}</span>
         <span class="value">{embeddingStatus.dimension}</span>
       </div>
     {/if}
 
     {#if embeddingStatus && !embeddingStatus.local_available}
-      <p class="muted warn">
-        The local embedding model is not available on this computer (no ONNX Runtime build is
-        published for Intel Macs). Configure a cloud embedding provider below to enable search.
-      </p>
+      <p class="muted warn">{i18n.t('settingsPage.localUnavailable')}</p>
     {/if}
 
-    <label for="embed-backend">Backend</label>
+    <label for="embed-backend">{i18n.t('settingsPage.backend')}</label>
     <select id="embed-backend" bind:value={embeddingBackend}>
       <option value="local" disabled={embeddingStatus ? !embeddingStatus.local_available : false}>
-        Local — nomic-embed-text-v1.5 (offline)
+        {i18n.t('settingsPage.localEmbedding')}
       </option>
-      <option value="openai">Cloud — OpenAI-compatible API</option>
+      <option value="openai">{i18n.t('settingsPage.cloudEmbedding')}</option>
     </select>
 
     {#if embeddingBackend === 'openai'}
-      <label for="embed-model">Model</label>
+      <label for="embed-model">{i18n.t('settingsPage.model')}</label>
       <input
         id="embed-model"
         type="text"
@@ -716,7 +720,7 @@
         placeholder="text-embedding-3-small"
       />
 
-      <label for="embed-api-key">API Key</label>
+      <label for="embed-api-key">{i18n.t('settingsPage.apiKey')}</label>
       <input
         id="embed-api-key"
         type="password"
@@ -725,7 +729,10 @@
         autocomplete="off"
       />
 
-      <label for="embed-base-url">Base URL <span class="muted">(optional)</span></label>
+      <label for="embed-base-url"
+        >{i18n.t('settingsPage.baseUrl')}
+        <span class="muted">({i18n.t('settingsPage.optional')})</span></label
+      >
       <input
         id="embed-base-url"
         type="text"
@@ -735,65 +742,65 @@
     {/if}
 
     <div class="actions">
-      <button class="primary" onclick={saveEmbeddingSettings} disabled={isSavingEmbedding}>
-        {isSavingEmbedding ? 'Saving…' : 'Save Embedding Provider'}
-      </button>
+      <Button
+        onclick={saveEmbeddingSettings}
+        disabled={isSavingEmbedding}
+        loading={isSavingEmbedding}>{i18n.t('settingsPage.saveEmbeddingProvider')}</Button
+      >
     </div>
   </section>
 
   <section class="config-section">
-    <h3>Re-index sources</h3>
-    <p class="muted">
-      Re-index every PDF source to apply recent improvements to text extraction, chunking, and
-      embedding quality — or after changing the embedding provider above. Existing sources stay
-      searchable during re-indexing; only their chunks get replaced.
-    </p>
-    <button class="small-btn primary" disabled={reindexing} onclick={onReindexAll}>
-      {reindexing ? 'Re-indexing…' : 'Re-index all sources'}
-    </button>
+    <h3>{i18n.t('settingsPage.reindexSources')}</h3>
+    <p class="muted">{i18n.t('settingsPage.reindexDescription')}</p>
+    <Button disabled={reindexing} onclick={onReindexAll} loading={reindexing}
+      >{i18n.t('settingsPage.reindexAll')}</Button
+    >
     {#if reindexing && reindexProgress}
       <div class="reindex-progress">
-        Source {reindexProgress.current}/{reindexProgress.total}: {reindexProgress.step}
-        ({Math.round(reindexProgress.progress * 100)}%)
+        {i18n.t('settingsPage.reindexProgress', {
+          current: reindexProgress.current,
+          total: reindexProgress.total,
+          step: reindexProgress.step,
+          progress: `${Math.round(reindexProgress.progress * 100)}%`,
+        })}
       </div>
     {/if}
     {#if reindexError}
-      <div class="reindex-error">Re-index failed: {reindexError}</div>
+      <div class="reindex-error">
+        {i18n.t('settingsPage.reindexFailed', { error: reindexError })}
+      </div>
     {/if}
     {#if reindexedCount !== null && !reindexing}
-      <div class="reindex-success">Re-indexed {reindexedCount} source(s).</div>
+      <div class="reindex-success">
+        {i18n.t('settingsPage.reindexed', { count: reindexedCount })}
+      </div>
     {/if}
   </section>
 
   <section class="config-section">
-    <h3>Relationship Graph</h3>
-    <p class="muted">
-      Re-scan every note's [[links]] and rebuild the relationship graph. Useful after importing
-      notes or for entities created before linking existed.
-    </p>
-    <button class="small-btn primary" disabled={resyncing} onclick={onResyncWikilinks}>
-      {resyncing ? 'Rebuilding…' : 'Rebuild relationship links'}
-    </button>
+    <h3>{i18n.t('settingsPage.relationshipGraph')}</h3>
+    <p class="muted">{i18n.t('settingsPage.relationshipDescription')}</p>
+    <Button disabled={resyncing} onclick={onResyncWikilinks} loading={resyncing}
+      >{i18n.t('settingsPage.rebuildLinks')}</Button
+    >
     {#if resyncError}
-      <div class="reindex-error">Rebuild failed: {resyncError}</div>
+      <div class="reindex-error">
+        {i18n.t('settingsPage.rebuildFailed', { error: resyncError })}
+      </div>
     {/if}
     {#if resyncedCount !== null && !resyncing}
-      <div class="reindex-success">Rebuilt links across {resyncedCount} entities.</div>
+      <div class="reindex-success">{i18n.t('settingsPage.rebuilt', { count: resyncedCount })}</div>
     {/if}
   </section>
 
   <section class="config-section">
-    <h3>Entity Extraction</h3>
+    <h3>{i18n.t('settingsPage.entityExtraction')}</h3>
     <label class="toggle-row">
       <input type="checkbox" bind:checked={enrichNeighbors} onchange={saveEnrichNeighbors} />
-      <span>Enrich related entities</span>
+      <span>{i18n.t('settingsPage.enrichEntities')}</span>
     </label>
-    <p class="muted">
-      After extracting an entity, run a second pass that re-searches the rulebook for each related
-      entity and rewrites its summary to describe the entity itself rather than its link to the
-      original. More accurate, but slower and uses more LLM calls. Capped at 20 related entities per
-      extraction.
-    </p>
+    <p class="muted">{i18n.t('settingsPage.enrichDescription')}</p>
   </section>
 
   <VaultSyncSettings />
@@ -894,33 +901,6 @@
     gap: 8px;
     margin-top: 18px;
   }
-  .actions button {
-    flex: 1;
-    padding: 10px 14px;
-    border: 1px solid var(--line);
-    border-radius: var(--r-md);
-    background: var(--bg-panel-2);
-    color: var(--fg-1);
-    font-family: var(--font-sans);
-    font-weight: 600;
-    font-size: 13.5px;
-  }
-  .actions button:hover:not(:disabled) {
-    border-color: var(--line-strong);
-  }
-  .actions .primary {
-    background: var(--grad-arcane);
-    border-color: transparent;
-    color: var(--fg-on-accent);
-    box-shadow: var(--glow-arcane);
-  }
-  .actions .primary:hover:not(:disabled) {
-    filter: brightness(1.08);
-  }
-  .actions button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
   .hint {
     font-size: 12.5px;
     color: var(--fg-3);
@@ -1005,32 +985,6 @@
     font-family: var(--font-mono);
     font-size: 11.5px;
     color: var(--fg-3);
-  }
-  .small-btn {
-    background: none;
-    border: 1px solid var(--line);
-    border-radius: var(--r-sm);
-    color: var(--fg-2);
-    cursor: pointer;
-    font-size: 12px;
-    padding: 4px 9px;
-    font-family: var(--font-sans);
-  }
-  .small-btn:hover {
-    border-color: var(--line-strong);
-    color: var(--fg-1);
-  }
-  .small-btn.danger {
-    color: var(--danger);
-    border-color: rgba(242, 103, 75, 0.4);
-  }
-  .small-btn.danger:hover {
-    background: var(--danger-bg);
-  }
-  .small-btn.primary {
-    background: var(--grad-arcane);
-    border-color: transparent;
-    color: var(--fg-on-accent);
   }
   .add-provider-form,
   .add-model-form {
