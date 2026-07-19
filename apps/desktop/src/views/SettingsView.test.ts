@@ -127,6 +127,34 @@ describe('SettingsView', () => {
     expect(screen.getByRole('heading', { name: 'Settings' })).toBeTruthy();
   });
 
+  it('ignores a stale successful save after a newer save restores English', async () => {
+    let resolveGerman: () => void;
+    let rejectFrench: (reason?: unknown) => void;
+    vi.mocked(commands.getSettings).mockResolvedValue({ ui_locale: 'en' });
+    vi.mocked(commands.updateSetting)
+      .mockImplementationOnce(
+        () => new Promise<void>((resolve) => { resolveGerman = resolve; }),
+      )
+      .mockImplementationOnce(
+        () => new Promise<void>((_resolve, reject) => { rejectFrench = reject; }),
+      )
+      .mockRejectedValueOnce(new Error('Spanish write failed'));
+    render(SettingsView);
+
+    const language = await screen.findByLabelText('Display language');
+    await fireEvent.change(language, { target: { value: 'de' } });
+    await fireEvent.change(language, { target: { value: 'fr' } });
+    await waitFor(() => expect(commands.updateSetting).toHaveBeenCalledTimes(2));
+    rejectFrench!(new Error('French write failed'));
+    await waitFor(() => expect((language as HTMLSelectElement).value).toBe('en'));
+    resolveGerman!();
+    await Promise.resolve();
+    await fireEvent.change(language, { target: { value: 'es' } });
+
+    await waitFor(() => expect((language as HTMLSelectElement).value).toBe('en'));
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeTruthy();
+  });
+
   it('displays current provider status after mount', async () => {
     render(SettingsView);
     await waitFor(() => expect(commands.getLlmProviderStatus).toHaveBeenCalled());

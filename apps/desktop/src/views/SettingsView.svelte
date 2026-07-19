@@ -194,7 +194,7 @@
     setUiLocalePreference(selectedLocale);
     try {
       await updateSetting('ui_locale', selectedLocale);
-      persistedUiLocale = selectedLocale;
+      if (saveVersion === uiLocaleSaveVersion) persistedUiLocale = selectedLocale;
     } catch (e) {
       if (saveVersion === uiLocaleSaveVersion) {
         uiLocale = persistedUiLocale;
