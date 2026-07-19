@@ -92,6 +92,24 @@ describe('SettingsView', () => {
     expect(screen.getByRole('heading', { name: 'Fournisseur d’intégration' })).toBeTruthy();
   });
 
+  it('translates dynamic provider labels and the default model fallback', async () => {
+    vi.mocked(commands.getSettings).mockResolvedValue({ ui_locale: 'de' });
+    vi.mocked(commands.getLlmProviderStatus).mockResolvedValue({
+      provider_type: 'ollama',
+      model: '',
+      api_key_configured: false,
+    });
+    vi.mocked(commands.getCustomProviders).mockResolvedValue([
+      { id: 'custom-1', name: 'Archiv', provider_type: 'openai', base_url: '', api_key: '' },
+    ]);
+
+    render(SettingsView);
+
+    expect(await screen.findByText('(Standard)')).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Ollama (lokal)' })).toBeTruthy();
+    expect(await screen.findByRole('option', { name: 'Benutzerdefiniert: Archiv' })).toBeTruthy();
+  });
+
   it('persists a selected German display language immediately', async () => {
     render(SettingsView);
 
