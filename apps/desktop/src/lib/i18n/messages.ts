@@ -1,4 +1,4 @@
-import type { DeepStringCatalog, MessageKeyFor } from './types';
+import type { DeepStringCatalog, MessageKeyFor, MessageParameters } from './types';
 
 export const sourceCatalog = {
   common: {
@@ -74,7 +74,15 @@ export type MessageParametersFor<Key extends MessageKey> = Record<
   string | number
 >;
 
+type IsUnion<Type, Whole = Type> = Type extends unknown
+  ? [Whole] extends [Type]
+    ? false
+    : true
+  : never;
+
 export type TranslationArguments<Key extends MessageKey> =
-  keyof MessageParametersFor<Key> extends never
-    ? [parameters?: never]
-    : [parameters: MessageParametersFor<Key>];
+  IsUnion<Key> extends true
+    ? [parameters?: MessageParameters]
+    : keyof MessageParametersFor<Key> extends never
+      ? [parameters?: never]
+      : [parameters: MessageParametersFor<Key>];
