@@ -70,6 +70,12 @@ describe('SettingsView', () => {
     expect(screen.getByRole('heading', { name: /settings/i })).toBeTruthy();
   });
 
+  it('uses shared buttons for provider actions', () => {
+    render(SettingsView);
+    expect(screen.getByRole('button', { name: /save settings/i })).toHaveClass('button');
+    expect(screen.getByRole('button', { name: /save & connect/i })).toHaveClass('button');
+  });
+
   it('uses a saved French locale for the settings heading', async () => {
     vi.mocked(commands.getSettings).mockResolvedValue({ ui_locale: 'fr' });
 
@@ -103,15 +109,21 @@ describe('SettingsView', () => {
   });
 
   it('restores the last persisted language when rapid saves both fail', async () => {
-    let rejectGerman: (reason?: unknown) => void;
-    let rejectFrench: (reason?: unknown) => void;
+    let rejectGerman: ((reason?: unknown) => void) | undefined;
+    let rejectFrench: ((reason?: unknown) => void) | undefined;
     vi.mocked(commands.getSettings).mockResolvedValue({ ui_locale: 'en' });
     vi.mocked(commands.updateSetting)
       .mockImplementationOnce(
-        () => new Promise<void>((_resolve, reject) => { rejectGerman = reject; }),
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectGerman = reject;
+          }),
       )
       .mockImplementationOnce(
-        () => new Promise<void>((_resolve, reject) => { rejectFrench = reject; }),
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectFrench = reject;
+          }),
       );
     render(SettingsView);
 
@@ -119,9 +131,9 @@ describe('SettingsView', () => {
     await fireEvent.change(language, { target: { value: 'de' } });
     await fireEvent.change(language, { target: { value: 'fr' } });
     await waitFor(() => expect(commands.updateSetting).toHaveBeenCalledTimes(1));
-    rejectGerman!(new Error('German write failed'));
+    rejectGerman?.(new Error('German write failed'));
     await waitFor(() => expect(commands.updateSetting).toHaveBeenCalledTimes(2));
-    rejectFrench!(new Error('French write failed'));
+    rejectFrench?.(new Error('French write failed'));
 
     await waitFor(() => expect(screen.getByText(/failed to save language/i)).toBeTruthy());
     expect((language as HTMLSelectElement).value).toBe('en');
@@ -130,16 +142,17 @@ describe('SettingsView', () => {
 
   it('serializes locale saves and restores the backend locale after a newer failure', async () => {
     let persistedLocale = 'en';
-    let resolveGerman: () => void;
+    let resolveGerman: (() => void) | undefined;
     vi.mocked(commands.getSettings).mockResolvedValue({ ui_locale: persistedLocale });
     vi.mocked(commands.updateSetting)
       .mockImplementationOnce(
-        () => new Promise<void>((resolve) => {
-          resolveGerman = () => {
-            persistedLocale = 'de';
-            resolve();
-          };
-        }),
+        () =>
+          new Promise<void>((resolve) => {
+            resolveGerman = () => {
+              persistedLocale = 'de';
+              resolve();
+            };
+          }),
       )
       .mockRejectedValueOnce(new Error('French write failed'))
       .mockImplementationOnce(async (_key, value) => {
@@ -151,7 +164,7 @@ describe('SettingsView', () => {
     await fireEvent.change(language, { target: { value: 'de' } });
     await fireEvent.change(language, { target: { value: 'fr' } });
     await waitFor(() => expect(commands.updateSetting).toHaveBeenCalledTimes(1));
-    resolveGerman!();
+    resolveGerman?.();
     await waitFor(() => expect(commands.updateSetting).toHaveBeenCalledTimes(3));
 
     expect(commands.updateSetting).toHaveBeenNthCalledWith(1, 'ui_locale', 'de');

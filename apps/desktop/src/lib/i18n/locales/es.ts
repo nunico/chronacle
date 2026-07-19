@@ -15,6 +15,7 @@ const es = {
     search: 'Buscar',
     settings: 'Configuración',
     language: 'Idioma',
+    dismiss: 'Descartar',
   },
   status: {
     ready: 'Listo',
@@ -36,14 +37,29 @@ const es = {
     embeddingBackend: 'Backend de representaciones vectoriales',
     embeddingModel: 'Modelo de representaciones vectoriales',
     saveSuccess: 'Configuración guardada.',
+    saveSettings: 'Guardar configuración',
+    saveConnect: 'Guardar y conectar',
   },
   progress: {
+    uploadProgress: 'Progreso de carga',
     source: 'Fuente {current}/{total}',
     sources: '{current} de {total} fuentes',
     extracting: 'Extrayendo texto…',
     uploading: 'Subiendo…',
     indexing: 'Indexando…',
     step: 'Paso {current} de {total}',
+  },
+  modelDownload: {
+    title: 'Se requiere un modelo de IA',
+    description:
+      'Chronacle necesita descargar un modelo de incrustaciones de IA antes de que puedas consultar tus PDF. Es una descarga única de unos 250 MB desde Hugging Face.',
+    checking: 'Comprobando la caché local…',
+    start: 'Iniciar descarga',
+    connecting: 'Conectando con Hugging Face…',
+    downloading: 'Descargando {name}…',
+    ready: '¡Modelo listo!',
+    failed: 'Error en la descarga',
+    retry: 'Reintentar',
   },
   dialog: {
     confirmDelete: '¿Eliminar este elemento?',

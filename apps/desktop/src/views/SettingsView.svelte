@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getSettings, updateSetting, getLlmProviderStatus, reconfigureLlmProvider } from '../lib/commands';
+  import {
+    getSettings,
+    updateSetting,
+    getLlmProviderStatus,
+    reconfigureLlmProvider,
+  } from '../lib/commands';
   import {
     getEmbeddingProviderStatus,
     reconfigureEmbeddingProvider,
@@ -20,6 +25,8 @@
   import { listen } from '@tauri-apps/api/event';
   import { SvelteMap } from 'svelte/reactivity';
   import VaultSyncSettings from '../components/VaultSyncSettings.svelte';
+  import Button from '../components/ui/Button.svelte';
+  import FormField from '../components/ui/FormField.svelte';
   import {
     i18n,
     setUiLocalePreference,
@@ -212,7 +219,7 @@
 
   function queueUiLocaleWrite(locale: UiLocalePreference): Promise<void> {
     const write = uiLocaleWriteQueue.then(() => updateSetting('ui_locale', locale));
-    uiLocaleWriteQueue = write.catch(() => {});
+    uiLocaleWriteQueue = write.catch(() => undefined);
     return write;
   }
 
@@ -230,13 +237,17 @@
   function showError(msg: string) {
     statusMessage = msg;
     statusIsError = true;
-    setTimeout(() => { statusMessage = ''; }, 5000);
+    setTimeout(() => {
+      statusMessage = '';
+    }, 5000);
   }
 
   function showSuccess(msg: string) {
     statusMessage = msg;
     statusIsError = false;
-    setTimeout(() => { statusMessage = ''; }, 3000);
+    setTimeout(() => {
+      statusMessage = '';
+    }, 3000);
   }
 
   async function saveSettings() {
@@ -307,41 +318,52 @@
   // ── New: derived state ─────────────────────────────────────────────
 
   let showBaseUrl = $derived(
-    providerType === 'ollama' || (providerType === 'openai' && baseUrl !== '') || providerType.startsWith('custom:')
+    providerType === 'ollama' ||
+      (providerType === 'openai' && baseUrl !== '') ||
+      providerType.startsWith('custom:'),
   );
 
   let showApiKey = $derived(
-    providerType === 'openai' || providerType === 'anthropic' || providerType.startsWith('custom:')
+    providerType === 'openai' || providerType === 'anthropic' || providerType.startsWith('custom:'),
   );
 
   let modelPlaceholder = $derived.by(() => {
     switch (providerType) {
-      case 'openai': return 'gpt-4o-mini';
-      case 'anthropic': return 'claude-3-5-haiku-20241022';
-      case 'ollama': return 'llama3.2';
-      default: return '';
+      case 'openai':
+        return 'gpt-4o-mini';
+      case 'anthropic':
+        return 'claude-3-5-haiku-20241022';
+      case 'ollama':
+        return 'llama3.2';
+      default:
+        return '';
     }
   });
 
   let baseUrlPlaceholder = $derived.by(() => {
     switch (providerType) {
-      case 'ollama': return 'http://localhost:11434';
-      case 'openai': return 'https://api.openai.com/v1';
-      default: return '';
+      case 'ollama':
+        return 'http://localhost:11434';
+      case 'openai':
+        return 'https://api.openai.com/v1';
+      default:
+        return '';
     }
   });
 
   // Provider options: built-in + custom providers with a separator
   let providerOptions = $derived.by(() => {
-    const builtin = [
+    const builtin: Array<{ value: string; label: string; disabled?: boolean }> = [
       { value: 'openai', label: 'OpenAI' },
       { value: 'anthropic', label: 'Anthropic' },
       { value: 'ollama', label: 'Ollama (Local)' },
     ];
-    const custom = customProviders.map(cp => ({
-      value: `custom:${cp.name}`,
-      label: `Custom: ${cp.name}`,
-    }));
+    const custom: Array<{ value: string; label: string; disabled?: boolean }> = customProviders.map(
+      (cp) => ({
+        value: `custom:${cp.name}`,
+        label: `Custom: ${cp.name}`,
+      }),
+    );
     if (custom.length === 0) return builtin;
     return [...builtin, { value: '', label: '──────────', disabled: true }, ...custom];
   });
@@ -350,14 +372,14 @@
   let selectedCustomProviderId = $derived.by(() => {
     if (!providerType.startsWith('custom:')) return null;
     const name = providerType.slice('custom:'.length);
-    return customProviders.find(p => p.name === name)?.id ?? null;
+    return customProviders.find((p) => p.name === name)?.id ?? null;
   });
 
   // Auto-populate API key and base URL when a custom provider is selected
   $effect(() => {
     if (providerType.startsWith('custom:')) {
       const name = providerType.slice('custom:'.length);
-      const cp = customProviders.find(p => p.name === name);
+      const cp = customProviders.find((p) => p.name === name);
       if (cp) {
         apiKey = cp.api_key;
         baseUrl = cp.base_url;
@@ -442,14 +464,15 @@
 
   <section class="config-section">
     <h3>{i18n.t('common.language')}</h3>
-    <label for="ui-locale">{i18n.t('settings.language')}</label>
-    <select id="ui-locale" bind:value={uiLocale} onchange={saveUiLocale}>
-      <option value="auto">{i18n.t('settings.languageAutomatic')}</option>
-      <option value="en">{i18n.t('settings.languageEnglish')}</option>
-      <option value="de">{i18n.t('settings.languageGerman')}</option>
-      <option value="fr">{i18n.t('settings.languageFrench')}</option>
-      <option value="es">{i18n.t('settings.languageSpanish')}</option>
-    </select>
+    <FormField label={i18n.t('settings.language')} controlId="ui-locale">
+      <select id="ui-locale" bind:value={uiLocale} onchange={saveUiLocale}>
+        <option value="auto">{i18n.t('settings.languageAutomatic')}</option>
+        <option value="en">{i18n.t('settings.languageEnglish')}</option>
+        <option value="de">{i18n.t('settings.languageGerman')}</option>
+        <option value="fr">{i18n.t('settings.languageFrench')}</option>
+        <option value="es">{i18n.t('settings.languageSpanish')}</option>
+      </select>
+    </FormField>
     <p class="muted">{i18n.t('settings.languageDescription')}</p>
   </section>
 
@@ -505,41 +528,27 @@
       </select>
     {:else}
       <label for="model">Model</label>
-      <input
-        id="model"
-        type="text"
-        bind:value={model}
-        placeholder={modelPlaceholder}
-      />
+      <input id="model" type="text" bind:value={model} placeholder={modelPlaceholder} />
     {/if}
 
     {#if showBaseUrl}
       <label for="base-url">Base URL</label>
-      <input
-        id="base-url"
-        type="text"
-        bind:value={baseUrl}
-        placeholder={baseUrlPlaceholder}
-      />
+      <input id="base-url" type="text" bind:value={baseUrl} placeholder={baseUrlPlaceholder} />
     {/if}
 
     <div class="actions">
-      <button onclick={saveSettings} disabled={isSaving}>
-        {isSaving ? 'Saving…' : 'Save Settings'}
-      </button>
-      <button
-        class="primary"
-        onclick={connect}
-        disabled={isConnecting || isSaving}
-      >
-        {isConnecting ? 'Connecting…' : 'Save &amp; Connect'}
-      </button>
+      <Button variant="secondary" onclick={saveSettings} disabled={isSaving} loading={isSaving}>
+        {i18n.t('settings.saveSettings')}
+      </Button>
+      <Button onclick={connect} disabled={isConnecting || isSaving} loading={isConnecting}>
+        {i18n.t('settings.saveConnect')}
+      </Button>
     </div>
   </section>
 
   <p class="hint">
-    Need to upload rulebook PDFs? Use the main chat view.
-    Once PDFs are indexed, ask questions and Chronacle will cite the sources.
+    Need to upload rulebook PDFs? Use the main chat view. Once PDFs are indexed, ask questions and
+    Chronacle will cite the sources.
   </p>
 
   <hr />
@@ -556,7 +565,9 @@
       <div class="custom-provider-card">
         <div class="provider-header">
           <strong>{cp.name}</strong>
-          <span class="type-badge">{cp.provider_type === 'openai' ? 'OpenAI-compatible' : 'Anthropic-compatible'}</span>
+          <span class="type-badge"
+            >{cp.provider_type === 'openai' ? 'OpenAI-compatible' : 'Anthropic-compatible'}</span
+          >
           <button class="small-btn" onclick={() => handleDeleteProvider(cp.id)}>Delete</button>
         </div>
         <div class="provider-detail">
@@ -573,7 +584,10 @@
                 <li>
                   <span class="model-display">{modelEntry.display_name}</span>
                   <code class="model-id">{modelEntry.model_id}</code>
-                  <button class="small-btn danger" onclick={() => handleRemoveModel(modelEntry.id, cp.id)}>×</button>
+                  <button
+                    class="small-btn danger"
+                    onclick={() => handleRemoveModel(modelEntry.id, cp.id)}>×</button
+                  >
                 </li>
               {/each}
             </ul>
@@ -583,7 +597,11 @@
         {#if editingProviderModels === cp.id}
           <div class="add-model-form">
             <input type="text" placeholder="Model ID (e.g. gpt-4o)" bind:value={newModelId} />
-            <input type="text" placeholder="Display name (e.g. GPT-4o)" bind:value={newModelDisplayName} />
+            <input
+              type="text"
+              placeholder="Display name (e.g. GPT-4o)"
+              bind:value={newModelDisplayName}
+            />
             <button class="small-btn primary" onclick={() => handleAddModel(cp.id)}>Add</button>
           </div>
         {/if}
@@ -603,7 +621,12 @@
     {#if showAddProvider}
       <div class="add-provider-form">
         <label for="new-provider-name">Provider Name</label>
-        <input id="new-provider-name" type="text" bind:value={newProviderName} placeholder="e.g. OpenRouter" />
+        <input
+          id="new-provider-name"
+          type="text"
+          bind:value={newProviderName}
+          placeholder="e.g. OpenRouter"
+        />
 
         <label for="new-provider-type">API Compatibility</label>
         <select id="new-provider-type" bind:value={newProviderType}>
@@ -612,33 +635,54 @@
         </select>
 
         <label for="new-provider-url">Base URL</label>
-        <input id="new-provider-url" type="text" bind:value={newProviderBaseUrl} placeholder="https://openrouter.ai/api/v1" />
+        <input
+          id="new-provider-url"
+          type="text"
+          bind:value={newProviderBaseUrl}
+          placeholder="https://openrouter.ai/api/v1"
+        />
 
         <label for="new-provider-key">API Key (optional)</label>
-        <input id="new-provider-key" type="password" bind:value={newProviderApiKey} autocomplete="off" />
+        <input
+          id="new-provider-key"
+          type="password"
+          bind:value={newProviderApiKey}
+          autocomplete="off"
+        />
 
         <div class="form-actions">
-          <button onclick={() => { showAddProvider = false; }}>Cancel</button>
+          <button
+            onclick={() => {
+              showAddProvider = false;
+            }}>Cancel</button
+          >
           <button class="primary" onclick={handleAddProvider}>Save Provider</button>
         </div>
       </div>
     {:else}
-      <button class="small-btn primary" onclick={() => { showAddProvider = true; }}>+ Add Custom Provider</button>
+      <button
+        class="small-btn primary"
+        onclick={() => {
+          showAddProvider = true;
+        }}>+ Add Custom Provider</button
+      >
     {/if}
   </section>
 
   <section class="config-section">
     <h3>Embedding Provider</h3>
     <p class="muted">
-      How document and query text is turned into vectors for search. The local
-      model runs offline; the cloud option uses an OpenAI-compatible API at 768
-      dimensions (matching the local index, so switching only requires re-indexing).
+      How document and query text is turned into vectors for search. The local model runs offline;
+      the cloud option uses an OpenAI-compatible API at 768 dimensions (matching the local index, so
+      switching only requires re-indexing).
     </p>
 
     {#if embeddingStatus}
       <div class="status-grid">
         <span class="label">Active</span>
-        <span class="value">{embeddingStatus.backend === 'openai' ? 'Cloud (OpenAI)' : 'Local (fastembed)'}</span>
+        <span class="value"
+          >{embeddingStatus.backend === 'openai' ? 'Cloud (OpenAI)' : 'Local (fastembed)'}</span
+        >
         <span class="label">Model</span>
         <span class="value">{embeddingStatus.model}</span>
         <span class="label">Dimension</span>
@@ -648,9 +692,8 @@
 
     {#if embeddingStatus && !embeddingStatus.local_available}
       <p class="muted warn">
-        The local embedding model is not available on this computer (no ONNX
-        Runtime build is published for Intel Macs). Configure a cloud embedding
-        provider below to enable search.
+        The local embedding model is not available on this computer (no ONNX Runtime build is
+        published for Intel Macs). Configure a cloud embedding provider below to enable search.
       </p>
     {/if}
 
@@ -699,10 +742,9 @@
   <section class="config-section">
     <h3>Re-index sources</h3>
     <p class="muted">
-      Re-index every PDF source to apply recent improvements to text extraction,
-      chunking, and embedding quality — or after changing the embedding provider
-      above. Existing sources stay searchable during re-indexing; only their
-      chunks get replaced.
+      Re-index every PDF source to apply recent improvements to text extraction, chunking, and
+      embedding quality — or after changing the embedding provider above. Existing sources stay
+      searchable during re-indexing; only their chunks get replaced.
     </p>
     <button class="small-btn primary" disabled={reindexing} onclick={onReindexAll}>
       {reindexing ? 'Re-indexing…' : 'Re-index all sources'}
@@ -724,8 +766,8 @@
   <section class="config-section">
     <h3>Relationship Graph</h3>
     <p class="muted">
-      Re-scan every note's [[links]] and rebuild the relationship graph. Useful
-      after importing notes or for entities created before linking existed.
+      Re-scan every note's [[links]] and rebuild the relationship graph. Useful after importing
+      notes or for entities created before linking existed.
     </p>
     <button class="small-btn primary" disabled={resyncing} onclick={onResyncWikilinks}>
       {resyncing ? 'Rebuilding…' : 'Rebuild relationship links'}
@@ -741,18 +783,14 @@
   <section class="config-section">
     <h3>Entity Extraction</h3>
     <label class="toggle-row">
-      <input
-        type="checkbox"
-        bind:checked={enrichNeighbors}
-        onchange={saveEnrichNeighbors}
-      />
+      <input type="checkbox" bind:checked={enrichNeighbors} onchange={saveEnrichNeighbors} />
       <span>Enrich related entities</span>
     </label>
     <p class="muted">
-      After extracting an entity, run a second pass that re-searches the rulebook
-      for each related entity and rewrites its summary to describe the entity
-      itself rather than its link to the original. More accurate, but slower and
-      uses more LLM calls. Capped at 20 related entities per extraction.
+      After extracting an entity, run a second pass that re-searches the rulebook for each related
+      entity and rewrites its summary to describe the entity itself rather than its link to the
+      original. More accurate, but slower and uses more LLM calls. Capped at 20 related entities per
+      extraction.
     </p>
   </section>
 
@@ -760,291 +798,291 @@
 </div>
 
 <style>
-.settings-page {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 28px 26px 40px;
-  font-family: var(--font-sans);
-}
-.settings-page > * {
-  max-width: 720px;
-  margin-left: auto;
-  margin-right: auto;
-}
-h2 {
-  font-family: var(--font-display);
-  font-size: 28px;
-  margin: 0 0 22px;
-  color: var(--fg-1);
-}
-h3 {
-  font-family: var(--font-sans);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--arcane-300);
-  margin: 0 0 12px;
-}
-.status-banner {
-  padding: 10px 14px;
-  border-radius: var(--r-md);
-  margin-bottom: 16px;
-  font-size: 13.5px;
-  border: 1px solid var(--line);
-}
-.status-banner.success {
-  background: var(--success-bg);
-  color: var(--success);
-  border-color: rgba(79, 209, 160, 0.4);
-}
-.status-banner.error {
-  background: var(--danger-bg);
-  color: var(--danger);
-  border-color: rgba(242, 103, 75, 0.4);
-}
-.status-section,
-.config-section {
-  background: var(--bg-panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  padding: 18px 18px 16px;
-  margin-bottom: 16px;
-  box-shadow: var(--shadow-card);
-}
-.status-grid {
-  display: grid;
-  grid-template-columns: 110px 1fr;
-  gap: 6px 14px;
-  font-size: 14px;
-  color: var(--fg-2);
-}
-.status-grid .label {
-  color: var(--fg-3);
-}
-label {
-  display: block;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--fg-3);
-  margin: 14px 0 6px;
-  letter-spacing: 0.02em;
-}
-select,
-input {
-  width: 100%;
-  padding: 9px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--bg-inset);
-  color: var(--fg-1);
-  font-family: var(--font-sans);
-  font-size: 14px;
-  box-sizing: border-box;
-}
-select:focus,
-input:focus {
-  outline: none;
-  border-color: var(--line-glow);
-  box-shadow: var(--glow-focus);
-}
-.actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 18px;
-}
-.actions button {
-  flex: 1;
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--bg-panel-2);
-  color: var(--fg-1);
-  font-family: var(--font-sans);
-  font-weight: 600;
-  font-size: 13.5px;
-}
-.actions button:hover:not(:disabled) {
-  border-color: var(--line-strong);
-}
-.actions .primary {
-  background: var(--grad-arcane);
-  border-color: transparent;
-  color: var(--fg-on-accent);
-  box-shadow: var(--glow-arcane);
-}
-.actions .primary:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-.actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.hint {
-  font-size: 12.5px;
-  color: var(--fg-3);
-  text-align: center;
-  margin: 24px 0 16px;
-}
-.muted {
-  font-size: 13px;
-  color: var(--fg-3);
-  margin: 0 0 10px;
-}
-.muted.warn {
-  color: #c2410c;
-}
-.toggle-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  margin-bottom: 6px;
-}
-.toggle-row input {
-  width: auto;
-  margin: 0;
-}
-hr {
-  border: none;
-  border-top: 1px solid var(--line-faint);
-  margin: 24px 0;
-}
-.custom-provider-card {
-  background: var(--bg-panel-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  padding: 12px 14px;
-  margin-bottom: 12px;
-}
-.provider-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.type-badge {
-  font-size: 11px;
-  background: rgba(91, 120, 255, 0.12);
-  color: var(--arcane-300);
-  padding: 2px 6px;
-  border-radius: var(--r-sm);
-  font-family: var(--font-mono);
-}
-.provider-detail {
-  font-size: 13px;
-  color: var(--fg-2);
-  margin-bottom: 6px;
-}
-.provider-detail .label {
-  color: var(--fg-3);
-  margin-right: 4px;
-}
-.provider-detail code {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--arcane-300);
-  background: var(--bg-inset);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-.model-list {
-  list-style: none;
-  padding: 0;
-  margin: 4px 0;
-}
-.model-list li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 0;
-  font-size: 13px;
-}
-.model-id {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--fg-3);
-}
-.small-btn {
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  color: var(--fg-2);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 4px 9px;
-  font-family: var(--font-sans);
-}
-.small-btn:hover {
-  border-color: var(--line-strong);
-  color: var(--fg-1);
-}
-.small-btn.danger {
-  color: var(--danger);
-  border-color: rgba(242, 103, 75, 0.4);
-}
-.small-btn.danger:hover {
-  background: var(--danger-bg);
-}
-.small-btn.primary {
-  background: var(--grad-arcane);
-  border-color: transparent;
-  color: var(--fg-on-accent);
-}
-.add-provider-form,
-.add-model-form {
-  background: var(--bg-inset);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  padding: 12px 14px;
-  margin-bottom: 12px;
-}
-.add-model-form {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.add-model-form input {
-  flex: 1;
-  padding: 6px 10px;
-  font-size: 13px;
-}
-.form-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}
-.empty-state {
-  color: var(--fg-3);
-  font-size: 13px;
-  text-align: center;
-  padding: 12px;
-}
-.text-muted {
-  color: var(--fg-3);
-  font-size: 13px;
-}
-.reindex-progress {
-  margin-top: 10px;
-  font-size: 13px;
-  color: var(--fg-3);
-  font-family: var(--font-mono);
-}
-.reindex-error {
-  margin-top: 10px;
-  padding: 8px 12px;
-  border-radius: var(--r-md);
-  background: var(--danger-bg);
-  color: var(--danger);
-  font-size: 13px;
-}
-.reindex-success {
-  margin-top: 10px;
-  padding: 8px 12px;
-  border-radius: var(--r-md);
-  background: var(--success-bg);
-  color: var(--success);
-  font-size: 13px;
-}
+  .settings-page {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 28px 26px 40px;
+    font-family: var(--font-sans);
+  }
+  .settings-page > * {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  h2 {
+    font-family: var(--font-display);
+    font-size: 28px;
+    margin: 0 0 22px;
+    color: var(--fg-1);
+  }
+  h3 {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--arcane-300);
+    margin: 0 0 12px;
+  }
+  .status-banner {
+    padding: 10px 14px;
+    border-radius: var(--r-md);
+    margin-bottom: 16px;
+    font-size: 13.5px;
+    border: 1px solid var(--line);
+  }
+  .status-banner.success {
+    background: var(--success-bg);
+    color: var(--success);
+    border-color: rgba(79, 209, 160, 0.4);
+  }
+  .status-banner.error {
+    background: var(--danger-bg);
+    color: var(--danger);
+    border-color: rgba(242, 103, 75, 0.4);
+  }
+  .status-section,
+  .config-section {
+    background: var(--bg-panel);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    padding: 18px 18px 16px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow-card);
+  }
+  .status-grid {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 6px 14px;
+    font-size: 14px;
+    color: var(--fg-2);
+  }
+  .status-grid .label {
+    color: var(--fg-3);
+  }
+  label {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--fg-3);
+    margin: 14px 0 6px;
+    letter-spacing: 0.02em;
+  }
+  select,
+  input {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--bg-inset);
+    color: var(--fg-1);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    box-sizing: border-box;
+  }
+  select:focus,
+  input:focus {
+    outline: none;
+    border-color: var(--line-glow);
+    box-shadow: var(--glow-focus);
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 18px;
+  }
+  .actions button {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--bg-panel-2);
+    color: var(--fg-1);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: 13.5px;
+  }
+  .actions button:hover:not(:disabled) {
+    border-color: var(--line-strong);
+  }
+  .actions .primary {
+    background: var(--grad-arcane);
+    border-color: transparent;
+    color: var(--fg-on-accent);
+    box-shadow: var(--glow-arcane);
+  }
+  .actions .primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  .actions button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .hint {
+    font-size: 12.5px;
+    color: var(--fg-3);
+    text-align: center;
+    margin: 24px 0 16px;
+  }
+  .muted {
+    font-size: 13px;
+    color: var(--fg-3);
+    margin: 0 0 10px;
+  }
+  .muted.warn {
+    color: #c2410c;
+  }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    margin-bottom: 6px;
+  }
+  .toggle-row input {
+    width: auto;
+    margin: 0;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid var(--line-faint);
+    margin: 24px 0;
+  }
+  .custom-provider-card {
+    background: var(--bg-panel-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .provider-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .type-badge {
+    font-size: 11px;
+    background: rgba(91, 120, 255, 0.12);
+    color: var(--arcane-300);
+    padding: 2px 6px;
+    border-radius: var(--r-sm);
+    font-family: var(--font-mono);
+  }
+  .provider-detail {
+    font-size: 13px;
+    color: var(--fg-2);
+    margin-bottom: 6px;
+  }
+  .provider-detail .label {
+    color: var(--fg-3);
+    margin-right: 4px;
+  }
+  .provider-detail code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--arcane-300);
+    background: var(--bg-inset);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .model-list {
+    list-style: none;
+    padding: 0;
+    margin: 4px 0;
+  }
+  .model-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 13px;
+  }
+  .model-id {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--fg-3);
+  }
+  .small-btn {
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    color: var(--fg-2);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 4px 9px;
+    font-family: var(--font-sans);
+  }
+  .small-btn:hover {
+    border-color: var(--line-strong);
+    color: var(--fg-1);
+  }
+  .small-btn.danger {
+    color: var(--danger);
+    border-color: rgba(242, 103, 75, 0.4);
+  }
+  .small-btn.danger:hover {
+    background: var(--danger-bg);
+  }
+  .small-btn.primary {
+    background: var(--grad-arcane);
+    border-color: transparent;
+    color: var(--fg-on-accent);
+  }
+  .add-provider-form,
+  .add-model-form {
+    background: var(--bg-inset);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .add-model-form {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .add-model-form input {
+    flex: 1;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  .form-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .empty-state {
+    color: var(--fg-3);
+    font-size: 13px;
+    text-align: center;
+    padding: 12px;
+  }
+  .text-muted {
+    color: var(--fg-3);
+    font-size: 13px;
+  }
+  .reindex-progress {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--fg-3);
+    font-family: var(--font-mono);
+  }
+  .reindex-error {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: var(--r-md);
+    background: var(--danger-bg);
+    color: var(--danger);
+    font-size: 13px;
+  }
+  .reindex-success {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: var(--r-md);
+    background: var(--success-bg);
+    color: var(--success);
+    font-size: 13px;
+  }
 </style>
