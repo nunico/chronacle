@@ -12,6 +12,8 @@ import { currentLocale, initLocale, setUiLocalePreference } from './locale.svelt
 
 describe('locale preferences', () => {
   beforeEach(() => {
+    mocks.locale.mockClear();
+    mocks.getSettings.mockClear();
     mocks.locale.mockResolvedValue('en-US');
     mocks.getSettings.mockResolvedValue({});
   });
@@ -40,6 +42,21 @@ describe('locale preferences', () => {
     await initLocale();
 
     expect(currentLocale()).toBe('fr');
+  });
+
+  it('does not let a stale settings load override a newer preference', async () => {
+    let resolveSettings: (settings: Record<string, string>) => void;
+    mocks.getSettings.mockImplementation(
+      () => new Promise<Record<string, string>>((resolve) => { resolveSettings = resolve; }),
+    );
+
+    const initialization = initLocale();
+    await vi.waitFor(() => expect(mocks.getSettings).toHaveBeenCalledOnce());
+    setUiLocalePreference('de');
+    resolveSettings!({ ui_locale: 'fr' });
+    await initialization;
+
+    expect(currentLocale()).toBe('de');
   });
 
   it('changes the application locale for an explicit preference', () => {

@@ -89,6 +89,19 @@ describe('SettingsView', () => {
     });
   });
 
+  it('rolls back the display language when saving it fails', async () => {
+    vi.mocked(commands.getSettings).mockResolvedValue({ ui_locale: 'en' });
+    vi.mocked(commands.updateSetting).mockRejectedValueOnce(new Error('write failed'));
+    render(SettingsView);
+
+    const language = await screen.findByLabelText('Display language');
+    await fireEvent.change(language, { target: { value: 'de' } });
+
+    await waitFor(() => expect(screen.getByText(/failed to save language/i)).toBeTruthy());
+    expect((language as HTMLSelectElement).value).toBe('en');
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeTruthy();
+  });
+
   it('displays current provider status after mount', async () => {
     render(SettingsView);
     await waitFor(() => expect(commands.getLlmProviderStatus).toHaveBeenCalled());
