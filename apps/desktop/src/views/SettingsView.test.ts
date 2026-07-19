@@ -84,6 +84,14 @@ describe('SettingsView', () => {
     expect(await screen.findByRole('heading', { name: 'Paramètres' })).toBeTruthy();
   });
 
+  it('translates the custom-provider and embedding settings sections', async () => {
+    vi.mocked(commands.getSettings).mockResolvedValue({ ui_locale: 'fr' });
+    render(SettingsView);
+
+    expect(await screen.findByRole('heading', { name: 'Fournisseurs personnalisés' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Fournisseur d’intégration' })).toBeTruthy();
+  });
+
   it('persists a selected German display language immediately', async () => {
     render(SettingsView);
 
