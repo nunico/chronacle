@@ -33,6 +33,7 @@
   let baseUrl = $state('');
   let enrichNeighbors = $state(false);
   let uiLocale = $state<UiLocalePreference>(uiLocalePreference());
+  let persistedUiLocale = uiLocalePreference();
   let uiLocaleSaveVersion = 0;
 
   let isSaving = $state(false);
@@ -128,6 +129,7 @@
       enrichNeighbors = settings['extraction_enrich_neighbors'] === 'true';
       setUiLocalePreference(settings['ui_locale']);
       uiLocale = uiLocalePreference();
+      persistedUiLocale = uiLocale;
       embeddingModel = settings['embedding_model'] ?? '';
       embeddingApiKey = settings['embedding_api_key'] ?? '';
       embeddingBaseUrl = settings['embedding_base_url'] ?? '';
@@ -187,15 +189,16 @@
   }
 
   async function saveUiLocale(): Promise<void> {
-    const previousPreference = uiLocalePreference();
     const saveVersion = ++uiLocaleSaveVersion;
-    setUiLocalePreference(uiLocale);
+    const selectedLocale = uiLocale;
+    setUiLocalePreference(selectedLocale);
     try {
-      await updateSetting('ui_locale', uiLocale);
+      await updateSetting('ui_locale', selectedLocale);
+      persistedUiLocale = selectedLocale;
     } catch (e) {
       if (saveVersion === uiLocaleSaveVersion) {
-        uiLocale = previousPreference;
-        setUiLocalePreference(previousPreference);
+        uiLocale = persistedUiLocale;
+        setUiLocalePreference(persistedUiLocale);
       }
       showError(`Failed to save language: ${e}`);
     }
