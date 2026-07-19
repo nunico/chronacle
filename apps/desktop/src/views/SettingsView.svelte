@@ -145,7 +145,7 @@
       // backend); seed the control from the live status in loadEmbeddingStatus.
       embeddingBackend = settings['embedding_backend'] ?? embeddingBackend;
     } catch (e) {
-      showError(`Failed to load settings: ${e}`);
+      showError(i18n.t('settingsPage.loadFailed', { error: String(e) }));
     }
   }
 
@@ -186,11 +186,9 @@
       ]);
       const activeModel = await reconfigureEmbeddingProvider();
       await loadEmbeddingStatus();
-      showSuccess(
-        `Embedding provider set to ${activeModel}. Re-index existing sources below to apply it.`,
-      );
+      showSuccess(i18n.t('settingsPage.embeddingSaved', { model: activeModel }));
     } catch (e) {
-      showError(`Failed to save embedding settings: ${e}`);
+      showError(i18n.t('settingsPage.embeddingSaveFailed', { error: String(e) }));
     } finally {
       isSavingEmbedding = false;
     }
@@ -213,7 +211,7 @@
           await reconcileUiLocale();
         }
       }
-      showError(`Failed to save language: ${e}`);
+      showError(i18n.t('settingsPage.languageSaveFailed', { error: String(e) }));
     }
   }
 
@@ -260,9 +258,9 @@
         updateSetting('llm_model', model),
         updateSetting('llm_base_url', baseUrl),
       ]);
-      showSuccess('Settings saved.');
+      showSuccess(i18n.t('settings.saveSuccess'));
     } catch (e) {
-      showError(`Failed to save: ${e}`);
+      showError(i18n.t('settingsPage.saveFailed', { error: String(e) }));
     } finally {
       isSaving = false;
     }
@@ -271,10 +269,10 @@
   async function saveEnrichNeighbors() {
     try {
       await updateSetting('extraction_enrich_neighbors', enrichNeighbors ? 'true' : 'false');
-      showSuccess('Settings saved.');
+      showSuccess(i18n.t('settings.saveSuccess'));
     } catch (e) {
       enrichNeighbors = !enrichNeighbors; // revert optimistic toggle
-      showError(`Failed to save: ${e}`);
+      showError(i18n.t('settingsPage.saveFailed', { error: String(e) }));
     }
   }
 
@@ -283,13 +281,13 @@
    * message, or null when the form is valid. */
   function validateConnection(): string | null {
     if (showApiKey && !apiKey.trim()) {
-      return 'An API key is required for this provider.';
+      return i18n.t('settingsPage.apiKeyRequired');
     }
     if (baseUrl.trim()) {
       try {
         new URL(baseUrl.trim());
       } catch {
-        return 'The base URL is not a valid URL (expected e.g. http://localhost:11434).';
+        return i18n.t('settingsPage.invalidBaseUrl');
       }
     }
     return null;
@@ -307,9 +305,9 @@
       await saveSettings();
       const activeType = await reconfigureLlmProvider();
       await loadStatus();
-      showSuccess(`Connected: ${activeType}`);
+      showSuccess(i18n.t('settingsPage.connected', { provider: activeType }));
     } catch (e) {
-      showError(`Connection failed: ${e}`);
+      showError(i18n.t('settingsPage.connectionFailed', { error: String(e) }));
     } finally {
       isConnecting = false;
     }
@@ -485,22 +483,26 @@
 
   <!-- Current connection status -->
   <section class="status-section">
-    <h3>Connection Status</h3>
+    <h3>{i18n.t('settingsPage.connectionStatus')}</h3>
     <div class="status-grid">
-      <span class="label">Provider</span>
+      <span class="label">{i18n.t('settingsPage.provider')}</span>
       <span class="value">{currentProviderType}</span>
-      <span class="label">Model</span>
+      <span class="label">{i18n.t('settingsPage.model')}</span>
       <span class="value">{currentModel}</span>
-      <span class="label">API Key</span>
-      <span class="value">{apiKeyConfigured ? 'Configured' : 'Not set'}</span>
+      <span class="label">{i18n.t('settingsPage.apiKey')}</span>
+      <span class="value"
+        >{apiKeyConfigured
+          ? i18n.t('settingsPage.configured')
+          : i18n.t('settingsPage.notSet')}</span
+      >
     </div>
   </section>
 
   <!-- Provider configuration -->
   <section class="config-section">
-    <h3>LLM Provider</h3>
+    <h3>{i18n.t('settingsPage.llmProvider')}</h3>
 
-    <label for="provider">Provider</label>
+    <label for="provider">{i18n.t('settingsPage.provider')}</label>
     <select id="provider" bind:value={providerType}>
       {#each providerOptions as opt (opt.value)}
         <option value={opt.value} disabled={opt.disabled}>{opt.label}</option>
@@ -508,7 +510,7 @@
     </select>
 
     {#if showApiKey}
-      <label for="api-key">API Key</label>
+      <label for="api-key">{i18n.t('settingsPage.apiKey')}</label>
       <input
         id="api-key"
         type="password"
@@ -519,20 +521,20 @@
     {/if}
 
     {#if providerType.startsWith('custom:')}
-      <label for="model">Model</label>
+      <label for="model">{i18n.t('settingsPage.model')}</label>
       <select id="model" bind:value={model}>
-        <option value="">Select a model…</option>
+        <option value="">{i18n.t('settingsPage.selectModel')}</option>
         {#each providerModelsMap.get(selectedCustomProviderId ?? '') ?? [] as cm (cm.id)}
           <option value={cm.model_id}>{cm.display_name}</option>
         {/each}
       </select>
     {:else}
-      <label for="model">Model</label>
+      <label for="model">{i18n.t('settingsPage.model')}</label>
       <input id="model" type="text" bind:value={model} placeholder={modelPlaceholder} />
     {/if}
 
     {#if showBaseUrl}
-      <label for="base-url">Base URL</label>
+      <label for="base-url">{i18n.t('settingsPage.baseUrl')}</label>
       <input id="base-url" type="text" bind:value={baseUrl} placeholder={baseUrlPlaceholder} />
     {/if}
 
