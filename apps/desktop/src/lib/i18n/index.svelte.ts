@@ -2,11 +2,23 @@ import de from './locales/de';
 import en from './locales/en';
 import es from './locales/es';
 import fr from './locales/fr';
-import type { MessageCatalog, MessageKey } from './messages';
+import type {
+  MessageCatalog,
+  MessageKey,
+  MessageParametersFor,
+  TranslationArguments,
+} from './messages';
 import { supportedLocales, type MessageParameters, type SupportedLocale } from './types';
 
 export { supportedLocales };
-export type { MessageCatalog, MessageKey, MessageParameters, SupportedLocale };
+export type {
+  MessageCatalog,
+  MessageKey,
+  MessageParameters,
+  MessageParametersFor,
+  SupportedLocale,
+  TranslationArguments,
+};
 
 export const localeCatalogs = { en, de, fr, es } satisfies Record<SupportedLocale, MessageCatalog>;
 
@@ -37,21 +49,33 @@ function messageKeys(catalog: object, prefix = ''): MessageKey[] {
   });
 }
 
-function interpolate(message: string, parameters: MessageParameters): string {
+function interpolate(message: string, parameters: object): string {
   return message.replace(/\{([^}]+)\}/g, (placeholder, name: string) =>
-    name in parameters ? String(parameters[name]) : placeholder,
+    Object.hasOwn(parameters, name)
+      ? String((parameters as Record<string, unknown>)[name])
+      : placeholder,
   );
 }
 
 export interface I18n {
   readonly locale: SupportedLocale;
   setLocale(locale: string | null | undefined): void;
-  t(key: MessageKey, parameters?: MessageParameters): string;
+  t<Key extends MessageKey>(key: Key, ...args: TranslationArguments<Key>): string;
   missingKeys(): MessageKey[];
 }
 
 export function createI18n(initialLocale: string | null | undefined): I18n {
   let currentLocale = $state(normalizeLocale(initialLocale));
+
+  function t<Key extends MessageKey>(key: Key, ...args: TranslationArguments<Key>): string {
+    const parameters = args[0] ?? {};
+
+    return interpolate(
+      messageAt(localeCatalogs[currentLocale], key) ?? messageAt(en, key) ?? key,
+      parameters,
+    );
+  }
+
   return {
     get locale() {
       return currentLocale;
@@ -59,12 +83,7 @@ export function createI18n(initialLocale: string | null | undefined): I18n {
     setLocale(locale) {
       currentLocale = normalizeLocale(locale);
     },
-    t(key, parameters = {}) {
-      return interpolate(
-        messageAt(localeCatalogs[currentLocale], key) ?? messageAt(en, key) ?? key,
-        parameters,
-      );
-    },
+    t,
     missingKeys() {
       return messageKeys(en).filter((key) => !messageAt(localeCatalogs[currentLocale], key));
     },

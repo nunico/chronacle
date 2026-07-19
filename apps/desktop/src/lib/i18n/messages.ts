@@ -57,3 +57,24 @@ export const sourceCatalog = {
 
 export type MessageCatalog = DeepStringCatalog<typeof sourceCatalog>;
 export type MessageKey = MessageKeyFor<MessageCatalog>;
+
+type MessageAtPath<T, Path extends string> = Path extends `${infer Head}.${infer Tail}`
+  ? Head extends keyof T
+    ? MessageAtPath<T[Head], Tail>
+    : never
+  : Path extends keyof T
+    ? T[Path]
+    : never;
+
+type PlaceholderName<Message extends string> =
+  Message extends `${string}{${infer Name}}${infer Rest}` ? Name | PlaceholderName<Rest> : never;
+
+export type MessageParametersFor<Key extends MessageKey> = Record<
+  PlaceholderName<Extract<MessageAtPath<typeof sourceCatalog, Key>, string>>,
+  string | number
+>;
+
+export type TranslationArguments<Key extends MessageKey> =
+  keyof MessageParametersFor<Key> extends never
+    ? [parameters?: never]
+    : [parameters: MessageParametersFor<Key>];
