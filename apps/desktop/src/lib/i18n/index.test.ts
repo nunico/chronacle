@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createI18n, localeCatalogs, normalizeLocale, supportedLocales } from './index.svelte';
+import type { MessageKey } from './messages';
 
 describe('i18n', () => {
   const i18n = createI18n('en');
@@ -10,6 +11,11 @@ describe('i18n', () => {
 
   // @ts-expect-error messages with placeholders require their parameters.
   i18n.t('progress.source');
+
+  const condition = Math.random() > 0.5;
+  const key: MessageKey = condition ? 'common.save' : 'progress.source';
+  i18n.t(key);
+  i18n.t(key, { current: 1 });
 
   it('normalizes supported locale variants and defaults unsupported values to English', () => {
     expect(normalizeLocale('de-DE')).toBe('de');
