@@ -15,6 +15,7 @@ const de = {
     search: 'Suchen',
     settings: 'Einstellungen',
     language: 'Sprache',
+    dismiss: 'Schließen',
   },
   status: {
     ready: 'Bereit',
@@ -36,14 +37,29 @@ const de = {
     embeddingBackend: 'Einbettungs-Backend',
     embeddingModel: 'Einbettungsmodell',
     saveSuccess: 'Einstellungen gespeichert.',
+    saveSettings: 'Einstellungen speichern',
+    saveConnect: 'Speichern und verbinden',
   },
   progress: {
+    uploadProgress: 'Upload-Fortschritt',
     source: 'Quelle {current}/{total}',
     sources: '{current} von {total} Quellen',
     extracting: 'Text wird extrahiert…',
     uploading: 'Wird hochgeladen…',
     indexing: 'Wird indexiert…',
     step: 'Schritt {current} von {total}',
+  },
+  modelDownload: {
+    title: 'KI-Modell erforderlich',
+    description:
+      'Chronacle muss ein KI-Einbettungsmodell herunterladen, bevor du Fragen zu deinen PDFs stellen kannst. Dies ist ein einmaliger Download von etwa 250 MB von Hugging Face.',
+    checking: 'Lokaler Cache wird geprüft…',
+    start: 'Download starten',
+    connecting: 'Verbindung zu Hugging Face wird hergestellt…',
+    downloading: '{name} wird heruntergeladen…',
+    ready: 'Modell bereit!',
+    failed: 'Download fehlgeschlagen',
+    retry: 'Erneut versuchen',
   },
   dialog: {
     confirmDelete: 'Dieses Element löschen?',

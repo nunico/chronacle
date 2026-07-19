@@ -1,16 +1,16 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import {
-    downloadEmbeddingModel,
-    getEmbeddingProviderStatus,
-  } from './lib/commands';
+  import { downloadEmbeddingModel, getEmbeddingProviderStatus } from './lib/commands';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import Button from './components/ui/Button.svelte';
+  import ProgressBar from './components/ui/ProgressBar.svelte';
+  import { i18n } from './lib/locale.svelte';
 
   let { onModelReady }: { onModelReady: () => void } = $props();
 
   let isDownloading = $state(false);
   let progress = $state(0);
-  let statusMessage = $state('Checking for AI model…');
+  let statusMessage = $state('');
   let currentFile = $state('');
   let bytesDownloaded = $state(0);
   let totalBytes = $state(0);
@@ -63,7 +63,7 @@
     isDownloading = true;
     error = '';
     progress = 0;
-    statusMessage = 'Connecting to HuggingFace…';
+    statusMessage = i18n.t('modelDownload.connecting');
 
     unlisten = await listen<{
       status: string;
@@ -85,17 +85,17 @@
         case 'downloading':
           if (p.file) {
             const name = p.file.split('/').pop() || p.file;
-            statusMessage = `Downloading ${name}…`;
+            statusMessage = i18n.t('modelDownload.downloading', { name });
           }
           break;
         case 'done':
-          statusMessage = 'Model ready!';
+          statusMessage = i18n.t('modelDownload.ready');
           progress = 100;
           setTimeout(finish, 500);
           break;
         case 'error':
           error = p as unknown as string;
-          statusMessage = 'Download failed';
+          statusMessage = i18n.t('modelDownload.failed');
           isDownloading = false;
           break;
       }
@@ -107,12 +107,12 @@
       // authoritative completion signal — don't rely solely on the terminal
       // progress event, which can be missed.
       await downloadEmbeddingModel();
-      statusMessage = 'Model ready!';
+      statusMessage = i18n.t('modelDownload.ready');
       progress = 100;
       finish();
     } catch (e) {
       error = String(e);
-      statusMessage = 'Download failed';
+      statusMessage = i18n.t('modelDownload.failed');
       isDownloading = false;
     }
   }
@@ -121,11 +121,9 @@
 <div class="download-screen">
   <div class="card">
     <div class="icon">🧠</div>
-    <h1>AI Model Required</h1>
+    <h1>{i18n.t('modelDownload.title')}</h1>
     <p class="desc">
-      Chronacle needs to download an AI embedding model before you can
-      ask questions about your PDFs. This is a one-time download of
-      <strong>~250 MB</strong> from HuggingFace.
+      {i18n.t('modelDownload.description')}
     </p>
 
     <p class="model-name">nomic-embed-text-v1.5 (768-dimension)</p>
@@ -133,34 +131,30 @@
     {#if checking}
       <div class="checking">
         <span class="spinner"></span>
-        <span>Checking local cache…</span>
+        <span>{i18n.t('modelDownload.checking')}</span>
       </div>
     {:else if !isDownloading && !error}
-      <button class="download-btn" onclick={handleDownload}>
-        Start Download
-      </button>
+      <Button onclick={handleDownload}>{i18n.t('modelDownload.start')}</Button>
     {/if}
 
     {#if isDownloading}
       <div class="progress-section">
         <div class="status-text">{statusMessage}</div>
         {#if currentFile}
-          <div class="file-info">{currentFile} — {formatBytes(bytesDownloaded)} / {formatBytes(totalBytes)}</div>
-        {/if}
-        <div class="progress-bar-container">
-          <div class="progress-bar">
-            <div class="progress-fill" style="width: {progress}%"></div>
+          <div class="file-info">
+            {currentFile} — {formatBytes(bytesDownloaded)} / {formatBytes(totalBytes)}
           </div>
-          <span class="progress-pct">{progress}%</span>
-        </div>
+        {/if}
+        <ProgressBar value={progress} label={statusMessage} />
       </div>
     {/if}
 
     {#if error}
       <div class="error-box">
-        <p class="error-title">Download failed</p>
+        <p class="error-title">{i18n.t('modelDownload.failed')}</p>
         <p class="error-detail">{error}</p>
-        <button class="retry-btn" onclick={handleDownload}>Retry</button>
+        <Button variant="secondary" onclick={handleDownload}>{i18n.t('modelDownload.retry')}</Button
+        >
       </div>
     {/if}
   </div>
@@ -235,23 +229,9 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  .download-btn {
-    padding: 0.75rem 2rem;
-    background: var(--arcane-500);
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-
-  .download-btn:hover {
-    background: var(--arcane-400);
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .progress-section {
@@ -273,36 +253,6 @@
     word-break: break-all;
   }
 
-  .progress-bar-container {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-  }
-
-  .progress-bar {
-    flex: 1;
-    max-width: 280px;
-    height: 8px;
-    background: var(--line);
-    border-radius: 4px;
-    overflow: hidden;
-  }
-
-  .progress-fill {
-    height: 100%;
-    background: var(--arcane-500);
-    transition: width 0.3s ease;
-    border-radius: 4px;
-  }
-
-  .progress-pct {
-    font-size: 0.85rem;
-    color: var(--fg-3);
-    min-width: 2.5rem;
-    text-align: right;
-  }
-
   .error-box {
     margin-top: 1rem;
     padding: 0.75rem 1rem;
@@ -322,21 +272,5 @@
     color: var(--fg-3);
     margin: 0 0 0.5rem;
     word-break: break-word;
-  }
-
-  .retry-btn {
-    padding: 0.4rem 1.2rem;
-    background: transparent;
-    color: #e53e3e;
-    border: 1px solid #e53e3e;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.85rem;
-    font-weight: 600;
-    transition: background 0.15s;
-  }
-
-  .retry-btn:hover {
-    background: color-mix(in srgb, #e53e3e 10%, transparent);
   }
 </style>

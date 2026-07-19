@@ -15,6 +15,7 @@ export const sourceCatalog = {
     search: 'Search',
     settings: 'Settings',
     language: 'Language',
+    dismiss: 'Dismiss',
   },
   status: {
     ready: 'Ready',
@@ -36,14 +37,29 @@ export const sourceCatalog = {
     embeddingBackend: 'Embedding backend',
     embeddingModel: 'Embedding model',
     saveSuccess: 'Settings saved.',
+    saveSettings: 'Save settings',
+    saveConnect: 'Save & connect',
   },
   progress: {
+    uploadProgress: 'Upload progress',
     source: 'Source {current}/{total}',
     sources: '{current} of {total} sources',
     extracting: 'Extracting text…',
     uploading: 'Uploading…',
     indexing: 'Indexing…',
     step: 'Step {current} of {total}',
+  },
+  modelDownload: {
+    title: 'AI model required',
+    description:
+      'Chronacle needs to download an AI embedding model before you can ask questions about your PDFs. This is a one-time download of approximately 250 MB from Hugging Face.',
+    checking: 'Checking local cache…',
+    start: 'Start download',
+    connecting: 'Connecting to Hugging Face…',
+    downloading: 'Downloading {name}…',
+    ready: 'Model ready!',
+    failed: 'Download failed',
+    retry: 'Retry',
   },
   dialog: {
     confirmDelete: 'Delete this item?',

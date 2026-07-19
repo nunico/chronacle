@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import UploadProgress from './UploadProgress.svelte';
+import { setUiLocalePreference } from './lib/locale.svelte';
 
 describe('UploadProgress', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    setUiLocalePreference('en');
   });
 
   afterEach(() => {
@@ -31,6 +33,10 @@ describe('UploadProgress', () => {
     expect(screen.getByText('rules.pdf')).toBeTruthy();
     expect(screen.getByText('Indexing PDF…')).toBeTruthy();
     expect(screen.getByText('42%')).toBeTruthy();
+    expect(screen.getByRole('progressbar', { name: 'Upload progress' })).toHaveAttribute(
+      'aria-valuenow',
+      '42',
+    );
   });
 
   it('auto-dismisses a few seconds after completion', async () => {

@@ -15,6 +15,7 @@ const fr = {
     search: 'Rechercher',
     settings: 'Paramètres',
     language: 'Langue',
+    dismiss: 'Fermer',
   },
   status: {
     ready: 'Prêt',
@@ -36,14 +37,29 @@ const fr = {
     embeddingBackend: 'Moteur de représentations vectorielles',
     embeddingModel: 'Modèle de représentations vectorielles',
     saveSuccess: 'Paramètres enregistrés.',
+    saveSettings: 'Enregistrer les paramètres',
+    saveConnect: 'Enregistrer et connecter',
   },
   progress: {
+    uploadProgress: 'Progression du téléversement',
     source: 'Source {current}/{total}',
     sources: '{current} sources sur {total}',
     extracting: 'Extraction du texte…',
     uploading: 'Téléversement…',
     indexing: 'Indexation…',
     step: 'Étape {current} sur {total}',
+  },
+  modelDownload: {
+    title: 'Modèle d’IA requis',
+    description:
+      'Chronacle doit télécharger un modèle d’intégration IA avant que vous puissiez interroger vos PDF. Il s’agit d’un téléchargement unique d’environ 250 Mo depuis Hugging Face.',
+    checking: 'Vérification du cache local…',
+    start: 'Démarrer le téléchargement',
+    connecting: 'Connexion à Hugging Face…',
+    downloading: 'Téléchargement de {name}…',
+    ready: 'Modèle prêt !',
+    failed: 'Échec du téléchargement',
+    retry: 'Réessayer',
   },
   dialog: {
     confirmDelete: 'Supprimer cet élément ?',
