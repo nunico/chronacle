@@ -1,3 +1,12 @@
+<script module lang="ts">
+  let dialogTitleId = 0;
+
+  function nextDialogTitleId() {
+    dialogTitleId += 1;
+    return `dialog-title-${dialogTitleId}`;
+  }
+</script>
+
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { modalBehavior } from '../../lib/actions/modal';
@@ -11,7 +20,7 @@
   }
 
   let { title, onclose, body, actions, children }: Props = $props();
-  let titleId = $derived(`dialog-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`);
+  const titleId = nextDialogTitleId();
 
   function handleClose() {
     onclose?.();
