@@ -35,6 +35,7 @@
   let uiLocale = $state<UiLocalePreference>(uiLocalePreference());
   let persistedUiLocale = uiLocalePreference();
   let uiLocaleSaveVersion = 0;
+  let uiLocaleWriteQueue: Promise<void> = Promise.resolve();
 
   let isSaving = $state(false);
   let isConnecting = $state(false);
@@ -193,14 +194,36 @@
     const selectedLocale = uiLocale;
     setUiLocalePreference(selectedLocale);
     try {
-      await updateSetting('ui_locale', selectedLocale);
+      await queueUiLocaleWrite(selectedLocale);
       if (saveVersion === uiLocaleSaveVersion) persistedUiLocale = selectedLocale;
     } catch (e) {
       if (saveVersion === uiLocaleSaveVersion) {
         uiLocale = persistedUiLocale;
         setUiLocalePreference(persistedUiLocale);
+        try {
+          await queueUiLocaleWrite(persistedUiLocale);
+        } catch {
+          await reconcileUiLocale();
+        }
       }
       showError(`Failed to save language: ${e}`);
+    }
+  }
+
+  function queueUiLocaleWrite(locale: UiLocalePreference): Promise<void> {
+    const write = uiLocaleWriteQueue.then(() => updateSetting('ui_locale', locale));
+    uiLocaleWriteQueue = write.catch(() => {});
+    return write;
+  }
+
+  async function reconcileUiLocale(): Promise<void> {
+    try {
+      const settings = await getSettings();
+      setUiLocalePreference(settings['ui_locale']);
+      uiLocale = uiLocalePreference();
+      persistedUiLocale = uiLocale;
+    } catch {
+      // Keep the best known preference when settings cannot be reloaded.
     }
   }
 

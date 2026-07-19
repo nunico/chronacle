@@ -118,8 +118,9 @@ describe('SettingsView', () => {
     const language = await screen.findByLabelText('Display language');
     await fireEvent.change(language, { target: { value: 'de' } });
     await fireEvent.change(language, { target: { value: 'fr' } });
-    await waitFor(() => expect(commands.updateSetting).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(commands.updateSetting).toHaveBeenCalledTimes(1));
     rejectGerman!(new Error('German write failed'));
+    await waitFor(() => expect(commands.updateSetting).toHaveBeenCalledTimes(2));
     rejectFrench!(new Error('French write failed'));
 
     await waitFor(() => expect(screen.getByText(/failed to save language/i)).toBeTruthy());
@@ -127,32 +128,37 @@ describe('SettingsView', () => {
     expect(screen.getByRole('heading', { name: 'Settings' })).toBeTruthy();
   });
 
-  it('ignores a stale successful save after a newer save restores English', async () => {
+  it('serializes locale saves and restores the backend locale after a newer failure', async () => {
+    let persistedLocale = 'en';
     let resolveGerman: () => void;
-    let rejectFrench: (reason?: unknown) => void;
-    vi.mocked(commands.getSettings).mockResolvedValue({ ui_locale: 'en' });
+    vi.mocked(commands.getSettings).mockResolvedValue({ ui_locale: persistedLocale });
     vi.mocked(commands.updateSetting)
       .mockImplementationOnce(
-        () => new Promise<void>((resolve) => { resolveGerman = resolve; }),
+        () => new Promise<void>((resolve) => {
+          resolveGerman = () => {
+            persistedLocale = 'de';
+            resolve();
+          };
+        }),
       )
-      .mockImplementationOnce(
-        () => new Promise<void>((_resolve, reject) => { rejectFrench = reject; }),
-      )
-      .mockRejectedValueOnce(new Error('Spanish write failed'));
+      .mockRejectedValueOnce(new Error('French write failed'))
+      .mockImplementationOnce(async (_key, value) => {
+        persistedLocale = value;
+      });
     render(SettingsView);
 
     const language = await screen.findByLabelText('Display language');
     await fireEvent.change(language, { target: { value: 'de' } });
     await fireEvent.change(language, { target: { value: 'fr' } });
-    await waitFor(() => expect(commands.updateSetting).toHaveBeenCalledTimes(2));
-    rejectFrench!(new Error('French write failed'));
-    await waitFor(() => expect((language as HTMLSelectElement).value).toBe('en'));
+    await waitFor(() => expect(commands.updateSetting).toHaveBeenCalledTimes(1));
     resolveGerman!();
-    await Promise.resolve();
-    await fireEvent.change(language, { target: { value: 'es' } });
+    await waitFor(() => expect(commands.updateSetting).toHaveBeenCalledTimes(3));
 
-    await waitFor(() => expect((language as HTMLSelectElement).value).toBe('en'));
-    expect(screen.getByRole('heading', { name: 'Settings' })).toBeTruthy();
+    expect(commands.updateSetting).toHaveBeenNthCalledWith(1, 'ui_locale', 'de');
+    expect(commands.updateSetting).toHaveBeenNthCalledWith(2, 'ui_locale', 'fr');
+    expect(commands.updateSetting).toHaveBeenNthCalledWith(3, 'ui_locale', 'en');
+    expect(persistedLocale).toBe('en');
+    expect((language as HTMLSelectElement).value).toBe('en');
   });
 
   it('displays current provider status after mount', async () => {
