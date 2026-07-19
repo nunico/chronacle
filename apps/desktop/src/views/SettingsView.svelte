@@ -153,7 +153,7 @@
     try {
       const status = await getLlmProviderStatus();
       currentProviderType = status.provider_type;
-      currentModel = status.model || '(default)';
+      currentModel = status.model || i18n.t('settingsPage.defaultModel');
       apiKeyConfigured = status.api_key_configured;
     } catch {
       // Status is unavailable on first load; that's fine
@@ -354,12 +354,12 @@
     const builtin: Array<{ value: string; label: string; disabled?: boolean }> = [
       { value: 'openai', label: 'OpenAI' },
       { value: 'anthropic', label: 'Anthropic' },
-      { value: 'ollama', label: 'Ollama (Local)' },
+      { value: 'ollama', label: i18n.t('settingsPage.ollamaLocal') },
     ];
     const custom: Array<{ value: string; label: string; disabled?: boolean }> = customProviders.map(
       (cp) => ({
         value: `custom:${cp.name}`,
-        label: `Custom: ${cp.name}`,
+        label: i18n.t('settingsPage.customProvider', { name: cp.name }),
       }),
     );
     if (custom.length === 0) return builtin;
@@ -418,7 +418,7 @@
       showAddProvider = false;
       await loadCustomProviders();
     } catch (e) {
-      showError(`Failed to create provider: ${e}`);
+      showError(i18n.t('settingsPage.createProviderFailed', { error: String(e) }));
     }
   }
 
@@ -427,7 +427,7 @@
       await deleteCustomProvider(id);
       await loadCustomProviders();
     } catch (e) {
-      showError(`Failed to delete provider: ${e}`);
+      showError(i18n.t('settingsPage.deleteProviderFailed', { error: String(e) }));
     }
   }
 
@@ -441,7 +441,7 @@
       providerModelsMap.set(providerId, models);
       providerModelsMap = new SvelteMap(providerModelsMap);
     } catch (e) {
-      showError(`Failed to add model: ${e}`);
+      showError(i18n.t('settingsPage.addModelFailed', { error: String(e) }));
     }
   }
 
@@ -452,7 +452,7 @@
       providerModelsMap.set(providerId, models);
       providerModelsMap = new SvelteMap(providerModelsMap);
     } catch (e) {
-      showError(`Failed to remove model: ${e}`);
+      showError(i18n.t('settingsPage.removeModelFailed', { error: String(e) }));
     }
   }
 </script>
