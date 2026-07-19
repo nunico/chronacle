@@ -27,6 +27,11 @@ export const sourceCatalog = {
   settings: {
     language: 'Display language',
     languageDescription: 'Choose the language used throughout Chronacle.',
+    languageAutomatic: 'Automatic',
+    languageEnglish: 'English',
+    languageGerman: 'Deutsch',
+    languageFrench: 'Français',
+    languageSpanish: 'Español',
     embedding: 'Embeddings',
     embeddingBackend: 'Embedding backend',
     embeddingModel: 'Embedding model',

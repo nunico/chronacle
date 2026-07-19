@@ -27,6 +27,11 @@ const es = {
   settings: {
     language: 'Idioma de visualización',
     languageDescription: 'Elige el idioma que se usa en Chronacle.',
+    languageAutomatic: 'Automático',
+    languageEnglish: 'English',
+    languageGerman: 'Deutsch',
+    languageFrench: 'Français',
+    languageSpanish: 'Español',
     embedding: 'Representaciones vectoriales',
     embeddingBackend: 'Backend de representaciones vectoriales',
     embeddingModel: 'Modelo de representaciones vectoriales',
