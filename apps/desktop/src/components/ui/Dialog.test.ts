@@ -13,4 +13,15 @@ describe('Dialog', () => {
     await fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(onclose).toHaveBeenCalledOnce();
   });
+
+  it('focuses a body-only dialog so Escape can close it', async () => {
+    const onclose = vi.fn();
+    render(Dialog, { props: { title: 'About Chronacle', onclose } });
+
+    const dialog = screen.getByRole('dialog', { name: 'About Chronacle' });
+    expect(document.activeElement).toBe(dialog);
+
+    await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Escape' });
+    expect(onclose).toHaveBeenCalledOnce();
+  });
 });
