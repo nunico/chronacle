@@ -16,4 +16,10 @@ describe('Button', () => {
     await user.click(button);
     expect(onclick).not.toHaveBeenCalled();
   });
+
+  it('requires an accessible label for icon-only buttons', () => {
+    expect(() => render(Button, { props: { iconOnly: true } })).toThrow(
+      'Icon-only buttons require an ariaLabel',
+    );
+  });
 });

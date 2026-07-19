@@ -32,12 +32,18 @@
   }: Props = $props();
 
   let isDisabled = $derived(disabled || loading);
+  let iconAriaLabel = $derived.by(() => {
+    if (iconOnly && !ariaLabel?.trim()) {
+      throw new Error('Icon-only buttons require an ariaLabel');
+    }
+    return iconOnly ? ariaLabel : undefined;
+  });
 </script>
 
 <button
   {type}
   class={['button', variant, { 'icon-only': iconOnly }]}
-  aria-label={iconOnly ? ariaLabel : undefined}
+  aria-label={iconAriaLabel}
   aria-busy={loading || undefined}
   disabled={isDisabled}
   {onclick}

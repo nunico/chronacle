@@ -24,4 +24,21 @@ describe('Dialog', () => {
     await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Escape' });
     expect(onclose).toHaveBeenCalledOnce();
   });
+
+  it('uses unique heading IDs for duplicate non-Latin titles', () => {
+    render(Dialog, { props: { title: '同じ題名' } });
+    render(Dialog, { props: { title: '同じ題名' } });
+
+    const dialogs = screen.getAllByRole('dialog', { name: '同じ題名' });
+    const titleIds = dialogs.map((dialog) => dialog.getAttribute('aria-labelledby'));
+
+    expect(titleIds[0]).toBeTruthy();
+    expect(titleIds[1]).toBeTruthy();
+    expect(titleIds[0]).not.toBe(titleIds[1]);
+    for (const titleId of titleIds) {
+      if (titleId) {
+        expect(document.getElementById(titleId)).toHaveTextContent('同じ題名');
+      }
+    }
+  });
 });
