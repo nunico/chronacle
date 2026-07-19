@@ -24,7 +24,7 @@ export function modalBehavior(node: HTMLElement, options: ModalBehaviorOptions) 
 
   const initial =
     node.querySelector<HTMLElement>('[data-autofocus]:not([disabled])') ?? focusables(node)[0];
-  initial?.focus();
+  (initial ?? node).focus();
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
