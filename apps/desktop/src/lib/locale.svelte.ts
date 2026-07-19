@@ -1,15 +1,55 @@
 import { locale } from '@tauri-apps/plugin-os';
+import { untrack } from 'svelte';
 import { SvelteDate } from 'svelte/reactivity';
+import { getSettings } from './commands';
+import { createI18n, normalizeLocale, type SupportedLocale } from './i18n/index.svelte';
 
-let _locale = $state<string>(navigator.language);
-const _dateFormatter = $derived(new Intl.DateTimeFormat(_locale));
+export type UiLocalePreference = 'auto' | SupportedLocale;
+
+function navigatorLocale(): string {
+  return typeof navigator === 'undefined' ? 'en' : navigator.language;
+}
+
+function normalizePreference(value: string | null | undefined): UiLocalePreference {
+  return value === 'auto' || value === 'en' || value === 'de' || value === 'fr' || value === 'es'
+    ? value
+    : 'auto';
+}
+
+let detectedLocale = $state<SupportedLocale>(normalizeLocale(navigatorLocale()));
+let preference = $state<UiLocalePreference>('auto');
+
+export const i18n = createI18n(untrack(() => detectedLocale));
+const _dateFormatter = $derived(new Intl.DateTimeFormat(i18n.locale));
+
+function applyLocale(): void {
+  i18n.setLocale(preference === 'auto' ? detectedLocale : preference);
+}
+
+export function uiLocalePreference(): UiLocalePreference {
+  return preference;
+}
+
+export function setUiLocalePreference(value: string | null | undefined): void {
+  preference = normalizePreference(value);
+  applyLocale();
+}
 
 export async function initLocale(): Promise<void> {
   try {
     const osLocale = await locale();
-    if (osLocale) _locale = osLocale;
+    if (osLocale) detectedLocale = normalizeLocale(osLocale);
   } catch {
-    // Keep navigator.language fallback — Tauri IPC unavailable (e.g. in tests)
+    // Keep the navigator.language fallback when Tauri IPC is unavailable.
+  }
+
+  applyLocale();
+
+  try {
+    const settings = await getSettings();
+    setUiLocalePreference(settings['ui_locale']);
+  } catch {
+    // Settings are unavailable during startup failures and browser-based tests.
   }
 }
 
@@ -22,9 +62,9 @@ export function formatDate(dateStr: string): string {
 }
 
 export function formatNumber(n: number, opts?: Intl.NumberFormatOptions): string {
-  return new Intl.NumberFormat(_locale, opts).format(n);
+  return new Intl.NumberFormat(i18n.locale, opts).format(n);
 }
 
 export function currentLocale(): string {
-  return _locale;
+  return i18n.locale;
 }

@@ -11,7 +11,7 @@
   }
 
   onMount(() => {
-    initLocale();
+    void initLocale();
   });
 </script>
 

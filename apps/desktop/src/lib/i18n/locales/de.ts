@@ -27,6 +27,11 @@ const de = {
   settings: {
     language: 'Anzeigesprache',
     languageDescription: 'Wähle die Sprache für Chronacle.',
+    languageAutomatic: 'Automatisch',
+    languageEnglish: 'English',
+    languageGerman: 'Deutsch',
+    languageFrench: 'Français',
+    languageSpanish: 'Español',
     embedding: 'Einbettungen',
     embeddingBackend: 'Einbettungs-Backend',
     embeddingModel: 'Einbettungsmodell',

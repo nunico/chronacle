@@ -20,12 +20,19 @@
   import { listen } from '@tauri-apps/api/event';
   import { SvelteMap } from 'svelte/reactivity';
   import VaultSyncSettings from '../components/VaultSyncSettings.svelte';
+  import {
+    i18n,
+    setUiLocalePreference,
+    uiLocalePreference,
+    type UiLocalePreference,
+  } from '../lib/locale.svelte';
 
   let providerType = $state('openai');
   let apiKey = $state('');
   let model = $state('');
   let baseUrl = $state('');
   let enrichNeighbors = $state(false);
+  let uiLocale = $state<UiLocalePreference>(uiLocalePreference());
 
   let isSaving = $state(false);
   let isConnecting = $state(false);
@@ -118,6 +125,8 @@
       model = settings['llm_model'] ?? '';
       baseUrl = settings['llm_base_url'] ?? '';
       enrichNeighbors = settings['extraction_enrich_neighbors'] === 'true';
+      setUiLocalePreference(settings['ui_locale']);
+      uiLocale = uiLocalePreference();
       embeddingModel = settings['embedding_model'] ?? '';
       embeddingApiKey = settings['embedding_api_key'] ?? '';
       embeddingBaseUrl = settings['embedding_base_url'] ?? '';
@@ -173,6 +182,15 @@
       showError(`Failed to save embedding settings: ${e}`);
     } finally {
       isSavingEmbedding = false;
+    }
+  }
+
+  async function saveUiLocale(): Promise<void> {
+    setUiLocalePreference(uiLocale);
+    try {
+      await updateSetting('ui_locale', uiLocale);
+    } catch (e) {
+      showError(`Failed to save language: ${e}`);
     }
   }
 
@@ -387,7 +405,20 @@
 </script>
 
 <div class="settings-page">
-  <h2>Settings</h2>
+  <h2>{i18n.t('common.settings')}</h2>
+
+  <section class="config-section">
+    <h3>{i18n.t('common.language')}</h3>
+    <label for="ui-locale">{i18n.t('settings.language')}</label>
+    <select id="ui-locale" bind:value={uiLocale} onchange={saveUiLocale}>
+      <option value="auto">{i18n.t('settings.languageAutomatic')}</option>
+      <option value="en">{i18n.t('settings.languageEnglish')}</option>
+      <option value="de">{i18n.t('settings.languageGerman')}</option>
+      <option value="fr">{i18n.t('settings.languageFrench')}</option>
+      <option value="es">{i18n.t('settings.languageSpanish')}</option>
+    </select>
+    <p class="muted">{i18n.t('settings.languageDescription')}</p>
+  </section>
 
   <!-- Status banner -->
   {#if statusMessage}

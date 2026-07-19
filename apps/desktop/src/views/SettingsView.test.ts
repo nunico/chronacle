@@ -70,6 +70,25 @@ describe('SettingsView', () => {
     expect(screen.getByRole('heading', { name: /settings/i })).toBeTruthy();
   });
 
+  it('uses a saved French locale for the settings heading', async () => {
+    vi.mocked(commands.getSettings).mockResolvedValue({ ui_locale: 'fr' });
+
+    render(SettingsView);
+
+    expect(await screen.findByRole('heading', { name: 'Paramètres' })).toBeTruthy();
+  });
+
+  it('persists a selected German display language immediately', async () => {
+    render(SettingsView);
+
+    const language = await screen.findByLabelText(/display language|langue d’affichage/i);
+    await fireEvent.change(language, { target: { value: 'de' } });
+
+    await waitFor(() => {
+      expect(commands.updateSetting).toHaveBeenCalledWith('ui_locale', 'de');
+    });
+  });
+
   it('displays current provider status after mount', async () => {
     render(SettingsView);
     await waitFor(() => expect(commands.getLlmProviderStatus).toHaveBeenCalled());
