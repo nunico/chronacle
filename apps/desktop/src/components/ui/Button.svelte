@@ -33,10 +33,11 @@
 
   let isDisabled = $derived(disabled || loading);
   let iconAriaLabel = $derived.by(() => {
-    if (iconOnly && !ariaLabel?.trim()) {
+    const normalizedLabel = ariaLabel?.trim();
+    if (iconOnly && !normalizedLabel) {
       throw new Error('Icon-only buttons require an ariaLabel');
     }
-    return iconOnly ? ariaLabel : undefined;
+    return iconOnly ? normalizedLabel : undefined;
   });
 </script>
 

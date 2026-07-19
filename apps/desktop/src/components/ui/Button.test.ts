@@ -22,4 +22,13 @@ describe('Button', () => {
       'Icon-only buttons require an ariaLabel',
     );
   });
+
+  it('normalizes an icon-only accessible label before rendering it', () => {
+    render(Button, { props: { iconOnly: true, ariaLabel: '  Close dialog  ' } });
+
+    expect(screen.getByRole('button', { name: 'Close dialog' })).toHaveAttribute(
+      'aria-label',
+      'Close dialog',
+    );
+  });
 });
