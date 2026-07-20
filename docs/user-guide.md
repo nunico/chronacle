@@ -131,6 +131,21 @@ A **Custom Provider** is any AI service that speaks the same "language" as OpenA
 
 Your custom provider will now appear in the provider list alongside OpenAI, Anthropic, and Ollama.
 
+### Language and search
+
+In **Settings**, choose **Automatic** to follow your operating-system language, or choose English,
+German, French, or Spanish explicitly. An explicit choice takes effect immediately.
+
+Oracle replies in a clearly detected English, German, French, or Spanish question. Short or
+ambiguous questions use your interface-language setting instead. Your PDFs, entity names, rules,
+and cited quotes always remain in their original language.
+
+For search, the small local Nomic model keeps a smaller offline English-focused index. The local
+multilingual E5 Base model is a larger offline download for German, French, Spanish, and
+cross-language retrieval. Cloud embeddings also support multilingual retrieval, but require your
+provider credentials. Whenever you change an embedding model, use **Settings → Re-index sources**
+before existing sources can use that model.
+
 ---
 
 ## Loading Your Rulebooks
