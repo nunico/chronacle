@@ -106,6 +106,7 @@ async fn rules_question_gets_rules_block_before_chunks() {
         &llm_provider,
         "How does initiative work?",
         Some("camp1"),
+        "en",
     )
     .await
     .expect("stream_response should succeed");
@@ -171,6 +172,7 @@ async fn compiled_article_excerpt_appears_in_codex_block_between_rules_and_chunk
         &llm_provider,
         "Tell me about Aldric the Smith.",
         Some("camp1"),
+        "en",
     )
     .await
     .expect("stream_response should succeed");
@@ -257,6 +259,7 @@ async fn campaign_with_no_compiled_content_behaves_exactly_as_today() {
         &llm_provider,
         "What does Action Surge do?",
         Some("camp1"),
+        "en",
     )
     .await
     .expect("stream_response should succeed");

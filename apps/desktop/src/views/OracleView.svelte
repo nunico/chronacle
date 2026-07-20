@@ -25,6 +25,7 @@
   import { clampPopoverPosition } from './popover-position';
   import { showToast } from '../lib/toast.svelte';
   import { i18n } from '../lib/locale.svelte';
+  import { resolveResponseLanguage } from '../lib/i18n/detect-language';
 
   let {
     activeCampaignId,
@@ -222,7 +223,7 @@
     isLoading = true;
     currentResponse = '';
     try {
-      await chatSend(t, activeCampaignId);
+      await chatSend(t, activeCampaignId, resolveResponseLanguage(t, i18n.locale));
     } catch (e) {
       messages = [...messages, { role: 'error', content: String(e) }];
       isLoading = false;
