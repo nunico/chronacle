@@ -24,6 +24,7 @@
   import { isNearBottom } from '../lib/scroll';
   import { clampPopoverPosition } from './popover-position';
   import { showToast } from '../lib/toast.svelte';
+  import { i18n } from '../lib/locale.svelte';
 
   let {
     activeCampaignId,
@@ -43,7 +44,7 @@
 
   async function saveToCodex(index: number, content: string) {
     if (!activeCampaignId) {
-      messages = [...messages, { role: 'error', content: 'Select a campaign first.' }];
+      messages = [...messages, { role: 'error', content: i18n.t('oracle.selectCampaignFirst') }];
       return;
     }
     savingToCodex = index;
@@ -51,13 +52,13 @@
       const n = await saveChatToCodex(activeCampaignId, content);
       showToast(
         n === 0
-          ? 'Nothing worth saving found.'
-          : `${n} proposal${n === 1 ? '' : 's'} created — review in Maintenance.`,
+          ? i18n.t('oracle.nothingWorthSaving')
+          : i18n.t('oracle.proposalsCreated', { count: n }),
         n === 0 ? 'info' : 'success',
       );
       onSavedToCodex?.(n);
     } catch (e) {
-      showToast(`Save to Codex failed: ${String(e)}`, 'error');
+      showToast(i18n.t('oracle.saveToCodexFailed', { error: String(e) }), 'error');
     } finally {
       savingToCodex = null;
     }
@@ -84,26 +85,23 @@
   } | null>(null);
   let unlistenExtract: UnlistenFn | null = null;
 
-  let citationPopover = $state<
-    | {
-        source: string;
-        page: number | null;
-        quote: string | null;
-        chunk: CitationChunk | null;
-        loading: boolean;
-        x: number;
-        y: number;
-        anchor: { top: number; bottom: number };
-      }
-    | null
-  >(null);
+  let citationPopover = $state<{
+    source: string;
+    page: number | null;
+    quote: string | null;
+    chunk: CitationChunk | null;
+    loading: boolean;
+    x: number;
+    y: number;
+    anchor: { top: number; bottom: number };
+  } | null>(null);
 
-  const suggestions = [
-    { icon: 'swords', text: 'Can I cast a spell while grappled?' },
-    { icon: 'shield', text: 'How does cover affect spell attacks?' },
-    { icon: 'scale', text: 'What are the rules for opportunity attacks?' },
-    { icon: 'book-open', text: "What's in the rulebook I just uploaded?" },
-  ];
+  let suggestions = $derived([
+    { icon: 'swords', text: i18n.t('oracle.suggestionGrappled') },
+    { icon: 'shield', text: i18n.t('oracle.suggestionCover') },
+    { icon: 'scale', text: i18n.t('oracle.suggestionOpportunity') },
+    { icon: 'book-open', text: i18n.t('oracle.suggestionUploaded') },
+  ]);
 
   async function loadHistory(campaignId: string | null) {
     try {
@@ -206,7 +204,10 @@
     const cmd = parseCommand(t);
     if (cmd.kind !== 'chat') {
       input = '';
-      if (inputEl) { inputEl.style.height = 'auto'; inputEl.focus(); }
+      if (inputEl) {
+        inputEl.style.height = 'auto';
+        inputEl.focus();
+      }
       handleCommand(cmd);
       return;
     }
@@ -231,22 +232,34 @@
   function handleCommand(cmd: ReturnType<typeof parseCommand>) {
     switch (cmd.kind) {
       case 'extract-usage':
-        messages = [...messages, {
-          role: 'system',
-          content: 'Usage: /extract <entity name>. To extract everything from all books, use /extract-all (this can take a while).',
-        }];
+        messages = [
+          ...messages,
+          {
+            role: 'system',
+            content: i18n.t('oracle.extractUsage'),
+          },
+        ];
         return;
       case 'help':
-        messages = [...messages, {
-          role: 'system',
-          content: 'Commands: /extract <name> — build one entity; /extract-all — extract everything (slow); /help — this list.',
-        }];
+        messages = [
+          ...messages,
+          {
+            role: 'system',
+            content: i18n.t('oracle.commandHelp'),
+          },
+        ];
         return;
       case 'extract':
-        runExtraction(() => extractEntityByName(activeCampaignId ?? '', cmd.name), `Extracting "${cmd.name}"`);
+        runExtraction(
+          () => extractEntityByName(activeCampaignId ?? '', cmd.name),
+          i18n.t('oracle.extractingEntity', { name: cmd.name }),
+        );
         return;
       case 'extract-all':
-        runExtraction(() => extractAllFromCampaign(activeCampaignId ?? ''), 'Extracting all entities');
+        runExtraction(
+          () => extractAllFromCampaign(activeCampaignId ?? ''),
+          i18n.t('oracle.extractingAll'),
+        );
         return;
     }
   }
@@ -256,19 +269,28 @@
     title: string,
   ) {
     if (!activeCampaignId) {
-      messages = [...messages, { role: 'error', content: 'Select a campaign first.' }];
+      messages = [...messages, { role: 'error', content: i18n.t('oracle.selectCampaignFirst') }];
       return;
     }
-    extraction = { status: 'running', title, detail: 'Starting…', entitiesFound: 0, relationsFound: 0 };
+    extraction = {
+      status: 'running',
+      title,
+      detail: i18n.t('oracle.starting'),
+      entitiesFound: 0,
+      relationsFound: 0,
+    };
     try {
       const summary = await start();
       const wasEmpty = extraction?.status === 'empty';
       extraction = {
         status: wasEmpty ? 'empty' : 'done',
-        title: wasEmpty ? 'Nothing found' : 'Extraction complete',
+        title: wasEmpty ? i18n.t('oracle.nothingFound') : i18n.t('oracle.extractionComplete'),
         detail: wasEmpty
-          ? (extraction?.detail ?? 'No passages found')
-          : `Created ${summary.entities_created} entities, ${summary.relations_created} relations`,
+          ? (extraction?.detail ?? i18n.t('oracle.noPassagesFound'))
+          : i18n.t('oracle.createdEntitiesRelations', {
+              entities: summary.entities_created,
+              relations: summary.relations_created,
+            }),
         entitiesFound: summary.entities_created,
         relationsFound: summary.relations_created,
       };
@@ -276,9 +298,12 @@
       const cancelled = String(e).includes('cancelled');
       extraction = {
         status: cancelled ? 'cancelled' : 'error',
-        title: cancelled ? 'Cancelled' : 'Extraction failed',
+        title: cancelled ? i18n.t('oracle.cancelled') : i18n.t('oracle.extractionFailed'),
         detail: cancelled
-          ? `Cancelled — kept ${extraction?.entitiesFound ?? 0} entities / ${extraction?.relationsFound ?? 0} relations created so far`
+          ? i18n.t('oracle.cancelledProgress', {
+              entities: extraction?.entitiesFound ?? 0,
+              relations: extraction?.relationsFound ?? 0,
+            })
           : String(e),
         entitiesFound: extraction?.entitiesFound ?? 0,
         relationsFound: extraction?.relationsFound ?? 0,
@@ -426,11 +451,11 @@
         <div class="msg">
           <div class="who-av eye-badge"><EyeMark size={28} /></div>
           <div class="error-bubble" role="alert">
-            <div class="error-title">The oracle could not answer.</div>
+            <div class="error-title">{i18n.t('oracle.oracleCouldNotAnswer')}</div>
             <div class="error-detail">{errorText(msg)}</div>
             <button type="button" class="retry-btn" onclick={() => retryFrom(i)}>
               <Icon name="rotate-ccw" size={13} />
-              Retry
+              {i18n.t('oracle.retry')}
             </button>
           </div>
         </div>
@@ -441,9 +466,10 @@
             class="save-codex"
             disabled={savingToCodex === i}
             onclick={() => saveToCodex(i, msg.content)}
-            title="Distill this answer into codex proposals"
+            title={i18n.t('oracle.distillToCodex')}
           >
-            <Icon name="book-plus" size={13} /> Save to Codex
+            <Icon name="book-plus" size={13} />
+            {i18n.t('oracle.saveToCodex')}
           </button>
         </div>
       {:else if msg.role === 'system'}
@@ -465,9 +491,10 @@
               class="save-codex"
               disabled={savingToCodex === i}
               onclick={() => saveToCodex(i, msg.content)}
-              title="Distill this answer into codex proposals"
+              title={i18n.t('oracle.distillToCodex')}
             >
-              <Icon name="book-plus" size={13} /> Save to Codex
+              <Icon name="book-plus" size={13} />
+              {i18n.t('oracle.saveToCodex')}
             </button>
           </div>
         </div>
@@ -489,7 +516,7 @@
         <div class="who-av eye-badge"><EyeMark size={28} /></div>
         <div class="thinking">
           <span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>
-          <span class="label">consulting your tomes…</span>
+          <span class="label">{i18n.t('oracle.consultingTomes')}</span>
         </div>
       </div>
     {/if}
@@ -517,10 +544,10 @@
         </div>
       {:else}
         <div class="empty-library">
-          <p>The oracle has no tomes to consult yet.</p>
+          <p>{i18n.t('oracle.noTomes')}</p>
           <button class="sug nudge" onclick={onOpenUpload}>
             <Icon name="paperclip" size={15} />
-            Upload a rulebook to get started
+            {i18n.t('oracle.uploadRulebook')}
           </button>
         </div>
       {/if}
@@ -532,7 +559,7 @@
   <div class="jump-wrap">
     <button type="button" class="jump-btn" onclick={jumpToLatest}>
       <Icon name="arrow-down" size={14} />
-      Jump to latest
+      {i18n.t('oracle.jumpToLatest')}
     </button>
   </div>
 {/if}
@@ -543,18 +570,19 @@
     bind:this={popoverEl}
     style="left: {citationPopover.x}px; top: {citationPopover.y}px"
     role="dialog"
-    aria-label="Source passage"
+    aria-label={i18n.t('oracle.sourcePassage')}
   >
     <div class="popover-header">
       <strong>{citationPopover.source}</strong>
       {#if citationPopover.page !== null}
-        <span class="muted">p.{citationPopover.page}</span>
+        <span class="muted">{i18n.t('oracle.page', { page: citationPopover.page })}</span>
       {/if}
       <button
         type="button"
         class="popover-close"
-        aria-label="Close"
-        onclick={() => (citationPopover = null)}>×</button>
+        aria-label={i18n.t('common.close')}
+        onclick={() => (citationPopover = null)}>×</button
+      >
     </div>
     {#if citationPopover.quote}
       {@const split = splitHeading(citationPopover.quote)}
@@ -563,14 +591,14 @@
       {/if}
       <div class="popover-body popover-quote">"{split.body}"</div>
     {:else if citationPopover.loading}
-      <div class="popover-body muted">Loading…</div>
+      <div class="popover-body muted">{i18n.t('common.loading')}</div>
     {:else if citationPopover.chunk}
       {#if citationPopover.chunk.section_heading}
         <div class="popover-heading">{citationPopover.chunk.section_heading}</div>
       {/if}
       <div class="popover-body">{citationPopover.chunk.text}</div>
     {:else}
-      <div class="popover-body muted">No supporting quote available.</div>
+      <div class="popover-body muted">{i18n.t('oracle.noSupportingQuote')}</div>
     {/if}
   </div>
 {/if}
@@ -584,16 +612,31 @@
       onkeydown={handleKeydown}
       oninput={autoGrow}
       rows="1"
-      placeholder="Ask a rule, a name, a place…"
+      placeholder={i18n.t('oracle.askPlaceholder')}
     ></textarea>
-    <button class="tool" onclick={onOpenUpload} title="Attach a rulebook" aria-label="Attach a rulebook">
+    <button
+      class="tool"
+      onclick={onOpenUpload}
+      title={i18n.t('oracle.attachRulebook')}
+      aria-label={i18n.t('oracle.attachRulebook')}
+    >
       <Icon name="paperclip" size={18} />
     </button>
-    <button class="tool" title="Roll — coming soon" aria-label="Roll dice" disabled>
+    <button
+      class="tool"
+      title={i18n.t('oracle.rollComingSoon')}
+      aria-label={i18n.t('oracle.rollDice')}
+      disabled
+    >
       <Icon name="dices" size={18} />
     </button>
     {#if isLoading}
-      <button class="send-btn" onclick={stopGeneration} aria-label="Stop generating" title="Stop generating">
+      <button
+        class="send-btn"
+        onclick={stopGeneration}
+        aria-label={i18n.t('oracle.stopGenerating')}
+        title={i18n.t('oracle.stopGenerating')}
+      >
         <Icon name="square" size={16} />
       </button>
     {:else}
@@ -601,7 +644,7 @@
         class="send-btn"
         disabled={!input.trim()}
         onclick={() => sendMessage()}
-        aria-label="Send"
+        aria-label={i18n.t('oracle.send')}
       >
         <Icon name="arrow-up" size={18} />
       </button>
@@ -741,8 +784,16 @@
     animation-delay: 0.3s;
   }
   @keyframes tdot {
-    0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
-    30% { opacity: 1; transform: translateY(-2px); }
+    0%,
+    60%,
+    100% {
+      opacity: 0.35;
+      transform: translateY(0);
+    }
+    30% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
   }
   .suggest {
     margin-top: 24px;
@@ -786,7 +837,12 @@
     border-color: var(--line-glow);
     font-style: normal;
   }
-  .system-note { color: var(--fg-3); font-size: 0.85rem; font-style: italic; margin: 0; }
+  .system-note {
+    color: var(--fg-3);
+    font-size: 0.85rem;
+    font-style: italic;
+    margin: 0;
+  }
   .error-bubble {
     flex: 1;
     background: var(--danger-bg, rgba(242, 103, 75, 0.08));
