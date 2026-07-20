@@ -16,11 +16,11 @@
   } from '../lib/commands';
   import EntityForm from './EntityForm.svelte';
   import WikiText from './WikiText.svelte';
-  import { modalBehavior } from '../lib/actions/modal';
   import { buildWikiLinkEntityMap } from '../lib/wikilinks';
   import { i18n } from '../lib/locale.svelte';
   import type { MessageKey } from '../lib/i18n/messages';
   import Button from './ui/Button.svelte';
+  import Dialog from './ui/Dialog.svelte';
 
   interface PendingCreate {
     kind: EntityKind;
@@ -301,20 +301,25 @@
         <ul class="entity-list">
           {#each entities as node (node.id)}
             <li class="entity-row" class:selected={formNode?.id === node.id}>
-              <button class="entity-name" onclick={() => openEdit(node)}>{node.name}</button>
+              <Button variant="ghost" class="entity-name" onclick={() => openEdit(node)}
+                >{node.name}</Button
+              >
               {#if onViewGraph}
-                <button
+                <Button
+                  variant="ghost"
                   class="btn-icon entity-graph-btn"
                   title={i18n.t('entityUi.viewRelationships')}
-                  onclick={() => onViewGraph(node)}>{i18n.t('entityUi.graph')}</button
+                  onclick={() => onViewGraph(node)}>{i18n.t('entityUi.graph')}</Button
                 >
               {/if}
-              <button
+              <Button
+                variant="ghost"
+                iconOnly
                 class="btn-icon delete"
-                aria-label={i18n.t('entityUi.deleteEntity', { name: node.name })}
+                ariaLabel={i18n.t('entityUi.deleteEntity', { name: node.name })}
                 onclick={() => {
                   deleteConfirm = node;
-                }}>×</button
+                }}>×</Button
               >
             </li>
           {/each}
@@ -341,15 +346,16 @@
               {#if formNode.codex_stale !== false}
                 <span class="chip-stale">{i18n.t('entityUi.stale')}</span>
               {/if}
-              <button
-                class="btn-ghost btn-recompile"
-                type="button"
-                aria-label={i18n.t('entityUi.recompileArticle')}
+              <Button
+                variant="ghost"
+                class="btn-recompile"
                 disabled={recompiling}
+                loading={recompiling}
+                loadingText={i18n.t('status.processing')}
                 onclick={handleRecompile}
               >
-                {recompiling ? i18n.t('status.processing') : i18n.t('entityUi.recompileArticle')}
-              </button>
+                {i18n.t('entityUi.recompileArticle')}
+              </Button>
             </div>
             <div class="codex-article">
               {#if formNode.codex_article}
@@ -389,71 +395,59 @@
 
   <!-- Delete confirmation -->
   {#if deleteConfirm}
-    <div
-      class="overlay"
-      role="dialog"
-      aria-modal="true"
-      use:modalBehavior={{
-        onClose: () => {
+    {#snippet deleteBody()}
+      <p>{i18n.t('entityUi.removeEntity', { name: deleteConfirm?.name ?? '' })}</p>
+    {/snippet}
+    {#snippet deleteActions()}
+      <Button variant="danger" onclick={() => confirmDelete(deleteConfirm as GraphNode)}
+        >{i18n.t('common.delete')}</Button
+      >
+      <Button
+        variant="ghost"
+        onclick={() => {
           deleteConfirm = null;
-        },
+        }}>{i18n.t('common.cancel')}</Button
+      >
+    {/snippet}
+    <Dialog
+      title={i18n.t('common.delete')}
+      body={deleteBody}
+      actions={deleteActions}
+      onclose={() => {
+        deleteConfirm = null;
       }}
-    >
-      <div class="confirm-box">
-        <p>
-          {i18n.t('entityUi.removeEntity', { name: deleteConfirm.name })}
-        </p>
-        <div class="actions">
-          <Button variant="danger" onclick={() => confirmDelete(deleteConfirm as GraphNode)}
-            >{i18n.t('common.delete')}</Button
-          >
-          <Button
-            variant="ghost"
-            onclick={() => {
-              deleteConfirm = null;
-            }}>{i18n.t('common.cancel')}</Button
-          >
-        </div>
-      </div>
-    </div>
+    />
   {/if}
 
   {#if blockedPendingCreate}
-    <div
-      class="overlay"
-      use:modalBehavior={{
-        onClose: () => {
+    {#snippet pendingCreateBody()}
+      <p>{i18n.t('entityUi.creatingReplacesForm', { name: blockedPendingCreate?.name ?? '' })}</p>
+    {/snippet}
+    {#snippet pendingCreateActions()}
+      <Button
+        variant="danger"
+        onclick={() => {
+          const request = blockedPendingCreate;
           blockedPendingCreate = null;
-        },
-      }}
-    >
-      <div
-        class="confirm-box"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="pending-create-title"
+          formDirty = false;
+          if (request) openPendingCreate(request);
+        }}>{i18n.t('entityUi.discardAndCreate')}</Button
       >
-        <h3 id="pending-create-title">{i18n.t('entityUi.discardUnsaved')}</h3>
-        <p>{i18n.t('entityUi.creatingReplacesForm', { name: blockedPendingCreate.name })}</p>
-        <div class="actions">
-          <Button
-            variant="danger"
-            onclick={() => {
-              const request = blockedPendingCreate;
-              blockedPendingCreate = null;
-              formDirty = false;
-              if (request) openPendingCreate(request);
-            }}>{i18n.t('entityUi.discardAndCreate')}</Button
-          >
-          <Button
-            variant="ghost"
-            onclick={() => {
-              blockedPendingCreate = null;
-            }}>{i18n.t('entityUi.keepEditing')}</Button
-          >
-        </div>
-      </div>
-    </div>
+      <Button
+        variant="ghost"
+        onclick={() => {
+          blockedPendingCreate = null;
+        }}>{i18n.t('entityUi.keepEditing')}</Button
+      >
+    {/snippet}
+    <Dialog
+      title={i18n.t('entityUi.discardUnsaved')}
+      body={pendingCreateBody}
+      actions={pendingCreateActions}
+      onclose={() => {
+        blockedPendingCreate = null;
+      }}
+    />
   {/if}
 
   <!-- Toast -->
@@ -500,7 +494,7 @@
   .entity-row.selected {
     background: var(--bg-panel-2);
   }
-  .entity-name {
+  :global(.entity-name) {
     flex: 1;
     background: none;
     border: none;
@@ -510,14 +504,14 @@
     cursor: pointer;
     font-size: 0.9rem;
   }
-  .btn-icon {
+  :global(.btn-icon) {
     background: none;
     border: none;
     color: var(--fg-4);
     cursor: pointer;
     font-size: 1rem;
   }
-  .btn-icon.delete:hover {
+  :global(.btn-icon.delete:hover) {
     color: var(--danger);
   }
   .form-panel {
@@ -567,7 +561,7 @@
     font-size: 0.75rem;
     font-weight: 600;
   }
-  .btn-recompile {
+  :global(.btn-recompile) {
     font-size: 0.8rem;
     padding: 4px 10px;
   }
@@ -576,39 +570,6 @@
     font-size: 0.9rem;
     color: var(--fg-2);
     line-height: 1.5;
-  }
-  .overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 100;
-  }
-  .confirm-box {
-    background: var(--bg-panel);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 20px;
-    max-width: 360px;
-    width: 90%;
-  }
-  .confirm-box p {
-    margin: 0 0 16px;
-    color: var(--fg-1);
-  }
-  .actions {
-    display: flex;
-    gap: 8px;
-  }
-  .btn-ghost {
-    background: transparent;
-    color: var(--fg-3);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 6px 14px;
-    cursor: pointer;
   }
   .toast {
     position: fixed;

@@ -76,11 +76,7 @@
 
 <section class="config-section">
   <h3>{i18n.t('entityUi.markdownVault')}</h3>
-  <p class="muted">
-    Sync entities, sessions, and collections to a folder of Markdown files — edit them in any text
-    editor and Chronacle reconciles the changes back in. Text inside the marked compiled block is
-    overwritten by Chronacle.
-  </p>
+  <p class="muted">{i18n.t('entityUi.vaultDescription')}</p>
 
   <div class="vault-path">
     {#if path}
@@ -110,21 +106,25 @@
 
   {#if report}
     <div class="reindex-success">
-      {report.exported} exported · {report.unchanged} unchanged · {report.applied} applied
+      {i18n.t('entityUi.vaultSyncSummary', {
+        exported: report.exported,
+        unchanged: report.unchanged,
+        applied: report.applied,
+      })}
       {#if report.conflicts > 0}
-        · {report.conflicts} conflicts
+        · {i18n.t('entityUi.vaultSyncConflicts', { count: report.conflicts })}
       {/if}
       {#if report.resolved > 0}
-        · {report.resolved} resolved
+        · {i18n.t('entityUi.vaultSyncResolved', { count: report.resolved })}
       {/if}
       {#if report.soft_deleted > 0}
-        · {report.soft_deleted} soft-deleted
+        · {i18n.t('entityUi.vaultSyncSoftDeleted', { count: report.soft_deleted })}
       {/if}
       {#if report.invalid > 0}
-        · {report.invalid} invalid
+        · {i18n.t('entityUi.vaultSyncInvalid', { count: report.invalid })}
       {/if}
       {#if report.failed > 0}
-        · {report.failed} failed
+        · {i18n.t('entityUi.vaultSyncFailed', { count: report.failed })}
       {/if}
     </div>
   {/if}
@@ -144,10 +144,7 @@
           </li>
         {/each}
       </ul>
-      <p class="muted conflict-hint">
-        Merge the two files in your vault, then delete the .conflict.md file — Chronacle applies
-        your version on the next sync.
-      </p>
+      <p class="muted conflict-hint">{i18n.t('entityUi.vaultConflictHint')}</p>
     </div>
   {/if}
 </section>

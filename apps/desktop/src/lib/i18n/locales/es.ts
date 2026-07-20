@@ -434,6 +434,17 @@ const es = {
     relationshipMany: '{count} relaciones',
     alternateNameOne: '{count} nombre alternativo',
     alternateNameMany: '{count} nombres alternativos',
+    vaultDescription:
+      'Sincroniza entidades, sesiones y colecciones en una carpeta de archivos Markdown — edítalos en cualquier editor de texto y Chronacle reconcilia los cambios. El texto dentro del bloque compilado marcado se sobrescribe con Chronacle.',
+    vaultSyncSummary: '{exported} exportados · {unchanged} sin cambios · {applied} aplicados',
+    vaultSyncConflicts: '{count} conflictos',
+    vaultSyncResolved: '{count} resueltos',
+    vaultSyncSoftDeleted: '{count} eliminados de forma reversible',
+    vaultSyncInvalid: '{count} no válidos',
+    vaultSyncFailed: '{count} fallidos',
+    vaultConflictHint:
+      'Combina los dos archivos en tu bóveda y después elimina el archivo .conflict.md — Chronacle aplicará tu versión en la próxima sincronización.',
+    pageAbbreviation: 'pág.',
   },
 } satisfies MessageCatalog;
 

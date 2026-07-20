@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import VaultSyncSettings from './VaultSyncSettings.svelte';
 import * as commands from '../lib/commands';
+import { i18n } from '../lib/locale.svelte';
 
 describe('VaultSyncSettings', () => {
   beforeEach(() => {
@@ -165,5 +166,40 @@ describe('VaultSyncSettings', () => {
     // The panel still renders; the supplementary list simply stays empty.
     expect(await screen.findByText('/Users/gm/Vault')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sync now/i })).toBeEnabled();
+  });
+
+  it('localizes the vault description, sync report, and conflict instructions', async () => {
+    vi.spyOn(commands, 'getVaultPath').mockResolvedValue('/Users/gm/Vault');
+    vi.spyOn(commands, 'vaultSyncNow').mockResolvedValue({
+      exported: 3,
+      unchanged: 7,
+      adopted: 0,
+      applied: 2,
+      conflicts: 1,
+      resolved: 0,
+      soft_deleted: 0,
+      swept: 0,
+      invalid: 0,
+      failed: 0,
+    });
+    vi.spyOn(commands, 'listVaultConflicts').mockResolvedValue([
+      {
+        id: 'n1',
+        kind: 'npc',
+        name: 'Seraphina',
+        key: 'entity.md',
+        sidecarKey: 'entity.conflict.md',
+      },
+    ]);
+    i18n.setLocale('de');
+    try {
+      render(VaultSyncSettings);
+      expect(await screen.findByText(/Markdown-Dateien/i)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: /jetzt synchronisieren/i }));
+      expect(await screen.findByText(/3 exportiert/i)).toBeInTheDocument();
+      expect(screen.getByText(/Datei \.conflict\.md/i)).toBeInTheDocument();
+    } finally {
+      i18n.setLocale('en');
+    }
   });
 });

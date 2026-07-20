@@ -12,7 +12,9 @@
   import WikiLinkEditor from './WikiLinkEditor.svelte';
   import AliasField from './AliasField.svelte';
   import { i18n } from '../lib/locale.svelte';
+  import type { MessageKey } from '../lib/i18n/messages';
   import Button from './ui/Button.svelte';
+  import FormField from './ui/FormField.svelte';
 
   interface Props {
     kind: EntityKind;
@@ -187,16 +189,21 @@
     };
   });
 
-  const KIND_LABEL: Record<string, string> = {
-    npc: 'NPC',
-    location: 'Location',
-    faction: 'Faction',
-    creature: 'Creature',
-    item: 'Item',
-    event: 'Event',
-    player_character: 'PC',
-    misc: 'Misc',
+  const KIND_LABEL: Record<string, MessageKey> = {
+    npc: 'entityUi.kindNpc',
+    location: 'entityUi.kindLocation',
+    faction: 'entityUi.kindFaction',
+    creature: 'entityUi.kindCreature',
+    item: 'entityUi.kindItem',
+    event: 'entityUi.kindEvent',
+    player_character: 'entityUi.kindPlayerCharacter',
+    misc: 'entityUi.kindMisc',
   };
+
+  function kindLabel(value: string): string {
+    const key = KIND_LABEL[value];
+    return key ? i18n.t(key) : value;
+  }
 
   function handleSubmit() {
     nameError = '';
@@ -242,24 +249,24 @@
     handleSubmit();
   }}
 >
-  <div class="field">
-    <label for="ef-name">{i18n.t('entityUi.name')}</label>
+  <FormField
+    label={i18n.t('entityUi.name')}
+    controlId="ef-name"
+    errorText={nameError || (error?.field === 'name' ? error.message : undefined)}
+    alertError={false}
+  >
     <input id="ef-name" type="text" bind:value={name} />
-    {#if nameError}<p class="field-error">{nameError}</p>{/if}
-    {#if error?.field === 'name'}<p class="field-error">{error.message}</p>{/if}
-  </div>
+  </FormField>
 
   <div class="field">
     <AliasField {aliases} onchange={(a) => (aliases = a)} />
   </div>
 
-  <div class="field">
-    <label for="ef-summary">{i18n.t('entityUi.summary')}</label>
+  <FormField label={i18n.t('entityUi.summary')} controlId="ef-summary">
     <input id="ef-summary" type="text" bind:value={summary} />
-  </div>
+  </FormField>
 
-  <div class="field">
-    <label for="ef-notes">{i18n.t('entityUi.notes')}</label>
+  <FormField label={i18n.t('entityUi.notes')} controlId="ef-notes">
     <WikiLinkEditor
       id="ef-notes"
       bind:value={notes}
@@ -267,61 +274,51 @@
       rows={4}
       placeholder={i18n.t('entityUi.wikiLinkHint')}
     />
-  </div>
+  </FormField>
 
   {#if kind === 'event'}
-    <div class="field">
-      <label for="ef-date-start">{i18n.t('entityUi.dateStart')}</label>
+    <FormField label={i18n.t('entityUi.dateStart')} controlId="ef-date-start">
       <input id="ef-date-start" type="text" bind:value={dateStart} />
-    </div>
-    <div class="field">
-      <label for="ef-date-end">{i18n.t('entityUi.dateEnd')}</label>
+    </FormField>
+    <FormField label={i18n.t('entityUi.dateEnd')} controlId="ef-date-end">
       <input id="ef-date-end" type="text" bind:value={dateEnd} />
-    </div>
-    <div class="field">
-      <label for="ef-seq">{i18n.t('entityUi.sequenceIndex')}</label>
+    </FormField>
+    <FormField label={i18n.t('entityUi.sequenceIndex')} controlId="ef-seq">
       <input id="ef-seq" type="number" bind:value={sequenceIndex} />
-    </div>
-    <div class="field">
-      <label for="ef-era">{i18n.t('entityUi.era')}</label>
+    </FormField>
+    <FormField label={i18n.t('entityUi.era')} controlId="ef-era">
       <input id="ef-era" type="text" bind:value={era} />
-    </div>
-    <div class="field">
-      <label for="ef-dur">{i18n.t('entityUi.durationLabel')}</label>
+    </FormField>
+    <FormField label={i18n.t('entityUi.durationLabel')} controlId="ef-dur">
       <input id="ef-dur" type="text" bind:value={durationLabel} />
-    </div>
+    </FormField>
     <div class="field checkbox">
       <label>
         <input type="checkbox" bind:checked={isOngoing} />
         {i18n.t('entityUi.ongoing')}
       </label>
     </div>
-    <div class="field">
-      <label for="ef-session">{i18n.t('entityUi.session')}</label>
+    <FormField label={i18n.t('entityUi.session')} controlId="ef-session">
       <select id="ef-session" bind:value={sessionId}>
         <option value="">{i18n.t('entityUi.none')}</option>
         {#each sessions as s (s.id)}
           <option value={s.id}>#{s.session_number}: {s.title}</option>
         {/each}
       </select>
-    </div>
+    </FormField>
   {/if}
 
   {#if kind === 'player_character'}
-    <div class="field">
-      <label for="ef-player">{i18n.t('entityUi.playerName')}</label>
+    <FormField label={i18n.t('entityUi.playerName')} controlId="ef-player">
       <input id="ef-player" type="text" bind:value={playerName} />
-    </div>
-    <div class="field">
-      <label for="ef-class">{i18n.t('entityUi.characterClass')}</label>
+    </FormField>
+    <FormField label={i18n.t('entityUi.characterClass')} controlId="ef-class">
       <input id="ef-class" type="text" bind:value={characterClass} />
-    </div>
-    <div class="field">
-      <label for="ef-level">{i18n.t('entityUi.characterLevel')}</label>
+    </FormField>
+    <FormField label={i18n.t('entityUi.characterLevel')} controlId="ef-level">
       <input id="ef-level" type="number" min="1" max="20" bind:value={characterLevel} />
-    </div>
-    <div class="field">
-      <label for="ef-status">{i18n.t('entityUi.status')}</label>
+    </FormField>
+    <FormField label={i18n.t('entityUi.status')} controlId="ef-status">
       <select id="ef-status" bind:value={status}>
         <option value="">{i18n.t('entityUi.select')}</option>
         <option value="active">{i18n.t('entityUi.active')}</option>
@@ -330,7 +327,7 @@
         <option value="missing">{i18n.t('entityUi.missing')}</option>
         <option value="on_hiatus">{i18n.t('entityUi.onHiatus')}</option>
       </select>
-    </div>
+    </FormField>
   {/if}
 
   {#if error && !error.field}
@@ -360,14 +357,14 @@
                 >
                   <span class="rel-direction">{rel.direction === 'outbound' ? '→' : '←'}</span>
                   <span class="rel-name">{rel.name}</span>
-                  <span class="rel-kind">{KIND_LABEL[rel.kind] ?? rel.kind}</span>
+                  <span class="rel-kind">{kindLabel(rel.kind)}</span>
                   <span class="rel-type">{rel.rel_type}</span>
                 </button>
               {:else}
                 <span class="rel-row-inner">
                   <span class="rel-direction">{rel.direction === 'outbound' ? '→' : '←'}</span>
                   <span class="rel-name">{rel.name}</span>
-                  <span class="rel-kind">{KIND_LABEL[rel.kind] ?? rel.kind}</span>
+                  <span class="rel-kind">{kindLabel(rel.kind)}</span>
                   <span class="rel-type">{rel.rel_type}</span>
                 </span>
               {/if}
@@ -403,7 +400,6 @@
     padding: 6px 10px;
     font-size: 0.9rem;
   }
-  .field-error,
   .form-error {
     color: var(--danger);
     font-size: 0.8rem;

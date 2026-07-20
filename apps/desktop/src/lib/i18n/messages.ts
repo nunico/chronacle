@@ -420,6 +420,17 @@ export const sourceCatalog = {
     categoryStatistic: 'Statistic',
     categoryEntry: 'Entry',
     entitySuggestions: 'Entity suggestions',
+    vaultDescription:
+      'Sync entities, sessions, and collections to a folder of Markdown files — edit them in any text editor and Chronacle reconciles the changes back in. Text inside the marked compiled block is overwritten by Chronacle.',
+    vaultSyncSummary: '{exported} exported · {unchanged} unchanged · {applied} applied',
+    vaultSyncConflicts: '{count} conflicts',
+    vaultSyncResolved: '{count} resolved',
+    vaultSyncSoftDeleted: '{count} soft-deleted',
+    vaultSyncInvalid: '{count} invalid',
+    vaultSyncFailed: '{count} failed',
+    vaultConflictHint:
+      'Merge the two files in your vault, then delete the .conflict.md file — Chronacle applies your version on the next sync.',
+    pageAbbreviation: 'p.',
     kindNpc: 'NPC',
     kindLocation: 'Location',
     kindFaction: 'Faction',
