@@ -54,6 +54,15 @@
     return labels[kind] ?? kind;
   }
 
+  function originLabel(origin: string): string {
+    const labels: Record<string, string> = {
+      chat: i18n.t('maintenance.originChat'),
+      session: i18n.t('maintenance.originSession'),
+      manual: i18n.t('maintenance.originManual'),
+    };
+    return labels[origin] ?? origin;
+  }
+
   function findingLabel(kind: string): string {
     const labels: Record<string, string> = {
       orphaned_edge: i18n.t('maintenance.findingOrphanedEdge'),
@@ -334,7 +343,7 @@
               <span class="target-name"
                 >{p.target_name ?? p.payload.name ?? i18n.t('maintenance.new')}</span
               >
-              <span class="chip-origin">{p.origin_kind}</span>
+              <span class="chip-origin">{originLabel(p.origin_kind)}</span>
             </div>
             <p class="rationale">{p.payload.rationale}</p>
             <div class="diff">
