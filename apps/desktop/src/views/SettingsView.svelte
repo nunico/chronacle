@@ -9,6 +9,7 @@
   import {
     getEmbeddingProviderStatus,
     reconfigureEmbeddingProvider,
+    downloadEmbeddingModel,
     type EmbeddingProviderStatus,
     getCustomProviders,
     createCustomProvider,
@@ -60,6 +61,8 @@
   let embeddingBaseUrl = $state('');
   let embeddingStatus = $state<EmbeddingProviderStatus | null>(null);
   let isSavingEmbedding = $state(false);
+  let isDownloadingEmbedding = $state(false);
+  let needsEmbeddingDownload = $state(false);
 
   // Custom providers state
   let customProviders = $state<CustomProvider[]>([]);
@@ -189,6 +192,7 @@
 
   async function saveEmbeddingSettings() {
     isSavingEmbedding = true;
+    needsEmbeddingDownload = false;
     statusMessage = '';
     try {
       await Promise.all([
@@ -201,9 +205,28 @@
       await loadEmbeddingStatus();
       showSuccess(i18n.t('settingsPage.embeddingSaved', { model: activeModel }));
     } catch (e) {
-      showError(i18n.t('settingsPage.embeddingSaveFailed', { error: String(e) }));
+      if (String(e).includes('not downloaded')) {
+        needsEmbeddingDownload = true;
+        showError(i18n.t('settingsPage.embeddingDownloadRequired'));
+      } else {
+        showError(i18n.t('settingsPage.embeddingSaveFailed', { error: String(e) }));
+      }
     } finally {
       isSavingEmbedding = false;
+    }
+  }
+
+  async function downloadSelectedEmbeddingModel() {
+    isDownloadingEmbedding = true;
+    try {
+      await downloadEmbeddingModel();
+      needsEmbeddingDownload = false;
+      await loadEmbeddingStatus();
+      showSuccess(i18n.t('settingsPage.embeddingSaved', { model: embeddingMode }));
+    } catch (e) {
+      showError(i18n.t('settingsPage.embeddingSaveFailed', { error: String(e) }));
+    } finally {
+      isDownloadingEmbedding = false;
     }
   }
 
@@ -789,6 +812,16 @@
         loading={isSavingEmbedding}
         loadingText={i18n.t('status.saving')}>{i18n.t('settingsPage.saveEmbeddingProvider')}</Button
       >
+      {#if needsEmbeddingDownload}
+        <Button
+          variant="secondary"
+          onclick={downloadSelectedEmbeddingModel}
+          disabled={isDownloadingEmbedding}
+          loading={isDownloadingEmbedding}
+          loadingText={i18n.t('settingsPage.downloadingSelectedModel')}
+          >{i18n.t('settingsPage.downloadSelectedModel')}</Button
+        >
+      {/if}
     </div>
   </section>
 

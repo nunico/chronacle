@@ -130,6 +130,10 @@ const fr = {
     cloudEmbedding: 'Cloud — API compatible OpenAI',
     optional: 'facultatif',
     saveEmbeddingProvider: 'Enregistrer le fournisseur d’intégration',
+    downloadSelectedModel: 'Télécharger le modèle sélectionné',
+    downloadingSelectedModel: 'Téléchargement du modèle…',
+    embeddingDownloadRequired:
+      'Téléchargez le modèle local sélectionné avant de changer de fournisseur d’intégration.',
     localUnavailable:
       'Le modèle local n’est pas disponible sur cet ordinateur. Configurez un fournisseur cloud ci-dessous.',
     reindexSources: 'Réindexer les sources',

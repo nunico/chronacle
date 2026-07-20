@@ -84,9 +84,26 @@ pub async fn get_embedding_provider_status(
 /// check / re-index if the identity changed.
 #[tauri::command]
 pub async fn reconfigure_embedding_provider(
+    app_handle: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
 ) -> Result<String, String> {
+    use chronacle_providers::embedding::{
+        local_embeddings_available, FastEmbedProvider, LocalEmbeddingMode,
+    };
+
     let map = settings_map(&state.db).await?;
+    let mode = crate::embedding_mode_from_settings(&map, local_embeddings_available());
+    if mode != "cloud" {
+        let local_mode = if mode == "local_multilingual" {
+            LocalEmbeddingMode::MultilingualE5Base
+        } else {
+            LocalEmbeddingMode::Nomic
+        };
+        let cache_dir = FastEmbedProvider::cache_dir(&crate::app_data_dir(), local_mode);
+        if !FastEmbedProvider::is_cached(local_mode, &cache_dir) {
+            return Err("The selected local embedding model is not downloaded. Download it before applying the change.".to_string());
+        }
+    }
 
     let data_dir = crate::app_data_dir();
     let new_provider = crate::build_embedding_provider_from_map(&map, &data_dir).await;
@@ -97,7 +114,35 @@ pub async fn reconfigure_embedding_provider(
         .write()
         .map_err(|e| format!("Failed to acquire write lock: {e}"))? = new_provider;
 
+    emit_embedding_model_mismatch(&app_handle, &state).await;
+
     Ok(model)
+}
+
+/// Re-check source identities after a live provider swap and notify the shell
+/// so it can present the existing explicit re-index workflow immediately.
+async fn emit_embedding_model_mismatch(app_handle: &tauri::AppHandle, state: &AppState) {
+    let active = match state.embedding_provider.read() {
+        Ok(provider) => provider.model_name().to_string(),
+        Err(error) => {
+            eprintln!("embedding lock while checking mismatch: {error}");
+            return;
+        }
+    };
+    if active == "mock" {
+        return;
+    }
+    match chronacle_providers::embedding::check_embedding_model_consistency(&state.db, &active)
+        .await
+    {
+        Ok(report) if !report.stale.is_empty() => {
+            if let Err(error) = app_handle.emit("embedding-model-mismatch", report) {
+                eprintln!("failed to emit embedding model mismatch: {error}");
+            }
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("mismatch check failed after provider swap: {error}"),
+    }
 }
 
 /// Report which sources were embedded with a different model than the active one.
@@ -310,6 +355,8 @@ pub async fn download_embedding_model(
         .embedding_provider
         .write()
         .map_err(|e| format!("Failed to acquire write lock: {e}"))? = Arc::new(real_provider);
+
+    emit_embedding_model_mismatch(&app_handle, &state).await;
 
     let _ = app_handle.emit(
         "model-download-progress",

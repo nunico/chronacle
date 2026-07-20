@@ -36,6 +36,7 @@ const uploadSource = vi.fn();
 const createCollection = vi.fn();
 const getMaintenanceCounts = vi.fn();
 const getProposals = vi.fn();
+const onEmbeddingModelMismatch = vi.fn();
 
 vi.mock('../lib/commands', () => ({
   getCampaigns: (...a: unknown[]) => getCampaigns(...a),
@@ -65,7 +66,7 @@ vi.mock('../lib/commands', () => ({
 }));
 
 vi.mock('../lib/events', () => ({
-  onEmbeddingModelMismatch: vi.fn().mockResolvedValue(() => {}),
+  onEmbeddingModelMismatch: (...a: unknown[]) => onEmbeddingModelMismatch(...a),
 }));
 
 async function openPicker() {
@@ -83,6 +84,7 @@ describe('Shell upload flow', () => {
     clearToasts();
     globalThis.localStorage?.clear();
     getCampaigns.mockResolvedValue([{ id: 'camp-1', name: 'Test Campaign', system: 'D&D 5e' }]);
+    onEmbeddingModelMismatch.mockImplementation(async () => () => {});
     getCollections.mockResolvedValue([{ id: 'col-1', name: 'Core Books' }]);
     getChatHistory.mockResolvedValue([]);
     getEmbeddingModelMismatch.mockResolvedValue({ active_model: 'mock', stale: [] });
@@ -197,6 +199,33 @@ describe('Shell upload flow', () => {
       expect(screen.getByTestId('mismatch-banner').textContent).toContain('Embedding chunks');
       expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '40');
     });
+  });
+
+  it('shows the explicit re-index workflow after a live model-mismatch event', async () => {
+    let mismatchCallback:
+      | ((payload: {
+          active_model: string;
+          stale: Array<{ embed_model: string; source_count: number }>;
+        }) => void)
+      | undefined;
+    onEmbeddingModelMismatch.mockImplementation(async (callback) => {
+      mismatchCallback = callback;
+      return () => {};
+    });
+    getEmbeddingModelMismatch.mockResolvedValue({
+      active_model: 'multilingual-e5-base',
+      stale: [],
+    });
+    render(Shell);
+
+    await waitFor(() => expect(onEmbeddingModelMismatch).toHaveBeenCalled());
+    mismatchCallback?.({
+      active_model: 'multilingual-e5-base',
+      stale: [{ embed_model: 'nomic-embed-text-v1.5', source_count: 2 }],
+    });
+
+    expect(await screen.findByTestId('mismatch-banner')).toBeTruthy();
+    expect(screen.getByTestId('mismatch-reindex')).toBeTruthy();
   });
 
   it('surfaces a reindex failure in the mismatch banner', async () => {
