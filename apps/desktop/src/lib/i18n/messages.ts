@@ -128,6 +128,10 @@ export const sourceCatalog = {
     cloudEmbedding: 'Cloud — OpenAI-compatible API',
     optional: 'optional',
     saveEmbeddingProvider: 'Save embedding provider',
+    downloadSelectedModel: 'Download selected model',
+    downloadingSelectedModel: 'Downloading model…',
+    embeddingDownloadRequired:
+      'Download the selected local model before switching embedding providers.',
     localUnavailable:
       'The local embedding model is not available on this computer. Configure a cloud embedding provider below to enable search.',
     reindexSources: 'Re-index sources',

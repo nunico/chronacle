@@ -129,6 +129,10 @@ const de = {
     cloudEmbedding: 'Cloud — OpenAI-kompatible API',
     optional: 'optional',
     saveEmbeddingProvider: 'Einbettungsanbieter speichern',
+    downloadSelectedModel: 'Ausgewähltes Modell herunterladen',
+    downloadingSelectedModel: 'Modell wird heruntergeladen…',
+    embeddingDownloadRequired:
+      'Lade das ausgewählte lokale Modell herunter, bevor du den Einbettungsanbieter wechselst.',
     localUnavailable:
       'Das lokale Einbettungsmodell ist auf diesem Computer nicht verfügbar. Richte unten einen Cloud-Anbieter ein.',
     reindexSources: 'Quellen neu indizieren',

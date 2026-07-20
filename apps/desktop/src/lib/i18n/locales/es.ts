@@ -129,6 +129,10 @@ const es = {
     cloudEmbedding: 'Nube — API compatible con OpenAI',
     optional: 'opcional',
     saveEmbeddingProvider: 'Guardar proveedor de incrustaciones',
+    downloadSelectedModel: 'Descargar el modelo seleccionado',
+    downloadingSelectedModel: 'Descargando modelo…',
+    embeddingDownloadRequired:
+      'Descarga el modelo local seleccionado antes de cambiar de proveedor de incrustaciones.',
     localUnavailable:
       'El modelo local no está disponible en este equipo. Configura un proveedor en la nube abajo.',
     reindexSources: 'Volver a indexar fuentes',

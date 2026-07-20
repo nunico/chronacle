@@ -20,6 +20,7 @@ vi.mock('../lib/commands', () => ({
     local_cached: true,
   }),
   reconfigureEmbeddingProvider: vi.fn().mockResolvedValue('nomic-embed-text-v1.5'),
+  downloadEmbeddingModel: vi.fn().mockResolvedValue(undefined),
   getCustomProviders: vi.fn().mockResolvedValue([]),
   createCustomProvider: vi.fn().mockResolvedValue(undefined),
   deleteCustomProvider: vi.fn().mockResolvedValue(undefined),
@@ -87,6 +88,30 @@ describe('SettingsView', () => {
       expect(commands.updateSetting).toHaveBeenCalledWith('embedding_mode', 'local_multilingual');
     });
     expect(await screen.findByText(/Re-index existing sources/)).toBeTruthy();
+  });
+
+  it('keeps the active provider until an uncached multilingual model is downloaded', async () => {
+    vi.mocked(commands.getEmbeddingProviderStatus).mockResolvedValue({
+      backend: 'local',
+      mode: 'local_multilingual',
+      model: 'nomic-embed-text-v1.5',
+      dimension: 768,
+      api_key_configured: false,
+      local_available: true,
+      local_cached: false,
+    });
+    vi.mocked(commands.reconfigureEmbeddingProvider).mockRejectedValueOnce(
+      new Error('The selected local embedding model is not downloaded.'),
+    );
+    render(SettingsView);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Save embedding provider' }));
+
+    expect(await screen.findByRole('button', { name: 'Download selected model' })).toBeTruthy();
+    expect(commands.reconfigureEmbeddingProvider).toHaveBeenCalledTimes(1);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Download selected model' }));
+    await waitFor(() => expect(commands.downloadEmbeddingModel).toHaveBeenCalledTimes(1));
   });
 
   it('uses a saved French locale for the settings heading', async () => {
