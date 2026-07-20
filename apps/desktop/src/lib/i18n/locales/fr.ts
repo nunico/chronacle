@@ -241,6 +241,53 @@ const fr = {
     description:
       'Le dossier {folder}/ de votre campagne vivra ici — des notes recherchables, basées sur des fichiers et liées aux entités auxquelles Chronacle peut répondre.',
   },
+  noteCategories: {
+    sessions: {
+      label: 'Sessions',
+      description: 'La chronologie de votre campagne — résumés, récompenses et fils ouverts.',
+    },
+    player_characters: {
+      label: 'Personnages joueurs',
+      description: 'Le groupe — fiches, accroches et situation de chacun.',
+    },
+    npcs: {
+      label: 'PNJ',
+      description: 'Toutes les personnes que le groupe a rencontrées, et quelques autres.',
+    },
+    locations: {
+      label: 'Lieux',
+      description: 'Les lieux visités par votre groupe — et ceux qu’il évite.',
+    },
+    factions: {
+      label: 'Factions',
+      description: 'Les pouvoirs qui agissent derrière votre campagne.',
+    },
+    creatures: { label: 'Créatures', description: 'Bêtes et horreurs qui rôdent dans le monde.' },
+    items: {
+      label: 'Objets',
+      description: 'Artefacts, reliques et butin qui méritent d’être notés.',
+    },
+    events: { label: 'Événements', description: 'Les moments qui ont façonné la campagne.' },
+    misc: { label: 'Divers', description: 'Tout le reste qui mérite d’être conservé.' },
+  },
+  shortcuts: {
+    oracle: 'Oracle (chat)',
+    timeline: 'Chronologie',
+    playerCharacters: 'Personnages joueurs',
+    npcs: 'PNJ',
+    locations: 'Lieux',
+    factions: 'Factions',
+    creatures: 'Créatures',
+    items: 'Objets',
+    events: 'Événements',
+    sessions: 'Sessions',
+    misc: 'Divers',
+    settings: 'Paramètres',
+    newEntity: 'Nouvelle entité (dans un carnet)',
+    focusChat: 'Placer le focus dans le chat',
+    toggleHelp: 'Afficher / masquer cette aide',
+    closeOverlay: 'Fermer la superposition',
+  },
   sessions: {
     title: 'Sessions',
     subtitle: 'La chronologie de votre campagne',

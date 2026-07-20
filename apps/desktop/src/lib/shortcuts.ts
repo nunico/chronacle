@@ -5,6 +5,7 @@
 // (which key goes where) and the typing-suppression rule.
 
 import type { NoteCategoryId } from '../shell/note-categories';
+import type { MessageKey } from './i18n/messages';
 
 /// A resolved navigation destination from a `g`-chord.
 export type NavTarget = 'oracle' | 'settings' | 'timeline' | { category: NoteCategoryId };
@@ -47,21 +48,21 @@ export function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 /// Rows for the `?` help overlay — single source of truth for documentation.
-export const SHORTCUT_HELP: ReadonlyArray<{ keys: string; label: string }> = [
-  { keys: 'g o', label: 'Oracle (chat)' },
-  { keys: 'g t', label: 'Timeline' },
-  { keys: 'g p', label: 'Player Characters' },
-  { keys: 'g n', label: 'NPCs' },
-  { keys: 'g l', label: 'Locations' },
-  { keys: 'g f', label: 'Factions' },
-  { keys: 'g c', label: 'Creatures' },
-  { keys: 'g i', label: 'Items' },
-  { keys: 'g e', label: 'Events' },
-  { keys: 'g s', label: 'Sessions' },
-  { keys: 'g m', label: 'Misc' },
-  { keys: 'g ,', label: 'Settings' },
-  { keys: 'c', label: 'New entity (in a notebook)' },
-  { keys: '/', label: 'Focus the chat box' },
-  { keys: '?', label: 'Show / hide this help' },
-  { keys: 'Esc', label: 'Close overlay' },
+export const SHORTCUT_HELP: ReadonlyArray<{ keys: string; labelKey: MessageKey }> = [
+  { keys: 'g o', labelKey: 'shortcuts.oracle' },
+  { keys: 'g t', labelKey: 'shortcuts.timeline' },
+  { keys: 'g p', labelKey: 'shortcuts.playerCharacters' },
+  { keys: 'g n', labelKey: 'shortcuts.npcs' },
+  { keys: 'g l', labelKey: 'shortcuts.locations' },
+  { keys: 'g f', labelKey: 'shortcuts.factions' },
+  { keys: 'g c', labelKey: 'shortcuts.creatures' },
+  { keys: 'g i', labelKey: 'shortcuts.items' },
+  { keys: 'g e', labelKey: 'shortcuts.events' },
+  { keys: 'g s', labelKey: 'shortcuts.sessions' },
+  { keys: 'g m', labelKey: 'shortcuts.misc' },
+  { keys: 'g ,', labelKey: 'shortcuts.settings' },
+  { keys: 'c', labelKey: 'shortcuts.newEntity' },
+  { keys: '/', labelKey: 'shortcuts.focusChat' },
+  { keys: '?', labelKey: 'shortcuts.toggleHelp' },
+  { keys: 'Esc', labelKey: 'shortcuts.closeOverlay' },
 ];

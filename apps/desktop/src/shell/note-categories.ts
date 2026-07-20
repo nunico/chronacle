@@ -11,85 +11,85 @@ export type NoteCategoryId =
 
 export interface NoteCategory {
   id: NoteCategoryId;
-  label: string;
+  labelKey: `noteCategories.${NoteCategoryId}.label`;
   icon: string; // Lucide kebab-case name
   group: 'Notebook' | 'Entities';
   folder: string;
-  sub: string;
+  subKey: `noteCategories.${NoteCategoryId}.description`;
 }
 
 export const NOTE_CATEGORIES: NoteCategory[] = [
   {
     id: 'sessions',
-    label: 'Sessions',
+    labelKey: 'noteCategories.sessions.label',
     icon: 'history',
     group: 'Notebook',
     folder: 'sessions',
-    sub: 'Your campaign timeline — recaps, rewards, and open threads.',
+    subKey: 'noteCategories.sessions.description',
   },
   {
     id: 'player_characters',
-    label: 'Player Characters',
+    labelKey: 'noteCategories.player_characters.label',
     icon: 'users-round',
     group: 'Entities',
     folder: 'entities/player_characters',
-    sub: 'The party — sheets, hooks, and where each one stands.',
+    subKey: 'noteCategories.player_characters.description',
   },
   {
     id: 'npcs',
-    label: 'NPCs',
+    labelKey: 'noteCategories.npcs.label',
     icon: 'drama',
     group: 'Entities',
     folder: 'entities/npcs',
-    sub: "Everyone the party has met, and a few they haven't yet.",
+    subKey: 'noteCategories.npcs.description',
   },
   {
     id: 'locations',
-    label: 'Locations',
+    labelKey: 'noteCategories.locations.label',
     icon: 'map-pin',
     group: 'Entities',
     folder: 'entities/locations',
-    sub: "Places your party has been — and the ones they're avoiding.",
+    subKey: 'noteCategories.locations.description',
   },
   {
     id: 'factions',
-    label: 'Factions',
+    labelKey: 'noteCategories.factions.label',
     icon: 'flag',
     group: 'Entities',
     folder: 'entities/factions',
-    sub: 'The powers moving behind your campaign.',
+    subKey: 'noteCategories.factions.description',
   },
   {
     id: 'creatures',
-    label: 'Creatures',
+    labelKey: 'noteCategories.creatures.label',
     icon: 'paw-print',
     group: 'Entities',
     folder: 'entities/creatures',
-    sub: 'Beasts and horrors stalking the world.',
+    subKey: 'noteCategories.creatures.description',
   },
   {
     id: 'items',
-    label: 'Items',
+    labelKey: 'noteCategories.items.label',
     icon: 'gem',
     group: 'Entities',
     folder: 'entities/items',
-    sub: 'Artifacts, relics, and loot worth noting.',
+    subKey: 'noteCategories.items.description',
   },
   {
     id: 'events',
-    label: 'Events',
+    labelKey: 'noteCategories.events.label',
     icon: 'milestone',
     group: 'Entities',
     folder: 'entities/events',
-    sub: 'The moments that shaped the campaign.',
+    subKey: 'noteCategories.events.description',
   },
   {
     id: 'misc',
-    label: 'Misc',
+    labelKey: 'noteCategories.misc.label',
     icon: 'shapes',
     group: 'Entities',
     folder: 'entities/misc',
-    sub: 'Everything else worth keeping.',
+    subKey: 'noteCategories.misc.description',
   },
 ];
 

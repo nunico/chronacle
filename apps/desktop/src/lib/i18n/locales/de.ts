@@ -240,6 +240,59 @@ const de = {
     description:
       'Die {folder}/ deiner Kampagne wird hier liegen — durchsuchbare, dateibasierte Notizen, verknüpft mit Entitäten, über die Chronacle Auskunft geben kann.',
   },
+  noteCategories: {
+    sessions: {
+      label: 'Sitzungen',
+      description: 'Deine Kampagnenzeitleiste — Zusammenfassungen, Belohnungen und offene Fäden.',
+    },
+    player_characters: {
+      label: 'Spielercharaktere',
+      description: 'Die Gruppe — Bögen, Aufhänger und der Stand jeder Figur.',
+    },
+    npcs: {
+      label: 'NSCs',
+      description: 'Alle, die die Gruppe getroffen hat, und einige, die sie noch treffen wird.',
+    },
+    locations: {
+      label: 'Orte',
+      description: 'Orte, die deine Gruppe besucht hat — und jene, die sie meidet.',
+    },
+    factions: {
+      label: 'Fraktionen',
+      description: 'Die Mächte, die hinter deiner Kampagne wirken.',
+    },
+    creatures: {
+      label: 'Kreaturen',
+      description: 'Bestien und Schrecken, die die Welt heimsuchen.',
+    },
+    items: {
+      label: 'Gegenstände',
+      description: 'Artefakte, Relikte und Beute, die es festzuhalten gilt.',
+    },
+    events: { label: 'Ereignisse', description: 'Die Momente, die die Kampagne geprägt haben.' },
+    misc: {
+      label: 'Verschiedenes',
+      description: 'Alles andere, das es wert ist, behalten zu werden.',
+    },
+  },
+  shortcuts: {
+    oracle: 'Orakel (Chat)',
+    timeline: 'Zeitleiste',
+    playerCharacters: 'Spielercharaktere',
+    npcs: 'NSCs',
+    locations: 'Orte',
+    factions: 'Fraktionen',
+    creatures: 'Kreaturen',
+    items: 'Gegenstände',
+    events: 'Ereignisse',
+    sessions: 'Sitzungen',
+    misc: 'Verschiedenes',
+    settings: 'Einstellungen',
+    newEntity: 'Neue Entität (im Notizbuch)',
+    focusChat: 'Chatfeld fokussieren',
+    toggleHelp: 'Hilfe ein-/ausblenden',
+    closeOverlay: 'Overlay schließen',
+  },
   sessions: {
     title: 'Sitzungen',
     subtitle: 'Deine Kampagnenzeitleiste',
