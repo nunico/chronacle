@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { i18n } from '../lib/locale.svelte';
+  import Button from './ui/Button.svelte';
   interface Props {
     /** The entity's current alternate names. Controlled — this component never
      * mutates it; every add/remove reports the full resulting array via `onchange`. */
@@ -35,8 +37,8 @@
 </script>
 
 <div class="alias-field">
-  <label for="alias-field-input">Alternate names</label>
-  <p class="hint">Other names this entity is known by. Links using any of them will find it.</p>
+  <label for="alias-field-input">{i18n.t('entityUi.alternateNames')}</label>
+  <p class="hint">{i18n.t('entityUi.alternateNamesHint')}</p>
 
   {#if aliases.length > 0}
     <ul class="chip-list">
@@ -46,7 +48,7 @@
           <button
             type="button"
             class="chip-remove"
-            aria-label="Remove {name}"
+            aria-label={i18n.t('entityUi.removeName', { name })}
             onclick={() => removeAlias(name)}
           >
             ×
@@ -60,11 +62,11 @@
     <input
       id="alias-field-input"
       type="text"
-      placeholder="Add an alternate name"
+      placeholder={i18n.t('entityUi.addAlternateName')}
       bind:value={draft}
       onkeydown={handleKeydown}
     />
-    <button type="button" class="btn-ghost" onclick={addAlias}>Add</button>
+    <Button variant="ghost" onclick={addAlias}>{i18n.t('common.add')}</Button>
   </div>
 </div>
 
@@ -127,14 +129,5 @@
     color: var(--fg-1);
     padding: 6px 10px;
     font-size: 0.9rem;
-  }
-  .btn-ghost {
-    background: transparent;
-    color: var(--fg-3);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 6px 14px;
-    cursor: pointer;
-    font-size: 0.85rem;
   }
 </style>

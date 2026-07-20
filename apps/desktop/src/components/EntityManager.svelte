@@ -18,6 +18,9 @@
   import WikiText from './WikiText.svelte';
   import { modalBehavior } from '../lib/actions/modal';
   import { buildWikiLinkEntityMap } from '../lib/wikilinks';
+  import { i18n } from '../lib/locale.svelte';
+  import type { MessageKey } from '../lib/i18n/messages';
+  import Button from './ui/Button.svelte';
 
   interface PendingCreate {
     kind: EntityKind;
@@ -59,15 +62,15 @@
     onMissingLinkClick,
   }: Props = $props();
 
-  const KIND_LABEL: Record<EntityKind, string> = {
-    npc: 'NPC',
-    location: 'Location',
-    faction: 'Faction',
-    creature: 'Creature',
-    item: 'Item',
-    event: 'Event',
-    player_character: 'PC',
-    misc: 'Misc',
+  const KIND_LABEL: Record<EntityKind, MessageKey> = {
+    npc: 'entityUi.kindNpc',
+    location: 'entityUi.kindLocation',
+    faction: 'entityUi.kindFaction',
+    creature: 'entityUi.kindCreature',
+    item: 'entityUi.kindItem',
+    event: 'entityUi.kindEvent',
+    player_character: 'entityUi.kindPlayerCharacter',
+    misc: 'entityUi.kindMisc',
   };
   let entities = $state<GraphNode[]>([]);
   let loading = $state(false);
@@ -92,7 +95,7 @@
     try {
       entities = await getEntities(campaignId, kind);
     } catch (e) {
-      showToastMsg((e as EntityError).message ?? 'Failed to load entities');
+      showToastMsg((e as EntityError).message ?? i18n.t('entityUi.failedLoadEntities'));
     } finally {
       loading = false;
     }
@@ -207,11 +210,11 @@
       if (err.code === 'VALIDATION') {
         formError = err;
       } else if (err.code === 'NOT_FOUND') {
-        showToastMsg('Entity no longer exists — refresh the list');
+        showToastMsg(i18n.t('entityUi.entityNoLongerExists'));
         showForm = false;
         await loadEntities();
       } else {
-        showToastMsg(err.message ?? 'An error occurred');
+        showToastMsg(err.message ?? i18n.t('entityUi.unexpectedError'));
       }
     }
   }
@@ -221,7 +224,7 @@
       await softDeleteEntity(node.id, kind);
       entities = entities.filter((e) => e.id !== node.id);
     } catch (e) {
-      showToastMsg((e as EntityError).message ?? 'Failed to delete');
+      showToastMsg((e as EntityError).message ?? i18n.t('entityUi.failedDeleteEntity'));
     } finally {
       deleteConfirm = null;
     }
@@ -233,14 +236,14 @@
     try {
       const ok = await compileEntity(kind, formNode.id);
       if (!ok) {
-        showToastMsg('No source context found — article unchanged');
+        showToastMsg(i18n.t('entityUi.noSourceContext'));
         return;
       }
       const refreshed = await getEntity(formNode.id, kind);
       formNode = refreshed;
       entities = entities.map((e) => (e.id === refreshed.id ? refreshed : e));
     } catch (e) {
-      showToastMsg((e as EntityError).message ?? 'Failed to recompile article');
+      showToastMsg((e as EntityError).message ?? i18n.t('entityUi.failedRecompileArticle'));
     } finally {
       recompiling = false;
     }
@@ -283,15 +286,17 @@
     <!-- List panel -->
     <div class="list-panel">
       <div class="list-header">
-        <button class="btn-primary" onclick={openCreate}>
-          + New {KIND_LABEL[kind]}
-        </button>
+        <Button onclick={openCreate}
+          >{i18n.t('entityUi.newEntity', { kind: i18n.t(KIND_LABEL[kind]) })}</Button
+        >
       </div>
 
       {#if loading}
-        <p class="muted">Loading…</p>
+        <p class="muted">{i18n.t('entityUi.loading')}</p>
       {:else if entities.length === 0}
-        <p class="muted">No {KIND_LABEL[kind].toLowerCase()}s yet.</p>
+        <p class="muted">
+          {i18n.t('entityUi.noEntities', { kind: i18n.t(KIND_LABEL[kind]).toLowerCase() })}
+        </p>
       {:else}
         <ul class="entity-list">
           {#each entities as node (node.id)}
@@ -300,13 +305,13 @@
               {#if onViewGraph}
                 <button
                   class="btn-icon entity-graph-btn"
-                  title="View relationships"
-                  onclick={() => onViewGraph(node)}>Graph</button
+                  title={i18n.t('entityUi.viewRelationships')}
+                  onclick={() => onViewGraph(node)}>{i18n.t('entityUi.graph')}</button
                 >
               {/if}
               <button
                 class="btn-icon delete"
-                aria-label="Delete {node.name}"
+                aria-label={i18n.t('entityUi.deleteEntity', { name: node.name })}
                 onclick={() => {
                   deleteConfirm = node;
                 }}>×</button
@@ -319,7 +324,11 @@
 
     <!-- Form panel -->
     {#if showForm}
-      <div class="form-panel" oninput={() => (formDirty = true)} onchange={() => (formDirty = true)}>
+      <div
+        class="form-panel"
+        oninput={() => (formDirty = true)}
+        onchange={() => (formDirty = true)}
+      >
         {#if formNode?.notes}
           <div class="notes-preview">
             <WikiText text={formNode.notes} entities={entityMap} {onMissingLinkClick} />
@@ -328,18 +337,18 @@
         {#if formNode}
           <div class="codex-section">
             <div class="codex-header">
-              <h3>Codex Article</h3>
+              <h3>{i18n.t('entityUi.codexArticle')}</h3>
               {#if formNode.codex_stale !== false}
-                <span class="chip-stale">Stale</span>
+                <span class="chip-stale">{i18n.t('entityUi.stale')}</span>
               {/if}
               <button
                 class="btn-ghost btn-recompile"
                 type="button"
-                aria-label="Recompile article"
+                aria-label={i18n.t('entityUi.recompileArticle')}
                 disabled={recompiling}
                 onclick={handleRecompile}
               >
-                {recompiling ? 'Recompiling…' : 'Recompile'}
+                {recompiling ? i18n.t('status.processing') : i18n.t('entityUi.recompileArticle')}
               </button>
             </div>
             <div class="codex-article">
@@ -351,7 +360,7 @@
                   {onMissingLinkClick}
                 />
               {:else}
-                <p class="muted">No article compiled yet</p>
+                <p class="muted">{i18n.t('entityUi.noArticle')}</p>
               {/if}
             </div>
           </div>
@@ -392,18 +401,17 @@
     >
       <div class="confirm-box">
         <p>
-          Remove <strong>{deleteConfirm.name}</strong>? It disappears from Chronacle and your
-          vault. (Files you edited by hand in the vault are kept.)
+          {i18n.t('entityUi.removeEntity', { name: deleteConfirm.name })}
         </p>
         <div class="actions">
-          <button class="btn-danger" onclick={() => confirmDelete(deleteConfirm as GraphNode)}
-            >Delete</button
+          <Button variant="danger" onclick={() => confirmDelete(deleteConfirm as GraphNode)}
+            >{i18n.t('common.delete')}</Button
           >
-          <button
-            class="btn-ghost"
+          <Button
+            variant="ghost"
             onclick={() => {
               deleteConfirm = null;
-            }}>Cancel</button
+            }}>{i18n.t('common.cancel')}</Button
           >
         </div>
       </div>
@@ -425,25 +433,23 @@
         aria-modal="true"
         aria-labelledby="pending-create-title"
       >
-        <h3 id="pending-create-title">Discard unsaved changes?</h3>
-        <p>Creating [[{blockedPendingCreate.name}]] will replace the current form.</p>
+        <h3 id="pending-create-title">{i18n.t('entityUi.discardUnsaved')}</h3>
+        <p>{i18n.t('entityUi.creatingReplacesForm', { name: blockedPendingCreate.name })}</p>
         <div class="actions">
-          <button
-            type="button"
-            class="btn-danger"
+          <Button
+            variant="danger"
             onclick={() => {
               const request = blockedPendingCreate;
               blockedPendingCreate = null;
               formDirty = false;
               if (request) openPendingCreate(request);
-            }}>Discard and create</button
+            }}>{i18n.t('entityUi.discardAndCreate')}</Button
           >
-          <button
-            type="button"
-            class="btn-ghost"
+          <Button
+            variant="ghost"
             onclick={() => {
               blockedPendingCreate = null;
-            }}>Keep editing</button
+            }}>{i18n.t('entityUi.keepEditing')}</Button
           >
         </div>
       </div>
@@ -571,16 +577,6 @@
     color: var(--fg-2);
     line-height: 1.5;
   }
-  .btn-primary {
-    background: var(--violet-300);
-    color: var(--bg-abyss);
-    border: none;
-    border-radius: 6px;
-    padding: 6px 12px;
-    cursor: pointer;
-    font-size: 0.85rem;
-    font-weight: 600;
-  }
   .overlay {
     position: fixed;
     inset: 0;
@@ -605,15 +601,6 @@
   .actions {
     display: flex;
     gap: 8px;
-  }
-  .btn-danger {
-    background: var(--danger);
-    color: var(--bg-abyss);
-    border: none;
-    border-radius: 6px;
-    padding: 6px 14px;
-    cursor: pointer;
-    font-weight: 600;
   }
   .btn-ghost {
     background: transparent;

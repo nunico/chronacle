@@ -1,10 +1,22 @@
 <script lang="ts">
+  import { i18n } from '../lib/locale.svelte';
   import { onMount, onDestroy, untrack } from 'svelte';
   import {
-    forceSimulation, forceManyBody, forceLink, forceCenter, forceCollide,
-    type Simulation, type SimulationNodeDatum, type SimulationLinkDatum,
+    forceSimulation,
+    forceManyBody,
+    forceLink,
+    forceCenter,
+    forceCollide,
+    type Simulation,
+    type SimulationNodeDatum,
+    type SimulationLinkDatum,
   } from 'd3-force';
-  import { getEntityGraph, type EntityGraph, type GraphNodeRef, type EntityKind } from '../lib/commands';
+  import {
+    getEntityGraph,
+    type EntityGraph,
+    type GraphNodeRef,
+    type EntityKind,
+  } from '../lib/commands';
   import { kindColor } from '../lib/graph-colors';
   import { mergeGraph } from '../lib/graph-merge';
 
@@ -19,7 +31,11 @@
 
   type SimNode = GraphNodeRef & SimulationNodeDatum;
   // d3-force mutates source/target from string ids to node objects after simulation starts.
-  interface SimLink extends SimulationLinkDatum<SimNode> { source: string | SimNode; target: string | SimNode; rel_type: string; }
+  interface SimLink extends SimulationLinkDatum<SimNode> {
+    source: string | SimNode;
+    target: string | SimNode;
+    rel_type: string;
+  }
 
   // Seeded once from the entityId prop so the center node is sized correctly on first
   // render; thereafter centerId diverges as the user re-centers the graph. untrack makes
@@ -90,7 +106,8 @@
       buildSimulation(g);
     } catch (e) {
       console.error('Failed to load graph:', e);
-      nodes = []; links = [];
+      nodes = [];
+      links = [];
     } finally {
       loading = false;
     }
@@ -118,8 +135,12 @@
       .force('charge', forceManyBody().strength(-280))
       .force('center', forceCenter(cx, cy))
       .force('collide', forceCollide(28))
-      .force('link', forceLink<SimNode, SimLink>(links)
-        .id((d) => d.id).distance(110))
+      .force(
+        'link',
+        forceLink<SimNode, SimLink>(links)
+          .id((d) => d.id)
+          .distance(110),
+      )
       .on('tick', () => (tick += 1));
   }
 
@@ -263,7 +284,7 @@
     event.preventDefault();
     if (!svgEl) return;
     const rect = svgEl.getBoundingClientRect();
-    const cx = event.clientX - rect.left;   // cursor in SVG pixel space
+    const cx = event.clientX - rect.left; // cursor in SVG pixel space
     const cy = event.clientY - rect.top;
     const delta = event.deltaY > 0 ? 0.9 : 1.1;
     const oldZoom = zoom;
@@ -318,12 +339,17 @@
   onresize={onDimsChange}
 >
   {#if onClose}
-    <button class="close-btn" onclick={onClose} aria-label="Close graph" data-autofocus>✕</button>
+    <button
+      class="close-btn"
+      onclick={onClose}
+      aria-label={i18n.t('entityUi.closeGraph')}
+      data-autofocus>✕</button
+    >
   {/if}
   {#if loading}
-    <p class="muted">Loading graph…</p>
+    <p class="muted">{i18n.t('entityUi.loadingGraph')}</p>
   {:else if nodes.length <= 1}
-    <p class="muted" data-testid="graph-empty">No relationships yet for this entity.</p>
+    <p class="muted" data-testid="graph-empty">{i18n.t('entityUi.noGraphRelationships')}</p>
   {/if}
   <!--
     role="application" — this SVG is an interactive widget (pan, zoom, drag),
@@ -335,7 +361,7 @@
     width={containerWidth}
     height={containerHeight}
     role="application"
-    aria-label="Entity relationship graph"
+    aria-label={i18n.t('entityUi.relationshipGraph')}
     onpointerdown={onCanvasPointerDown}
     onwheel={onWheel}
     style="cursor: grab; display: block;"
@@ -373,7 +399,9 @@
             vector-effect="non-scaling-stroke"
           />
           <!-- Counter-scale the label at the midpoint so it stays constant screen size. -->
-          <g transform={`translate(${((a.x ?? 0) + (b.x ?? 0)) / 2},${((a.y ?? 0) + (b.y ?? 0)) / 2}) scale(${1 / zoom})`}>
+          <g
+            transform={`translate(${((a.x ?? 0) + (b.x ?? 0)) / 2},${((a.y ?? 0) + (b.y ?? 0)) / 2}) scale(${1 / zoom})`}
+          >
             <text x={0} y={0} class="edge-label">{l.rel_type}</text>
           </g>
         {/if}
@@ -426,33 +454,31 @@
                 onOpenEntity?.(n);
               }
             }}
-            style="cursor: pointer;"
-          >{isMissingNode(n) ? `[[${n.name}]]` : n.name}</text>
+            style="cursor: pointer;">{isMissingNode(n) ? `[[${n.name}]]` : n.name}</text
+          >
           <!-- Expand affordance: constant-size button at fixed local offset from node center. -->
           {#if n.id !== centerId && !isMissingNode(n)}
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <g
               class="expand-btn"
-              aria-label="Expand neighbours"
+              aria-label={i18n.t('entityUi.expandNeighbours')}
               onpointerdown={(e) => e.stopPropagation()}
-              onclick={(e) => { e.stopPropagation(); void expand(n.id, n.kind); }}
+              onclick={(e) => {
+                e.stopPropagation();
+                void expand(n.id, n.kind);
+              }}
               style="cursor: pointer;"
             >
-              <title>Expand neighbours</title>
-              <circle
-                cx={14}
-                cy={-14}
-                r={9}
-                class="expand-circle"
-              />
+              <title>{i18n.t('entityUi.expandNeighbours')}</title>
+              <circle cx={14} cy={-14} r={9} class="expand-circle" />
               <text
                 x={14}
                 y={-14}
                 class="expand-glyph"
                 text-anchor="middle"
-                dominant-baseline="central"
-              >＋</text>
+                dominant-baseline="central">＋</text
+              >
             </g>
           {/if}
         </g>
@@ -490,7 +516,10 @@
     font-size: 14px;
     line-height: 1;
     cursor: pointer;
-    transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+    transition:
+      background var(--dur-fast),
+      color var(--dur-fast),
+      border-color var(--dur-fast);
     z-index: 1;
   }
   .close-btn:hover {
@@ -585,5 +614,8 @@
     fill: var(--fg-on-accent);
   }
 
-  .muted { color: var(--fg-3); font-family: var(--font-sans); }
+  .muted {
+    color: var(--fg-3);
+    font-family: var(--font-sans);
+  }
 </style>

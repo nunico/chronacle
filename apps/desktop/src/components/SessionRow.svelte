@@ -1,7 +1,15 @@
 <script lang="ts">
-  import { updateSession, deleteSession, getSessionEntities, type Session, type GraphNode } from '../lib/commands';
+  import {
+    updateSession,
+    deleteSession,
+    getSessionEntities,
+    type Session,
+    type GraphNode,
+  } from '../lib/commands';
   import WikiText from './WikiText.svelte';
   import WikiLinkEditor from './WikiLinkEditor.svelte';
+  import { i18n } from '../lib/locale.svelte';
+  import Button from './ui/Button.svelte';
   import { formatDate } from '../lib/locale.svelte';
 
   interface Props {
@@ -61,7 +69,7 @@
   }
 
   async function handleDelete() {
-    if (!confirm(`Delete "${session.title}"? This cannot be undone.`)) return;
+    if (!confirm(i18n.t('dialog.confirmDelete'))) return;
     try {
       await deleteSession(session.id);
       onDelete(session.id);
@@ -78,7 +86,9 @@
     <span class="session-title">{session.title}</span>
     <span class="session-date">{formatDate(session.date_played)}</span>
     {#if linkedEntities.length > 0}
-      <span class="session-events">{linkedEntities.length} event{linkedEntities.length === 1 ? '' : 's'}</span>
+      <span class="session-events"
+        >{i18n.t('entityUi.events', { count: linkedEntities.length })}</span
+      >
     {/if}
     <span class="chevron" class:rotated={expanded}>›</span>
   </button>
@@ -86,7 +96,7 @@
   {#if expanded}
     <div class="session-body">
       <div class="field-row">
-        <label for="title-{session.id}" class="field-label">Title</label>
+        <label for="title-{session.id}" class="field-label">{i18n.t('entityUi.name')}</label>
         <input
           id="title-{session.id}"
           class="field-input"
@@ -97,7 +107,7 @@
       </div>
 
       <div class="field-row">
-        <label for="date-{session.id}" class="field-label">Date played</label>
+        <label for="date-{session.id}" class="field-label">{i18n.t('entityUi.datePlayed')}</label>
         <input
           id="date-{session.id}"
           class="field-input"
@@ -108,14 +118,14 @@
       </div>
 
       <div class="field-col">
-        <label for="notes-{session.id}" class="field-label">Notes</label>
+        <label for="notes-{session.id}" class="field-label">{i18n.t('entityUi.notes')}</label>
         <WikiLinkEditor
           id="notes-{session.id}"
           bind:value={editNotes}
           entities={entityMap}
           onblur={saveField}
           rows={6}
-          placeholder="Session recap, rewards, open threads… Use [[Entity Name]] to link."
+          placeholder={i18n.t('entityUi.sessionNotesPlaceholder')}
         />
         {#if editNotes}
           <div class="wiki-preview">
@@ -125,7 +135,7 @@
       </div>
 
       {#if loadingEntities}
-        <p class="muted">Loading linked events…</p>
+        <p class="muted">{i18n.t('entityUi.loadingLinkedEvents')}</p>
       {:else if linkedEntities.length > 0}
         <div class="linked-entities">
           {#each linkedEntities as e (e.id)}
@@ -135,7 +145,7 @@
       {/if}
 
       <div class="session-actions">
-        <button type="button" class="btn-delete" onclick={handleDelete}>Delete</button>
+        <Button variant="danger" onclick={handleDelete}>{i18n.t('common.delete')}</Button>
       </div>
     </div>
   {/if}
@@ -282,21 +292,5 @@
     display: flex;
     justify-content: flex-end;
     padding-top: 4px;
-  }
-
-  .btn-delete {
-    background: none;
-    border: 1px solid var(--line);
-    border-radius: var(--r-sm);
-    padding: 6px 12px;
-    font-size: 12.5px;
-    color: var(--fg-3);
-    font-family: var(--font-sans);
-    cursor: pointer;
-  }
-
-  .btn-delete:hover {
-    border-color: var(--danger, #d97757);
-    color: var(--danger, #d97757);
   }
 </style>

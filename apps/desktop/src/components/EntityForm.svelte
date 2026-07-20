@@ -11,6 +11,8 @@
   } from '../lib/commands';
   import WikiLinkEditor from './WikiLinkEditor.svelte';
   import AliasField from './AliasField.svelte';
+  import { i18n } from '../lib/locale.svelte';
+  import Button from './ui/Button.svelte';
 
   interface Props {
     kind: EntityKind;
@@ -199,7 +201,7 @@
   function handleSubmit() {
     nameError = '';
     if (!name.trim()) {
-      nameError = 'Name is required';
+      nameError = i18n.t('errors.validationRequired', { field: i18n.t('entityUi.name') });
       return;
     }
     const input: EntityInput = {
@@ -227,12 +229,12 @@
 
 {#if conflict}
   <div class="conflict-banner" role="alert">
-    This record has unsynced vault edits in conflict — resolve in your vault ({conflict.sidecarKey}).
+    {i18n.t('entityUi.vaultConflict', { path: conflict.sidecarKey })}
   </div>
 {/if}
 
 <form
-  aria-label="entity form"
+  aria-label={i18n.t('entityUi.entityForm')}
   oninput={notifyDirty}
   onchange={notifyDirty}
   onsubmit={(e) => {
@@ -241,7 +243,7 @@
   }}
 >
   <div class="field">
-    <label for="ef-name">Name</label>
+    <label for="ef-name">{i18n.t('entityUi.name')}</label>
     <input id="ef-name" type="text" bind:value={name} />
     {#if nameError}<p class="field-error">{nameError}</p>{/if}
     {#if error?.field === 'name'}<p class="field-error">{error.message}</p>{/if}
@@ -252,52 +254,52 @@
   </div>
 
   <div class="field">
-    <label for="ef-summary">Summary</label>
+    <label for="ef-summary">{i18n.t('entityUi.summary')}</label>
     <input id="ef-summary" type="text" bind:value={summary} />
   </div>
 
   <div class="field">
-    <label for="ef-notes">Notes</label>
+    <label for="ef-notes">{i18n.t('entityUi.notes')}</label>
     <WikiLinkEditor
       id="ef-notes"
       bind:value={notes}
       entities={entityMap}
       rows={4}
-      placeholder="Use [[Entity Name]] to link."
+      placeholder={i18n.t('entityUi.wikiLinkHint')}
     />
   </div>
 
   {#if kind === 'event'}
     <div class="field">
-      <label for="ef-date-start">Date Start</label>
+      <label for="ef-date-start">{i18n.t('entityUi.dateStart')}</label>
       <input id="ef-date-start" type="text" bind:value={dateStart} />
     </div>
     <div class="field">
-      <label for="ef-date-end">Date End</label>
+      <label for="ef-date-end">{i18n.t('entityUi.dateEnd')}</label>
       <input id="ef-date-end" type="text" bind:value={dateEnd} />
     </div>
     <div class="field">
-      <label for="ef-seq">Sequence Index</label>
+      <label for="ef-seq">{i18n.t('entityUi.sequenceIndex')}</label>
       <input id="ef-seq" type="number" bind:value={sequenceIndex} />
     </div>
     <div class="field">
-      <label for="ef-era">Era</label>
+      <label for="ef-era">{i18n.t('entityUi.era')}</label>
       <input id="ef-era" type="text" bind:value={era} />
     </div>
     <div class="field">
-      <label for="ef-dur">Duration Label</label>
+      <label for="ef-dur">{i18n.t('entityUi.durationLabel')}</label>
       <input id="ef-dur" type="text" bind:value={durationLabel} />
     </div>
     <div class="field checkbox">
       <label>
         <input type="checkbox" bind:checked={isOngoing} />
-        Ongoing
+        {i18n.t('entityUi.ongoing')}
       </label>
     </div>
     <div class="field">
-      <label for="ef-session">Session</label>
+      <label for="ef-session">{i18n.t('entityUi.session')}</label>
       <select id="ef-session" bind:value={sessionId}>
-        <option value="">— none —</option>
+        <option value="">{i18n.t('entityUi.none')}</option>
         {#each sessions as s (s.id)}
           <option value={s.id}>#{s.session_number}: {s.title}</option>
         {/each}
@@ -307,26 +309,26 @@
 
   {#if kind === 'player_character'}
     <div class="field">
-      <label for="ef-player">Player Name</label>
+      <label for="ef-player">{i18n.t('entityUi.playerName')}</label>
       <input id="ef-player" type="text" bind:value={playerName} />
     </div>
     <div class="field">
-      <label for="ef-class">Character Class</label>
+      <label for="ef-class">{i18n.t('entityUi.characterClass')}</label>
       <input id="ef-class" type="text" bind:value={characterClass} />
     </div>
     <div class="field">
-      <label for="ef-level">Character Level</label>
+      <label for="ef-level">{i18n.t('entityUi.characterLevel')}</label>
       <input id="ef-level" type="number" min="1" max="20" bind:value={characterLevel} />
     </div>
     <div class="field">
-      <label for="ef-status">Status</label>
+      <label for="ef-status">{i18n.t('entityUi.status')}</label>
       <select id="ef-status" bind:value={status}>
-        <option value="">— select —</option>
-        <option value="active">Active</option>
-        <option value="retired">Retired</option>
-        <option value="deceased">Deceased</option>
-        <option value="missing">Missing</option>
-        <option value="on_hiatus">On Hiatus</option>
+        <option value="">{i18n.t('entityUi.select')}</option>
+        <option value="active">{i18n.t('entityUi.active')}</option>
+        <option value="retired">{i18n.t('entityUi.retired')}</option>
+        <option value="deceased">{i18n.t('entityUi.deceased')}</option>
+        <option value="missing">{i18n.t('entityUi.missing')}</option>
+        <option value="on_hiatus">{i18n.t('entityUi.onHiatus')}</option>
       </select>
     </div>
   {/if}
@@ -336,15 +338,15 @@
   {/if}
 
   <div class="actions">
-    <button type="submit" class="btn-primary">{node ? 'Save' : 'Create'}</button>
-    <button type="button" class="btn-ghost" onclick={() => oncancel?.()}>Cancel</button>
+    <Button type="submit">{node ? i18n.t('common.save') : i18n.t('entityUi.create')}</Button>
+    <Button variant="ghost" onclick={() => oncancel?.()}>{i18n.t('common.cancel')}</Button>
   </div>
 
   {#if node?.id}
     <div class="relationships-section">
-      <h3 class="relationships-heading">Relationships</h3>
+      <h3 class="relationships-heading">{i18n.t('entityUi.relationships')}</h3>
       {#if relations.length === 0}
-        <p class="relationships-empty">No relationships yet.</p>
+        <p class="relationships-empty">{i18n.t('entityUi.noRelationships')}</p>
       {:else}
         <ul class="relationships-list">
           {#each relations as rel (rel.id + rel.direction + rel.rel_type)}
@@ -354,7 +356,7 @@
                   type="button"
                   class="rel-row-btn"
                   onclick={() => onOpenEntity(rel.id, rel.kind)}
-                  aria-label="Open {rel.name}"
+                  aria-label={i18n.t('entityUi.openEntity', { name: rel.name })}
                 >
                   <span class="rel-direction">{rel.direction === 'outbound' ? '→' : '←'}</span>
                   <span class="rel-name">{rel.name}</span>
@@ -421,24 +423,6 @@
     gap: 8px;
     margin-top: 8px;
   }
-  .btn-primary {
-    background: var(--violet-300);
-    color: var(--bg-abyss);
-    border: none;
-    border-radius: 6px;
-    padding: 6px 16px;
-    cursor: pointer;
-    font-weight: 600;
-  }
-  .btn-ghost {
-    background: transparent;
-    color: var(--fg-3);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 6px 16px;
-    cursor: pointer;
-  }
-
   /* ── Relationships section ─────────────────────────────────────────── */
   .relationships-section {
     border-top: 1px solid var(--line);

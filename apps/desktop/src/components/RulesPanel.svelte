@@ -1,5 +1,8 @@
 <script lang="ts">
   import { getRuleEntries, updateRuleNotes, redoRuleEntry, type RuleEntry } from '../lib/commands';
+  import { i18n } from '../lib/locale.svelte';
+  import type { MessageKey } from '../lib/i18n/messages';
+  import Button from './ui/Button.svelte';
 
   interface Props {
     collectionId: string;
@@ -17,14 +20,14 @@
     'entry',
   ];
 
-  const CATEGORY_LABEL: Record<string, string> = {
-    mechanic: 'Mechanic',
-    ability: 'Ability',
-    state: 'State',
-    procedure: 'Procedure',
-    resource: 'Resource',
-    statistic: 'Statistic',
-    entry: 'Entry',
+  const CATEGORY_LABEL: Record<string, MessageKey> = {
+    mechanic: 'entityUi.categoryMechanic',
+    ability: 'entityUi.categoryAbility',
+    state: 'entityUi.categoryState',
+    procedure: 'entityUi.categoryProcedure',
+    resource: 'entityUi.categoryResource',
+    statistic: 'entityUi.categoryStatistic',
+    entry: 'entityUi.categoryEntry',
   };
 
   let entries = $state<RuleEntry[]>([]);
@@ -116,24 +119,26 @@
     <input
       class="search-input"
       type="text"
-      aria-label="Search rules"
-      placeholder="Search rules…"
+      aria-label={i18n.t('entityUi.searchRules')}
+      placeholder={i18n.t('entityUi.searchRules')}
       bind:value={search}
     />
   </div>
 
   {#if loading}
-    <p class="muted">Loading…</p>
+    <p class="muted">{i18n.t('entityUi.loadingRules')}</p>
   {:else if error}
-    <p class="error" role="alert">Failed to load rule entries: {error}</p>
+    <p class="error" role="alert">{i18n.t('entityUi.loadRulesFailed', { error })}</p>
   {:else if entries.length === 0}
-    <p class="muted">No rule entries compiled yet.</p>
+    <p class="muted">{i18n.t('entityUi.noRules')}</p>
   {:else if grouped.length === 0}
-    <p class="muted">No matching rules.</p>
+    <p class="muted">{i18n.t('entityUi.noMatchingRules')}</p>
   {:else}
     {#each grouped as group (group.category)}
       <div class="category-group">
-        <h3>{CATEGORY_LABEL[group.category] ?? group.category}</h3>
+        <h3>
+          {CATEGORY_LABEL[group.category] ? i18n.t(CATEGORY_LABEL[group.category]) : group.category}
+        </h3>
         <ul class="entry-list">
           {#each group.entries as entry (entry.id)}
             <li class="entry-item">
@@ -144,7 +149,7 @@
               >
                 {entry.name}
                 {#if entry.stale}
-                  <span class="chip-stale">Stale</span>
+                  <span class="chip-stale">{i18n.t('entityUi.stale')}</span>
                 {/if}
               </button>
               {#if expandedId === entry.id}
@@ -161,10 +166,12 @@
                     </p>
                   {/if}
 
-                  <label class="notes-label" for="notes-{entry.id}">Table notes</label>
+                  <label class="notes-label" for="notes-{entry.id}"
+                    >{i18n.t('entityUi.tableNotes')}</label
+                  >
                   <textarea
                     id="notes-{entry.id}"
-                    aria-label="Table notes"
+                    aria-label={i18n.t('entityUi.tableNotes')}
                     value={notesDraft[entry.id] ?? entry.notes ?? ''}
                     oninput={(e) => {
                       notesDraft[entry.id] = (e.target as HTMLTextAreaElement).value;
@@ -174,34 +181,35 @@
 
                   {#if redoOpenId === entry.id}
                     <div class="redo-dialog">
-                      <label class="objection-label" for="objection-{entry.id}">Objection</label>
+                      <label class="objection-label" for="objection-{entry.id}"
+                        >{i18n.t('entityUi.objection')}</label
+                      >
                       <textarea
                         id="objection-{entry.id}"
-                        aria-label="Objection"
+                        aria-label={i18n.t('entityUi.objection')}
                         bind:value={objectionDraft}
                       ></textarea>
                       {#if redoError}
-                        <p class="error" role="alert">Failed to redo: {redoError}</p>
+                        <p class="error" role="alert">
+                          {i18n.t('entityUi.redoFailed', { error: redoError })}
+                        </p>
                       {/if}
                       <div class="redo-actions">
-                        <button type="button" onclick={() => submitRedo(entry)}>Submit</button>
-                        <button
-                          type="button"
-                          class="btn-ghost"
+                        <Button onclick={() => submitRedo(entry)}
+                          >{i18n.t('entityUi.submit')}</Button
+                        >
+                        <Button
+                          variant="ghost"
                           onclick={() => {
                             redoOpenId = null;
-                          }}>Cancel</button
+                          }}>{i18n.t('common.cancel')}</Button
                         >
                       </div>
                     </div>
                   {:else}
-                    <button
-                      type="button"
-                      class="btn-ghost redo-btn"
-                      onclick={() => openRedo(entry)}
+                    <Button variant="ghost" onclick={() => openRedo(entry)}
+                      >{i18n.t('entityUi.redoWithObjections')}</Button
                     >
-                      Redo with objections…
-                    </button>
                   {/if}
                 </div>
               {/if}
@@ -300,9 +308,6 @@
     resize: vertical;
     box-sizing: border-box;
   }
-  .redo-btn {
-    margin-top: 8px;
-  }
   .redo-dialog {
     margin-top: 8px;
   }
@@ -310,15 +315,6 @@
     display: flex;
     gap: 8px;
     margin-top: 6px;
-  }
-  .btn-ghost {
-    background: transparent;
-    color: var(--fg-3);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 6px 14px;
-    cursor: pointer;
-    font-size: 0.8rem;
   }
   .muted {
     color: var(--fg-3);

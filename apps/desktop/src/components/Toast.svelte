@@ -1,6 +1,8 @@
 <script lang="ts">
   import { toasts, dismissToast } from '../lib/toast.svelte';
   import Icon from './Icon.svelte';
+  import { i18n } from '../lib/locale.svelte';
+  import Button from './ui/Button.svelte';
 </script>
 
 {#if toasts.length > 0}
@@ -9,14 +11,14 @@
       <div class="toast {t.variant}" role={t.variant === 'error' ? 'alert' : 'status'}>
         <span class="toast-msg">{t.message}</span>
         {#if t.variant === 'error'}
-          <button
-            type="button"
-            class="toast-dismiss"
-            aria-label="Dismiss"
+          <Button
+            variant="ghost"
+            iconOnly
+            ariaLabel={i18n.t('common.dismiss')}
             onclick={() => dismissToast(t.id)}
           >
             <Icon name="x" size={14} />
-          </button>
+          </Button>
         {/if}
       </div>
     {/each}

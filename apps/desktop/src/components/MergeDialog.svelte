@@ -9,6 +9,8 @@
     type GraphNode,
   } from '../lib/commands';
   import { modalBehavior } from '../lib/actions/modal';
+  import { i18n } from '../lib/locale.svelte';
+  import Button from './ui/Button.svelte';
 
   interface Props {
     idA: string;
@@ -49,9 +51,19 @@
   let consequence = $derived.by(() => {
     if (!loserNode) return '';
     const rc = relationCount;
-    const relPart = rc === null ? '…' : `${rc} relationship${rc === 1 ? '' : 's'}`;
+    const relPart =
+      rc === null
+        ? '…'
+        : i18n.t(rc === 1 ? 'entityUi.relationshipOne' : 'entityUi.relationshipMany', {
+            count: rc,
+          });
     const altCount = loserNode.aliases.length + 1;
-    return `${relPart} merged, ${altCount} alternate name${altCount === 1 ? '' : 's'} kept, the codex article will be rewritten.`;
+    return i18n.t('entityUi.mergeConsequence', {
+      relationships: relPart,
+      names: i18n.t(altCount === 1 ? 'entityUi.alternateNameOne' : 'entityUi.alternateNameMany', {
+        count: altCount,
+      }),
+    });
   });
 
   $effect(() => {
@@ -67,7 +79,7 @@
       },
       (e) => {
         if (cancelled) return;
-        loadError = (e as EntityError).message ?? 'Failed to load entities';
+        loadError = (e as EntityError).message ?? i18n.t('entityUi.failedLoadEntities');
         loading = false;
       },
     );
@@ -107,7 +119,7 @@
       );
       onmerged?.();
     } catch (e) {
-      mergeError = (e as EntityError).message ?? 'Failed to merge';
+      mergeError = (e as EntityError).message ?? i18n.t('entityUi.failedMerge');
     } finally {
       busy = false;
     }
@@ -118,14 +130,14 @@
   class="overlay"
   role="dialog"
   aria-modal="true"
-  aria-label="Merge entities"
+  aria-label={i18n.t('entityUi.mergeEntities')}
   use:modalBehavior={{ onClose: () => onclose?.() }}
 >
   <div class="dialog">
-    <h2 class="heading">Merge entities</h2>
+    <h2 class="heading">{i18n.t('entityUi.mergeEntities')}</h2>
 
     {#if loading}
-      <p class="muted">Loading…</p>
+      <p class="muted">{i18n.t('entityUi.loading')}</p>
     {:else if loadError}
       <p class="error" role="alert">{loadError}</p>
     {:else if nodeA && nodeB}
@@ -133,30 +145,38 @@
         <label class="side" class:chosen={survivor === 'a'}>
           <input type="radio" name="merge-survivor" value="a" bind:group={survivor} />
           <span class="side-name">{nodeA.name}</span>
-          <p class="side-summary">{nodeA.summary ?? '(no summary)'}</p>
+          <p class="side-summary">{nodeA.summary ?? i18n.t('entityUi.noSummary')}</p>
         </label>
         <label class="side" class:chosen={survivor === 'b'}>
           <input type="radio" name="merge-survivor" value="b" bind:group={survivor} />
           <span class="side-name">{nodeB.name}</span>
-          <p class="side-summary">{nodeB.summary ?? '(no summary)'}</p>
+          <p class="side-summary">{nodeB.summary ?? i18n.t('entityUi.noSummary')}</p>
         </label>
       </div>
-      <p class="hint">Pick the entity to keep as the survivor.</p>
+      <p class="hint">{i18n.t('entityUi.mergeHint')}</p>
 
       <div class="field-choice">
-        <span class="field-choice-label">Summary</span>
+        <span class="field-choice-label">{i18n.t('entityUi.summary')}</span>
         <select bind:value={summaryChoice}>
-          <option value="keepSurvivor">Keep {survivorNode?.name}'s</option>
-          <option value="keepLoser">Keep {loserNode?.name}'s</option>
-          <option value="keepBoth">Keep both</option>
+          <option value="keepSurvivor"
+            >{i18n.t('entityUi.keepEntity', { name: survivorNode?.name ?? '' })}</option
+          >
+          <option value="keepLoser"
+            >{i18n.t('entityUi.keepEntity', { name: loserNode?.name ?? '' })}</option
+          >
+          <option value="keepBoth">{i18n.t('entityUi.keepBoth')}</option>
         </select>
       </div>
       <div class="field-choice">
-        <span class="field-choice-label">Notes</span>
+        <span class="field-choice-label">{i18n.t('entityUi.notes')}</span>
         <select bind:value={notesChoice}>
-          <option value="keepSurvivor">Keep {survivorNode?.name}'s</option>
-          <option value="keepLoser">Keep {loserNode?.name}'s</option>
-          <option value="keepBoth">Keep both</option>
+          <option value="keepSurvivor"
+            >{i18n.t('entityUi.keepEntity', { name: survivorNode?.name ?? '' })}</option
+          >
+          <option value="keepLoser"
+            >{i18n.t('entityUi.keepEntity', { name: loserNode?.name ?? '' })}</option
+          >
+          <option value="keepBoth">{i18n.t('entityUi.keepBoth')}</option>
         </select>
       </div>
 
@@ -167,10 +187,10 @@
       {/if}
 
       <div class="actions">
-        <button type="button" class="btn-primary" disabled={busy} onclick={handleMerge}>
-          {busy ? 'Merging…' : 'Merge'}
-        </button>
-        <button type="button" class="btn-ghost" onclick={() => onclose?.()}>Cancel</button>
+        <Button loading={busy} loadingText={i18n.t('entityUi.merging')} onclick={handleMerge}
+          >{i18n.t('entityUi.merge')}</Button
+        >
+        <Button variant="ghost" onclick={() => onclose?.()}>{i18n.t('common.cancel')}</Button>
       </div>
     {/if}
   </div>
@@ -271,26 +291,5 @@
     display: flex;
     gap: 8px;
     margin-top: 10px;
-  }
-  .btn-primary {
-    background: var(--violet-300);
-    color: var(--bg-abyss);
-    border: none;
-    border-radius: 6px;
-    padding: 6px 16px;
-    cursor: pointer;
-    font-weight: 600;
-  }
-  .btn-primary:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-  .btn-ghost {
-    background: transparent;
-    color: var(--fg-3);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 6px 16px;
-    cursor: pointer;
   }
 </style>

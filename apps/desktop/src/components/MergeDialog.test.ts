@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import MergeDialog from './MergeDialog.svelte';
 import type { GraphNode } from '../lib/commands';
+import { i18n } from '../lib/locale.svelte';
 
 vi.mock('../lib/commands', () => ({
   getEntity: vi.fn(),
@@ -131,5 +132,22 @@ describe('MergeDialog', () => {
     await screen.findByText('The Free League');
     await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onclose).toHaveBeenCalled();
+  });
+
+  it('uses the active display language for dialog controls', async () => {
+    m.getEntity.mockImplementation((id) =>
+      Promise.resolve(id === 'a' ? node({ id: 'a' }) : node({ id: 'b', name: 'Free League' })),
+    );
+    i18n.setLocale('de');
+    try {
+      render(MergeDialog, {
+        props: { idA: 'a', kindA: 'faction', idB: 'b', kindB: 'faction' },
+      });
+
+      expect(await screen.findByRole('dialog', { name: 'Entitäten zusammenführen' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Abbrechen' })).toBeTruthy();
+    } finally {
+      i18n.setLocale('en');
+    }
   });
 });

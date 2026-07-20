@@ -2,6 +2,7 @@
   import Icon from './Icon.svelte';
   import EyeMark from './EyeMark.svelte';
   import type { RulingData } from '../views/ruling-parse';
+  import { i18n } from '../lib/locale.svelte';
 
   let { data, defaultOpen = false }: { data: RulingData; defaultOpen?: boolean } = $props();
   // Writable $derived: which citation is expanded. Seeds from defaultOpen and
@@ -16,7 +17,7 @@
   <div class="ruling">
     <div class="who">
       <span>Chronacle</span>
-      <span class="tag">· ruling</span>
+      <span class="tag">· {i18n.t('entityUi.ruling')}</span>
     </div>
     {#if data.verdict}
       <!-- eslint-disable-next-line svelte/no-at-html-tags -->
@@ -39,7 +40,7 @@
       {#if open >= 0 && data.cites[open]}
         <div class="passage">
           <div class="src">{data.cites[open].src}</div>
-          <div class="quote">{data.cites[open].quote || 'No supporting quote available.'}</div>
+          <div class="quote">{data.cites[open].quote || i18n.t('errors.loadFailed')}</div>
         </div>
       {/if}
     {/if}

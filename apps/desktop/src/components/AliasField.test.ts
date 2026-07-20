@@ -1,8 +1,19 @@
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import { describe, it, expect, vi } from 'vitest';
 import AliasField from './AliasField.svelte';
+import { i18n } from '../lib/locale.svelte';
 
 describe('AliasField', () => {
+  it('uses the active display language for alternate-name controls', () => {
+    i18n.setLocale('de');
+    render(AliasField, { props: { aliases: [] } });
+
+    expect(screen.getByText('Alternative Namen')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Alternativen Namen hinzufügen')).toBeInTheDocument();
+
+    i18n.setLocale('en');
+  });
+
   it('never says the word "aliases" to the GM; says "alternate names" instead', () => {
     render(AliasField, { props: { aliases: ['The Quassars'] } });
     expect(screen.queryByText(/alias/i)).not.toBeInTheDocument();
