@@ -3,9 +3,6 @@ use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
 use super::{EmbeddingError, EmbeddingProvider};
 
-/// Subdirectory of the cache dir where hf-hub stores the model data.
-const HF_HUB_MODEL_DIR: &str = "models--nomic-ai--nomic-embed-text-v1.5";
-
 /// Platform-specific filename of the bundled ONNX Runtime dynamic library.
 ///
 /// `build.rs` downloads the correct binary for the target into
@@ -21,6 +18,106 @@ pub(super) const ORT_DYLIB_NAME: &str = if cfg!(target_os = "macos") {
 // Nomic asymmetric prefixes — applied internally by FastEmbedProvider.
 const NOMIC_DOC_PREFIX: &str = "search_document: ";
 const NOMIC_QUERY_PREFIX: &str = "search_query: ";
+const E5_DOC_PREFIX: &str = "passage: ";
+const E5_QUERY_PREFIX: &str = "query: ";
+
+/// The local embedding models Chronacle supports.
+///
+/// Both modes intentionally produce 768-dimensional vectors, matching the
+/// vector index schema. The model name is persisted with every indexed source,
+/// so switching modes is detected by the existing stale-index check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalEmbeddingMode {
+    /// Small, English-focused Nomic model.
+    Nomic,
+    /// Larger multilingual E5 Base model for German, French, Spanish and
+    /// cross-language retrieval.
+    MultilingualE5Base,
+}
+
+impl LocalEmbeddingMode {
+    /// Canonical persisted embedding-mode setting value.
+    pub const fn setting_value(self) -> &'static str {
+        match self {
+            Self::Nomic => "local_nomic",
+            Self::MultilingualE5Base => "local_multilingual",
+        }
+    }
+
+    /// Stable model identity stored in source and chunk metadata.
+    pub const fn model_name(self) -> &'static str {
+        match self {
+            Self::Nomic => "nomic-embed-text-v1.5",
+            Self::MultilingualE5Base => "multilingual-e5-base",
+        }
+    }
+
+    /// Hugging Face repository used by FastEmbed.
+    pub const fn model_repo(self) -> &'static str {
+        match self {
+            Self::Nomic => "nomic-ai/nomic-embed-text-v1.5",
+            Self::MultilingualE5Base => "intfloat/multilingual-e5-base",
+        }
+    }
+
+    /// FastEmbed model variant.
+    const fn model_kind(self) -> EmbeddingModel {
+        match self {
+            Self::Nomic => EmbeddingModel::NomicEmbedTextV15,
+            Self::MultilingualE5Base => EmbeddingModel::MultilingualE5Base,
+        }
+    }
+
+    /// Both supported local models match the 768-dimensional vector schema.
+    pub const fn dimension(self) -> usize {
+        768
+    }
+
+    fn cache_key(self) -> &'static str {
+        match self {
+            // Keep Nomic at its original location so an existing download
+            // remains usable after migrating from embedding_backend.
+            Self::Nomic => "",
+            Self::MultilingualE5Base => "multilingual-e5-base",
+        }
+    }
+
+    /// hf-hub's cache directory name for this model.
+    pub fn hf_hub_model_dir(self) -> String {
+        format!("models--{}", self.model_repo().replace('/', "--"))
+    }
+
+    /// Files needed by both supported FastEmbed text models.
+    pub const fn model_files() -> &'static [(&'static str, &'static str)] {
+        &[
+            ("tokenizer.json", "tokenizer.json"),
+            ("config.json", "config.json"),
+            ("special_tokens_map.json", "special_tokens_map.json"),
+            ("tokenizer_config.json", "tokenizer_config.json"),
+            ("onnx/model.onnx", "onnx/model.onnx"),
+        ]
+    }
+
+    /// Formats text for indexing according to the selected model's retrieval
+    /// training convention.
+    pub fn document_text(self, text: &str) -> String {
+        let prefix = match self {
+            Self::Nomic => NOMIC_DOC_PREFIX,
+            Self::MultilingualE5Base => E5_DOC_PREFIX,
+        };
+        format!("{prefix}{text}")
+    }
+
+    /// Formats a user query according to the selected model's retrieval
+    /// training convention.
+    pub fn query_text(self, text: &str) -> String {
+        let prefix = match self {
+            Self::Nomic => NOMIC_QUERY_PREFIX,
+            Self::MultilingualE5Base => E5_QUERY_PREFIX,
+        };
+        format!("{prefix}{text}")
+    }
+}
 
 /// The platform-specific ONNX Runtime library filename, for callers (e.g. the
 /// desktop shell) that resolve the bundled resource path themselves.
@@ -133,6 +230,7 @@ pub fn local_embeddings_available() -> bool {
 pub struct FastEmbedProvider {
     inner: tokio::sync::Mutex<TextEmbedding>,
     dim: usize,
+    mode: Option<LocalEmbeddingMode>,
     name: &'static str,
 }
 
@@ -142,11 +240,12 @@ impl FastEmbedProvider {
     /// When `cache_dir` is `Some`, hf-hub uses that directory for model caching
     /// (expected structure: `{cache_dir}/models--nomic-ai--nomic-embed-text-v1.5/...`).
     /// When `None`, the default hf-hub cache is used (`~/.cache/huggingface/`).
-    pub fn try_new(cache_dir: Option<&std::path::Path>) -> Result<Self, EmbeddingError> {
+    pub fn try_new(
+        mode: LocalEmbeddingMode,
+        cache_dir: Option<&std::path::Path>,
+    ) -> Result<Self, EmbeddingError> {
         ensure_ort_dylib_path();
-        let model_kind = EmbeddingModel::NomicEmbedTextV15;
-        let dim = Self::model_dimension(&model_kind);
-        let name = Self::model_to_name(&model_kind);
+        let model_kind = mode.model_kind();
 
         let mut opts = InitOptions::new(model_kind).with_show_download_progress(false);
         if let Some(dir) = cache_dir {
@@ -158,8 +257,9 @@ impl FastEmbedProvider {
 
         Ok(Self {
             inner: tokio::sync::Mutex::new(inner),
-            dim,
-            name,
+            dim: mode.dimension(),
+            mode: Some(mode),
+            name: mode.model_name(),
         })
     }
 
@@ -177,22 +277,31 @@ impl FastEmbedProvider {
         Ok(Self {
             inner: tokio::sync::Mutex::new(inner),
             dim,
+            mode: None,
             name,
         })
     }
 
     /// Check if model files are already cached in the given directory.
-    pub fn is_cached(cache_dir: &std::path::Path) -> bool {
+    pub fn is_cached(mode: LocalEmbeddingMode, cache_dir: &std::path::Path) -> bool {
         let snapshot = cache_dir
-            .join(HF_HUB_MODEL_DIR)
+            .join(mode.hf_hub_model_dir())
             .join("snapshots/download")
             .join("onnx/model.onnx");
         snapshot.exists()
     }
 
     /// The default cache directory under the given app data dir.
-    pub fn cache_dir(app_data_dir: &std::path::Path) -> std::path::PathBuf {
-        app_data_dir.join("embedding_model")
+    pub fn cache_dir(
+        app_data_dir: &std::path::Path,
+        mode: LocalEmbeddingMode,
+    ) -> std::path::PathBuf {
+        let root = app_data_dir.join("embedding_model");
+        if mode.cache_key().is_empty() {
+            root
+        } else {
+            root.join(mode.cache_key())
+        }
     }
 
     pub(super) fn model_to_name(kind: &EmbeddingModel) -> &'static str {
@@ -214,24 +323,18 @@ impl FastEmbedProvider {
             _ => 768,
         }
     }
-
-    /// True for Nomic embed models, which require asymmetric task prefixes.
-    fn uses_nomic_prefixes(&self) -> bool {
-        self.name.starts_with("nomic-embed-text")
-    }
 }
 
 #[async_trait]
 impl EmbeddingProvider for FastEmbedProvider {
     async fn embed_documents(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-        let prefixed: Vec<String> = if self.uses_nomic_prefixes() {
-            texts
-                .into_iter()
-                .map(|t| format!("{NOMIC_DOC_PREFIX}{t}"))
-                .collect()
-        } else {
-            texts
-        };
+        let prefixed: Vec<String> = texts
+            .into_iter()
+            .map(|text| match self.mode {
+                Some(mode) => mode.document_text(&text),
+                None => text,
+            })
+            .collect();
         let refs: Vec<&str> = prefixed.iter().map(|s| s.as_str()).collect();
         let mut model = self.inner.lock().await;
         model
@@ -240,11 +343,9 @@ impl EmbeddingProvider for FastEmbedProvider {
     }
 
     async fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
-        let prefixed = if self.uses_nomic_prefixes() {
-            format!("{NOMIC_QUERY_PREFIX}{text}")
-        } else {
-            text.to_string()
-        };
+        let prefixed = self
+            .mode
+            .map_or_else(|| text.to_string(), |mode| mode.query_text(text));
         let mut model = self.inner.lock().await;
         let mut out = model
             .embed(vec![prefixed.as_str()], None)

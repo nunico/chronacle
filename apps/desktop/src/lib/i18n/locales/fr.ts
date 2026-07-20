@@ -112,12 +112,21 @@ const fr = {
     deleteProvider: 'Supprimer le fournisseur',
     removeModel: 'Supprimer le modèle',
     embeddingProvider: 'Fournisseur d’intégration',
+    embeddingMode: 'Mode d’intégration',
     embeddingDescription:
       'Définit comment le texte des documents et requêtes est converti en vecteurs pour la recherche. Le modèle local fonctionne hors ligne.',
     active: 'Actif',
     dimension: 'Dimension',
     backend: 'Moteur',
     localEmbedding: 'Local — nomic-embed-text-v1.5 (hors ligne)',
+    localNomicEmbedding: 'Petit modèle local — Nomic (hors ligne)',
+    localMultilingualEmbedding: 'Multilingue local — E5 Base (hors ligne)',
+    localNomicDescription:
+      'Petit modèle axé sur l’anglais, téléchargé une fois et utilisé hors ligne.',
+    localMultilingualDescription:
+      'Modèle multilingue plus grand pour l’allemand, le français, l’espagnol et la recherche interlangue. Téléchargé une fois et utilisé hors ligne.',
+    cloudEmbeddingDescription:
+      'API d’intégration compatible OpenAI. Nécessite des identifiants et un modèle de 768 dimensions.',
     cloudEmbedding: 'Cloud — API compatible OpenAI',
     optional: 'facultatif',
     saveEmbeddingProvider: 'Enregistrer le fournisseur d’intégration',

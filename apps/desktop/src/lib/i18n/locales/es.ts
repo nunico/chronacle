@@ -111,12 +111,21 @@ const es = {
     deleteProvider: 'Eliminar proveedor',
     removeModel: 'Eliminar modelo',
     embeddingProvider: 'Proveedor de incrustaciones',
+    embeddingMode: 'Modo de incrustación',
     embeddingDescription:
       'Define cómo el texto de documentos y consultas se convierte en vectores para la búsqueda. El modelo local funciona sin conexión.',
     active: 'Activo',
     dimension: 'Dimensión',
     backend: 'Motor',
     localEmbedding: 'Local — nomic-embed-text-v1.5 (sin conexión)',
+    localNomicEmbedding: 'Local pequeño — Nomic (sin conexión)',
+    localMultilingualEmbedding: 'Local multilingüe — E5 Base (sin conexión)',
+    localNomicDescription:
+      'Modelo pequeño centrado en inglés, descargado una vez y usado sin conexión.',
+    localMultilingualDescription:
+      'Modelo multilingüe más grande para alemán, francés, español y búsqueda entre idiomas. Se descarga una vez y se usa sin conexión.',
+    cloudEmbeddingDescription:
+      'API de incrustaciones compatible con OpenAI. Requiere credenciales y un modelo de 768 dimensiones.',
     cloudEmbedding: 'Nube — API compatible con OpenAI',
     optional: 'opcional',
     saveEmbeddingProvider: 'Guardar proveedor de incrustaciones',

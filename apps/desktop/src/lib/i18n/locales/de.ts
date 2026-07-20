@@ -111,12 +111,21 @@ const de = {
     deleteProvider: 'Anbieter löschen',
     removeModel: 'Modell entfernen',
     embeddingProvider: 'Einbettungsanbieter',
+    embeddingMode: 'Einbettungsmodus',
     embeddingDescription:
       'Legt fest, wie Dokument- und Abfragetext für die Suche in Vektoren umgewandelt wird. Das lokale Modell läuft offline.',
     active: 'Aktiv',
     dimension: 'Dimension',
     backend: 'Backend',
     localEmbedding: 'Lokal — nomic-embed-text-v1.5 (offline)',
+    localNomicEmbedding: 'Klein lokal — Nomic (offline)',
+    localMultilingualEmbedding: 'Mehrsprachig lokal — E5 Base (offline)',
+    localNomicDescription:
+      'Kleines englisch-fokussiertes Modell, einmal heruntergeladen und offline verwendet.',
+    localMultilingualDescription:
+      'Größeres mehrsprachiges Modell für Deutsch, Französisch, Spanisch und sprachübergreifende Suche. Wird einmal heruntergeladen und offline verwendet.',
+    cloudEmbeddingDescription:
+      'OpenAI-kompatible Einbettungs-API. Benötigt Zugangsdaten und ein Modell mit 768 Dimensionen.',
     cloudEmbedding: 'Cloud — OpenAI-kompatible API',
     optional: 'optional',
     saveEmbeddingProvider: 'Einbettungsanbieter speichern',

@@ -54,7 +54,7 @@
   let apiKeyConfigured = $state(false);
 
   // Embedding provider state
-  let embeddingBackend = $state('local'); // 'local' | 'openai'
+  let embeddingMode = $state<'local_nomic' | 'local_multilingual' | 'cloud'>('local_nomic');
   let embeddingModel = $state('');
   let embeddingApiKey = $state('');
   let embeddingBaseUrl = $state('');
@@ -141,9 +141,21 @@
       embeddingModel = settings['embedding_model'] ?? '';
       embeddingApiKey = settings['embedding_api_key'] ?? '';
       embeddingBaseUrl = settings['embedding_base_url'] ?? '';
-      // Default backend follows platform capability when unset (resolved by the
-      // backend); seed the control from the live status in loadEmbeddingStatus.
-      embeddingBackend = settings['embedding_backend'] ?? embeddingBackend;
+      // `embedding_mode` is canonical. Map legacy backend values so existing
+      // installations continue using their original Nomic or cloud provider.
+      const savedMode = settings['embedding_mode'];
+      if (
+        savedMode === 'local_nomic' ||
+        savedMode === 'local_multilingual' ||
+        savedMode === 'cloud'
+      ) {
+        embeddingMode = savedMode;
+      } else if (
+        settings['embedding_backend'] === 'openai' ||
+        settings['embedding_backend'] === 'cloud'
+      ) {
+        embeddingMode = 'cloud';
+      }
     } catch (e) {
       showError(i18n.t('settingsPage.loadFailed', { error: String(e) }));
     }
@@ -164,10 +176,11 @@
     try {
       const status = await getEmbeddingProviderStatus();
       embeddingStatus = status;
-      // If the user has never explicitly chosen a backend, reflect the active one.
+      // If the user has never explicitly chosen a mode, reflect the backend's
+      // resolved default (which already accounts for local runtime support).
       const settings = await getSettings();
-      if (settings['embedding_backend'] === undefined) {
-        embeddingBackend = status.backend;
+      if (settings['embedding_mode'] === undefined && settings['embedding_backend'] === undefined) {
+        embeddingMode = status.mode ?? (status.backend === 'openai' ? 'cloud' : 'local_nomic');
       }
     } catch {
       // Status unavailable on first load; that's fine.
@@ -179,7 +192,7 @@
     statusMessage = '';
     try {
       await Promise.all([
-        updateSetting('embedding_backend', embeddingBackend),
+        updateSetting('embedding_mode', embeddingMode),
         updateSetting('embedding_model', embeddingModel),
         updateSetting('embedding_api_key', embeddingApiKey),
         updateSetting('embedding_base_url', embeddingBaseUrl),
@@ -714,15 +727,32 @@
       <p class="muted warn">{i18n.t('settingsPage.localUnavailable')}</p>
     {/if}
 
-    <label for="embed-backend">{i18n.t('settingsPage.backend')}</label>
-    <select id="embed-backend" bind:value={embeddingBackend}>
-      <option value="local" disabled={embeddingStatus ? !embeddingStatus.local_available : false}>
-        {i18n.t('settingsPage.localEmbedding')}
+    <label for="embed-mode">{i18n.t('settingsPage.embeddingMode')}</label>
+    <select id="embed-mode" bind:value={embeddingMode}>
+      <option
+        value="local_nomic"
+        disabled={embeddingStatus ? !embeddingStatus.local_available : false}
+      >
+        {i18n.t('settingsPage.localNomicEmbedding')}
       </option>
-      <option value="openai">{i18n.t('settingsPage.cloudEmbedding')}</option>
+      <option
+        value="local_multilingual"
+        disabled={embeddingStatus ? !embeddingStatus.local_available : false}
+      >
+        {i18n.t('settingsPage.localMultilingualEmbedding')}
+      </option>
+      <option value="cloud">{i18n.t('settingsPage.cloudEmbedding')}</option>
     </select>
 
-    {#if embeddingBackend === 'openai'}
+    {#if embeddingMode === 'local_nomic'}
+      <p class="muted">{i18n.t('settingsPage.localNomicDescription')}</p>
+    {:else if embeddingMode === 'local_multilingual'}
+      <p class="muted">{i18n.t('settingsPage.localMultilingualDescription')}</p>
+    {:else}
+      <p class="muted">{i18n.t('settingsPage.cloudEmbeddingDescription')}</p>
+    {/if}
+
+    {#if embeddingMode === 'cloud'}
       <label for="embed-model">{i18n.t('settingsPage.model')}</label>
       <input
         id="embed-model"

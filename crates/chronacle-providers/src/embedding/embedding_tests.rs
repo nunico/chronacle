@@ -123,9 +123,46 @@ fn test_model_constants() {
 }
 
 #[test]
+fn local_mode_metadata_keeps_supported_models_at_768_dimensions() {
+    assert_eq!(
+        LocalEmbeddingMode::Nomic.model_name(),
+        "nomic-embed-text-v1.5"
+    );
+    assert_eq!(LocalEmbeddingMode::Nomic.dimension(), 768);
+    assert_eq!(
+        LocalEmbeddingMode::MultilingualE5Base.model_name(),
+        "multilingual-e5-base"
+    );
+    assert_eq!(LocalEmbeddingMode::MultilingualE5Base.dimension(), 768);
+}
+
+#[test]
+fn local_modes_use_their_respective_document_and_query_prefixes() {
+    assert_eq!(
+        LocalEmbeddingMode::Nomic.document_text("lore"),
+        "search_document: lore"
+    );
+    assert_eq!(
+        LocalEmbeddingMode::Nomic.query_text("lore"),
+        "search_query: lore"
+    );
+    assert_eq!(
+        LocalEmbeddingMode::MultilingualE5Base.document_text("lore"),
+        "passage: lore"
+    );
+    assert_eq!(
+        LocalEmbeddingMode::MultilingualE5Base.query_text("lore"),
+        "query: lore"
+    );
+}
+
+#[test]
 fn test_is_cached_returns_false_for_empty_dir() {
     let dir = tempfile::tempdir().unwrap();
-    assert!(!FastEmbedProvider::is_cached(dir.path()));
+    assert!(!FastEmbedProvider::is_cached(
+        LocalEmbeddingMode::Nomic,
+        dir.path()
+    ));
 }
 
 #[tokio::test]

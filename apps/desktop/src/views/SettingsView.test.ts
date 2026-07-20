@@ -76,6 +76,19 @@ describe('SettingsView', () => {
     expect(screen.getByRole('button', { name: /save & connect/i })).toHaveClass('button');
   });
 
+  it('saves the multilingual local mode and tells the user to re-index', async () => {
+    render(SettingsView);
+
+    const mode = await screen.findByLabelText('Embedding mode');
+    await fireEvent.change(mode, { target: { value: 'local_multilingual' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save embedding provider' }));
+
+    await waitFor(() => {
+      expect(commands.updateSetting).toHaveBeenCalledWith('embedding_mode', 'local_multilingual');
+    });
+    expect(await screen.findByText(/Re-index existing sources/)).toBeTruthy();
+  });
+
   it('uses a saved French locale for the settings heading', async () => {
     vi.mocked(commands.getSettings).mockResolvedValue({ ui_locale: 'fr' });
 

@@ -120,11 +120,13 @@ export async function reconfigureLlmProvider(): Promise<string> {
  */
 export interface EmbeddingProviderStatus {
   backend: string; // "local" | "openai"
+  /** Canonical embedding selection: local_nomic, local_multilingual, or cloud. */
+  mode?: 'local_nomic' | 'local_multilingual' | 'cloud';
   model: string;
   dimension: number;
   api_key_configured: boolean;
   local_available: boolean; // ONNX Runtime bundled for this platform
-  local_cached: boolean; // local nomic model downloaded
+  local_cached: boolean; // selected local model downloaded
 }
 
 /**

@@ -24,7 +24,7 @@ use chronacle_ingestion::ingestion_service;
 use chronacle_ingestion::pdf_extractor::{PdfExtractor, PdfiumExtractor};
 use chronacle_lib::AppState;
 use chronacle_providers::blob_store::{BlobStore, LocalFileStore};
-use chronacle_providers::embedding::{EmbeddingProvider, FastEmbedProvider};
+use chronacle_providers::embedding::{EmbeddingProvider, FastEmbedProvider, LocalEmbeddingMode};
 use chronacle_providers::llm_provider::{LlmProvider, NoopProvider};
 use chronacle_providers::vector_store::{SurrealDbVector, VectorStore};
 use std::sync::{Arc, RwLock};
@@ -80,7 +80,7 @@ fn query_set() -> Vec<(&'static str, &'static str)> {
 #[tokio::test]
 #[ignore = "requires Nomic embedding model cached locally"]
 async fn measure_recall_at_5() {
-    let Ok(embed) = FastEmbedProvider::try_new(None) else {
+    let Ok(embed) = FastEmbedProvider::try_new(LocalEmbeddingMode::Nomic, None) else {
         eprintln!("Skipping recall@5 — Nomic model not cached. Run app once to download.");
         return;
     };
