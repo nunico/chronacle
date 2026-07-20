@@ -10,7 +10,7 @@ interface IpcCall {
 interface LanguageScenarioState {
   osLocale: string;
   uiLocale: string;
-  staleEmbeddingModel: string | null;
+  indexedEmbeddingModel: string | null;
 }
 
 const scenarioState = new WeakMap<Page, LanguageScenarioState>();
@@ -19,43 +19,69 @@ function stateFor(page: Page): LanguageScenarioState {
   const existing = scenarioState.get(page);
   if (existing) return existing;
 
-  const state = { osLocale: 'en-US', uiLocale: 'auto', staleEmbeddingModel: null };
+  const state = { osLocale: 'en-US', uiLocale: 'auto', indexedEmbeddingModel: null };
   scenarioState.set(page, state);
   return state;
 }
 
 async function installLanguageScenarioMock(page: Page): Promise<void> {
   const state = stateFor(page);
-  await installIpcMock(page, {
-    'plugin:os|locale': state.osLocale,
-    get_settings: {
-      llm_provider: 'openai',
-      llm_model: 'gpt-4o-mini',
-      llm_api_key: 'sk-test',
-      llm_base_url: '',
-      active_campaign_id: '',
-      ui_locale: state.uiLocale,
-      embedding_mode: state.staleEmbeddingModel ? 'local_multilingual' : 'local_nomic',
+  await installIpcMock(
+    page,
+    {
+      'plugin:os|locale': state.osLocale,
+      get_settings: {
+        llm_provider: 'openai',
+        llm_model: 'gpt-4o-mini',
+        llm_api_key: 'sk-test',
+        llm_base_url: '',
+        active_campaign_id: '',
+        ui_locale: state.uiLocale,
+        embedding_mode: 'local_nomic',
+      },
+      get_embedding_provider_status: {
+        backend: 'local',
+        mode: 'local_nomic',
+        model: 'nomic-embed-text-v1.5',
+        dimension: 768,
+        api_key_configured: false,
+        local_available: true,
+        local_cached: true,
+      },
+      get_embedding_model_mismatch: {
+        active_model: 'nomic-embed-text-v1.5',
+        stale: [],
+      },
+      reconfigure_embedding_provider: 'multilingual-e5-base',
     },
-    get_embedding_provider_status: {
-      backend: 'local',
-      mode: state.staleEmbeddingModel ? 'local_multilingual' : 'local_nomic',
-      model: state.staleEmbeddingModel ? 'multilingual-e5-base' : 'nomic-embed-text-v1.5',
-      dimension: 768,
-      api_key_configured: false,
-      local_available: true,
-      local_cached: true,
+    undefined,
+    {
+      get_settings: {
+        llm_provider: 'openai',
+        llm_model: 'gpt-4o-mini',
+        llm_api_key: 'sk-test',
+        llm_base_url: '',
+        active_campaign_id: '',
+        ui_locale: state.uiLocale,
+        embedding_mode: 'local_multilingual',
+      },
+      get_embedding_provider_status: {
+        backend: 'local',
+        mode: 'local_multilingual',
+        model: 'multilingual-e5-base',
+        dimension: 768,
+        api_key_configured: false,
+        local_available: true,
+        local_cached: true,
+      },
+      get_embedding_model_mismatch: {
+        active_model: 'multilingual-e5-base',
+        stale: state.indexedEmbeddingModel
+          ? [{ embed_model: state.indexedEmbeddingModel, source_count: 1 }]
+          : [],
+      },
     },
-    get_embedding_model_mismatch: {
-      active_model: state.staleEmbeddingModel ? 'multilingual-e5-base' : 'nomic-embed-text-v1.5',
-      stale: state.staleEmbeddingModel
-        ? [{ embed_model: state.staleEmbeddingModel, source_count: 1 }]
-        : [],
-    },
-    reconfigure_embedding_provider: state.staleEmbeddingModel
-      ? 'multilingual-e5-base'
-      : 'nomic-embed-text-v1.5',
-  });
+  );
 }
 
 async function getIpcCalls(page: Page): Promise<IpcCall[]> {
@@ -97,15 +123,22 @@ Then('the Oracle request response language is {string}', async ({ page }, langua
 });
 
 Given('sources were indexed with {string}', async ({ page }, embedModel: string) => {
-  stateFor(page).staleEmbeddingModel = embedModel;
+  stateFor(page).indexedEmbeddingModel = embedModel;
   await installLanguageScenarioMock(page);
 });
 
 When('I select the local multilingual embedding mode', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: /Settings/ }).click();
   await page.locator('#embed-mode').selectOption('local_multilingual');
   await page.getByRole('button', { name: /Save embedding provider/ }).click();
+});
+
+When('I open embedding settings', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Settings/ }).click();
+});
+
+Then('the Nomic sources do not require re-indexing', async ({ page }) => {
+  await expect(page.getByTestId('mismatch-banner')).toHaveCount(0);
 });
 
 Then('Chronacle shows that source embeddings require re-indexing', async ({ page }) => {

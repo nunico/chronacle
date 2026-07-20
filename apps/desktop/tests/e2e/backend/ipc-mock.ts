@@ -17,16 +17,22 @@ import type { Page } from '@playwright/test';
  *   call) causally depend on the sync having actually run, instead of baking the post-sync
  *   state into the very first page load. Commands not listed here fall back to `overrides`
  *   (or the built-in default) both before and after the sync.
+ * @param postEmbeddingReconfigureOverrides - Optional command responses that take effect after
+ *   `reconfigure_embedding_provider`. A supplied mismatch report is also emitted as the live
+ *   mismatch event, matching the desktop command's behavior.
  */
 export async function installIpcMock(
   page: Page,
   overrides?: Record<string, unknown>,
   postSyncOverrides?: Record<string, unknown>,
+  postEmbeddingReconfigureOverrides?: Record<string, unknown>,
 ): Promise<void> {
   await page.addInitScript(
-    ({ overridesArg, postSyncOverridesArg }) => {
+    ({ overridesArg, postSyncOverridesArg, postEmbeddingReconfigureOverridesArg }) => {
       let _cbId = 0;
       let _synced = false;
+      let _embeddingReconfigured = false;
+      const callbacks = new Map<number, (event: unknown) => void>();
       // @ts-expect-error -- injected by Tauri at runtime
       // eslint-disable-next-line @typescript-eslint/no-empty-function
       window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
@@ -34,7 +40,11 @@ export async function installIpcMock(
       window.__ipcCalls = [] as Array<{ cmd: string; args?: Record<string, unknown> }>;
       // @ts-expect-error -- injected by Tauri at runtime
       window.__TAURI_INTERNALS__ = {
-        transformCallback: (_cb: unknown, _once?: boolean) => ++_cbId,
+        transformCallback: (cb: unknown, _once?: boolean) => {
+          const id = ++_cbId;
+          callbacks.set(id, cb as (event: unknown) => void);
+          return id;
+        },
         invoke: (cmd: string, args?: Record<string, unknown>) => {
           // @ts-expect-error -- test-only call log
           window.__ipcCalls.push({ cmd, args });
@@ -42,8 +52,35 @@ export async function installIpcMock(
           // always answered from the pre-sync overrides (its report), never
           // from postSyncOverrides.
           const usePostSync = _synced && postSyncOverridesArg && cmd in postSyncOverridesArg;
+          const usePostEmbeddingReconfigure =
+            _embeddingReconfigured &&
+            postEmbeddingReconfigureOverridesArg &&
+            cmd in postEmbeddingReconfigureOverridesArg;
           if (cmd === 'vault_sync_now') {
             _synced = true;
+          }
+          if (cmd === 'reconfigure_embedding_provider') {
+            _embeddingReconfigured = true;
+            const report = postEmbeddingReconfigureOverridesArg?.get_embedding_model_mismatch;
+            if (report && typeof report === 'object') {
+              for (const call of window.__ipcCalls) {
+                if (
+                  call.cmd !== 'plugin:event|listen' ||
+                  call.args?.event !== 'embedding-model-mismatch'
+                ) {
+                  continue;
+                }
+                const callback = callbacks.get(call.args.handler as number);
+                callback?.({ event: 'embedding-model-mismatch', payload: report });
+              }
+            }
+          }
+          if (usePostEmbeddingReconfigure) {
+            return Promise.resolve(
+              postEmbeddingReconfigureOverridesArg[
+                cmd as keyof typeof postEmbeddingReconfigureOverridesArg
+              ],
+            );
           }
           if (usePostSync) {
             return Promise.resolve(postSyncOverridesArg[cmd as keyof typeof postSyncOverridesArg]);
@@ -175,6 +212,10 @@ export async function installIpcMock(
         },
       };
     },
-    { overridesArg: overrides, postSyncOverridesArg: postSyncOverrides },
+    {
+      overridesArg: overrides,
+      postSyncOverridesArg: postSyncOverrides,
+      postEmbeddingReconfigureOverridesArg: postEmbeddingReconfigureOverrides,
+    },
   );
 }

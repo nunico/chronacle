@@ -12,5 +12,7 @@ Then the Oracle request response language is "fr"
 
 Scenario: Switching embedding modes requires re-indexing
 Given sources were indexed with "nomic-embed-text-v1.5"
+When I open embedding settings
+Then the Nomic sources do not require re-indexing
 When I select the local multilingual embedding mode
 Then Chronacle shows that source embeddings require re-indexing
