@@ -142,9 +142,9 @@ and cited quotes always remain in their original language.
 
 For search, the small local Nomic model keeps a smaller offline English-focused index. The local
 multilingual E5 Base model is a larger offline download for German, French, Spanish, and
-cross-language retrieval. Cloud embeddings also support multilingual retrieval, but require your
-provider credentials. Whenever you change an embedding model, use **Settings → Re-index sources**
-before existing sources can use that model.
+cross-language retrieval. Cloud embeddings require your provider credentials and a multilingual
+cloud embedding model for cross-language retrieval. Whenever you change an embedding model, use
+**Settings → Re-index sources** before existing sources can use that model.
 
 ---
 
