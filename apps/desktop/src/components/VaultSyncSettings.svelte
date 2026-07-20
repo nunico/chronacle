@@ -8,6 +8,8 @@
     type ReconcileReport,
     type VaultConflict,
   } from '../lib/commands';
+  import { i18n } from '../lib/locale.svelte';
+  import Button from './ui/Button.svelte';
 
   let path = $state<string | null>(null);
   let busy = $state(false);
@@ -73,34 +75,37 @@
 </script>
 
 <section class="config-section">
-  <h3>Markdown vault</h3>
+  <h3>{i18n.t('entityUi.markdownVault')}</h3>
   <p class="muted">
-    Sync entities, sessions, and collections to a folder of Markdown files —
-    edit them in any text editor and Chronacle reconciles the changes back in.
-    Text inside the marked compiled block is overwritten by Chronacle.
+    Sync entities, sessions, and collections to a folder of Markdown files — edit them in any text
+    editor and Chronacle reconciles the changes back in. Text inside the marked compiled block is
+    overwritten by Chronacle.
   </p>
 
   <div class="vault-path">
     {#if path}
       <span class="path-value">{path}</span>
     {:else}
-      <span class="path-value muted">No vault configured</span>
+      <span class="path-value muted">{i18n.t('entityUi.noVaultConfigured')}</span>
     {/if}
   </div>
-  <p class="muted path-hint">Changing the folder re-exports everything; nothing is deleted.</p>
+  <p class="muted path-hint">{i18n.t('entityUi.vaultPathHint')}</p>
 
   <div class="actions">
-    <button class="small-btn" onclick={choose}>Choose folder…</button>
+    <Button variant="ghost" onclick={choose}>{i18n.t('entityUi.chooseFolder')}</Button>
     {#if path}
-      <button class="small-btn" onclick={disconnect}>Disconnect</button>
+      <Button variant="ghost" onclick={disconnect}>{i18n.t('entityUi.disconnect')}</Button>
     {/if}
-    <button class="small-btn primary" disabled={path === null || busy} onclick={syncNow}>
-      {busy ? 'Syncing…' : 'Sync now'}
-    </button>
+    <Button
+      disabled={path === null || busy}
+      loading={busy}
+      loadingText={i18n.t('entityUi.syncing')}
+      onclick={syncNow}>{i18n.t('entityUi.syncNow')}</Button
+    >
   </div>
 
   {#if error}
-    <div class="reindex-error">Sync failed: {error}</div>
+    <div class="reindex-error">{i18n.t('entityUi.syncFailed', { error })}</div>
   {/if}
 
   {#if report}
@@ -127,7 +132,7 @@
   {#if conflicts.length > 0}
     <div class="conflicts-section">
       <h4>
-        Conflicts <span class="badge">({conflicts.length})</span>
+        {i18n.t('entityUi.conflicts', { count: conflicts.length })}
       </h4>
       <ul class="conflicts-list">
         {#each conflicts as c (c.id)}
@@ -183,29 +188,6 @@
     gap: 8px;
     margin-top: 4px;
   }
-  .small-btn {
-    background: none;
-    border: 1px solid var(--line);
-    border-radius: var(--r-sm);
-    color: var(--fg-2);
-    cursor: pointer;
-    font-size: 12px;
-    padding: 4px 9px;
-    font-family: var(--font-sans);
-  }
-  .small-btn:hover {
-    border-color: var(--line-strong);
-    color: var(--fg-1);
-  }
-  .small-btn.primary {
-    background: var(--grad-arcane);
-    border-color: transparent;
-    color: var(--fg-on-accent);
-  }
-  .small-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
   .reindex-error {
     margin-top: 10px;
     padding: 8px 12px;
@@ -238,12 +220,6 @@
     text-transform: uppercase;
     color: var(--danger);
     margin: 0 0 8px;
-  }
-  .badge {
-    color: var(--fg-3);
-    font-weight: 400;
-    text-transform: none;
-    letter-spacing: normal;
   }
   .conflicts-list {
     list-style: none;

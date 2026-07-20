@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import { i18n } from '../lib/locale.svelte';
 
   interface Props {
     id?: string;
@@ -10,14 +11,7 @@
     placeholder?: string;
   }
 
-  let {
-    id,
-    value = $bindable(''),
-    entities,
-    onblur,
-    rows = 4,
-    placeholder = '',
-  }: Props = $props();
+  let { id, value = $bindable(''), entities, onblur, rows = 4, placeholder = '' }: Props = $props();
 
   let textarea = $state<HTMLTextAreaElement | null>(null);
   let prefix = $state<string | null>(null);
@@ -27,8 +21,10 @@
     if (prefix === null) return [] as string[];
     const q = prefix.toLowerCase();
     const names = [...entities.keys()];
-    const starts = names.filter(n => n.toLowerCase().startsWith(q));
-    const contains = names.filter(n => !n.toLowerCase().startsWith(q) && n.toLowerCase().includes(q));
+    const starts = names.filter((n) => n.toLowerCase().startsWith(q));
+    const contains = names.filter(
+      (n) => !n.toLowerCase().startsWith(q) && n.toLowerCase().includes(q),
+    );
     return [...starts.sort(), ...contains.sort()].slice(0, 8);
   });
 
@@ -93,7 +89,7 @@
     spellcheck="false"
   ></textarea>
   {#if suggestions.length > 0}
-    <div class="suggestions" role="listbox">
+    <div class="suggestions" role="listbox" aria-label={i18n.t('entityUi.entitySuggestions')}>
       {#each suggestions as name, i (name)}
         <button
           type="button"

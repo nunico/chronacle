@@ -25,13 +25,22 @@ const mockNpc = (): GraphNode => ({
   aliases: [],
   summary: 'Shady merchant',
   notes: null,
-  created_at: null, updated_at: null,
-  date_start: null, date_end: null, is_ongoing: null,
-  sequence_index: null, era: null, duration_label: null,
+  created_at: null,
+  updated_at: null,
+  date_start: null,
+  date_end: null,
+  is_ongoing: null,
+  sequence_index: null,
+  era: null,
+  duration_label: null,
   session_id: null,
-  player_name: null, character_class: null,
-  character_level: null, status: null,
-  codex_article: null, codex_stale: null, codex_compiled_at: null,
+  player_name: null,
+  character_class: null,
+  character_level: null,
+  status: null,
+  codex_article: null,
+  codex_stale: null,
+  codex_compiled_at: null,
 });
 
 describe('EntityManager', () => {
@@ -126,7 +135,8 @@ describe('EntityManager', () => {
 
   it('shows toast on DATABASE error from createEntity', async () => {
     vi.mocked(commands.createEntity).mockRejectedValue({
-      code: 'DATABASE', message: 'disk full',
+      code: 'DATABASE',
+      message: 'disk full',
     });
     render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
     await waitFor(() => screen.getByRole('button', { name: /new npc/i }));
@@ -140,7 +150,9 @@ describe('EntityManager', () => {
 
   it('passes VALIDATION error to form when createEntity returns VALIDATION', async () => {
     vi.mocked(commands.createEntity).mockRejectedValue({
-      code: 'VALIDATION', message: 'Too long', field: 'name',
+      code: 'VALIDATION',
+      message: 'Too long',
+      field: 'name',
     });
     render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
     await waitFor(() => screen.getByRole('button', { name: /new npc/i }));
@@ -156,7 +168,8 @@ describe('EntityManager', () => {
 
   it('reloads list after NOT_FOUND error', async () => {
     vi.mocked(commands.updateEntity).mockRejectedValue({
-      code: 'NOT_FOUND', message: 'Gone',
+      code: 'NOT_FOUND',
+      message: 'Gone',
     });
     vi.mocked(commands.getEntities).mockResolvedValue([mockNpc()]);
     render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
@@ -178,7 +191,12 @@ describe('EntityManager', () => {
 
   it('updates form fields when switching from one entity to another', async () => {
     const torvin = mockNpc();
-    const brakka: GraphNode = { ...mockNpc(), id: 'npc2', name: 'Brakka', summary: 'Orc chieftain' };
+    const brakka: GraphNode = {
+      ...mockNpc(),
+      id: 'npc2',
+      name: 'Brakka',
+      summary: 'Orc chieftain',
+    };
     vi.mocked(commands.getEntities).mockResolvedValue([torvin, brakka]);
     render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
     await waitFor(() => screen.getByText('Torvin'));
@@ -353,9 +371,7 @@ describe('EntityManager', () => {
     );
     await fireEvent.click(screen.getByRole('button', { name: 'Recompile article' }));
 
-    await waitFor(() =>
-      expect(commands.compileEntity).toHaveBeenCalledWith('npc', 'npc1'),
-    );
+    await waitFor(() => expect(commands.compileEntity).toHaveBeenCalledWith('npc', 'npc1'));
   });
 
   it('shows no-context toast when recompile finds no source', async () => {
