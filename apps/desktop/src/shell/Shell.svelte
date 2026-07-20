@@ -44,6 +44,7 @@
     SHORTCUT_HELP,
     type NavTarget,
   } from '../lib/shortcuts';
+  import { i18n } from '../lib/locale.svelte';
 
   const ENTITY_KIND_MAP: Partial<Record<NoteCategoryId, EntityKind>> = {
     npcs: 'npc',
@@ -311,7 +312,7 @@
         mismatch = report;
       }
     } catch (e) {
-      reindexError = `Re-indexing failed: ${String(e)}`;
+      reindexError = i18n.t('shell.reindexFailed', { error: String(e) });
     } finally {
       if (unlistenProgress) unlistenProgress();
       reindexProgress = null;
@@ -356,21 +357,22 @@
   // Topbar copy
   let head = $derived.by(() => {
     if (view === 'oracle')
-      return { title: 'Oracle', sub: 'Ask in plain language — answers come cited' };
+      return { title: i18n.t('shell.oracle'), sub: i18n.t('shell.oracleSubtitle') };
     if (view === 'campaign')
-      return { title: 'Campaign', sub: 'Manage details & subscribed source collections' };
-    if (view === 'settings') return { title: 'Settings', sub: 'Provider, models, and re-indexing' };
+      return { title: i18n.t('campaign.label'), sub: i18n.t('shell.campaignSubtitle') };
+    if (view === 'settings')
+      return { title: i18n.t('common.settings'), sub: i18n.t('shell.settingsSubtitle') };
     if (view === 'timeline')
-      return { title: 'Timeline', sub: 'Your campaign in chronological and session order' };
+      return { title: i18n.t('shell.timeline'), sub: i18n.t('shell.timelineSubtitle') };
     if (view === 'maintenance')
-      return { title: 'Maintenance', sub: 'Codex proposals and lint findings' };
+      return { title: i18n.t('shell.maintenance'), sub: i18n.t('shell.maintenanceSubtitle') };
     const cat = findCategory(view.category);
     return { title: cat.label, sub: cat.sub };
   });
 
   async function openFilePicker(initialCollectionId?: string) {
     if (uploadPhase === 'active') {
-      showToast('An upload is already in progress — wait for it to finish.', 'info');
+      showToast(i18n.t('shell.uploadInProgress'), 'info');
       return;
     }
     const selected = await open({
@@ -379,7 +381,7 @@
     });
     if (!selected) return;
     const path = typeof selected === 'string' ? selected : selected[0];
-    const name = path.split('/').pop()?.split('\\').pop() ?? 'document.pdf';
+    const name = path.split('/').pop()?.split('\\').pop() ?? i18n.t('shell.uploadDefaultName');
     pendingPath = path;
     pendingName = name;
 
@@ -448,7 +450,7 @@
     if (uploadPhase === 'active') return;
     uploadPhase = 'active';
     uploadProgress = 0;
-    uploadStatus = 'Uploading…';
+    uploadStatus = i18n.t('shell.uploading');
     uploadedSourceName = name;
     let unlistenProgress: UnlistenFn | null = null;
     let unlistenError: UnlistenFn | null = null;
@@ -463,39 +465,37 @@
       }>('ingestion-progress', (event) => {
         uploadProgress = Math.round(event.payload.progress * 100);
         if (event.payload.status === 'done') {
-          uploadStatus = 'Ready!';
+          uploadStatus = i18n.t('shell.ready');
           uploadProgress = 100;
           uploadPhase = 'done';
         } else if (event.payload.step) {
           uploadStatus = event.payload.step;
         } else {
-          uploadStatus = 'Indexing PDF…';
+          uploadStatus = i18n.t('shell.indexingPdf');
         }
       });
       unlistenError = await listen<{ source_id: string; error: string }>(
         'ingestion-error',
         (event) => {
-          uploadStatus = `Error: ${event.payload.error}`;
+          uploadStatus = i18n.t('shell.uploadError', { error: event.payload.error });
           uploadPhase = 'error';
-          showToast(`"${name}" failed to index: ${event.payload.error}`, 'error');
+          showToast(i18n.t('shell.indexFailed', { name, error: event.payload.error }), 'error');
         },
       );
       await uploadSource(path, name, 'rules', collectionId);
       // The 'done' progress event normally lands before the command resolves,
       // but don't leave the strip stuck on 'active' if it was dropped.
       if (uploadPhase === 'active') {
-        uploadStatus = 'Ready!';
+        uploadStatus = i18n.t('shell.ready');
         uploadProgress = 100;
         uploadPhase = 'done';
       }
     } catch (e) {
       // The ingestion-error event usually fires first with a cleaner message;
       // only surface the rejection if it didn't.
-      if (uploadPhase !== 'error') {
-        uploadStatus = `Upload failed: ${String(e)}`;
-        uploadPhase = 'error';
-        showToast(`"${name}" failed to upload: ${String(e)}`, 'error');
-      }
+      uploadStatus = i18n.t('shell.uploadFailed', { error: String(e) });
+      uploadPhase = 'error';
+      showToast(i18n.t('shell.fileUploadFailed', { name, error: String(e) }), 'error');
     } finally {
       if (unlistenProgress) unlistenProgress();
       if (unlistenError) unlistenError();
@@ -531,21 +531,21 @@
       class="help-backdrop"
       role="button"
       tabindex="-1"
-      aria-label="Close shortcuts"
+      aria-label={i18n.t('shell.closeShortcuts')}
       onclick={() => (showHelp = false)}
       onkeydown={(e) => e.key === 'Enter' && (showHelp = false)}
     >
       <div
         class="help-card"
         role="dialog"
-        aria-label="Keyboard shortcuts"
+        aria-label={i18n.t('shell.keyboardShortcuts')}
         onclick={(e) => e.stopPropagation()}
         onkeydown={() => {
           /* swallow so backdrop key handler doesn't double-fire */
         }}
         tabindex="-1"
       >
-        <h2>Keyboard shortcuts</h2>
+        <h2>{i18n.t('shell.keyboardShortcuts')}</h2>
         <dl class="help-list">
           {#each SHORTCUT_HELP as row (row.keys)}
             <div class="help-row">
@@ -554,7 +554,7 @@
             </div>
           {/each}
         </dl>
-        <p class="help-hint">Press <kbd>?</kbd> or <kbd>Esc</kbd> to close.</p>
+        <p class="help-hint">{i18n.t('shell.shortcutHint', { question: '?', escape: 'Esc' })}</p>
       </div>
     </div>
   {/if}
@@ -564,15 +564,15 @@
     {#if mismatch && !mismatchDismissed}
       <div class="mismatch-banner" role="status" data-testid="mismatch-banner">
         <div class="mismatch-text">
-          <strong>Embedding model changed.</strong>
-          {totalStaleSources}
-          source{totalStaleSources === 1 ? '' : 's'} indexed with a different model ({mismatch.stale
-            .map((s) => s.embed_model)
-            .join(', ')}). Retrieval quality will suffer until they are re-indexed with the active
-          model ({mismatch.active_model}).
+          <strong>{i18n.t('shell.embeddingChanged')}</strong>
+          {i18n.t('shell.staleSources', {
+            count: totalStaleSources,
+            models: mismatch.stale.map((s) => s.embed_model).join(', '),
+            activeModel: mismatch.active_model,
+          })}
           {#if reindexProgress}
             <div class="mismatch-progress">
-              Re-indexing {reindexProgress.current}/{reindexProgress.total} — {reindexProgress.step}
+              {i18n.t('shell.reindexingProgress', reindexProgress)}
               <div class="mismatch-progress-bar">
                 <div
                   class="mismatch-progress-fill"
@@ -594,7 +594,7 @@
             disabled={reindexing}
             data-testid="mismatch-reindex"
           >
-            {reindexing ? 'Re-indexing…' : 'Re-index now'}
+            {reindexing ? i18n.t('settingsPage.reindexing') : i18n.t('shell.reindexNow')}
           </button>
           <button
             class="mismatch-dismiss-btn"
@@ -602,7 +602,7 @@
             disabled={reindexing}
             data-testid="mismatch-dismiss"
           >
-            Dismiss
+            {i18n.t('common.dismiss')}
           </button>
         </div>
       </div>
@@ -625,10 +625,13 @@
     {:else if view === 'settings'}
       <SettingsView />
     {:else if view === 'timeline' && activeCampaignId}
-      <TimelineView campaignId={activeCampaignId} onOpenEntity={(e) => openEntity(e.id, e.kind)} />
+      <TimelineView
+        campaignId={activeCampaignId}
+        onOpenEntity={(e) => openEntity(e.id, e.kind as EntityKind)}
+      />
     {:else if view === 'timeline'}
       <div class="no-campaign-msg">
-        <p>Create or select a campaign to see its timeline.</p>
+        <p>{i18n.t('shell.noCampaignTimeline')}</p>
       </div>
     {:else if view === 'maintenance'}
       <MaintenanceView
@@ -641,7 +644,7 @@
       <SessionLogView campaignId={activeCampaignId} />
     {:else if typeof view === 'object' && view.category === 'sessions'}
       <div class="no-campaign-msg">
-        <p>Select a campaign to view sessions.</p>
+        <p>{i18n.t('shell.noCampaignSessions')}</p>
       </div>
     {:else if ENTITY_KIND_MAP[view.category] && activeCampaignId}
       <EntityManager
@@ -666,7 +669,7 @@
       />
     {:else if ENTITY_KIND_MAP[view.category]}
       <div class="no-campaign-msg">
-        <p>Select a campaign to manage entities.</p>
+        <p>{i18n.t('shell.noCampaignEntities')}</p>
       </div>
     {:else}
       <NotesView category={view.category} />
@@ -696,7 +699,9 @@
           },
         }}
       >
-        <h3 id="create-link-title">Create article for [[{createChooser.name}]]</h3>
+        <h3 id="create-link-title">
+          {i18n.t('shell.createArticle', { name: createChooser.name })}
+        </h3>
         <div class="kind-grid">
           {#each Object.entries(KIND_TO_CATEGORY) as [kind] (kind)}
             <button
@@ -718,7 +723,7 @@
           class="picker-cancel-btn"
           onclick={() => {
             createChooser = null;
-          }}>Cancel</button
+          }}>{i18n.t('common.cancel')}</button
         >
       </div>
     </div>
@@ -729,7 +734,7 @@
       class="graph-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label="Entity relationships"
+      aria-label={i18n.t('shell.entityRelationships')}
       tabindex="-1"
       onclick={(e) => {
         if (e.target === e.currentTarget) graphFor = null;
@@ -765,7 +770,7 @@
         aria-labelledby="picker-title"
         use:modalBehavior={{ onClose: cancelPicker }}
       >
-        <h3 id="picker-title">Add "{pendingName}" to collection</h3>
+        <h3 id="picker-title">{i18n.t('shell.addToCollection', { name: pendingName ?? '' })}</h3>
         {#if pickerError}
           <div class="picker-error">{pickerError}</div>
         {/if}
@@ -776,31 +781,33 @@
             {/each}
           </select>
         {:else}
-          <p class="picker-hint">No collections yet.</p>
+          <p class="picker-hint">{i18n.t('shell.noCollections')}</p>
         {/if}
         {#if showNewCollectionInput}
           <div class="picker-new">
             <input
               bind:value={pickerNewName}
-              placeholder="New collection name"
+              placeholder={i18n.t('shell.newCollectionName')}
               onkeydown={(e) => e.key === 'Enter' && handlePickerCreateNew()}
             />
-            <button class="picker-create-btn" onclick={handlePickerCreateNew}>Create</button>
+            <button class="picker-create-btn" onclick={handlePickerCreateNew}
+              >{i18n.t('shell.create')}</button
+            >
             <button class="picker-cancel-btn" onclick={() => (showNewCollectionInput = false)}
-              >Cancel</button
+              >{i18n.t('common.cancel')}</button
             >
           </div>
         {:else}
           <button class="picker-new-btn" onclick={() => (showNewCollectionInput = true)}
-            >+ Create new collection</button
+            >+ {i18n.t('shell.createCollection')}</button
           >
         {/if}
         <div class="picker-actions">
           <button class="picker-cancel-btn" data-testid="picker-cancel" onclick={cancelPicker}
-            >Cancel</button
+            >{i18n.t('common.cancel')}</button
           >
           <button class="picker-confirm-btn" disabled={!pickerCollectionId} onclick={confirmUpload}
-            >Upload</button
+            >{i18n.t('common.upload')}</button
           >
         </div>
       </div>

@@ -1,8 +1,9 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
-  import { NOTE_CATEGORIES } from './note-categories.ts';
+  import { NOTE_CATEGORIES } from './note-categories';
   import type { Campaign } from '../lib/commands';
-  import type { NoteCategoryId } from './note-categories.ts';
+  import type { NoteCategoryId } from './note-categories';
+  import { i18n } from '../lib/locale.svelte';
 
   export type View =
     | 'oracle'
@@ -35,7 +36,7 @@
   }
 </script>
 
-<aside class="rail" aria-label="Campaign rail">
+<aside class="rail" aria-label={i18n.t('shell.campaignRail')}>
   <div class="rail-head">
     <div class="rail-mark" aria-hidden="true"></div>
     <div class="rail-word">Chron<b>a</b>cle</div>
@@ -44,34 +45,26 @@
   <button
     class="campaign"
     class:active={view === 'campaign'}
-    title="Switch campaign"
-    aria-label="Switch campaign"
+    title={i18n.t('shell.switchCampaign')}
+    aria-label={i18n.t('shell.switchCampaign')}
     onclick={onOpenSwitcher}
   >
     <span class="gem"></span>
     <span class="campaign-text">
-      <span class="nm">{activeCampaign?.name ?? 'No campaign'}</span>
-      <span class="mt">{activeCampaign?.system ?? 'create one to start'}</span>
+      <span class="nm">{activeCampaign?.name ?? i18n.t('shell.noCampaign')}</span>
+      <span class="mt">{activeCampaign?.system ?? i18n.t('shell.createCampaignHint')}</span>
     </span>
     <Icon name="chevrons-up-down" size={15} className="chev" />
   </button>
 
   <nav class="nav primary">
-    <button
-      class="nav-item"
-      class:active={view === 'oracle'}
-      onclick={() => setView('oracle')}
-    >
+    <button class="nav-item" class:active={view === 'oracle'} onclick={() => setView('oracle')}>
       <Icon name="sparkles" size={18} className="ic" />
-      Oracle
+      {i18n.t('shell.oracle')}
     </button>
-    <button
-      class="nav-item"
-      class:active={view === 'timeline'}
-      onclick={() => setView('timeline')}
-    >
+    <button class="nav-item" class:active={view === 'timeline'} onclick={() => setView('timeline')}>
       <Icon name="milestone" size={18} className="ic" />
-      Timeline
+      {i18n.t('shell.timeline')}
     </button>
     <button
       class="nav-item"
@@ -79,7 +72,7 @@
       onclick={() => setView('maintenance')}
     >
       <Icon name="inbox" size={18} className="ic" />
-      Maintenance
+      {i18n.t('shell.maintenance')}
       {#if maintenanceCount > 0}
         <span class="ct badge">{maintenanceCount}</span>
       {/if}
@@ -88,7 +81,9 @@
 
   <div class="rail-scroll">
     {#each ['Notebook', 'Entities'] as group (group)}
-      <div class="rail-section">{group}</div>
+      <div class="rail-section">
+        {group === 'Notebook' ? i18n.t('shell.notebook') : i18n.t('shell.entities')}
+      </div>
       <nav class="nav">
         {#each NOTE_CATEGORIES.filter((c) => c.group === group) as c (c.id)}
           <button
@@ -106,25 +101,25 @@
   </div>
 
   <div class="rail-foot">
-    <button class="foot-btn" onclick={onOpenUpload} title="Upload a PDF">
+    <button class="foot-btn" onclick={onOpenUpload} title={i18n.t('shell.uploadPdf')}>
       <Icon name="upload" size={16} />
-      Upload PDF
+      {i18n.t('shell.uploadPdf')}
     </button>
     <button
       class="foot-btn"
       class:active={view === 'campaign'}
       onclick={() => setView('campaign')}
-      title="Manage campaign and source collections"
+      title={i18n.t('shell.manageCampaignSources')}
     >
       <Icon name="library" size={16} />
-      Campaign &amp; sources
+      {i18n.t('shell.campaignSources')}
     </button>
     <button
       class="foot-btn icon-only"
       class:active={view === 'settings'}
       onclick={() => setView('settings')}
-      title="Settings"
-      aria-label="Settings"
+      title={i18n.t('common.settings')}
+      aria-label={i18n.t('common.settings')}
     >
       <Icon name="settings" size={16} />
     </button>
@@ -152,7 +147,9 @@
     height: 36px;
     border-radius: 11px;
     background: var(--brand-mark) center/cover;
-    box-shadow: 0 0 0 1px var(--line), var(--glow-arcane);
+    box-shadow:
+      0 0 0 1px var(--line),
+      var(--glow-arcane);
     flex: none;
   }
   .rail-word {

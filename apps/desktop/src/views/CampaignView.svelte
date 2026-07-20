@@ -26,6 +26,7 @@
   import EntityManager from '../components/EntityManager.svelte';
   import RulesPanel from '../components/RulesPanel.svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+  import { i18n } from '../lib/locale.svelte';
 
   let {
     activeCampaignId,
@@ -179,7 +180,7 @@
   }
 
   async function removeSource(s: Source, colId: string) {
-    if (!confirm('Delete this source and all its indexed chunks?')) return;
+    if (!confirm(i18n.t('dialog.confirmDelete'))) return;
     try {
       await deleteSource(s.id);
       const list = await getSources(colId);
@@ -263,17 +264,17 @@
     <section class="hero">
       <div class="gem"></div>
       <div class="hero-text">
-        <div class="eyebrow">Campaign</div>
-        <h1>{active?.name ?? 'No campaign yet'}</h1>
+        <div class="eyebrow">{i18n.t('campaign.label')}</div>
+        <h1>{active?.name ?? i18n.t('campaign.noCampaignYet')}</h1>
         <p class="meta">
-          {active?.system ?? '—'}
-          {#if !active}<span class="hint"> · create one below to get started</span>{/if}
+          {active?.system ?? i18n.t('campaign.systemDash')}
+          {#if !active}<span class="hint"> · {i18n.t('campaign.createHint')}</span>{/if}
         </p>
       </div>
       {#if active}
         <button class="edit" onclick={() => startEdit(active)}>
           <Icon name="pencil" size={14} />
-          Edit details
+          {i18n.t('campaign.editDetails')}
         </button>
       {/if}
     </section>
@@ -288,7 +289,7 @@
           activeTab = 'library';
         }}
       >
-        Library
+        {i18n.t('campaign.library')}
       </button>
       <button
         role="tab"
@@ -299,24 +300,30 @@
           activeTab = 'entities';
         }}
       >
-        Entities
+        {i18n.t('campaign.entities')}
       </button>
     </div>
 
     {#if activeTab === 'library'}
       <div class="stats">
-        <div class="stat"><span class="n">{subCount}</span><span class="l">collections</span></div>
         <div class="stat">
-          <span class="n">{bookCount}</span><span class="l">books loaded</span>
+          <span class="n">{subCount}</span><span class="l">{i18n.t('campaign.collections')}</span>
         </div>
-        <div class="stat"><span class="n">—</span><span class="l">notebook entries</span></div>
-        <div class="stat"><span class="n">—</span><span class="l">sessions logged</span></div>
+        <div class="stat">
+          <span class="n">{bookCount}</span><span class="l">{i18n.t('campaign.booksLoaded')}</span>
+        </div>
+        <div class="stat">
+          <span class="n">—</span><span class="l">{i18n.t('campaign.notebookEntries')}</span>
+        </div>
+        <div class="stat">
+          <span class="n">—</span><span class="l">{i18n.t('campaign.sessionsLogged')}</span>
+        </div>
       </div>
 
       <section class="manage">
         <button class="manage-head" onclick={() => (manageOpen = !manageOpen)}>
           <Icon name={manageOpen ? 'chevron-down' : 'chevron-right'} size={16} />
-          Manage campaigns
+          {i18n.t('campaign.manageCampaigns')}
           <span class="ct">{campaigns.length}</span>
         </button>
         {#if manageOpen}
@@ -324,28 +331,51 @@
             {#each campaigns as c (c.id)}
               <div class="manage-row" class:active={activeCampaignId === c.id}>
                 {#if editingId === c.id}
-                  <input class="m-edit" bind:value={editName} placeholder="Name" />
-                  <input class="m-edit" bind:value={editSystem} placeholder="System (optional)" />
-                  <button class="m-btn primary" onclick={commitEdit}>Save</button>
-                  <button class="m-btn" onclick={() => (editingId = null)}>Cancel</button>
+                  <input
+                    class="m-edit"
+                    bind:value={editName}
+                    placeholder={i18n.t('campaign.name')}
+                  />
+                  <input
+                    class="m-edit"
+                    bind:value={editSystem}
+                    placeholder={i18n.t('campaign.systemOptional')}
+                  />
+                  <button class="m-btn primary" onclick={commitEdit}>{i18n.t('common.save')}</button
+                  >
+                  <button class="m-btn" onclick={() => (editingId = null)}
+                    >{i18n.t('common.cancel')}</button
+                  >
                 {:else}
                   <button class="m-pick" onclick={() => setActiveCampaignId(c.id)}>
                     <span class="m-nm">{c.name}</span>
                     {#if c.system}<span class="m-sys">{c.system}</span>{/if}
                   </button>
-                  <button class="m-btn" onclick={() => startEdit(c)} title="Rename">
+                  <button
+                    class="m-btn"
+                    onclick={() => startEdit(c)}
+                    title={i18n.t('campaign.rename')}
+                    aria-label={i18n.t('campaign.rename')}
+                  >
                     <Icon name="pencil" size={13} />
                   </button>
-                  <button class="m-btn danger" onclick={() => removeCampaign(c)} title="Delete">
+                  <button
+                    class="m-btn danger"
+                    onclick={() => removeCampaign(c)}
+                    title={i18n.t('common.delete')}
+                    aria-label={i18n.t('common.delete')}
+                  >
                     <Icon name="trash-2" size={13} />
                   </button>
                 {/if}
               </div>
             {/each}
             <div class="manage-new">
-              <input bind:value={newName} placeholder="New campaign name" />
-              <input bind:value={newSystem} placeholder="System (optional)" />
-              <button class="m-btn primary" onclick={createNewCampaign}>+ Create</button>
+              <input bind:value={newName} placeholder={i18n.t('campaign.newCampaignName')} />
+              <input bind:value={newSystem} placeholder={i18n.t('campaign.systemOptional')} />
+              <button class="m-btn primary" onclick={createNewCampaign}
+                >+ {i18n.t('campaign.create')}</button
+              >
             </div>
           </div>
         {/if}
@@ -353,15 +383,14 @@
 
       <section class="collections">
         <div class="sec-head">
-          <h2>Source collections</h2>
+          <h2>{i18n.t('campaign.sourceCollections')}</h2>
           <p>
-            Subscribe this campaign to the rulebooks and lore it should draw from. Collections are
-            shared across campaigns; subscribing is per-campaign.
+            {i18n.t('campaign.sourceCollectionsHint')}
           </p>
         </div>
 
         {#if collections.length === 0}
-          <p class="muted">No collections yet. Upload a PDF to create one.</p>
+          <p class="muted">{i18n.t('campaign.noCollections')}</p>
         {/if}
 
         {#each collections as c (c.id)}
@@ -388,23 +417,30 @@
                 <span class="nm">{c.name}</span>
                 <span class="ct">
                   {list.length}
-                  {list.length === 1 ? 'book' : 'books'} ·
+                  {list.length === 1 ? i18n.t('campaign.book') : i18n.t('campaign.books')} ·
                   {#if !activeCampaignId}
-                    shared
+                    {i18n.t('campaign.shared')}
                   {:else if on}
-                    subscribed
+                    {i18n.t('campaign.subscribed')}
                   {:else}
-                    not subscribed
+                    {i18n.t('campaign.notSubscribed')}
                   {/if}
                 </span>
               </span>
               {#if on && codexStatus && codexStatus.stale_entities > 0}
-                <span class="codex-badge">{codexStatus.stale_entities} stale</span>
+                <span class="codex-badge"
+                  >{i18n.t('campaign.stale', { count: codexStatus.stale_entities })}</span
+                >
               {/if}
               {#if on}
                 <button
                   class="m-btn compile-btn"
-                  aria-label="{compiling ? 'Cancel' : 'Compile'} {c.name}"
+                  aria-label={i18n.t('campaign.compileCollection', {
+                    action: compiling
+                      ? i18n.t('campaign.cancelCompile')
+                      : i18n.t('campaign.compile'),
+                    name: c.name,
+                  })}
                   onclick={(e) => {
                     e.stopPropagation();
                     toggleCompile(c);
@@ -413,7 +449,7 @@
                     e.stopPropagation();
                   }}
                 >
-                  {compiling ? 'Cancel' : 'Compile'}
+                  {compiling ? i18n.t('campaign.cancelCompile') : i18n.t('campaign.compile')}
                 </button>
               {/if}
               <span
@@ -422,7 +458,7 @@
                 role="switch"
                 aria-checked={on}
                 tabindex="0"
-                aria-label="Subscribe to {c.name}"
+                aria-label={i18n.t('campaign.subscribeTo', { name: c.name })}
                 onclick={(e) => {
                   e.stopPropagation();
                   toggleSubscribe(c);
@@ -440,7 +476,7 @@
               <Icon name={isOpen ? 'chevron-up' : 'chevron-down'} size={16} />
             </div>
             {#if compiling}
-              <div class="codex-progress">{compileDetail || 'Compiling…'}</div>
+              <div class="codex-progress">{compileDetail || i18n.t('campaign.compiling')}</div>
             {/if}
             {#if isOpen}
               {@const tab = collTab(c.id)}
@@ -452,7 +488,7 @@
                   class:active={tab === 'books'}
                   onclick={() => collTabByCol.set(c.id, 'books')}
                 >
-                  Books
+                  {i18n.t('campaign.books')}
                 </button>
                 <button
                   role="tab"
@@ -461,7 +497,7 @@
                   class:active={tab === 'rules'}
                   onclick={() => collTabByCol.set(c.id, 'rules')}
                 >
-                  Rules
+                  {i18n.t('campaign.rules')}
                 </button>
               </div>
               {#if tab === 'books'}
@@ -477,15 +513,16 @@
                         class:err={s.index_status === 'error'}
                       >
                         {s.index_status === 'done'
-                          ? 'Indexed'
+                          ? i18n.t('campaign.indexed')
                           : s.index_status === 'error'
-                            ? 'Error'
-                            : 'Indexing…'}
+                            ? i18n.t('campaign.indexError')
+                            : i18n.t('campaign.indexing')}
                       </span>
                       <button
                         class="m-btn danger"
                         onclick={() => removeSource(s, c.id)}
-                        title="Delete"
+                        title={i18n.t('common.delete')}
+                        aria-label={i18n.t('common.delete')}
                       >
                         <Icon name="trash-2" size={13} />
                       </button>
@@ -493,7 +530,7 @@
                   {/each}
                   <button class="add-book" onclick={() => onOpenUpload(c.id)}>
                     <Icon name="plus" size={14} />
-                    Add book
+                    {i18n.t('campaign.addBook')}
                   </button>
                 </div>
               {:else}
@@ -506,9 +543,9 @@
         {/each}
       </section>
     {:else if activeTab === 'entities' && active}
-      <EntityManager campaignId={active.id} />
+      <EntityManager campaignId={active.id} kind="npc" />
     {:else if activeTab === 'entities'}
-      <p class="muted">Select a campaign to manage entities.</p>
+      <p class="muted">{i18n.t('campaign.selectCampaign')}</p>
     {/if}
   </div>
 
@@ -520,24 +557,21 @@
         if (e.target === e.currentTarget) deleteTarget = null;
       }}
     >
-      <div
-        class="modal"
-        role="dialog"
-        aria-label="Delete campaign"
-        tabindex="-1"
-      >
-        <h3>Delete "{deleteTarget.name}"?</h3>
+      <div class="modal" role="dialog" aria-label={i18n.t('campaign.deleteCampaign')} tabindex="-1">
+        <h3>{i18n.t('campaign.deleteCampaignQuestion', { name: deleteTarget.name })}</h3>
         <p>
-          If this campaign has its own collection of notes and entities, choose what happens to it.
+          {i18n.t('campaign.deleteCampaignHint')}
         </p>
         <div class="modal-actions">
           <button class="m-btn danger" onclick={() => confirmDelete('delete')}>
-            Delete campaign and its notes
+            {i18n.t('campaign.deleteCampaignNotes')}
           </button>
           <button class="m-btn" onclick={() => confirmDelete('convert_to_regular')}>
-            Keep notes as a regular collection
+            {i18n.t('campaign.keepNotes')}
           </button>
-          <button class="m-btn" onclick={() => (deleteTarget = null)}>Cancel</button>
+          <button class="m-btn" onclick={() => (deleteTarget = null)}
+            >{i18n.t('common.cancel')}</button
+          >
         </div>
       </div>
     </div>

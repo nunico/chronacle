@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
   import type { Campaign } from '../lib/commands';
+  import { i18n } from '../lib/locale.svelte';
 
   let {
     campaigns,
@@ -38,12 +39,21 @@
   class="backdrop"
   role="presentation"
   onclick={onBackdropClick}
-  onkeydown={() => { /* empty */ }}
+  onkeydown={() => {
+    /* empty */
+  }}
 ></div>
 
-<div class="popover" role="dialog" aria-label="Switch campaign" bind:this={popoverEl}>
+<div
+  class="popover"
+  role="dialog"
+  aria-label={i18n.t('shell.switchCampaign')}
+  bind:this={popoverEl}
+>
   {#if campaigns.length === 0}
-    <div class="empty">No campaigns yet — create one to get started.</div>
+    <div class="empty">
+      {i18n.t('campaign.noCampaignYet')} — {i18n.t('shell.createCampaignHint')}.
+    </div>
   {/if}
   {#each campaigns as c (c.id)}
     <button
@@ -56,7 +66,7 @@
     >
       <span class="gem-dot"></span>
       <span class="nm">{c.name}</span>
-      <span class="mt">{c.system ?? '—'}</span>
+      <span class="mt">{c.system ?? i18n.t('campaign.systemDash')}</span>
       {#if activeCampaignId === c.id}
         <Icon name="check" size={14} />
       {/if}
@@ -71,7 +81,7 @@
     }}
   >
     <Icon name="settings" size={14} />
-    <span class="nm">Manage campaigns…</span>
+    <span class="nm">{i18n.t('campaign.manageCampaigns')}…</span>
   </button>
 </div>
 

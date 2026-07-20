@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/svelte';
 import TimelineView from './TimelineView.svelte';
 import * as commands from '../lib/commands';
 import type { Session } from '../lib/commands';
+import { i18n } from '../lib/locale.svelte';
 
 vi.mock('../lib/commands', () => ({
   getEventsTimeline: vi.fn().mockResolvedValue([]),
@@ -11,13 +12,36 @@ vi.mock('../lib/commands', () => ({
 
 const m = vi.mocked(commands);
 
-function ev(name: string, sequence_index: number | null, era: string | null, session_id: string | null = null) {
+function ev(
+  name: string,
+  sequence_index: number | null,
+  era: string | null,
+  session_id: string | null = null,
+) {
   return {
-    id: name, kind: 'event', campaign_id: null, name, aliases: [], summary: null, notes: null,
-    created_at: null, updated_at: null, date_start: null, date_end: null,
-    is_ongoing: false, sequence_index, era, duration_label: null, session_id,
-    player_name: null, character_class: null, character_level: null, status: null,
-    codex_article: null, codex_stale: null, codex_compiled_at: null,
+    id: name,
+    kind: 'event',
+    campaign_id: null,
+    name,
+    aliases: [],
+    summary: null,
+    notes: null,
+    created_at: null,
+    updated_at: null,
+    date_start: null,
+    date_end: null,
+    is_ongoing: false,
+    sequence_index,
+    era,
+    duration_label: null,
+    session_id,
+    player_name: null,
+    character_class: null,
+    character_level: null,
+    status: null,
+    codex_article: null,
+    codex_stale: null,
+    codex_compiled_at: null,
   };
 }
 
@@ -27,11 +51,20 @@ function sess(id: string, title: string): Session {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  i18n.setLocale('en');
   m.getEventsTimeline.mockResolvedValue([]);
   m.getSessions.mockResolvedValue([]);
 });
 
 describe('TimelineView — chronicle mode', () => {
+  it('uses the active display language for the timeline controls', async () => {
+    i18n.setLocale('de');
+    render(TimelineView, { campaignId: 'c1' });
+
+    expect(await screen.findByRole('tab', { name: 'Chronik' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Sitzungen' })).toBeTruthy();
+  });
+
   it('renders era headers and events in order, with an Unordered group last', async () => {
     m.getEventsTimeline.mockResolvedValueOnce([
       ev('Siege', 1, 'Dawn'),
@@ -67,10 +100,7 @@ describe('TimelineView — sessions mode', () => {
       ev('Pact Signed', 2, 'Dawn', 's2'),
       ev('Lost Soul', null, null, null),
     ]);
-    m.getSessions.mockResolvedValueOnce([
-      sess('s1', 'Session 1'),
-      sess('s2', 'Session 2'),
-    ]);
+    m.getSessions.mockResolvedValueOnce([sess('s1', 'Session 1'), sess('s2', 'Session 2')]);
     render(TimelineView, { campaignId: 'c1' });
     // Wait for data to load
     await screen.findByText('Battle of Ash');
@@ -89,10 +119,7 @@ describe('TimelineView — sessions mode', () => {
 
   it('renders session lane headers even when there are zero events', async () => {
     m.getEventsTimeline.mockResolvedValueOnce([]);
-    m.getSessions.mockResolvedValueOnce([
-      sess('s1', 'Session 1'),
-      sess('s2', 'Session 2'),
-    ]);
+    m.getSessions.mockResolvedValueOnce([sess('s1', 'Session 1'), sess('s2', 'Session 2')]);
     render(TimelineView, { campaignId: 'c1' });
     await fireEvent.click(screen.getByRole('tab', { name: 'Sessions' }));
     // Wait for sessions to load and render lane headers
@@ -103,12 +130,8 @@ describe('TimelineView — sessions mode', () => {
   });
 
   it('omits the Unscheduled lane when all events belong to a session', async () => {
-    m.getEventsTimeline.mockResolvedValueOnce([
-      ev('First Light', 1, null, 's1'),
-    ]);
-    m.getSessions.mockResolvedValueOnce([
-      sess('s1', 'Session 1'),
-    ]);
+    m.getEventsTimeline.mockResolvedValueOnce([ev('First Light', 1, null, 's1')]);
+    m.getSessions.mockResolvedValueOnce([sess('s1', 'Session 1')]);
     render(TimelineView, { campaignId: 'c1' });
     await screen.findByText('First Light');
     await fireEvent.click(screen.getByRole('tab', { name: 'Sessions' }));

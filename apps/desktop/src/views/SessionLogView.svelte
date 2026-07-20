@@ -9,6 +9,8 @@
     type EntityKind,
   } from '../lib/commands';
   import SessionList from '../components/SessionList.svelte';
+  import Button from '../components/ui/Button.svelte';
+  import { i18n } from '../lib/locale.svelte';
 
   interface Props {
     campaignId: string;
@@ -66,7 +68,7 @@
     try {
       const created = await createSession(campaignId, {
         sessionNumber: nextNumber,
-        title: `Session ${nextNumber}`,
+        title: i18n.t('sessions.defaultTitle', { number: nextNumber }),
         datePlayed: today,
         notes: '',
       });
@@ -88,15 +90,15 @@
 <div class="session-log">
   <div class="session-log-head">
     <div>
-      <h1>Sessions</h1>
-      <p class="sub">Your campaign timeline</p>
+      <h1>{i18n.t('sessions.title')}</h1>
+      <p class="sub">{i18n.t('sessions.subtitle')}</p>
     </div>
-    <button class="btn-primary" onclick={handleNewSession}>+ New Session</button>
+    <Button onclick={handleNewSession}>+ {i18n.t('sessions.newSession')}</Button>
   </div>
   {#if loading}
-    <p class="muted">Loading…</p>
+    <p class="muted">{i18n.t('sessions.loading')}</p>
   {:else if sessions.length === 0}
-    <div class="empty">No sessions yet. Start one above.</div>
+    <div class="empty">{i18n.t('sessions.empty')}</div>
   {:else}
     <SessionList {sessions} {entityMap} onUpdate={handleUpdate} onDelete={handleDelete} />
   {/if}
@@ -131,24 +133,6 @@
     margin: 0;
     font-size: 13px;
     color: var(--fg-3);
-  }
-
-  .btn-primary {
-    border: 0;
-    border-radius: var(--r-md);
-    padding: 8px 16px;
-    font-size: 13px;
-    font-weight: 600;
-    background: var(--grad-arcane);
-    color: var(--fg-on-accent);
-    box-shadow: var(--glow-arcane);
-    font-family: var(--font-sans);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .btn-primary:hover {
-    opacity: 0.9;
   }
 
   .muted {
