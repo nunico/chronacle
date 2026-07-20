@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import OracleView from './OracleView.svelte';
 import * as commands from '../lib/commands';
 import { toasts, clearToasts } from '../lib/toast.svelte';
+import { i18n } from '../lib/locale.svelte';
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -49,6 +50,22 @@ describe('OracleView', () => {
     ).toBeTruthy();
   });
 
+  it('uses the active locale for composer and source controls', async () => {
+    i18n.setLocale('de');
+    try {
+      render(OracleView, {
+        props: { activeCampaignId: null, onOpenUpload: vi.fn() },
+      });
+
+      expect(
+        await screen.findByPlaceholderText('Frage nach einer Regel, einem Namen, einem Ort…'),
+      ).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Regelbuch anhängen' })).toBeTruthy();
+    } finally {
+      i18n.setLocale('en');
+    }
+  });
+
   it('hides suggestions once a message exists', async () => {
     m.getChatHistory.mockResolvedValue([{ role: 'user', content: 'hi' }]);
     render(OracleView, {
@@ -77,7 +94,7 @@ describe('OracleView', () => {
     });
   });
 
-  it('does not leak a card\'s expand state to a different message at the same index after reload', async () => {
+  it("does not leak a card's expand state to a different message at the same index after reload", async () => {
     // Ruling A at index 0, with a collapsible citation.
     m.getChatHistory.mockResolvedValue([
       { role: 'assistant', content: 'Answer A. [Source: "BookA", p.1, quote: "Alpha passage."]' },

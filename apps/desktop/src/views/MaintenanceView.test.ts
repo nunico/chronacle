@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import MaintenanceView from './MaintenanceView.svelte';
 import maintenanceSource from './MaintenanceView.svelte?raw';
 import type { CodexProposal, LintFinding } from '../lib/commands';
+import { i18n } from '../lib/locale.svelte';
 
 describe('MaintenanceView scroll (regression: clipped findings)', () => {
   it('.maintenance root is its own scroll container', () => {
@@ -91,6 +92,20 @@ describe('MaintenanceView', () => {
     m.undoAutoAlias.mockResolvedValue(undefined);
     m.getEntityRelations.mockResolvedValue([]);
     m.mergeEntities.mockResolvedValue(undefined);
+  });
+
+  it('uses the active locale for maintenance navigation and proposal actions', async () => {
+    i18n.setLocale('de');
+    try {
+      m.getProposals.mockResolvedValue([proposal()]);
+      render(MaintenanceView, { props: {} });
+
+      expect(await screen.findByRole('heading', { name: 'Wartung' })).toBeTruthy();
+      expect(screen.getByRole('tab', { name: 'Vorschläge' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Vorschlag annehmen' })).toBeTruthy();
+    } finally {
+      i18n.setLocale('en');
+    }
   });
 
   it('renders pending proposals with kind label, target name, rationale', async () => {

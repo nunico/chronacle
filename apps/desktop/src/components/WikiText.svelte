@@ -1,5 +1,6 @@
 <script lang="ts">
   import { normalizeWikiLinkKey } from '../lib/wikilinks';
+  import { i18n } from '../lib/locale.svelte';
 
   const WIKILINK_RE = /\[\[([^\]]+)\]\]/g;
 
@@ -32,7 +33,7 @@
         entities.get(name) ??
         entities.get(lowerKey) ??
         entities.get(normalizeWikiLinkKey(name)) ??
-        entities.get([...entities.keys()].find(k => k.toLowerCase() === lowerKey) ?? '');
+        entities.get([...entities.keys()].find((k) => k.toLowerCase() === lowerKey) ?? '');
       if (entity) {
         const e = entity as { id: string; kind: string };
         result.push({ kind: 'entity', name, id: e.id, entityKind: e.kind });
@@ -53,7 +54,12 @@
     {#if seg.kind === 'text'}
       {seg.content}
     {:else if seg.kind === 'entity'}
-      <button type="button" class="entity-badge" title={seg.entityKind} onclick={() => onEntityClick?.(seg.id, seg.entityKind)}>
+      <button
+        type="button"
+        class="entity-badge"
+        title={seg.entityKind}
+        onclick={() => onEntityClick?.(seg.id, seg.entityKind)}
+      >
         {seg.name}
       </button>
     {:else}
@@ -61,7 +67,7 @@
         <button
           type="button"
           class="missing-link"
-          aria-label={`Create article for ${seg.name}`}
+          aria-label={i18n.t('shell.createArticleAria', { name: seg.name })}
           onclick={() => onMissingLinkClick(seg.name)}
         >
           [[{seg.name}]]

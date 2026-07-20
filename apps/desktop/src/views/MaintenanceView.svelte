@@ -19,6 +19,7 @@
     type EntityKind,
   } from '../lib/commands';
   import MergeDialog from '../components/MergeDialog.svelte';
+  import { i18n } from '../lib/locale.svelte';
 
   interface Props {
     onCountsChanged?: () => void;
@@ -26,8 +27,7 @@
     onOpenEntity?: (id: string, kind: string) => void;
     onCreateMissingArticle?: (name: string, sourceFindingId: string) => void;
   }
-  let { onCountsChanged, activeCampaignId, onOpenEntity, onCreateMissingArticle }: Props =
-    $props();
+  let { onCountsChanged, activeCampaignId, onOpenEntity, onCreateMissingArticle }: Props = $props();
 
   let tab = $state<'proposals' | 'findings'>('proposals');
   let proposals = $state<CodexProposal[]>([]);
@@ -43,22 +43,28 @@
     b: { id: string; kind: string };
   } | null>(null);
 
-  const KIND_LABELS: Record<string, string> = {
-    entity_article_update: 'Article update',
-    entity_notes_update: 'Notes suggestion',
-    rule_entry_update: 'Rule update',
-    new_entity: 'New entity',
-    new_rule_entry: 'New rule',
-  };
+  function proposalLabel(kind: string): string {
+    const labels: Record<string, string> = {
+      entity_article_update: i18n.t('maintenance.kindArticleUpdate'),
+      entity_notes_update: i18n.t('maintenance.kindNotesSuggestion'),
+      rule_entry_update: i18n.t('maintenance.kindRuleUpdate'),
+      new_entity: i18n.t('maintenance.kindNewEntity'),
+      new_rule_entry: i18n.t('maintenance.kindNewRule'),
+    };
+    return labels[kind] ?? kind;
+  }
 
-  const FINDING_LABELS: Record<string, string> = {
-    orphaned_edge: 'Orphaned edge',
-    scope_violation: 'Scope violation',
-    broken_wikilink: 'Wikilinks',
-    stale_article: 'Stale article',
-    duplicate_entity: 'Possible duplicate',
-    alias_collision: 'Naming conflict',
-  };
+  function findingLabel(kind: string): string {
+    const labels: Record<string, string> = {
+      orphaned_edge: i18n.t('maintenance.findingOrphanedEdge'),
+      scope_violation: i18n.t('maintenance.findingScopeViolation'),
+      broken_wikilink: i18n.t('maintenance.findingWikilinks'),
+      stale_article: i18n.t('maintenance.findingStaleArticle'),
+      duplicate_entity: i18n.t('maintenance.findingPossibleDuplicate'),
+      alias_collision: i18n.t('maintenance.findingNamingConflict'),
+    };
+    return labels[kind] ?? kind;
+  }
 
   const CARD_OUTRO_MS = 280;
 
@@ -104,7 +110,9 @@
   }
 
   function brokenWikilinkLabel(f: LintFinding): string {
-    return hasCandidates(f) ? 'Possible name mismatch' : 'Missing article';
+    return hasCandidates(f)
+      ? i18n.t('maintenance.possibleNameMismatch')
+      : i18n.t('maintenance.missingArticle');
   }
 
   async function refresh({ showLoading = false }: { showLoading?: boolean } = {}) {
@@ -258,7 +266,10 @@
     checking = true;
     try {
       const s = await runLint(activeCampaignId);
-      lintNote = `${s.new_findings} new finding${s.new_findings === 1 ? '' : 's'} · ${s.unresolved_total} open`;
+      lintNote = i18n.t('maintenance.findingsSummary', {
+        newFindings: s.new_findings,
+        open: s.unresolved_total,
+      });
       await refresh();
       onCountsChanged?.();
     } catch (e) {
@@ -273,11 +284,11 @@
 
 <div class="maintenance">
   <div class="header-row">
-    <h2 class="heading">Maintenance</h2>
+    <h2 class="heading">{i18n.t('maintenance.title')}</h2>
     {#if tab === 'findings'}
       <div class="check-campaign">
         <button type="button" disabled={checking} onclick={() => void checkCampaign()}>
-          {checking ? 'Checking…' : 'Check campaign'}
+          {checking ? i18n.t('maintenance.checking') : i18n.t('maintenance.checkCampaign')}
         </button>
         {#if lintNote}
           <span class="lint-note">{lintNote}</span>
@@ -286,14 +297,14 @@
     {/if}
   </div>
 
-  <div class="toolbar" role="tablist" aria-label="Maintenance sections">
+  <div class="toolbar" role="tablist" aria-label={i18n.t('maintenance.sections')}>
     <button
       role="tab"
       aria-selected={tab === 'proposals'}
       class:active={tab === 'proposals'}
       onclick={() => (tab = 'proposals')}
     >
-      Proposals
+      {i18n.t('maintenance.proposals')}
     </button>
     <button
       role="tab"
@@ -301,7 +312,7 @@
       class:active={tab === 'findings'}
       onclick={() => (tab = 'findings')}
     >
-      Findings
+      {i18n.t('maintenance.findings')}
     </button>
   </div>
 
@@ -310,47 +321,49 @@
   {/if}
 
   {#if loading}
-    <p class="muted">Loading…</p>
+    <p class="muted">{i18n.t('common.loading')}</p>
   {:else if tab === 'proposals'}
     {#if proposals.length === 0}
-      <p class="muted">No pending proposals</p>
+      <p class="muted">{i18n.t('maintenance.noPendingProposals')}</p>
     {:else}
       <ul class="proposal-list">
         {#each proposals as p (p.id)}
           <li class="proposal-card motion-list-card" out:cardOutro>
             <div class="proposal-head">
-              <span class="chip-kind">{KIND_LABELS[p.kind] ?? p.kind}</span>
-              <span class="target-name">{p.target_name ?? p.payload.name ?? '(new)'}</span>
+              <span class="chip-kind">{proposalLabel(p.kind)}</span>
+              <span class="target-name"
+                >{p.target_name ?? p.payload.name ?? i18n.t('maintenance.new')}</span
+              >
               <span class="chip-origin">{p.origin_kind}</span>
             </div>
             <p class="rationale">{p.payload.rationale}</p>
             <div class="diff">
               <div class="diff-pane">
-                <h4>Current</h4>
-                <pre class="diff-text">{p.current_text ?? '(none)'}</pre>
+                <h4>{i18n.t('maintenance.current')}</h4>
+                <pre class="diff-text">{p.current_text ?? i18n.t('maintenance.none')}</pre>
               </div>
               <div class="diff-pane">
-                <h4>Proposed</h4>
+                <h4>{i18n.t('maintenance.proposed')}</h4>
                 <pre class="diff-text">{p.payload.proposed_text}</pre>
               </div>
             </div>
             <div class="proposal-actions">
               <button
                 type="button"
-                aria-label="Accept proposal"
+                aria-label={i18n.t('maintenance.acceptProposal')}
                 disabled={busy === p.id}
                 onclick={() => resolve(p.id, 'accept')}
               >
-                Accept
+                {i18n.t('maintenance.accept')}
               </button>
               <button
                 type="button"
                 class="btn-ghost"
-                aria-label="Reject proposal"
+                aria-label={i18n.t('maintenance.rejectProposal')}
                 disabled={busy === p.id}
                 onclick={() => resolve(p.id, 'reject')}
               >
-                Reject
+                {i18n.t('maintenance.reject')}
               </button>
             </div>
           </li>
@@ -358,7 +371,7 @@
       </ul>
     {/if}
   {:else if findings.length === 0}
-    <p class="muted">No unresolved findings</p>
+    <p class="muted">{i18n.t('maintenance.noUnresolvedFindings')}</p>
   {:else}
     <div class="finding-groups">
       {#each [...findingsByKind.entries()] as [kind, items] (kind)}
@@ -366,13 +379,14 @@
           {#if kind === 'auto_alias'}
             <details class="auto-alias-details">
               <summary class="finding-kind-heading">
-                Auto-linked ({items.length}) — reviewable, not required
+                {i18n.t('maintenance.autoLinked', { count: items.length })}
               </summary>
               <ul class="finding-list">
                 {#each items as f (f.id)}
                   <li class="finding-card motion-list-card" out:cardOutro>
                     <p class="finding-detail">
-                      <strong>{String(f.payload.alias)}</strong> was auto-linked to
+                      <strong>{String(f.payload.alias)}</strong>
+                      {i18n.t('maintenance.autoLinkedTo')}
                       <strong>{entityRef(f.payload.entity)?.id ?? String(f.payload.entity)}</strong>
                     </p>
                     <div class="finding-actions">
@@ -381,7 +395,7 @@
                         disabled={busy === f.id}
                         onclick={() => void openEntityRef(f.payload.entity)}
                       >
-                        Open entity
+                        {i18n.t('maintenance.openEntity')}
                       </button>
                       <button
                         type="button"
@@ -389,7 +403,7 @@
                         disabled={busy === f.id}
                         onclick={() => undoSuggestion(f)}
                       >
-                        Undo
+                        {i18n.t('maintenance.undo')}
                       </button>
                     </div>
                   </li>
@@ -397,7 +411,7 @@
               </ul>
             </details>
           {:else}
-            <h3 class="finding-kind-heading">{FINDING_LABELS[kind] ?? kind}</h3>
+            <h3 class="finding-kind-heading">{findingLabel(kind)}</h3>
             <ul class="finding-list">
               {#each items as f (f.id)}
                 <li class="finding-card motion-list-card" out:cardOutro>
@@ -406,12 +420,15 @@
                       <span class="chip-kind">{brokenWikilinkLabel(f)}</span>
                     </div>
                     <p class="finding-detail">
-                      [[{String(f.payload.link_text)}]] in {entityName(f)}
+                      {i18n.t('maintenance.wikilinkInEntity', {
+                        link: String(f.payload.link_text),
+                        entity: entityName(f),
+                      })}
                     </p>
                     {#if candidatesOf(f).length > 0}
                       {@const candidate = candidatesOf(f)[0]}
                       <p class="finding-detail">
-                        Suggested match: <strong>{candidate.name}</strong>
+                        {i18n.t('maintenance.suggestedMatch')} <strong>{candidate.name}</strong>
                       </p>
                     {/if}
                     <div class="finding-actions">
@@ -421,23 +438,22 @@
                           disabled={busy === f.id}
                           onclick={() => confirmSuggestion(f, candidatesOf(f)[0])}
                         >
-                          Use suggestion
+                          {i18n.t('maintenance.useSuggestion')}
                         </button>
                       {/if}
                       <button
                         type="button"
                         disabled={busy === f.id}
-                        onclick={() =>
-                          onCreateMissingArticle?.(String(f.payload.link_text), f.id)}
+                        onclick={() => onCreateMissingArticle?.(String(f.payload.link_text), f.id)}
                       >
-                        Create article
+                        {i18n.t('maintenance.createArticle')}
                       </button>
                       <button
                         type="button"
                         disabled={busy === f.id}
                         onclick={() => void openEntityRef(f.payload.entity)}
                       >
-                        Open source
+                        {i18n.t('maintenance.openSource')}
                       </button>
                       <button
                         type="button"
@@ -445,7 +461,7 @@
                         disabled={busy === f.id}
                         onclick={() => resolveFinding(f.id)}
                       >
-                        Dismiss
+                        {i18n.t('common.dismiss')}
                       </button>
                     </div>
                   {:else if kind === 'stale_article'}
@@ -455,7 +471,7 @@
                     {#if compilingId === f.id}
                       <div class="compiling-status" role="status" aria-live="polite">
                         <span class="spinner" aria-hidden="true"></span>
-                        Compiling…
+                        {i18n.t('maintenance.compiling')}
                       </div>
                     {:else}
                       <div class="finding-actions">
@@ -464,7 +480,7 @@
                           disabled={busy === f.id}
                           onclick={() => compileAndResolve(f)}
                         >
-                          Compile
+                          {i18n.t('maintenance.compile')}
                         </button>
                         <button
                           type="button"
@@ -472,7 +488,7 @@
                           disabled={busy === f.id}
                           onclick={() => resolveFinding(f.id)}
                         >
-                          Dismiss
+                          {i18n.t('common.dismiss')}
                         </button>
                       </div>
                     {/if}
@@ -486,7 +502,7 @@
                         disabled={busy === f.id}
                         onclick={() => deleteEdgeAndResolve(f)}
                       >
-                        Delete edge
+                        {i18n.t('maintenance.deleteEdge')}
                       </button>
                       <button
                         type="button"
@@ -494,33 +510,33 @@
                         disabled={busy === f.id}
                         onclick={() => resolveFinding(f.id)}
                       >
-                        Dismiss
+                        {i18n.t('common.dismiss')}
                       </button>
                     </div>
                   {:else if kind === 'duplicate_entity'}
                     <p class="finding-detail">
-                      Possible duplicate:
+                      {i18n.t('maintenance.possibleDuplicate')}
                       <strong>{partyName(f, 'a')}</strong>
-                      and
+                      {i18n.t('maintenance.and')}
                       <strong>{partyName(f, 'b')}</strong>
                     </p>
                     <div class="finding-actions">
                       <button type="button" disabled={busy === f.id} onclick={() => openMerge(f)}>
-                        Merge
+                        {i18n.t('maintenance.merge')}
                       </button>
                       <button
                         type="button"
                         disabled={busy === f.id}
                         onclick={() => void openEntityRef(f.payload.a)}
                       >
-                        Open A
+                        {i18n.t('maintenance.openA')}
                       </button>
                       <button
                         type="button"
                         disabled={busy === f.id}
                         onclick={() => void openEntityRef(f.payload.b)}
                       >
-                        Open B
+                        {i18n.t('maintenance.openB')}
                       </button>
                       <button
                         type="button"
@@ -528,7 +544,7 @@
                         disabled={busy === f.id}
                         onclick={() => resolveFinding(f.id)}
                       >
-                        Dismiss
+                        {i18n.t('common.dismiss')}
                       </button>
                     </div>
                   {:else if kind === 'alias_collision'}
@@ -539,18 +555,27 @@
                     {@const aResolved = typeof f.payload.a_name === 'string'}
                     {@const bResolved = typeof f.payload.b_name === 'string'}
                     <p class="finding-detail">
-                      <strong>{String(f.payload.alias)}</strong> is claimed by two entities:
+                      <strong>{String(f.payload.alias)}</strong>
+                      {i18n.t('maintenance.aliasClaimed')}
                     </p>
                     <div class="conflict-parties">
                       <div class="party">
                         <span class="party-name">{aName}</span>
                         <span class="party-kind">{entityRef(f.payload.a)?.kind ?? ''}</span>
-                        <span class="party-tag">{aIsName ? 'as name' : 'as alias'}</span>
+                        <span class="party-tag"
+                          >{aIsName
+                            ? i18n.t('maintenance.asName')
+                            : i18n.t('maintenance.asAlias')}</span
+                        >
                       </div>
                       <div class="party">
                         <span class="party-name">{bName}</span>
                         <span class="party-kind">{entityRef(f.payload.b)?.kind ?? ''}</span>
-                        <span class="party-tag">{bIsName ? 'as name' : 'as alias'}</span>
+                        <span class="party-tag"
+                          >{bIsName
+                            ? i18n.t('maintenance.asName')
+                            : i18n.t('maintenance.asAlias')}</span
+                        >
                       </div>
                     </div>
                     <div class="finding-actions">
@@ -561,7 +586,7 @@
                           onclick={() =>
                             resolveCollision(f, String(f.payload.a), String(f.payload.b))}
                         >
-                          Keep on {aName}
+                          {i18n.t('maintenance.keepOn', { name: aName })}
                         </button>
                       {/if}
                       {#if aResolved && bResolved && !aIsName}
@@ -571,25 +596,25 @@
                           onclick={() =>
                             resolveCollision(f, String(f.payload.b), String(f.payload.a))}
                         >
-                          Keep on {bName}
+                          {i18n.t('maintenance.keepOn', { name: bName })}
                         </button>
                       {/if}
                       <button type="button" disabled={busy === f.id} onclick={() => openMerge(f)}>
-                        Merge…
+                        {i18n.t('maintenance.mergeEllipsis')}
                       </button>
                       <button
                         type="button"
                         disabled={busy === f.id}
                         onclick={() => void openEntityRef(f.payload.a)}
                       >
-                        Open {aName}
+                        {i18n.t('maintenance.openNamed', { name: aName })}
                       </button>
                       <button
                         type="button"
                         disabled={busy === f.id}
                         onclick={() => void openEntityRef(f.payload.b)}
                       >
-                        Open {bName}
+                        {i18n.t('maintenance.openNamed', { name: bName })}
                       </button>
                       <button
                         type="button"
@@ -597,11 +622,11 @@
                         disabled={busy === f.id}
                         onclick={() => resolveFinding(f.id)}
                       >
-                        Dismiss
+                        {i18n.t('common.dismiss')}
                       </button>
                     </div>
                   {:else}
-                    <p class="finding-detail">Orphaned relation edge</p>
+                    <p class="finding-detail">{i18n.t('maintenance.orphanedRelationEdge')}</p>
                     <div class="finding-actions">
                       <button
                         type="button"
@@ -609,7 +634,7 @@
                         disabled={busy === f.id}
                         onclick={() => resolveFinding(f.id)}
                       >
-                        Dismiss
+                        {i18n.t('common.dismiss')}
                       </button>
                     </div>
                   {/if}
