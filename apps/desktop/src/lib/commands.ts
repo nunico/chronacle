@@ -77,9 +77,13 @@ export async function deleteSource(id: string): Promise<void> {
  * Send a chat message to the AI agent (streaming response is delivered
  * via the `chat-token` event).
  */
-export async function chatSend(message: string, campaignId: string | null): Promise<void> {
+export async function chatSend(
+  message: string,
+  campaignId: string | null,
+  responseLanguage: 'en' | 'de' | 'fr' | 'es',
+): Promise<void> {
   return invoke('chat_send', {
-    request: { message, campaignId },
+    request: { message, campaignId, responseLanguage },
   });
 }
 

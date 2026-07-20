@@ -12,16 +12,20 @@ pub(super) fn build_system_prompt(
     rag_context: &str,
     entity_context: &str,
     rules_context: &str,
+    response_language: &str,
 ) -> String {
     let has_rag = !rag_context.is_empty();
     let has_entities = !entity_context.is_empty();
     let has_rules = !rules_context.is_empty();
 
     if !has_rag && !has_entities && !has_rules {
-        return "You are an expert Game Master assistant. \
+        return format!("You are an expert Game Master assistant. \
             Answer the user's question to the best of your ability. \
-            If you don't know the answer, say so — do not make up rules."
-            .to_string();
+            If you don't know the answer, say so — do not make up rules.\n\n\
+            RESPONSE LANGUAGE:\n\
+            - Respond in {}. When using source material or campaign notes, keep source and entity names exact and preserve the exact [Source: ...] / [Entity: ...] citation syntax.",
+            response_language_name(response_language),
+        );
     }
 
     let mut prompt = String::from("You are an expert Game Master assistant.\n\n");
@@ -42,6 +46,10 @@ pub(super) fn build_system_prompt(
 
     prompt.push_str("INSTRUCTIONS:\n");
     prompt.push_str("- Read every passage and note above carefully BEFORE answering.\n");
+    prompt.push_str(&format!(
+        "- Respond in {}. When using source material or campaign notes, keep source and entity names exact and preserve the exact [Source: ...] / [Entity: ...] citation syntax.\n",
+        response_language_name(response_language),
+    ));
 
     if has_rag {
         prompt.push_str(
@@ -116,13 +124,29 @@ pub(super) fn build_system_prompt(
     prompt
 }
 
+fn response_language_name(response_language: &str) -> &'static str {
+    match response_language {
+        "de" => "German",
+        "fr" => "French",
+        "es" => "Spanish",
+        _ => "English",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    fn system_prompt_requires_the_resolved_response_language() {
+        let prompt = build_system_prompt("", "", "", "fr");
+        assert!(prompt.contains("Respond in French"));
+        assert!(prompt.contains("keep source and entity names exact"));
+    }
+
+    #[test]
     fn test_system_prompt_without_context() {
-        let prompt = build_system_prompt("", "", "");
+        let prompt = build_system_prompt("", "", "", "en");
         assert!(prompt.contains("Game Master assistant"));
         assert!(!prompt.contains("REFERENCE MATERIAL"));
     }
@@ -131,7 +155,7 @@ mod tests {
     fn test_system_prompt_with_context() {
         let ctx =
             "[0] Source: \"PHB.pdf\", p. 72 — \"Fighter Class Features\"\nAction Surge text.\n\n";
-        let prompt = build_system_prompt(ctx, "", "");
+        let prompt = build_system_prompt(ctx, "", "", "en");
         assert!(prompt.contains("REFERENCE MATERIAL"));
         assert!(prompt.contains("PHB.pdf"));
         assert!(prompt.contains("[Source: \"<source name>\""));
@@ -151,7 +175,8 @@ mod tests {
     /// D" trap, (b) require enumeration questions to list every attributed item.
     #[test]
     fn test_system_prompt_guards_entity_scope_and_enumeration() {
-        let prompt = build_system_prompt("[0] Source: \"x.pdf\", p. 1 — \"\"\ntext\n\n", "", "");
+        let prompt =
+            build_system_prompt("[0] Source: \"x.pdf\", p. 1 — \"\"\ntext\n\n", "", "", "en");
         // Entity-scope rule must be present.
         assert!(
             prompt.contains("Entity scope is critical"),
@@ -177,7 +202,7 @@ mod tests {
     fn build_system_prompt_both_contexts_includes_both_sections() {
         let rag = "[0] Source: \"PHB\", p.1 — \"Intro\"\nSome rules.\n\n";
         let ent = "Campaign notes (your GM records):\n\n[npc] Aldric\n";
-        let prompt = build_system_prompt(rag, ent, "");
+        let prompt = build_system_prompt(rag, ent, "", "en");
         assert!(prompt.contains("REFERENCE MATERIAL"), "missing RAG section");
         assert!(prompt.contains("CAMPAIGN NOTES"), "missing entity section");
         assert!(
@@ -193,7 +218,7 @@ mod tests {
     #[test]
     fn build_system_prompt_entity_only_omits_rag_section() {
         let ent = "Campaign notes (your GM records):\n\n[npc] Aldric\n";
-        let prompt = build_system_prompt("", ent, "");
+        let prompt = build_system_prompt("", ent, "", "en");
         assert!(prompt.contains("CAMPAIGN NOTES"), "missing entity section");
         assert!(
             !prompt.contains("REFERENCE MATERIAL"),
@@ -213,7 +238,7 @@ mod tests {
     fn build_system_prompt_rag_only_regression() {
         // Regression: existing behaviour must be preserved when entity_context is empty.
         let rag = "[0] Source: \"PHB\", p.1 — \"Intro\"\nSome rules.\n\n";
-        let prompt = build_system_prompt(rag, "", "");
+        let prompt = build_system_prompt(rag, "", "", "en");
         assert!(prompt.contains("REFERENCE MATERIAL"), "missing RAG section");
         assert!(
             !prompt.contains("CAMPAIGN NOTES"),
@@ -239,7 +264,7 @@ mod tests {
 
     #[test]
     fn build_system_prompt_neither_returns_fallback() {
-        let prompt = build_system_prompt("", "", "");
+        let prompt = build_system_prompt("", "", "", "en");
         assert!(
             !prompt.contains("REFERENCE MATERIAL"),
             "unexpected RAG section"
@@ -259,7 +284,7 @@ mod tests {
         let rules = "COMPILED RULES (distilled from your rulebooks):\n\n[mechanic] Initiative — PHB p.14\nRoll d20.\n\n";
         let rag = "[0] Source: \"PHB\", p.1 — \"Intro\"\nSome rules.\n\n";
         let ent = "Campaign notes (your GM records):\n\n[npc] Aldric\n";
-        let prompt = build_system_prompt(rag, ent, rules);
+        let prompt = build_system_prompt(rag, ent, rules, "en");
         let i_rules = prompt.find("COMPILED RULES").expect("rules section");
         let i_notes = prompt.find("CAMPAIGN NOTES").expect("notes section");
         let i_rag = prompt.find("REFERENCE MATERIAL").expect("rag section");
@@ -276,7 +301,7 @@ mod tests {
     #[test]
     fn no_rules_context_is_todays_behavior() {
         let rag = "[0] Source: \"PHB\", p.1 — \"Intro\"\nSome rules.\n\n";
-        let with = build_system_prompt(rag, "", "");
+        let with = build_system_prompt(rag, "", "", "en");
         assert!(!with.contains("COMPILED RULES"));
         assert!(
             with.contains("REFERENCE MATERIAL"),

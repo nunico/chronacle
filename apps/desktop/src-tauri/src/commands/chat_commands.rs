@@ -58,6 +58,7 @@ pub async fn get_chat_history(
 pub struct ChatRequest {
     pub message: String,
     pub campaign_id: Option<String>,
+    pub response_language: Option<String>,
 }
 
 /// Chat message response chunk.
@@ -86,6 +87,9 @@ pub async fn chat_send(
     let state_ref = state.inner().clone();
     let message = request.message;
     let campaign_id = request.campaign_id;
+    let response_language = request
+        .response_language
+        .unwrap_or_else(|| "en".to_string());
 
     // Spawn so the command returns immediately — tokens come via events
     let task = tokio::spawn(async move {
@@ -97,6 +101,7 @@ pub async fn chat_send(
             &state_ref.llm_provider,
             &message,
             campaign_id.as_deref(),
+            &response_language,
         )
         .await
         {
@@ -211,14 +216,14 @@ mod tests {
     /// `None`, history is unscoped, and RAG retrieval skips the DB.
     #[test]
     fn chat_request_deserializes_camel_case_campaign_id() {
-        let json =
-            r#"{"message":"what does cover do?","campaignId":"d5a8019596844cb8b46270830df952f"}"#;
+        let json = r#"{"message":"what does cover do?","campaignId":"d5a8019596844cb8b46270830df952f","responseLanguage":"de"}"#;
         let req: ChatRequest = serde_json::from_str(json).expect("camelCase IPC payload");
         assert_eq!(req.message, "what does cover do?");
         assert_eq!(
             req.campaign_id.as_deref(),
             Some("d5a8019596844cb8b46270830df952f"),
         );
+        assert_eq!(req.response_language.as_deref(), Some("de"));
     }
 
     #[test]
@@ -226,6 +231,7 @@ mod tests {
         let json = r#"{"message":"hi"}"#;
         let req: ChatRequest = serde_json::from_str(json).expect("no campaign id is valid");
         assert!(req.campaign_id.is_none());
+        assert!(req.response_language.is_none());
     }
 
     // ── Chat cancellation ────────────────────────────────────────────────────

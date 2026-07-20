@@ -57,6 +57,7 @@ pub async fn stream_response<C: surrealdb::Connection>(
     llm_provider: &RwLock<Arc<dyn LlmProvider>>,
     message: &str,
     campaign_id: Option<&str>,
+    response_language: &str,
 ) -> Result<mpsc::Receiver<Result<String, LlmError>>, AgentError> {
     // 1. Persist the user message
     persist_message(db, "user", message, campaign_id).await?;
@@ -120,7 +121,8 @@ pub async fn stream_response<C: surrealdb::Connection>(
 
     // 5. Build context-augmented system prompt
     let context = context::build_context(&results);
-    let system_prompt = prompt::build_system_prompt(&context, &entity_context, &rules_context);
+    let system_prompt =
+        prompt::build_system_prompt(&context, &entity_context, &rules_context, response_language);
 
     if std::env::var("CHRONACLE_RAG_DEBUG").is_ok() {
         let llm_type = llm_provider

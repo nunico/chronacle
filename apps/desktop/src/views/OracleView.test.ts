@@ -126,16 +126,21 @@ describe('OracleView', () => {
     expect(screen.queryByText('Alpha passage.')).toBeNull();
   });
 
-  it('Enter submits, calling chatSend with the active campaign id', async () => {
-    render(OracleView, {
-      props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn() },
-    });
-    const input = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
-    await fireEvent.input(input, { target: { value: 'How does cover work?' } });
-    await fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => {
-      expect(m.chatSend).toHaveBeenCalledWith('How does cover work?', 'camp-1');
-    });
+  it('resolves the response language from the sent message before calling chatSend', async () => {
+    i18n.setLocale('de');
+    try {
+      render(OracleView, {
+        props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn() },
+      });
+      const input = await screen.findByPlaceholderText('Frage nach einer Regel, einem Namen, einem Ort…');
+      await fireEvent.input(input, { target: { value: 'Quelle est la règle ?' } });
+      await fireEvent.keyDown(input, { key: 'Enter' });
+      await waitFor(() => {
+        expect(m.chatSend).toHaveBeenCalledWith('Quelle est la règle ?', 'camp-1', 'fr');
+      });
+    } finally {
+      i18n.setLocale('en');
+    }
   });
 
   it('the paperclip button triggers onOpenUpload', async () => {
@@ -188,7 +193,7 @@ describe('OracleView', () => {
     await fireEvent.click(retry);
     await waitFor(() => {
       expect(m.chatSend).toHaveBeenCalledTimes(2);
-      expect(m.chatSend).toHaveBeenLastCalledWith('How does cover work?', 'camp-1');
+      expect(m.chatSend).toHaveBeenLastCalledWith('How does cover work?', 'camp-1', 'en');
     });
   });
 
