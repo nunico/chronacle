@@ -70,6 +70,7 @@ export const sourceCatalog = {
       'Embedding provider set to {model}. Re-index existing sources below to apply it.',
     connectionFailed: 'Connection failed: {error}',
     connected: 'Connected: {provider}',
+    connecting: 'Connecting…',
     apiKeyRequired: 'An API key is required for this provider.',
     invalidBaseUrl: 'The base URL is not a valid URL (expected e.g. http://localhost:11434).',
     connectionStatus: 'Connection status',

@@ -70,6 +70,7 @@ const es = {
       'Proveedor de incrustaciones establecido en {model}. Vuelve a indexar las fuentes existentes.',
     connectionFailed: 'Error de conexión: {error}',
     connected: 'Conectado: {provider}',
+    connecting: 'Conectando…',
     apiKeyRequired: 'Se requiere una clave API para este proveedor.',
     invalidBaseUrl: 'La URL base no es válida (por ejemplo, http://localhost:11434).',
     connectionStatus: 'Estado de conexión',

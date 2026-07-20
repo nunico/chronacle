@@ -539,10 +539,21 @@
     {/if}
 
     <div class="actions">
-      <Button variant="secondary" onclick={saveSettings} disabled={isSaving} loading={isSaving}>
+      <Button
+        variant="secondary"
+        onclick={saveSettings}
+        disabled={isSaving}
+        loading={isSaving}
+        loadingText={i18n.t('status.saving')}
+      >
         {i18n.t('settings.saveSettings')}
       </Button>
-      <Button onclick={connect} disabled={isConnecting || isSaving} loading={isConnecting}>
+      <Button
+        onclick={connect}
+        disabled={isConnecting || isSaving}
+        loading={isConnecting}
+        loadingText={i18n.t('settingsPage.connecting')}
+      >
         {i18n.t('settings.saveConnect')}
       </Button>
     </div>
@@ -745,7 +756,8 @@
       <Button
         onclick={saveEmbeddingSettings}
         disabled={isSavingEmbedding}
-        loading={isSavingEmbedding}>{i18n.t('settingsPage.saveEmbeddingProvider')}</Button
+        loading={isSavingEmbedding}
+        loadingText={i18n.t('status.saving')}>{i18n.t('settingsPage.saveEmbeddingProvider')}</Button
       >
     </div>
   </section>
@@ -753,8 +765,11 @@
   <section class="config-section">
     <h3>{i18n.t('settingsPage.reindexSources')}</h3>
     <p class="muted">{i18n.t('settingsPage.reindexDescription')}</p>
-    <Button disabled={reindexing} onclick={onReindexAll} loading={reindexing}
-      >{i18n.t('settingsPage.reindexAll')}</Button
+    <Button
+      disabled={reindexing}
+      onclick={onReindexAll}
+      loading={reindexing}
+      loadingText={i18n.t('settingsPage.reindexing')}>{i18n.t('settingsPage.reindexAll')}</Button
     >
     {#if reindexing && reindexProgress}
       <div class="reindex-progress">
@@ -781,8 +796,11 @@
   <section class="config-section">
     <h3>{i18n.t('settingsPage.relationshipGraph')}</h3>
     <p class="muted">{i18n.t('settingsPage.relationshipDescription')}</p>
-    <Button disabled={resyncing} onclick={onResyncWikilinks} loading={resyncing}
-      >{i18n.t('settingsPage.rebuildLinks')}</Button
+    <Button
+      disabled={resyncing}
+      onclick={onResyncWikilinks}
+      loading={resyncing}
+      loadingText={i18n.t('settingsPage.rebuilding')}>{i18n.t('settingsPage.rebuildLinks')}</Button
     >
     {#if resyncError}
       <div class="reindex-error">

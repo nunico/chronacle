@@ -70,6 +70,7 @@ const fr = {
       'Fournisseur d’intégration défini sur {model}. Réindexez les sources existantes ci-dessous.',
     connectionFailed: 'Échec de la connexion : {error}',
     connected: 'Connecté : {provider}',
+    connecting: 'Connexion…',
     apiKeyRequired: 'Une clé API est requise pour ce fournisseur.',
     invalidBaseUrl: 'L’URL de base est invalide (par exemple http://localhost:11434).',
     connectionStatus: 'État de la connexion',
