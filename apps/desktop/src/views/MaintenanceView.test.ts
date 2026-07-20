@@ -103,6 +103,7 @@ describe('MaintenanceView', () => {
       expect(await screen.findByRole('heading', { name: 'Wartung' })).toBeTruthy();
       expect(screen.getByRole('tab', { name: 'Vorschläge' })).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Vorschlag annehmen' })).toBeTruthy();
+      expect(screen.getByText('Sitzung')).toBeTruthy();
     } finally {
       i18n.setLocale('en');
     }
