@@ -15,6 +15,7 @@
   let bytesDownloaded = $state(0);
   let totalBytes = $state(0);
   let error = $state('');
+  let selectedModel = $state('nomic-embed-text-v1.5');
 
   // Guards against firing onModelReady twice (once from the terminal
   // progress event, once from the command's promise resolving).
@@ -37,6 +38,12 @@
     // the app and configure/use embeddings from there.
     try {
       const status = await getEmbeddingProviderStatus();
+      selectedModel =
+        status.mode === 'local_multilingual'
+          ? 'multilingual-e5-base'
+          : status.mode === 'local_nomic'
+            ? 'nomic-embed-text-v1.5'
+            : (status.model ?? 'nomic-embed-text-v1.5');
       if (status.backend !== 'local' || !status.local_available || status.local_cached) {
         onModelReady();
         return;
@@ -126,7 +133,7 @@
       {i18n.t('modelDownload.description')}
     </p>
 
-    <p class="model-name">nomic-embed-text-v1.5 (768-dimension)</p>
+    <p class="model-name">{selectedModel} ({i18n.t('settingsPage.dimension')}: 768)</p>
 
     {#if checking}
       <div class="checking">

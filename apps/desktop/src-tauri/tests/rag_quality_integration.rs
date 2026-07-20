@@ -16,7 +16,7 @@
 
 use chronacle_ingestion::chunker::{chunk_document, ExtractedDoc, PageContent};
 use chronacle_ingestion::text_normalizer::normalize;
-use chronacle_providers::embedding::{EmbeddingProvider, FastEmbedProvider};
+use chronacle_providers::embedding::{EmbeddingProvider, FastEmbedProvider, LocalEmbeddingMode};
 use chronacle_providers::vector_store::{IndexedChunk, SurrealDbVector, VectorStore};
 use std::sync::Arc;
 use surrealdb::Surreal;
@@ -90,7 +90,7 @@ async fn seed_index(
 #[tokio::test]
 #[ignore = "downloads ~700 MB Nomic model; run locally with: cargo test -- --ignored"]
 async fn orbital_station_question_retrieves_correct_chunk() {
-    let Ok(provider) = FastEmbedProvider::try_new(None) else {
+    let Ok(provider) = FastEmbedProvider::try_new(LocalEmbeddingMode::Nomic, None) else {
         eprintln!("Skipping — nomic model not cached");
         return;
     };
@@ -122,7 +122,7 @@ async fn orbital_station_question_retrieves_correct_chunk() {
 #[tokio::test]
 #[ignore = "downloads ~700 MB Nomic model; run locally with: cargo test -- --ignored"]
 async fn council_factions_question_retrieves_correct_chunk() {
-    let Ok(provider) = FastEmbedProvider::try_new(None) else {
+    let Ok(provider) = FastEmbedProvider::try_new(LocalEmbeddingMode::Nomic, None) else {
         eprintln!("Skipping — nomic model not cached");
         return;
     };
@@ -164,7 +164,7 @@ async fn council_factions_question_retrieves_correct_chunk() {
 #[tokio::test]
 #[ignore = "downloads ~700 MB Nomic model; run locally with: cargo test -- --ignored"]
 async fn retrieval_ranks_target_chunk_above_distractors() {
-    let Ok(provider) = FastEmbedProvider::try_new(None) else {
+    let Ok(provider) = FastEmbedProvider::try_new(LocalEmbeddingMode::Nomic, None) else {
         eprintln!("Skipping — nomic model not cached");
         return;
     };

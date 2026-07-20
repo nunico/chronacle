@@ -600,13 +600,34 @@ pub(crate) async fn build_embedding_provider_from_db(
     build_embedding_provider_from_map(&settings, data_dir).await
 }
 
+/// Resolve the canonical embedding-mode setting, preserving existing settings
+/// created before the explicit mode selector existed.
+///
+/// The legacy `embedding_backend` stays readable for backwards compatibility:
+/// `local` maps to the original Nomic model, while `openai` and `cloud` map to
+/// the cloud provider. New saves always use the canonical `embedding_mode`.
+pub(crate) fn embedding_mode_from_settings(
+    settings: &HashMap<String, String>,
+    local_available: bool,
+) -> &'static str {
+    match settings.get("embedding_mode").map(String::as_str) {
+        Some("local_nomic") => "local_nomic",
+        Some("local_multilingual") => "local_multilingual",
+        Some("cloud") => "cloud",
+        _ => match settings.get("embedding_backend").map(String::as_str) {
+            Some("local") => "local_nomic",
+            Some("openai" | "cloud") => "cloud",
+            _ if local_available => "local_nomic",
+            _ => "cloud",
+        },
+    }
+}
+
 /// Construct the embedding provider from settings.
 ///
-/// `embedding_backend` selects between `local` (bundled fastembed /
-/// `nomic-embed-text-v1.5`) and `openai`/`cloud` (an OpenAI-compatible
-/// `/embeddings` endpoint at 768 dims). When the setting is absent, the default
-/// is `local` where ONNX Runtime is bundled, and `openai` where it is not
-/// (notably macOS x86_64) — so Intel Macs steer to the cloud automatically.
+/// `embedding_mode` selects Nomic, multilingual E5 Base, or an
+/// OpenAI-compatible cloud embedding provider. Both local modes are 768
+/// dimensional; cloud providers are accepted only when they match that schema.
 ///
 /// The local path mirrors the startup constraint: only construct fastembed when
 /// the model is already cached; otherwise return the mock placeholder and let
@@ -617,22 +638,14 @@ pub(crate) async fn build_embedding_provider_from_map(
     data_dir: &std::path::Path,
 ) -> Arc<dyn chronacle_providers::embedding::EmbeddingProvider> {
     use chronacle_providers::embedding::{
-        local_embeddings_available, FastEmbedProvider, MockEmbeddingProvider,
+        local_embeddings_available, FastEmbedProvider, LocalEmbeddingMode, MockEmbeddingProvider,
         OpenAiEmbeddingProvider,
     };
 
-    let default_backend = if local_embeddings_available() {
-        "local"
-    } else {
-        "openai"
-    };
-    let backend = settings
-        .get("embedding_backend")
-        .map(|s| s.as_str())
-        .unwrap_or(default_backend);
+    let mode = embedding_mode_from_settings(settings, local_embeddings_available());
 
-    match backend {
-        "openai" | "cloud" => {
+    match mode {
+        "cloud" => {
             let api_key = settings
                 .get("embedding_api_key")
                 .cloned()
@@ -643,6 +656,16 @@ pub(crate) async fn build_embedding_provider_from_map(
                 .cloned()
                 .unwrap_or_default();
             let provider = OpenAiEmbeddingProvider::new(api_key, model, base_url);
+            if provider.dimension() != chronacle_providers::embedding::CLOUD_EMBED_DIM {
+                eprintln!(
+                    "Embedding provider '{}' has unsupported dimension {}; using mock placeholder.",
+                    provider.model_name(),
+                    provider.dimension()
+                );
+                return Arc::new(MockEmbeddingProvider::new(
+                    chronacle_providers::embedding::CLOUD_EMBED_DIM,
+                ));
+            }
             eprintln!(
                 "Embedding backend: OpenAI cloud ('{}', {} dim)",
                 provider.model_name(),
@@ -650,10 +673,15 @@ pub(crate) async fn build_embedding_provider_from_map(
             );
             Arc::new(provider)
         }
-        _ => {
-            let cache_dir = FastEmbedProvider::cache_dir(data_dir);
-            if FastEmbedProvider::is_cached(&cache_dir) {
-                match FastEmbedProvider::try_new(Some(&cache_dir)) {
+        "local_nomic" | "local_multilingual" => {
+            let local_mode = if mode == "local_multilingual" {
+                LocalEmbeddingMode::MultilingualE5Base
+            } else {
+                LocalEmbeddingMode::Nomic
+            };
+            let cache_dir = FastEmbedProvider::cache_dir(data_dir, local_mode);
+            if FastEmbedProvider::is_cached(local_mode, &cache_dir) {
+                match FastEmbedProvider::try_new(local_mode, Some(&cache_dir)) {
                     Ok(p) => {
                         eprintln!(
                             "Embedding model '{}' ready ({} dim)",
@@ -678,6 +706,7 @@ pub(crate) async fn build_embedding_provider_from_map(
                 Arc::new(MockEmbeddingProvider::new(768))
             }
         }
+        _ => unreachable!("embedding_mode_from_settings only returns supported values"),
     }
 }
 
@@ -745,6 +774,29 @@ async fn build_custom_provider(
 /// Return a short human-readable provider type name.
 pub(crate) fn provider_type_name(provider: &Arc<dyn LlmProvider>) -> &'static str {
     provider.provider_type()
+}
+
+#[cfg(test)]
+mod embedding_mode_tests {
+    use super::*;
+
+    #[test]
+    fn canonical_embedding_mode_maps_legacy_backends_without_mixing_models() {
+        let settings = HashMap::from([(String::from("embedding_backend"), String::from("local"))]);
+        assert_eq!(embedding_mode_from_settings(&settings, true), "local_nomic");
+
+        let settings = HashMap::from([(String::from("embedding_backend"), String::from("openai"))]);
+        assert_eq!(embedding_mode_from_settings(&settings, true), "cloud");
+
+        let settings = HashMap::from([(
+            String::from("embedding_mode"),
+            String::from("local_multilingual"),
+        )]);
+        assert_eq!(
+            embedding_mode_from_settings(&settings, true),
+            "local_multilingual"
+        );
+    }
 }
 
 #[cfg(test)]

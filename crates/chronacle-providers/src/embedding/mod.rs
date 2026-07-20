@@ -15,7 +15,9 @@ mod mock;
 mod openai;
 
 pub use consistency::{check_embedding_model_consistency, EmbeddingModelMismatch, StaleModelCount};
-pub use local::{local_embeddings_available, ort_dylib_name, FastEmbedProvider};
+pub use local::{
+    local_embeddings_available, ort_dylib_name, FastEmbedProvider, LocalEmbeddingMode,
+};
 pub use mock::MockEmbeddingProvider;
 pub use openai::OpenAiEmbeddingProvider;
 

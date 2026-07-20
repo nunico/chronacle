@@ -111,12 +111,20 @@ export const sourceCatalog = {
     deleteProvider: 'Delete provider',
     removeModel: 'Remove model',
     embeddingProvider: 'Embedding provider',
+    embeddingMode: 'Embedding mode',
     embeddingDescription:
       'How document and query text is turned into vectors for search. The local model runs offline; the cloud option uses an OpenAI-compatible API at 768 dimensions (matching the local index, so switching only requires re-indexing).',
     active: 'Active',
     dimension: 'Dimension',
     backend: 'Backend',
     localEmbedding: 'Local — nomic-embed-text-v1.5 (offline)',
+    localNomicEmbedding: 'Small local — Nomic (offline)',
+    localMultilingualEmbedding: 'Multilingual local — E5 Base (offline)',
+    localNomicDescription: 'Small English-focused model, downloaded once and used offline.',
+    localMultilingualDescription:
+      'Larger multilingual model for German, French, Spanish, and cross-language retrieval. Downloaded once and used offline.',
+    cloudEmbeddingDescription:
+      'OpenAI-compatible embedding API. Requires provider credentials and a 768-dimensional model.',
     cloudEmbedding: 'Cloud — OpenAI-compatible API',
     optional: 'optional',
     saveEmbeddingProvider: 'Save embedding provider',

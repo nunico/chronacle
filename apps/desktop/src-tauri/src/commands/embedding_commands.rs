@@ -14,6 +14,8 @@ use tauri::State;
 pub struct EmbeddingProviderStatus {
     /// `"local"` (fastembed) or `"openai"` (cloud).
     pub backend: String,
+    /// Canonical setting: `local_nomic`, `local_multilingual`, or `cloud`.
+    pub mode: String,
     /// Active model identity (the value stored in `embed_model`).
     pub model: String,
     /// Output vector dimension.
@@ -23,7 +25,7 @@ pub struct EmbeddingProviderStatus {
     /// Whether ONNX Runtime is bundled for this platform (local embeddings can
     /// run). `false` on e.g. macOS x86_64.
     pub local_available: bool,
-    /// Whether the local `nomic-embed-text-v1.5` model is already downloaded.
+    /// Whether the selected local model is already downloaded.
     pub local_cached: bool,
 }
 
@@ -32,19 +34,26 @@ pub struct EmbeddingProviderStatus {
 pub async fn get_embedding_provider_status(
     state: State<'_, Arc<AppState>>,
 ) -> Result<EmbeddingProviderStatus, String> {
-    use chronacle_providers::embedding::{local_embeddings_available, FastEmbedProvider};
+    use chronacle_providers::embedding::{
+        local_embeddings_available, FastEmbedProvider, LocalEmbeddingMode,
+    };
 
     let map = settings_map(&state.db).await?;
 
     let local_available = local_embeddings_available();
-    let default_backend = if local_available { "local" } else { "openai" };
-    let backend = map
-        .get("embedding_backend")
-        .cloned()
-        .unwrap_or_else(|| default_backend.to_string());
+    let mode = crate::embedding_mode_from_settings(&map, local_available);
+    let backend = if mode == "cloud" { "openai" } else { "local" }.to_string();
+    let local_mode = match mode {
+        "local_multilingual" => LocalEmbeddingMode::MultilingualE5Base,
+        _ => LocalEmbeddingMode::Nomic,
+    };
 
     let data_dir = crate::app_data_dir();
-    let local_cached = FastEmbedProvider::is_cached(&FastEmbedProvider::cache_dir(&data_dir));
+    let local_cached = mode != "cloud"
+        && FastEmbedProvider::is_cached(
+            local_mode,
+            &FastEmbedProvider::cache_dir(&data_dir, local_mode),
+        );
 
     let (model, dimension) = {
         let provider = state
@@ -61,6 +70,7 @@ pub async fn get_embedding_provider_status(
 
     Ok(EmbeddingProviderStatus {
         backend,
+        mode: mode.to_string(),
         model,
         dimension,
         api_key_configured,
@@ -117,12 +127,27 @@ pub async fn get_embedding_model_mismatch(
         .map_err(|e| format!("mismatch check failed: {e}"))
 }
 
-/// Check whether the nomic-embed-text-v1.5 model is already cached.
+/// Check whether the selected local embedding model is already cached.
 #[tauri::command]
 pub async fn check_embedding_model(_state: State<'_, Arc<AppState>>) -> Result<bool, String> {
+    use chronacle_providers::embedding::LocalEmbeddingMode;
+    let map = settings_map(&_state.db).await?;
+    let mode = crate::embedding_mode_from_settings(
+        &map,
+        chronacle_providers::embedding::local_embeddings_available(),
+    );
+    if mode == "cloud" {
+        return Ok(true);
+    }
+    let local_mode = if mode == "local_multilingual" {
+        LocalEmbeddingMode::MultilingualE5Base
+    } else {
+        LocalEmbeddingMode::Nomic
+    };
     let data_dir = crate::app_data_dir();
-    let cache_dir = chronacle_providers::embedding::FastEmbedProvider::cache_dir(&data_dir);
-    Ok(chronacle_providers::embedding::FastEmbedProvider::is_cached(&cache_dir))
+    let cache_dir =
+        chronacle_providers::embedding::FastEmbedProvider::cache_dir(&data_dir, local_mode);
+    Ok(chronacle_providers::embedding::FastEmbedProvider::is_cached(local_mode, &cache_dir))
 }
 
 /// Download the embedding model with streaming progress.
@@ -135,8 +160,22 @@ pub async fn download_embedding_model(
     app_handle: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
+    use chronacle_providers::embedding::{FastEmbedProvider, LocalEmbeddingMode};
+    let settings = settings_map(&state.db).await?;
+    let selected_mode = crate::embedding_mode_from_settings(
+        &settings,
+        chronacle_providers::embedding::local_embeddings_available(),
+    );
+    if selected_mode == "cloud" {
+        return Err("Cloud embeddings do not require a local model download.".to_string());
+    }
+    let local_mode = if selected_mode == "local_multilingual" {
+        LocalEmbeddingMode::MultilingualE5Base
+    } else {
+        LocalEmbeddingMode::Nomic
+    };
     let data_dir = crate::app_data_dir();
-    let cache_dir = data_dir.join("embedding_model");
+    let cache_dir = FastEmbedProvider::cache_dir(&data_dir, local_mode);
 
     // Ensure the cache directory exists
     tokio::fs::create_dir_all(&cache_dir)
@@ -159,13 +198,7 @@ pub async fn download_embedding_model(
     let client = reqwest::Client::new();
 
     // Download each model file
-    let model_files = vec![
-        ("tokenizer.json", "tokenizer.json"),
-        ("config.json", "config.json"),
-        ("special_tokens_map.json", "special_tokens_map.json"),
-        ("tokenizer_config.json", "tokenizer_config.json"),
-        ("onnx/model.onnx", "onnx/model.onnx"),
-    ];
+    let model_files = LocalEmbeddingMode::model_files();
 
     // Ensure onnx subdirectory exists
     tokio::fs::create_dir_all(cache_dir.join("onnx"))
@@ -173,7 +206,10 @@ pub async fn download_embedding_model(
         .map_err(|e| format!("Failed to create onnx dir: {e}"))?;
 
     let total_files = model_files.len() as f32;
-    let hf_base = "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main";
+    let hf_base = format!(
+        "https://huggingface.co/{}/resolve/main",
+        local_mode.model_repo()
+    );
 
     for (i, (url_suffix, local_path)) in model_files.iter().enumerate() {
         let url = format!("{hf_base}/{url_suffix}");
@@ -233,7 +269,9 @@ pub async fn download_embedding_model(
     }
 
     // Now initialize the real embedding provider from the cached files
-    let model_dir = cache_dir.join("models--nomic-ai--nomic-embed-text-v1.5/snapshots/download");
+    let model_dir = cache_dir
+        .join(local_mode.hf_hub_model_dir())
+        .join("snapshots/download");
     tokio::fs::create_dir_all(&model_dir)
         .await
         .map_err(|e| format!("Failed to create model dir: {e}"))?;
@@ -242,10 +280,11 @@ pub async fn download_embedding_model(
         .map_err(|e| format!("Failed to create model onnx dir: {e}"))?;
 
     // Copy downloaded files into hf-hub-compatible cache structure
-    for (_, local_path) in &model_files {
+    for (_, local_path) in model_files {
         let src = cache_dir.join(local_path);
         let dst = cache_dir
-            .join("models--nomic-ai--nomic-embed-text-v1.5/snapshots/download")
+            .join(local_mode.hf_hub_model_dir())
+            .join("snapshots/download")
             .join(local_path);
         tokio::fs::copy(&src, &dst)
             .await
@@ -253,7 +292,7 @@ pub async fn download_embedding_model(
     }
 
     // Write a sentinel ref so we know the model is cached
-    let refs_dir = cache_dir.join("models--nomic-ai--nomic-embed-text-v1.5/refs");
+    let refs_dir = cache_dir.join(local_mode.hf_hub_model_dir()).join("refs");
     tokio::fs::create_dir_all(&refs_dir)
         .await
         .map_err(|e| format!("Failed to create refs dir: {e}"))?;
@@ -263,7 +302,7 @@ pub async fn download_embedding_model(
 
     // Initialize the real FastEmbedProvider using the custom cache dir
     let real_provider =
-        chronacle_providers::embedding::FastEmbedProvider::try_new(Some(&cache_dir))
+        chronacle_providers::embedding::FastEmbedProvider::try_new(local_mode, Some(&cache_dir))
             .map_err(|e| format!("Failed to initialize embedding model: {e}"))?;
 
     // Swap the provider in AppState
