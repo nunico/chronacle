@@ -109,6 +109,24 @@ describe('MaintenanceView', () => {
     }
   });
 
+  it('localizes known proposal origins and keeps unknown origins visible', async () => {
+    i18n.setLocale('de');
+    try {
+      m.getProposals.mockResolvedValue([
+        proposal({ id: 'codex_proposal:chat', origin_kind: 'chat' }),
+        proposal({ id: 'codex_proposal:manual', origin_kind: 'manual' }),
+        proposal({ id: 'codex_proposal:unknown', origin_kind: 'imported' }),
+      ]);
+      render(MaintenanceView, { props: {} });
+
+      expect(await screen.findByText('Chat')).toBeTruthy();
+      expect(screen.getByText('manuell')).toBeTruthy();
+      expect(screen.getByText('imported')).toBeTruthy();
+    } finally {
+      i18n.setLocale('en');
+    }
+  });
+
   it('renders pending proposals with kind label, target name, rationale', async () => {
     m.getProposals.mockResolvedValue([proposal()]);
     render(MaintenanceView, { props: {} });
