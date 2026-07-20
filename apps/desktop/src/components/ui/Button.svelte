@@ -15,6 +15,8 @@
     leading?: Snippet;
     trailing?: Snippet;
     children?: Snippet;
+    class?: string;
+    title?: string;
   }
 
   let {
@@ -29,6 +31,8 @@
     leading,
     trailing,
     children,
+    class: className = '',
+    title,
   }: Props = $props();
 
   let isDisabled = $derived(disabled || loading);
@@ -43,7 +47,8 @@
 
 <button
   {type}
-  class={['button', variant, { 'icon-only': iconOnly }]}
+  class={['button', variant, { 'icon-only': iconOnly }, className]}
+  {title}
   aria-label={iconAriaLabel}
   aria-busy={loading || undefined}
   disabled={isDisabled}

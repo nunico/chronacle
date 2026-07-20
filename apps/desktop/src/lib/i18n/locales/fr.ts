@@ -441,6 +441,17 @@ const fr = {
     relationshipMany: '{count} relations',
     alternateNameOne: '{count} nom alternatif',
     alternateNameMany: '{count} noms alternatifs',
+    vaultDescription:
+      'Synchronisez les entités, les séances et les collections dans un dossier de fichiers Markdown — modifiez-les dans n’importe quel éditeur de texte et Chronacle réconcilie les changements. Le texte du bloc compilé marqué est écrasé par Chronacle.',
+    vaultSyncSummary: '{exported} exporté(s) · {unchanged} inchangé(s) · {applied} appliqué(s)',
+    vaultSyncConflicts: '{count} conflits',
+    vaultSyncResolved: '{count} résolu(s)',
+    vaultSyncSoftDeleted: '{count} supprimé(s) logiquement',
+    vaultSyncInvalid: '{count} invalide(s)',
+    vaultSyncFailed: '{count} échec(s)',
+    vaultConflictHint:
+      'Fusionnez les deux fichiers dans votre coffre, puis supprimez le fichier .conflict.md — Chronacle appliquera votre version à la prochaine synchronisation.',
+    pageAbbreviation: 'p.',
   },
 } satisfies MessageCatalog;
 

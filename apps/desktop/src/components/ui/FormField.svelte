@@ -6,11 +6,20 @@
     controlId: string;
     helpText?: string;
     errorText?: string;
+    alertError?: boolean;
     control?: Snippet<[string | undefined]>;
     children?: Snippet;
   }
 
-  let { label, controlId, helpText, errorText, control, children }: Props = $props();
+  let {
+    label,
+    controlId,
+    helpText,
+    errorText,
+    alertError = true,
+    control,
+    children,
+  }: Props = $props();
   let helpId = $derived(helpText ? `${controlId}-help` : undefined);
   let errorId = $derived(errorText ? `${controlId}-error` : undefined);
   let describedBy = $derived([helpId, errorId].filter(Boolean).join(' ') || undefined);
@@ -26,7 +35,9 @@
     {/if}
   </div>
   {#if helpText}<p id={helpId} class="help">{helpText}</p>{/if}
-  {#if errorText}<p id={errorId} class="error" role="alert">{errorText}</p>{/if}
+  {#if errorText}<p id={errorId} class="error" role={alertError ? 'alert' : undefined}>
+      {errorText}
+    </p>{/if}
 </div>
 
 <style>

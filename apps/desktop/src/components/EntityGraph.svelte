@@ -19,6 +19,7 @@
   } from '../lib/commands';
   import { kindColor } from '../lib/graph-colors';
   import { mergeGraph } from '../lib/graph-merge';
+  import Button from './ui/Button.svelte';
 
   interface Props {
     entityId: string;
@@ -339,11 +340,8 @@
   onresize={onDimsChange}
 >
   {#if onClose}
-    <button
-      class="close-btn"
-      onclick={onClose}
-      aria-label={i18n.t('entityUi.closeGraph')}
-      data-autofocus>✕</button
+    <Button iconOnly class="close-btn" ariaLabel={i18n.t('entityUi.closeGraph')} onclick={onClose}
+      >✕</Button
     >
   {/if}
   {#if loading}
@@ -498,38 +496,11 @@
     flex-direction: column;
   }
 
-  /* ── Close button ──────────────────────────────────────────────────────────── */
-  .close-btn {
+  :global(.close-btn) {
     position: absolute;
     top: 8px;
     right: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--r-sm);
-    background: var(--bg-panel-2);
-    color: var(--fg-3);
-    font-size: 14px;
-    line-height: 1;
-    cursor: pointer;
-    transition:
-      background var(--dur-fast),
-      color var(--dur-fast),
-      border-color var(--dur-fast);
     z-index: 1;
-  }
-  .close-btn:hover {
-    background: var(--bg-inset);
-    border-color: var(--line-glow);
-    color: var(--fg-1);
-  }
-  .close-btn:focus-visible {
-    outline: none;
-    box-shadow: var(--glow-focus);
   }
 
   /* ── Edges ─────────────────────────────────────────────────────────────────── */

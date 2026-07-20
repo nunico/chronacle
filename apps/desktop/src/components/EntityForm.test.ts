@@ -11,6 +11,7 @@ vi.mock('../lib/commands', () => ({
 }));
 
 import * as commands from '../lib/commands';
+import { i18n } from '../lib/locale.svelte';
 
 const mockNode = (overrides: Partial<GraphNode> = {}): GraphNode => ({
   id: 'abc',
@@ -22,12 +23,20 @@ const mockNode = (overrides: Partial<GraphNode> = {}): GraphNode => ({
   notes: null,
   created_at: null,
   updated_at: null,
-  date_start: null, date_end: null, is_ongoing: null,
-  sequence_index: null, era: null, duration_label: null,
+  date_start: null,
+  date_end: null,
+  is_ongoing: null,
+  sequence_index: null,
+  era: null,
+  duration_label: null,
   session_id: null,
-  player_name: null, character_class: null,
-  character_level: null, status: null,
-  codex_article: null, codex_stale: null, codex_compiled_at: null,
+  player_name: null,
+  character_class: null,
+  character_level: null,
+  status: null,
+  codex_article: null,
+  codex_stale: null,
+  codex_compiled_at: null,
   ...overrides,
 });
 
@@ -84,7 +93,9 @@ describe('EntityForm', () => {
     render(EntityForm, {
       props: { kind: 'npc' as EntityKind, node: null, onsave: onSave },
     });
-    await fireEvent.input(screen.getByLabelText('Name', { exact: true }), { target: { value: 'New NPC' } });
+    await fireEvent.input(screen.getByLabelText('Name', { exact: true }), {
+      target: { value: 'New NPC' },
+    });
     await fireEvent.submit(screen.getByRole('form'));
     expect(onSave).toHaveBeenCalledOnce();
     expect(onSave.mock.calls[0][0].name).toBe('New NPC');
@@ -144,7 +155,10 @@ describe('EntityForm', () => {
   });
 
   it('shows session dropdown for event kind', () => {
-    const sessions = [mockSession(), mockSession({ id: 'sess2', session_number: 2, title: 'The Dungeon' })];
+    const sessions = [
+      mockSession(),
+      mockSession({ id: 'sess2', session_number: 2, title: 'The Dungeon' }),
+    ];
     render(EntityForm, { props: { kind: 'event' as EntityKind, node: null, sessions } });
     expect(screen.getByLabelText(/session/i)).toBeTruthy();
     expect(screen.getByText(/#1: The Beginning/i)).toBeTruthy();
@@ -160,8 +174,12 @@ describe('EntityForm', () => {
   it('includes sessionId in save payload for event kind', async () => {
     const onSave = vi.fn();
     const sessions = [mockSession()];
-    render(EntityForm, { props: { kind: 'event' as EntityKind, node: null, sessions, onsave: onSave } });
-    await fireEvent.input(screen.getByLabelText('Name', { exact: true }), { target: { value: 'Battle of Helm' } });
+    render(EntityForm, {
+      props: { kind: 'event' as EntityKind, node: null, sessions, onsave: onSave },
+    });
+    await fireEvent.input(screen.getByLabelText('Name', { exact: true }), {
+      target: { value: 'Battle of Helm' },
+    });
     const select = screen.getByLabelText(/session/i) as HTMLSelectElement;
     await fireEvent.change(select, { target: { value: 'sess1' } });
     await fireEvent.submit(screen.getByRole('form'));
@@ -172,7 +190,9 @@ describe('EntityForm', () => {
   it('sets sessionId null when no session selected', async () => {
     const onSave = vi.fn();
     render(EntityForm, { props: { kind: 'event' as EntityKind, node: null, onsave: onSave } });
-    await fireEvent.input(screen.getByLabelText('Name', { exact: true }), { target: { value: 'Battle' } });
+    await fireEvent.input(screen.getByLabelText('Name', { exact: true }), {
+      target: { value: 'Battle' },
+    });
     await fireEvent.submit(screen.getByRole('form'));
     expect(onSave).toHaveBeenCalledOnce();
     expect(onSave.mock.calls[0][0].sessionId).toBeNull();
@@ -188,8 +208,20 @@ describe('EntityForm', () => {
 
   it('renders both outbound and inbound relations with names and rel_type visible', async () => {
     const relations: RelatedEntity[] = [
-      { id: 'loc1', kind: 'location', name: 'Shadowhaven', rel_type: 'lives_in', direction: 'outbound' },
-      { id: 'fac1', kind: 'faction', name: 'Shadow Guild', rel_type: 'member_of', direction: 'inbound' },
+      {
+        id: 'loc1',
+        kind: 'location',
+        name: 'Shadowhaven',
+        rel_type: 'lives_in',
+        direction: 'outbound',
+      },
+      {
+        id: 'fac1',
+        kind: 'faction',
+        name: 'Shadow Guild',
+        rel_type: 'member_of',
+        direction: 'inbound',
+      },
     ];
     vi.mocked(commands.getEntityRelations).mockResolvedValue(relations);
     const node = mockNode();
@@ -209,6 +241,25 @@ describe('EntityForm', () => {
     expect(directions).toContain('←');
   });
 
+  it('localizes relationship kind labels with the active display language', async () => {
+    vi.mocked(commands.getEntityRelations).mockResolvedValue([
+      {
+        id: 'loc1',
+        kind: 'location',
+        name: 'Shadowhaven',
+        rel_type: 'lives_in',
+        direction: 'outbound',
+      },
+    ]);
+    i18n.setLocale('de');
+    try {
+      render(EntityForm, { props: { kind: 'npc' as EntityKind, node: mockNode() } });
+      expect(await screen.findByText('Ort')).toBeTruthy();
+    } finally {
+      i18n.setLocale('en');
+    }
+  });
+
   it('shows the empty state when getEntityRelations returns []', async () => {
     vi.mocked(commands.getEntityRelations).mockResolvedValue([]);
     const node = mockNode();
@@ -222,7 +273,13 @@ describe('EntityForm', () => {
 
   it('calls onOpenEntity with the related entity id and kind when a row is clicked', async () => {
     const relations: RelatedEntity[] = [
-      { id: 'loc1', kind: 'location', name: 'Shadowhaven', rel_type: 'lives_in', direction: 'outbound' },
+      {
+        id: 'loc1',
+        kind: 'location',
+        name: 'Shadowhaven',
+        rel_type: 'lives_in',
+        direction: 'outbound',
+      },
     ];
     vi.mocked(commands.getEntityRelations).mockResolvedValue(relations);
     const onOpenEntity = vi.fn();
@@ -241,7 +298,13 @@ describe('EntityForm', () => {
 
   it('rows are non-interactive (no button) when onOpenEntity is not provided', async () => {
     const relations: RelatedEntity[] = [
-      { id: 'loc1', kind: 'location', name: 'Shadowhaven', rel_type: 'lives_in', direction: 'outbound' },
+      {
+        id: 'loc1',
+        kind: 'location',
+        name: 'Shadowhaven',
+        rel_type: 'lives_in',
+        direction: 'outbound',
+      },
     ];
     vi.mocked(commands.getEntityRelations).mockResolvedValue(relations);
     const node = mockNode();

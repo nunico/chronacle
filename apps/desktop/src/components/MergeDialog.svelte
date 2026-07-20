@@ -8,9 +8,9 @@
     type FieldChoice,
     type GraphNode,
   } from '../lib/commands';
-  import { modalBehavior } from '../lib/actions/modal';
   import { i18n } from '../lib/locale.svelte';
   import Button from './ui/Button.svelte';
+  import Dialog from './ui/Dialog.svelte';
 
   interface Props {
     idA: string;
@@ -126,99 +126,76 @@
   }
 </script>
 
-<div
-  class="overlay"
-  role="dialog"
-  aria-modal="true"
-  aria-label={i18n.t('entityUi.mergeEntities')}
-  use:modalBehavior={{ onClose: () => onclose?.() }}
->
-  <div class="dialog">
-    <h2 class="heading">{i18n.t('entityUi.mergeEntities')}</h2>
+{#snippet mergeBody()}
+  {#if loading}
+    <p class="muted">{i18n.t('entityUi.loading')}</p>
+  {:else if loadError}
+    <p class="error" role="alert">{loadError}</p>
+  {:else if nodeA && nodeB}
+    <div class="side-by-side">
+      <label class="side" class:chosen={survivor === 'a'}>
+        <input type="radio" name="merge-survivor" value="a" bind:group={survivor} />
+        <span class="side-name">{nodeA.name}</span>
+        <p class="side-summary">{nodeA.summary ?? i18n.t('entityUi.noSummary')}</p>
+      </label>
+      <label class="side" class:chosen={survivor === 'b'}>
+        <input type="radio" name="merge-survivor" value="b" bind:group={survivor} />
+        <span class="side-name">{nodeB.name}</span>
+        <p class="side-summary">{nodeB.summary ?? i18n.t('entityUi.noSummary')}</p>
+      </label>
+    </div>
+    <p class="hint">{i18n.t('entityUi.mergeHint')}</p>
 
-    {#if loading}
-      <p class="muted">{i18n.t('entityUi.loading')}</p>
-    {:else if loadError}
-      <p class="error" role="alert">{loadError}</p>
-    {:else if nodeA && nodeB}
-      <div class="side-by-side">
-        <label class="side" class:chosen={survivor === 'a'}>
-          <input type="radio" name="merge-survivor" value="a" bind:group={survivor} />
-          <span class="side-name">{nodeA.name}</span>
-          <p class="side-summary">{nodeA.summary ?? i18n.t('entityUi.noSummary')}</p>
-        </label>
-        <label class="side" class:chosen={survivor === 'b'}>
-          <input type="radio" name="merge-survivor" value="b" bind:group={survivor} />
-          <span class="side-name">{nodeB.name}</span>
-          <p class="side-summary">{nodeB.summary ?? i18n.t('entityUi.noSummary')}</p>
-        </label>
-      </div>
-      <p class="hint">{i18n.t('entityUi.mergeHint')}</p>
-
-      <div class="field-choice">
-        <span class="field-choice-label">{i18n.t('entityUi.summary')}</span>
-        <select bind:value={summaryChoice}>
-          <option value="keepSurvivor"
-            >{i18n.t('entityUi.keepEntity', { name: survivorNode?.name ?? '' })}</option
-          >
-          <option value="keepLoser"
-            >{i18n.t('entityUi.keepEntity', { name: loserNode?.name ?? '' })}</option
-          >
-          <option value="keepBoth">{i18n.t('entityUi.keepBoth')}</option>
-        </select>
-      </div>
-      <div class="field-choice">
-        <span class="field-choice-label">{i18n.t('entityUi.notes')}</span>
-        <select bind:value={notesChoice}>
-          <option value="keepSurvivor"
-            >{i18n.t('entityUi.keepEntity', { name: survivorNode?.name ?? '' })}</option
-          >
-          <option value="keepLoser"
-            >{i18n.t('entityUi.keepEntity', { name: loserNode?.name ?? '' })}</option
-          >
-          <option value="keepBoth">{i18n.t('entityUi.keepBoth')}</option>
-        </select>
-      </div>
-
-      <p class="consequence">{consequence}</p>
-
-      {#if mergeError}
-        <p class="error" role="alert">{mergeError}</p>
-      {/if}
-
-      <div class="actions">
-        <Button loading={busy} loadingText={i18n.t('entityUi.merging')} onclick={handleMerge}
-          >{i18n.t('entityUi.merge')}</Button
+    <div class="field-choice">
+      <span class="field-choice-label">{i18n.t('entityUi.summary')}</span>
+      <select bind:value={summaryChoice}>
+        <option value="keepSurvivor"
+          >{i18n.t('entityUi.keepEntity', { name: survivorNode?.name ?? '' })}</option
         >
-        <Button variant="ghost" onclick={() => onclose?.()}>{i18n.t('common.cancel')}</Button>
-      </div>
+        <option value="keepLoser"
+          >{i18n.t('entityUi.keepEntity', { name: loserNode?.name ?? '' })}</option
+        >
+        <option value="keepBoth">{i18n.t('entityUi.keepBoth')}</option>
+      </select>
+    </div>
+    <div class="field-choice">
+      <span class="field-choice-label">{i18n.t('entityUi.notes')}</span>
+      <select bind:value={notesChoice}>
+        <option value="keepSurvivor"
+          >{i18n.t('entityUi.keepEntity', { name: survivorNode?.name ?? '' })}</option
+        >
+        <option value="keepLoser"
+          >{i18n.t('entityUi.keepEntity', { name: loserNode?.name ?? '' })}</option
+        >
+        <option value="keepBoth">{i18n.t('entityUi.keepBoth')}</option>
+      </select>
+    </div>
+
+    <p class="consequence">{consequence}</p>
+
+    {#if mergeError}
+      <p class="error" role="alert">{mergeError}</p>
     {/if}
-  </div>
-</div>
+  {/if}
+{/snippet}
+
+{#snippet mergeActions()}
+  {#if !loading && nodeA && nodeB}
+    <Button loading={busy} loadingText={i18n.t('entityUi.merging')} onclick={handleMerge}
+      >{i18n.t('entityUi.merge')}</Button
+    >
+    <Button variant="ghost" onclick={() => onclose?.()}>{i18n.t('common.cancel')}</Button>
+  {/if}
+{/snippet}
+
+<Dialog
+  title={i18n.t('entityUi.mergeEntities')}
+  body={mergeBody}
+  actions={mergeActions}
+  onclose={() => onclose?.()}
+/>
 
 <style>
-  .overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 200;
-  }
-  .dialog {
-    background: var(--bg-panel);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 20px;
-    max-width: 520px;
-    width: 90%;
-  }
-  .heading {
-    margin: 0 0 12px;
-    font-family: var(--font-display);
-    color: var(--fg-1);
-  }
   .muted {
     color: var(--fg-3);
     font-size: 0.85rem;
@@ -286,10 +263,5 @@
   .error {
     color: var(--danger);
     font-size: 0.82rem;
-  }
-  .actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 10px;
   }
 </style>

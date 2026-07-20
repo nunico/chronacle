@@ -158,7 +158,8 @@
                   {#if entry.page_refs.length > 0}
                     <p class="page-refs">
                       {#each entry.page_refs as ref, i (i)}
-                        {i > 0 ? ' · ' : ''}{ref.source_name} p.{ref.page_start}{ref.page_start ===
+                        {i > 0 ? ' · ' : ''}{ref.source_name}
+                        {i18n.t('entityUi.pageAbbreviation')}{ref.page_start}{ref.page_start ===
                         ref.page_end
                           ? ''
                           : `-${ref.page_end}`}
