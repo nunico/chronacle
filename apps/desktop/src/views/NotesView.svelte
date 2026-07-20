@@ -11,8 +11,8 @@
   <div class="notes">
     <div class="notes-head">
       <div>
-        <h1>{cat.label}</h1>
-        <p class="sub">{cat.sub}</p>
+        <h1>{i18n.t(cat.labelKey)}</h1>
+        <p class="sub">{i18n.t(cat.subKey)}</p>
         <div class="notes-path">
           <Icon name="folder" size={12} />
           {cat.folder}/

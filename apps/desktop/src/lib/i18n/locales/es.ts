@@ -240,6 +240,47 @@ const es = {
     description:
       'Aquí estarán las {folder}/ de tu campaña: notas con búsqueda, respaldadas por archivos y vinculadas a entidades sobre las que Chronacle puede responder.',
   },
+  noteCategories: {
+    sessions: {
+      label: 'Sesiones',
+      description: 'La cronología de tu campaña: resúmenes, recompensas e hilos abiertos.',
+    },
+    player_characters: {
+      label: 'Personajes jugadores',
+      description: 'El grupo: hojas, ganchos y la situación de cada cual.',
+    },
+    npcs: {
+      label: 'PNJ',
+      description: 'Todas las personas que el grupo ha conocido, y algunas más.',
+    },
+    locations: {
+      label: 'Lugares',
+      description: 'Lugares que tu grupo ha visitado y aquellos que evita.',
+    },
+    factions: { label: 'Facciones', description: 'Los poderes que actúan tras tu campaña.' },
+    creatures: { label: 'Criaturas', description: 'Bestias y horrores que acechan el mundo.' },
+    items: { label: 'Objetos', description: 'Artefactos, reliquias y botín dignos de anotar.' },
+    events: { label: 'Eventos', description: 'Los momentos que dieron forma a la campaña.' },
+    misc: { label: 'Varios', description: 'Todo lo demás que vale la pena conservar.' },
+  },
+  shortcuts: {
+    oracle: 'Oráculo (chat)',
+    timeline: 'Cronología',
+    playerCharacters: 'Personajes jugadores',
+    npcs: 'PNJ',
+    locations: 'Lugares',
+    factions: 'Facciones',
+    creatures: 'Criaturas',
+    items: 'Objetos',
+    events: 'Eventos',
+    sessions: 'Sesiones',
+    misc: 'Varios',
+    settings: 'Configuración',
+    newEntity: 'Nueva entidad (en un cuaderno)',
+    focusChat: 'Enfocar la caja de chat',
+    toggleHelp: 'Mostrar / ocultar esta ayuda',
+    closeOverlay: 'Cerrar superposición',
+  },
   sessions: {
     title: 'Sesiones',
     subtitle: 'La cronología de tu campaña',

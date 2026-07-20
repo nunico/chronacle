@@ -31,6 +31,7 @@
   import NotesView from '../views/NotesView.svelte';
   import SettingsView from '../views/SettingsView.svelte';
   import UploadProgress from '../UploadProgress.svelte';
+  import ProgressBar from '../components/ui/ProgressBar.svelte';
   import EntityManager from '../components/EntityManager.svelte';
   import EntityGraph from '../components/EntityGraph.svelte';
   import SessionLogView from '../views/SessionLogView.svelte';
@@ -87,6 +88,10 @@
     pendingCreate = { kind, name, sourceFindingId };
     view = { kind: 'notebook', category: KIND_TO_CATEGORY[kind] };
     createChooser = null;
+  }
+
+  function entityKindLabel(kind: EntityKind): string {
+    return i18n.t(findCategory(KIND_TO_CATEGORY[kind]).labelKey);
   }
 
   const ACTIVE_KEY = 'chronacle_active_campaign_id';
@@ -367,7 +372,7 @@
     if (view === 'maintenance')
       return { title: i18n.t('shell.maintenance'), sub: i18n.t('shell.maintenanceSubtitle') };
     const cat = findCategory(view.category);
-    return { title: cat.label, sub: cat.sub };
+    return { title: i18n.t(cat.labelKey), sub: i18n.t(cat.subKey) };
   });
 
   async function openFilePicker(initialCollectionId?: string) {
@@ -550,7 +555,7 @@
           {#each SHORTCUT_HELP as row (row.keys)}
             <div class="help-row">
               <dt><kbd>{row.keys}</kbd></dt>
-              <dd>{row.label}</dd>
+              <dd>{i18n.t(row.labelKey)}</dd>
             </div>
           {/each}
         </dl>
@@ -572,15 +577,13 @@
           })}
           {#if reindexProgress}
             <div class="mismatch-progress">
-              {i18n.t('shell.reindexingProgress', reindexProgress)}
-              <div class="mismatch-progress-bar">
-                <div
-                  class="mismatch-progress-fill"
-                  style="width: {reindexProgress.total > 0
-                    ? Math.round((reindexProgress.current / reindexProgress.total) * 100)
-                    : 0}%"
-                ></div>
-              </div>
+              <ProgressBar
+                value={reindexProgress.total > 0
+                  ? Math.round((reindexProgress.current / reindexProgress.total) * 100)
+                  : 0}
+                label={i18n.t('shell.reindexingProgress', reindexProgress)}
+                locale={i18n.locale}
+              />
             </div>
           {/if}
           {#if reindexError}
@@ -714,7 +717,7 @@
                   createChooser?.sourceFindingId,
                 )}
             >
-              {kind.replaceAll('_', ' ')}
+              {entityKindLabel(kind as EntityKind)}
             </button>
           {/each}
         </div>
@@ -1044,19 +1047,6 @@
     margin-top: 6px;
     font-size: 12px;
     color: var(--fg-2);
-  }
-  .mismatch-progress-bar {
-    margin-top: 4px;
-    height: 3px;
-    background: var(--line);
-    border-radius: 2px;
-    overflow: hidden;
-    max-width: 320px;
-  }
-  .mismatch-progress-fill {
-    height: 100%;
-    background: var(--grad-arcane);
-    transition: width 0.3s ease;
   }
   .mismatch-error {
     margin-top: 6px;

@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import Shell from './Shell.svelte';
 import { open } from '@tauri-apps/plugin-dialog';
 import { clearToasts } from '../lib/toast.svelte';
+import { i18n } from '../lib/locale.svelte';
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn(),
@@ -77,6 +78,7 @@ async function openPicker() {
 describe('Shell upload flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    i18n.setLocale('en');
     eventHandlers.clear();
     clearToasts();
     globalThis.localStorage?.clear();
@@ -120,6 +122,15 @@ describe('Shell upload flow', () => {
     expect(screen.getByRole('button', { name: /Locations/i }).textContent).toContain('5');
     expect(screen.getByRole('button', { name: /^Sessions/i }).textContent).toContain('1');
     expect(getEntityCounts).toHaveBeenCalledWith('camp-1');
+  });
+
+  it('translates note categories and shortcut help with the active locale', async () => {
+    i18n.setLocale('de');
+    render(Shell);
+    await screen.findByRole('button', { name: /NSCs/i });
+
+    await fireEvent.keyDown(document.body, { key: '?' });
+    expect(await screen.findByText('Orakel (Chat)')).toBeTruthy();
   });
 
   it('Escape closes the collection picker dialog', async () => {
@@ -184,6 +195,7 @@ describe('Shell upload flow', () => {
     await waitFor(() => {
       expect(screen.getByTestId('mismatch-banner').textContent).toMatch(/2\s*\/\s*5/);
       expect(screen.getByTestId('mismatch-banner').textContent).toContain('Embedding chunks');
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '40');
     });
   });
 

@@ -92,7 +92,7 @@
             onclick={() => setView({ kind: 'notebook', category: c.id })}
           >
             <Icon name={c.icon} size={18} className="ic" />
-            {c.label}
+            {i18n.t(c.labelKey)}
             <span class="ct">{counts[c.id] ?? '—'}</span>
           </button>
         {/each}
