@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
-  import { findCategory, type NoteCategoryId } from '../shell/note-categories.ts';
+  import { findCategory, type NoteCategoryId } from '../shell/note-categories';
+  import { i18n } from '../lib/locale.svelte';
 
   let { category }: { category: NoteCategoryId } = $props();
   let cat = $derived(findCategory(category));
@@ -21,10 +22,9 @@
 
     <div class="empty">
       <div class="glyph">✦</div>
-      <h2>Coming in Phase 2</h2>
+      <h2>{i18n.t('notes.comingSoon')}</h2>
       <p>
-        Your campaign's <code>{cat.folder}/</code> will live here — searchable notes, file-backed,
-        linked to entities Chronacle can answer about.
+        {i18n.t('notes.description', { folder: cat.folder })}
       </p>
     </div>
   </div>
@@ -93,10 +93,5 @@
     max-width: 56ch;
     margin: 0 auto;
     line-height: 1.55;
-  }
-  .empty code {
-    font-family: var(--font-mono);
-    font-size: 13px;
-    color: var(--arcane-300);
   }
 </style>
