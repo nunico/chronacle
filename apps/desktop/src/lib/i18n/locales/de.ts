@@ -70,6 +70,7 @@ const de = {
       'Einbettungsanbieter auf {model} gesetzt. Indiziere bestehende Quellen unten neu.',
     connectionFailed: 'Verbindung fehlgeschlagen: {error}',
     connected: 'Verbunden: {provider}',
+    connecting: 'Verbindung wird hergestellt…',
     apiKeyRequired: 'Für diesen Anbieter ist ein API-Schlüssel erforderlich.',
     invalidBaseUrl: 'Die Basis-URL ist ungültig (z. B. http://localhost:11434).',
     connectionStatus: 'Verbindungsstatus',
