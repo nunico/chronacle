@@ -49,7 +49,7 @@
 
 <button
   {type}
-  class={['button', variant, { 'icon-only': iconOnly }, className]}
+  class={['button', 'single-line', variant, { 'icon-only': iconOnly }, className]}
   {title}
   data-testid={testId}
   aria-label={iconAriaLabel}
@@ -81,8 +81,8 @@
     border-radius: var(--r-sm);
     font: 600 0.875rem/1.2 var(--font-sans);
     cursor: pointer;
-    white-space: normal;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
+    overflow: visible;
     text-align: center;
     transition:
       background var(--dur-fast) var(--ease-arcane),
@@ -130,8 +130,7 @@
 
   .button-label {
     min-width: 0;
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    white-space: nowrap;
   }
 
   .icon-only .button-label {

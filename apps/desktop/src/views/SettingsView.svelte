@@ -574,7 +574,7 @@
       <input id="base-url" type="text" bind:value={baseUrl} placeholder={baseUrlPlaceholder} />
     {/if}
 
-    <div class="actions">
+    <div class="actions responsive-actions">
       <Button
         variant="secondary"
         onclick={saveSettings}
@@ -805,7 +805,7 @@
       />
     {/if}
 
-    <div class="actions">
+    <div class="actions responsive-actions">
       <Button
         onclick={saveEmbeddingSettings}
         disabled={isSavingEmbedding}
