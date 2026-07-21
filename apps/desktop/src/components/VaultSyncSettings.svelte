@@ -87,7 +87,7 @@
   </div>
   <p class="muted path-hint">{i18n.t('entityUi.vaultPathHint')}</p>
 
-  <div class="actions">
+  <div class="actions responsive-actions">
     <Button variant="ghost" onclick={choose}>{i18n.t('entityUi.chooseFolder')}</Button>
     {#if path}
       <Button variant="ghost" onclick={disconnect}>{i18n.t('entityUi.disconnect')}</Button>
@@ -190,6 +190,12 @@
     min-width: 0;
     max-width: 100%;
     flex: 1 1 10rem;
+  }
+  @media (max-width: 520px) {
+    .actions :global(.button) {
+      flex: 1 1 100%;
+      width: 100%;
+    }
   }
   .reindex-error {
     margin-top: 10px;

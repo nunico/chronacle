@@ -874,6 +874,8 @@
     .proposal-actions button,
     .finding-actions button {
       max-width: 100%;
+      flex: 1 1 100%;
+      width: 100%;
       white-space: nowrap;
     }
     .diff {
