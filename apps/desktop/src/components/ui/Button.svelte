@@ -17,6 +17,7 @@
     children?: Snippet;
     class?: string;
     title?: string;
+    testId?: string;
   }
 
   let {
@@ -33,6 +34,7 @@
     children,
     class: className = '',
     title,
+    testId,
   }: Props = $props();
 
   let isDisabled = $derived(disabled || loading);
@@ -49,6 +51,7 @@
   {type}
   class={['button', variant, { 'icon-only': iconOnly }, className]}
   {title}
+  data-testid={testId}
   aria-label={iconAriaLabel}
   aria-busy={loading || undefined}
   disabled={isDisabled}

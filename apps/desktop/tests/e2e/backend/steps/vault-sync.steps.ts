@@ -129,13 +129,13 @@ async function openEntityEditForm(page: import('@playwright/test').Page): Promis
 When("the GM edits that entity's notes to {string}", async ({ page }, notes: string) => {
   await openEntityEditForm(page);
   await page.locator('#ef-notes').fill(notes);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByTestId('entity-form-submit').click();
 });
 
 When('the GM renames that entity to {string}', async ({ page }, newName: string) => {
   await openEntityEditForm(page);
-  await page.locator('#ef-name').fill(newName);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByTestId('entity-form-name').fill(newName);
+  await page.getByTestId('entity-form-submit').click();
 });
 
 Then('an update entity command was sent with notes {string}', async ({ page }, notes: string) => {
