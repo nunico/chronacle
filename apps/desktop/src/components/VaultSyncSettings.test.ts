@@ -22,6 +22,9 @@ describe('VaultSyncSettings', () => {
     render(VaultSyncSettings);
     expect(await screen.findByText('/Users/gm/Vault')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sync now/i })).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: /sync now/i }).closest('.responsive-actions'),
+    ).toBeTruthy();
   });
 
   it('disables Sync now when no vault is configured', async () => {
