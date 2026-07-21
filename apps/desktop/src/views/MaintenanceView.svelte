@@ -874,8 +874,7 @@
     .proposal-actions button,
     .finding-actions button {
       max-width: 100%;
-      white-space: normal;
-      overflow-wrap: anywhere;
+      white-space: nowrap;
     }
     .diff {
       flex-direction: column;

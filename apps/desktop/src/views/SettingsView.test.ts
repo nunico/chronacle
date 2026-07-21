@@ -154,6 +154,7 @@ describe('SettingsView', () => {
 
     const save = await screen.findByRole('button', { name: 'Einstellungen speichern' });
     expect(save.querySelector('.button-label')).toHaveTextContent('Einstellungen speichern');
+    expect(save.closest('.responsive-actions')).toBeTruthy();
   });
 
   it('persists a selected German display language immediately', async () => {

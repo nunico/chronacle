@@ -32,7 +32,7 @@ describe('Button', () => {
     );
   });
 
-  it('keeps long localized loading labels in a wrapping label element', () => {
+  it('keeps long localized loading labels in a single-line label element', () => {
     render(Button, {
       props: {
         loading: true,
@@ -42,6 +42,7 @@ describe('Button', () => {
     });
 
     const button = screen.getByRole('button', { name: /Wird gespeichert/ });
+    expect(button).toHaveClass('single-line');
     expect(button.querySelector('.button-label')).toHaveTextContent(
       'Wird gespeichert und mit dem Server synchronisiert…',
     );

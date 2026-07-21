@@ -116,7 +116,7 @@
     font-family: var(--font-sans);
     font-size: 13px;
     text-align: left;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
     background: none;
     border: 0;
   }
@@ -149,8 +149,8 @@
     min-width: 0;
     max-width: 36%;
     overflow: hidden;
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--fg-3);

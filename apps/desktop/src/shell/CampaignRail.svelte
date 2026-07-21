@@ -227,7 +227,9 @@
     border: 0;
     text-align: left;
     min-width: 0;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .nav-item:hover {
     background: rgba(124, 148, 255, 0.07);
@@ -242,7 +244,9 @@
     margin-left: auto;
     min-width: 0;
     flex: 0 1 auto;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--fg-3);
@@ -291,8 +295,9 @@
     font-size: 12.5px;
     min-width: 0;
     max-width: 100%;
-    overflow-wrap: anywhere;
-    white-space: normal;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     text-align: center;
   }
   .foot-btn:hover {
