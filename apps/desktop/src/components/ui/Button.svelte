@@ -59,10 +59,10 @@
 >
   {#if loading}
     <span class="spinner" aria-hidden="true"></span>
-    <span>{loadingText}</span>
+    <span class="button-label">{loadingText}</span>
   {:else}
     {#if leading}{@render leading()}{/if}
-    {#if children}{@render children()}{/if}
+    {#if children}<span class="button-label">{@render children()}</span>{/if}
     {#if trailing}{@render trailing()}{/if}
   {/if}
 </button>
@@ -70,6 +70,8 @@
 <style>
   .button {
     display: inline-flex;
+    min-width: 0;
+    max-width: 100%;
     align-items: center;
     justify-content: center;
     gap: var(--s-2);
@@ -79,6 +81,9 @@
     border-radius: var(--r-sm);
     font: 600 0.875rem/1.2 var(--font-sans);
     cursor: pointer;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
     transition:
       background var(--dur-fast) var(--ease-arcane),
       border-color var(--dur-fast) var(--ease-arcane),
@@ -121,6 +126,16 @@
   .icon-only {
     width: 36px;
     padding: var(--s-2);
+  }
+
+  .button-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .icon-only .button-label {
+    display: none;
   }
 
   .spinner {

@@ -148,6 +148,14 @@ describe('SettingsView', () => {
     expect(await screen.findByRole('option', { name: 'Benutzerdefiniert: Archiv' })).toBeTruthy();
   });
 
+  it('keeps the longer German save label inside the shared button label', async () => {
+    vi.mocked(commands.getSettings).mockResolvedValue({ ui_locale: 'de' });
+    render(SettingsView);
+
+    const save = await screen.findByRole('button', { name: 'Einstellungen speichern' });
+    expect(save.querySelector('.button-label')).toHaveTextContent('Einstellungen speichern');
+  });
+
   it('persists a selected German display language immediately', async () => {
     render(SettingsView);
 

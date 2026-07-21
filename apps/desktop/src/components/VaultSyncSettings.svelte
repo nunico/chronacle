@@ -182,8 +182,14 @@
   }
   .actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin-top: 4px;
+  }
+  .actions :global(.button) {
+    min-width: 0;
+    max-width: 100%;
+    flex: 1 1 10rem;
   }
   .reindex-error {
     margin-top: 10px;
