@@ -979,8 +979,15 @@
   }
   .actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin-top: 18px;
+  }
+  .actions :global(.button),
+  .form-actions :global(.button) {
+    min-width: 0;
+    max-width: 100%;
+    flex: 1 1 12rem;
   }
   .hint {
     font-size: 12.5px;
@@ -1022,8 +1029,13 @@
   .provider-header {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 8px;
+  }
+  .provider-header > :first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
   .type-badge {
     font-size: 11px;
@@ -1077,18 +1089,33 @@
   }
   .add-model-form {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     align-items: center;
   }
   .add-model-form input {
     flex: 1;
+    min-width: min(100%, 12rem);
     padding: 6px 10px;
     font-size: 13px;
   }
   .form-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin-top: 10px;
+  }
+
+  @media (max-width: 520px) {
+    .status-grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 2px;
+    }
+    .actions :global(.button),
+    .form-actions :global(.button),
+    .add-model-form :global(.button) {
+      flex-basis: 100%;
+    }
   }
   .empty-state {
     color: var(--fg-3);

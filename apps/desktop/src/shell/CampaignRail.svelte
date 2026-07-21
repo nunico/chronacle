@@ -226,6 +226,8 @@
     background: none;
     border: 0;
     text-align: left;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
   .nav-item:hover {
     background: rgba(124, 148, 255, 0.07);
@@ -238,6 +240,9 @@
   }
   .nav-item .ct {
     margin-left: auto;
+    min-width: 0;
+    flex: 0 1 auto;
+    overflow-wrap: anywhere;
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--fg-3);
@@ -268,7 +273,7 @@
     padding: 12px;
     border-top: 1px solid var(--line-faint);
     display: grid;
-    grid-template-columns: 1fr 1fr auto;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(36px, auto);
     gap: 6px;
   }
   .foot-btn {
@@ -284,6 +289,11 @@
     font-family: var(--font-sans);
     font-weight: 600;
     font-size: 12.5px;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    text-align: center;
   }
   .foot-btn:hover {
     border-color: var(--line-strong);

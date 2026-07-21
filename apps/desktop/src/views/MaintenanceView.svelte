@@ -692,6 +692,7 @@
   .check-campaign {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 10px;
   }
   .check-campaign button {
@@ -713,6 +714,7 @@
   }
   .toolbar {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
   }
   .toolbar button {
@@ -798,6 +800,7 @@
   .proposal-actions,
   .finding-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
   }
   .compiling-status {
@@ -855,6 +858,28 @@
   .finding-actions button:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+
+  @media (max-width: 600px) {
+    .header-row {
+      align-items: stretch;
+      flex-direction: column;
+    }
+    .check-campaign,
+    .proposal-actions,
+    .finding-actions {
+      align-items: stretch;
+    }
+    .check-campaign button,
+    .proposal-actions button,
+    .finding-actions button {
+      max-width: 100%;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    .diff {
+      flex-direction: column;
+    }
   }
   .finding-groups {
     display: flex;

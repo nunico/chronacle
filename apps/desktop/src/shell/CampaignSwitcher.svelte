@@ -106,6 +106,7 @@
   }
   .row {
     width: 100%;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -115,6 +116,7 @@
     font-family: var(--font-sans);
     font-size: 13px;
     text-align: left;
+    overflow-wrap: anywhere;
     background: none;
     border: 0;
   }
@@ -137,12 +139,18 @@
   }
   .row .nm {
     flex: 1;
+    min-width: 0;
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
   .row .mt {
+    min-width: 0;
+    max-width: 36%;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    word-break: break-word;
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--fg-3);

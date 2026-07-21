@@ -250,6 +250,8 @@
     color: var(--arcane-500);
     font-weight: 600;
     margin-bottom: 0.3rem;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .file-info {
@@ -258,6 +260,7 @@
     margin-bottom: 0.5rem;
     font-family: monospace;
     word-break: break-all;
+    overflow-wrap: anywhere;
   }
 
   .error-box {

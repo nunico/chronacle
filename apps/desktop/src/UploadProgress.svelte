@@ -53,15 +53,21 @@
     color: var(--fg-3);
     text-align: center;
     font-family: var(--font-sans);
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .upload-filename {
     font-weight: 600;
     margin-right: 0.5rem;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .upload-progress-text {
     color: var(--arcane-500);
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .upload-status.error .upload-progress-text {

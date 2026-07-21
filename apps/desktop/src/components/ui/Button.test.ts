@@ -31,4 +31,19 @@ describe('Button', () => {
       'Close dialog',
     );
   });
+
+  it('keeps long localized loading labels in a wrapping label element', () => {
+    render(Button, {
+      props: {
+        loading: true,
+        loadingText: 'Wird gespeichert und mit dem Server synchronisiert…',
+        ariaLabel: 'Speichern',
+      },
+    });
+
+    const button = screen.getByRole('button', { name: /Wird gespeichert/ });
+    expect(button.querySelector('.button-label')).toHaveTextContent(
+      'Wird gespeichert und mit dem Server synchronisiert…',
+    );
+  });
 });
