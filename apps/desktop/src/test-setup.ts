@@ -1,13 +1,13 @@
 import '@testing-library/jest-dom/vitest';
 
-type TauriInternals = {
+interface TauriInternals {
   invoke: (command: string, payload?: Record<string, unknown>) => Promise<unknown>;
   transformCallback: (_callback: unknown, _once?: boolean) => number;
-};
+}
 
-type EventPluginInternals = {
-  unregisterListener: (eventId: number) => void;
-};
+interface EventPluginInternals {
+  unregisterListener(eventId: number): void;
+}
 
 const tauriWindow = window as typeof window & {
   __TAURI_INTERNALS__?: TauriInternals;
@@ -35,5 +35,7 @@ tauriWindow.__TAURI_INTERNALS__ ??= {
 };
 
 tauriWindow.__TAURI_EVENT_PLUGIN_INTERNALS__ ??= {
-  unregisterListener() {},
+  unregisterListener(_eventId) {
+    return undefined;
+  },
 };

@@ -45,7 +45,7 @@ describe('locale preferences', () => {
   });
 
   it('does not let a stale settings load override a newer preference', async () => {
-    let resolveSettings: (settings: Record<string, string>) => void;
+    let resolveSettings: ((settings: Record<string, string>) => void) | undefined;
     mocks.getSettings.mockImplementation(
       () => new Promise<Record<string, string>>((resolve) => { resolveSettings = resolve; }),
     );
@@ -53,7 +53,10 @@ describe('locale preferences', () => {
     const initialization = initLocale();
     await vi.waitFor(() => expect(mocks.getSettings).toHaveBeenCalledOnce());
     setUiLocalePreference('de');
-    resolveSettings!({ ui_locale: 'fr' });
+    if (!resolveSettings) {
+      throw new Error('Expected settings request to be pending');
+    }
+    resolveSettings({ ui_locale: 'fr' });
     await initialization;
 
     expect(currentLocale()).toBe('de');
