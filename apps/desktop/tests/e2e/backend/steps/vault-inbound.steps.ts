@@ -302,8 +302,8 @@ Then('no conflict is listed for {string}', async ({ page }, _name: string) => {
   // panel itself: close the form, go back to Settings, and require the freshly
   // re-fetched conflict list to be empty. Before the sync, that same panel
   // still lists the frozen record, so this fails if the sync never ran.
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(page.locator('form[aria-label="entity form"]')).toBeHidden();
+  await page.getByTestId('entity-form-cancel').click();
+  await expect(page.getByTestId('entity-form')).toBeHidden();
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByRole('heading', { name: 'Markdown vault' })).toBeVisible();
   await expect(page.locator('.conflicts-section')).toHaveCount(0);

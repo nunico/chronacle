@@ -64,6 +64,19 @@ describe('EntityForm', () => {
     expect(screen.getByLabelText('Name', { exact: true })).toBeTruthy();
   });
 
+  it('keeps entity form automation hooks stable when controls are localized', () => {
+    i18n.setLocale('de');
+    try {
+      render(EntityForm, { props: { kind: 'npc' as EntityKind, node: null } });
+      expect(screen.getByTestId('entity-form')).toBeTruthy();
+      expect(screen.getByTestId('entity-form-name')).toBeTruthy();
+      expect(screen.getByTestId('entity-form-submit')).toHaveTextContent('Erstellen');
+      expect(screen.getByTestId('entity-form-cancel')).toHaveTextContent('Abbrechen');
+    } finally {
+      i18n.setLocale('en');
+    }
+  });
+
   it('shows temporal fields for event kind', () => {
     render(EntityForm, { props: { kind: 'event' as EntityKind, node: null } });
     expect(screen.getByLabelText(/date start/i)).toBeTruthy();

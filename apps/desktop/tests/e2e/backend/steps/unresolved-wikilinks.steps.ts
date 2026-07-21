@@ -161,8 +161,8 @@ When('the GM clicks the unresolved link {string}', async ({ page }, linkText: st
 
 When('creates a Location named {string}', async ({ page }, name: string) => {
   await page.locator('[data-testid="create-entity-chooser"] [data-entity-kind="location"]').click();
-  await expect(page.getByLabel('Name', { exact: true })).toHaveValue(name);
-  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByTestId('entity-form-name')).toHaveValue(name);
+  await page.getByTestId('entity-form-submit').click();
 });
 
 When('the GM opens the finding', async ({ page }) => {
@@ -199,7 +199,7 @@ Then('they can use the suggestion', async ({ page }) => {
 Then('they can instead create a new article named {string}', async ({ page }, name: string) => {
   await page.getByRole('button', { name: 'Create article' }).click();
   await page.locator('[data-testid="create-entity-chooser"] [data-entity-kind="location"]').click();
-  await expect(page.getByLabel('Name', { exact: true })).toHaveValue(name);
+  await expect(page.getByTestId('entity-form-name')).toHaveValue(name);
 });
 
 Then('the finding is labeled {string}', async ({ page }, label: string) => {

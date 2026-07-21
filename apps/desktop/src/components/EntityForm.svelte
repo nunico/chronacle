@@ -256,7 +256,7 @@
     errorText={nameError || (error?.field === 'name' ? error.message : undefined)}
     alertError={false}
   >
-    <input id="ef-name" type="text" bind:value={name} />
+    <input id="ef-name" data-testid="entity-form-name" type="text" bind:value={name} />
   </FormField>
 
   <div class="field">
@@ -336,8 +336,12 @@
   {/if}
 
   <div class="actions">
-    <Button type="submit">{node ? i18n.t('common.save') : i18n.t('entityUi.create')}</Button>
-    <Button variant="ghost" onclick={() => oncancel?.()}>{i18n.t('common.cancel')}</Button>
+    <Button testId="entity-form-submit" type="submit"
+      >{node ? i18n.t('common.save') : i18n.t('entityUi.create')}</Button
+    >
+    <Button testId="entity-form-cancel" variant="ghost" onclick={() => oncancel?.()}
+      >{i18n.t('common.cancel')}</Button
+    >
   </div>
 
   {#if node?.id}
