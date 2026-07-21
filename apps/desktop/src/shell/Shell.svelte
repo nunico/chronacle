@@ -693,6 +693,7 @@
     <div class="picker-overlay">
       <div
         class="picker-dialog"
+        data-testid="create-entity-chooser"
         role="dialog"
         aria-modal="true"
         aria-labelledby="create-link-title"
@@ -710,6 +711,7 @@
             <button
               type="button"
               class="kind-choice"
+              data-entity-kind={kind}
               onclick={() =>
                 createFromWikilink(
                   createChooser?.name ?? '',
