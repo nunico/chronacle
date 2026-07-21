@@ -160,10 +160,7 @@ When('the GM clicks the unresolved link {string}', async ({ page }, linkText: st
 });
 
 When('creates a Location named {string}', async ({ page }, name: string) => {
-  await page
-    .getByRole('dialog', { name: /Create article/ })
-    .getByRole('button', { name: 'location', exact: true })
-    .click();
+  await page.locator('[data-testid="create-entity-chooser"] [data-entity-kind="location"]').click();
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue(name);
   await page.getByRole('button', { name: 'Create' }).click();
 });
@@ -201,10 +198,7 @@ Then('they can use the suggestion', async ({ page }) => {
 
 Then('they can instead create a new article named {string}', async ({ page }, name: string) => {
   await page.getByRole('button', { name: 'Create article' }).click();
-  await page
-    .getByRole('dialog', { name: /Create article/ })
-    .getByRole('button', { name: 'location', exact: true })
-    .click();
+  await page.locator('[data-testid="create-entity-chooser"] [data-entity-kind="location"]').click();
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue(name);
 });
 

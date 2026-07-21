@@ -241,6 +241,7 @@
 {/if}
 
 <form
+  data-testid="entity-form"
   aria-label={i18n.t('entityUi.entityForm')}
   oninput={notifyDirty}
   onchange={notifyDirty}

@@ -100,7 +100,7 @@ const names = new WeakMap<Page, string>();
 async function openEntityEditForm(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'NPCs' }).click();
   await page.locator('button.entity-name').first().click();
-  await expect(page.locator('form[aria-label="entity form"]')).toBeVisible();
+  await expect(page.getByTestId('entity-form')).toBeVisible();
 }
 
 Given('a synced vault with an entity {string}', async ({ page }, name: string) => {

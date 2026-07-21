@@ -19,23 +19,26 @@ Given('a vault is configured at {string}', async ({ page }, path: string) => {
   await installIpcMock(page, { get_vault_path: path });
 });
 
-Given('a sync will report {int} exported and {int} failed', async ({ page }, exported: number, failed: number) => {
-  await installIpcMock(page, {
-    get_vault_path: '/Users/gm/Vault',
-    vault_sync_now: {
-      exported,
-      unchanged: 0,
-      adopted: 0,
-      applied: 0,
-      conflicts: 0,
-      resolved: 0,
-      soft_deleted: 0,
-      swept: 0,
-      invalid: 0,
-      failed,
-    },
-  });
-});
+Given(
+  'a sync will report {int} exported and {int} failed',
+  async ({ page }, exported: number, failed: number) => {
+    await installIpcMock(page, {
+      get_vault_path: '/Users/gm/Vault',
+      vault_sync_now: {
+        exported,
+        unchanged: 0,
+        adopted: 0,
+        applied: 0,
+        conflicts: 0,
+        resolved: 0,
+        soft_deleted: 0,
+        swept: 0,
+        invalid: 0,
+        failed,
+      },
+    });
+  },
+);
 
 When('the GM opens Settings', async ({ page }) => {
   await page.goto('/');
@@ -120,10 +123,10 @@ async function openEntityEditForm(page: import('@playwright/test').Page): Promis
   // the "NPCs" label as a substring.
   await page.getByRole('button', { name: 'NPCs' }).click();
   await page.locator('button.entity-name').first().click();
-  await expect(page.locator('form[aria-label="entity form"]')).toBeVisible();
+  await expect(page.getByTestId('entity-form')).toBeVisible();
 }
 
-When('the GM edits that entity\'s notes to {string}', async ({ page }, notes: string) => {
+When("the GM edits that entity's notes to {string}", async ({ page }, notes: string) => {
   await openEntityEditForm(page);
   await page.locator('#ef-notes').fill(notes);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
