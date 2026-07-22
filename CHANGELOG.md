@@ -21,6 +21,18 @@ desktop application.
   progress.
 - Added graph actions for unresolved wikilinks, including creating a new
   article directly from a finding.
+- Added full internationalization for English, German, French, and Spanish,
+  with automatic OS-locale detection, persisted display-language selection,
+  complete translation catalogs, interpolation, and live UI updates.
+- Added language-aware Oracle responses: supported-language messages are
+  answered in their detected language, with the configured UI language as the
+  fallback for ambiguous messages.
+- Added multilingual local retrieval with the E5 Base embedding mode,
+  language-specific document/query prefixes, model identity checks, download
+  progress, and explicit re-indexing safeguards when switching models.
+- Added shared accessible UI controls covering buttons, progress bars, form
+  fields, dialogs, and status badges, and migrated the repeated application
+  surfaces to use them.
 - Added shared pull-request quality gates and an optimized cached local gate
   covering backend, frontend, and acceptance validation.
 
@@ -32,8 +44,9 @@ desktop application.
   behavior.
 - Made the RocksDB-enabled desktop suite part of release validation and
   hardened persistence and shutdown tests.
-- Added design and implementation documentation for internationalization and
-  multilingual retrieval.
+- Added translation-catalog completeness tests and end-to-end coverage for
+  locale selection, multilingual Oracle responses, embedding-mode changes,
+  and re-indexing behavior.
 
 ### Fixed
 
