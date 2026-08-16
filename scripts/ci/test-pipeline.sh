@@ -333,24 +333,62 @@ function canonicalCreateFlow(text) {
 }
 
 function canonicalAssetUpload(text) {
-  const loop = text.search(/while IFS= read -r -d '' asset; do/);
-  const done = loop < 0 ? -1 : text.indexOf('\ndone', loop);
-  if (loop < 0 || done < 0) return false;
-  const body = text.slice(loop, done);
+  const planLoop = text.search(/while IFS= read -r -d '' asset; do/);
+  const planDone = text.indexOf('\ndone', planLoop);
+  const uploadLoop = text.search(/for index in "\$\{!assets\[@\]\}"; do/);
+  const uploadDone = text.indexOf('\ndone', uploadLoop);
+  if (!(planLoop >= 0 && planLoop < planDone && planDone < uploadLoop && uploadLoop < uploadDone)) {
+    return false;
+  }
+
+  const planBody = text.slice(planLoop, planDone);
+  const validation = text.slice(planDone, uploadLoop);
+  const uploadBody = text.slice(uploadLoop, uploadDone);
+  const beforeUpload = text.slice(0, uploadLoop);
   return (
     /find release-assets\/native release-assets\/flatpak/.test(text) &&
     /-print0/.test(text) &&
     ['deb', 'AppImage', 'rpm', 'app.tar.gz', 'dmg', 'msi', 'exe', 'flatpak'].every((suffix) =>
       text.includes(`*.${suffix}`),
     ) &&
-    /basename "\$asset"/.test(body) &&
-    /@uri/.test(body) &&
-    /--hostname uploads\.github\.com/.test(body) &&
-    /--method POST/.test(body) &&
-    /releases\/(?:\$\{RELEASE_ID\}|\$RELEASE_ID)\/assets\?name=\$\{encoded_name\}/.test(body) &&
-    /Content-Type: application\/octet-stream/.test(body) &&
-    /--input "\$asset"/.test(body)
+    /basename "\$asset"/.test(planBody) &&
+    /release-assets\/native\/chronacle-native-macos-arm64\/\*\/Chronacle\.app\.tar\.gz[^\n]*Chronacle_aarch64\.app\.tar\.gz/.test(
+      planBody,
+    ) &&
+    /release-assets\/native\/chronacle-native-macos-x86_64\/\*\/Chronacle\.app\.tar\.gz[^\n]*Chronacle_x64\.app\.tar\.gz/.test(
+      planBody,
+    ) &&
+    /assets\+=\("\$asset"\)/.test(planBody) &&
+    /asset_names\+=\("\$asset_name"\)/.test(planBody) &&
+    /\$\{#assets\[@\]\}/.test(validation) &&
+    /\$\{#asset_names\[@\]\}/.test(validation) &&
+    /sort[^\n]*-u|uniq[^\n]*-d/.test(validation) &&
+    /exit 1/.test(validation) &&
+    !/gh api\b/.test(beforeUpload) &&
+    /asset="\$\{assets\[\$index\]\}"/.test(uploadBody) &&
+    /asset_name="\$\{asset_names\[\$index\]\}"/.test(uploadBody) &&
+    /@uri/.test(uploadBody) &&
+    !/--hostname uploads\.github\.com/.test(text) &&
+    /--method POST/.test(uploadBody) &&
+    /https:\/\/uploads\.github\.com\/repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?name=\$\{encoded_name\}/.test(
+      uploadBody,
+    ) &&
+    /Content-Type: application\/octet-stream/.test(uploadBody) &&
+    /--input "\$asset"/.test(uploadBody)
   );
+}
+
+function derivedReleaseAssetName(path) {
+  const basename = path.split('/').at(-1);
+  if (basename !== 'Chronacle.app.tar.gz') return basename;
+  if (path.includes('/chronacle-native-macos-arm64/')) return 'Chronacle_aarch64.app.tar.gz';
+  if (path.includes('/chronacle-native-macos-x86_64/')) return 'Chronacle_x64.app.tar.gz';
+  return basename;
+}
+
+function hasUniqueDerivedReleaseAssetNames(paths) {
+  const names = paths.map(derivedReleaseAssetName);
+  return names.length > 0 && new Set(names).size === paths.length;
 }
 
 function canonicalPublish(text) {
@@ -554,16 +592,56 @@ requireContract(
   'pipeline parser canonical release fixture must remain valid',
 );
 const canonicalAssetFixture = [
-  "find release-assets/native release-assets/flatpak -type f \\( -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' -o -name '*.app.tar.gz' -o -name '*.dmg' -o -name '*.msi' -o -name '*.exe' -o -name '*.flatpak' \\) -print0 |",
+  'assets=()',
+  'asset_names=()',
   "while IFS= read -r -d '' asset; do",
   'asset_name=$(basename "$asset")',
+  'case "$asset" in',
+  'release-assets/native/chronacle-native-macos-arm64/*/Chronacle.app.tar.gz) asset_name=Chronacle_aarch64.app.tar.gz ;;',
+  'release-assets/native/chronacle-native-macos-x86_64/*/Chronacle.app.tar.gz) asset_name=Chronacle_x64.app.tar.gz ;;',
+  'esac',
+  'assets+=("$asset")',
+  'asset_names+=("$asset_name")',
+  "done < <(find release-assets/native release-assets/flatpak -type f \\( -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' -o -name '*.app.tar.gz' -o -name '*.dmg' -o -name '*.msi' -o -name '*.exe' -o -name '*.flatpak' \\) -print0)",
+  'if [ "${#assets[@]}" -eq 0 ] || [ "${#assets[@]}" -ne "${#asset_names[@]}" ]; then exit 1; fi',
+  'if [ "$(printf \'%s\\n\' "${asset_names[@]}" | sort -u | wc -l)" -ne "${#asset_names[@]}" ]; then exit 1; fi',
+  'for index in "${!assets[@]}"; do',
+  'asset="${assets[$index]}"',
+  'asset_name="${asset_names[$index]}"',
   "encoded_name=$(jq -rn --arg name \"$asset_name\" '$name | @uri')",
-  'gh api --hostname uploads.github.com --method POST "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" -H "Content-Type: application/octet-stream" --input "$asset"',
+  'gh api --method POST "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" -H "Content-Type: application/octet-stream" --input "$asset"',
   'done',
 ].join('\n');
 requireContract(
   canonicalAssetUpload(canonicalAssetFixture),
   'pipeline parser canonical asset fixture must remain valid',
+);
+requireContract(
+  !canonicalAssetUpload(
+    canonicalAssetFixture.replace(
+      'if [ "$(printf \'%s\\n\' "${asset_names[@]}" | sort -u | wc -l)" -ne "${#asset_names[@]}" ]; then exit 1; fi',
+      '',
+    ),
+  ),
+  'pipeline parser must require complete unique asset-name validation before API mutation',
+);
+requireContract(
+  !canonicalAssetUpload(canonicalAssetFixture.replace('https://uploads.github.com/', '').replace('gh api --method POST', 'gh api --hostname uploads.github.com --method POST')),
+  'pipeline parser must reject hostname-based upload API calls',
+);
+requireContract(
+  !hasUniqueDerivedReleaseAssetNames([
+    'release-assets/native/one/Chronacle.app.tar.gz',
+    'release-assets/native/two/Chronacle.app.tar.gz',
+  ]),
+  'two unmapped macOS archives with the same basename must be rejected',
+);
+requireContract(
+  hasUniqueDerivedReleaseAssetNames([
+    'release-assets/native/chronacle-native-macos-arm64/bundle/Chronacle.app.tar.gz',
+    'release-assets/native/chronacle-native-macos-x86_64/bundle/Chronacle.app.tar.gz',
+  ]),
+  'architecture-labelled macOS archive names must remain unique',
 );
 const canonicalPublishFixture = [
   'release=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}")',
