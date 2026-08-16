@@ -125,4 +125,168 @@ require_fixed "$metainfo" '<content_rating type="oars-1.1" />'
 require_fixed "$metainfo" "<launchable type=\"desktop-id\">$app_id.desktop</launchable>"
 reject_pattern "$metainfo" '<screenshots([[:space:]>])'
 
+release_script=scripts/release-flatpak.sh
+test_root=$(mktemp -d "${TMPDIR:-/tmp}/chronacle-flatpak-contract.XXXXXX")
+trap 'rm -rf "$test_root"' EXIT HUP INT TERM
+
+if "$release_script" >/dev/null 2>&1; then
+  fail 'release-flatpak must reject missing arguments'
+fi
+
+touch "$test_root/not-a-deb.txt"
+if "$release_script" "$test_root/not-a-deb.txt" 1.2.3 "$test_root/out" >/dev/null 2>&1; then
+  fail 'release-flatpak must reject a non-Debian input'
+fi
+
+touch "$test_root/Chronacle.deb"
+if "$release_script" "$test_root/Chronacle.deb" v1.2.3 "$test_root/out" >/dev/null 2>&1; then
+  fail 'release-flatpak must reject prefixed semver'
+fi
+
+mkdir -p "$test_root/bin" "$test_root/state" "$test_root/output"
+printf '%s\n' amd64 arm64 >"$test_root/state/deb-architectures"
+touch "$test_root/output/caller-owned"
+
+cat >"$test_root/bin/dpkg-deb" <<'STUB'
+#!/bin/sh
+set -eu
+printf 'dpkg-deb %s\n' "$*" >>"$STUB_STATE/calls"
+[ "$1" = -f ]
+[ "$3" = Architecture ]
+arch=$(sed -n '1p' "$STUB_STATE/deb-architectures")
+[ -n "$arch" ]
+sed '1d' "$STUB_STATE/deb-architectures" >"$STUB_STATE/deb-architectures.next"
+mv "$STUB_STATE/deb-architectures.next" "$STUB_STATE/deb-architectures"
+printf '%s\n' "$arch"
+STUB
+
+cat >"$test_root/bin/appstreamcli" <<'STUB'
+#!/bin/sh
+set -eu
+printf 'appstreamcli %s\n' "$*" >>"$STUB_STATE/calls"
+STUB
+
+cat >"$test_root/bin/flatpak-builder" <<'STUB'
+#!/bin/sh
+set -eu
+printf 'flatpak-builder %s\n' "$*" >>"$STUB_STATE/calls"
+repo=
+arch=
+build_dir=
+manifest=
+for arg in "$@"; do
+  case "$arg" in
+    --repo=*) repo=${arg#--repo=} ;;
+    --arch=*) arch=${arg#--arch=} ;;
+    --*) ;;
+    *)
+      if [ -z "$build_dir" ]; then
+        build_dir=$arg
+      else
+        manifest=$arg
+      fi
+      ;;
+  esac
+done
+[ -n "$repo" ]
+[ -n "$arch" ]
+[ -f "$manifest" ]
+context=$(dirname "$manifest")
+[ -f "$context/Chronacle.deb" ]
+[ -f "$context/dev.tea-driven.chronacle.desktop.metainfo.xml" ]
+mkdir -p "$repo" "$build_dir"
+printf '%s\n' "$arch" >"$STUB_STATE/flatpak-arch"
+STUB
+
+cat >"$test_root/bin/flatpak" <<'STUB'
+#!/bin/sh
+set -eu
+printf 'flatpak %s\n' "$*" >>"$STUB_STATE/calls"
+
+case "${1:-}" in
+  build-bundle)
+    shift
+    while [ "${1#--}" != "$1" ]; do
+      shift
+    done
+    repo=$1
+    bundle=$2
+    app_id=$3
+    [ -d "$repo" ]
+    [ "$app_id" = dev.tea-driven.chronacle.desktop ]
+    mkdir -p "$(dirname "$bundle")"
+    : >"$bundle"
+    ;;
+  --user)
+    [ "$2" = --noninteractive ]
+    [ "$3" = install ]
+    [ -f "$4" ]
+    ;;
+  info)
+    cat "$STUB_STATE/flatpak-arch"
+    ;;
+  run)
+    case " $* " in
+      *' --command=sh '*) exit 0 ;;
+      *) exec /bin/sleep 30 ;;
+    esac
+    ;;
+  *)
+    echo "unexpected flatpak invocation: $*" >&2
+    exit 1
+    ;;
+esac
+STUB
+
+cat >"$test_root/bin/dbus-run-session" <<'STUB'
+#!/bin/sh
+set -eu
+[ "$1" = -- ]
+shift
+exec "$@"
+STUB
+
+cat >"$test_root/bin/xvfb-run" <<'STUB'
+#!/bin/sh
+set -eu
+[ "$1" = -a ]
+shift
+exec "$@"
+STUB
+
+cat >"$test_root/bin/sleep" <<'STUB'
+#!/bin/sh
+exec /bin/sleep 0.05
+STUB
+
+chmod +x "$test_root/bin/"*
+export STUB_STATE="$test_root/state"
+original_path=$PATH
+PATH="$test_root/bin:$PATH"
+export PATH
+
+"$release_script" "$test_root/Chronacle.deb" 1.2.3 "$test_root/output"
+"$release_script" "$test_root/Chronacle.deb" 1.2.3 "$test_root/output"
+
+PATH=$original_path
+export PATH
+
+require_file "$test_root/output/Chronacle_1.2.3_x86_64.flatpak"
+require_file "$test_root/output/Chronacle_1.2.3_aarch64.flatpak"
+require_file "$test_root/output/caller-owned"
+
+require_fixed "$test_root/state/calls" 'appstreamcli validate --no-net'
+require_fixed "$test_root/state/calls" 'flatpak-builder --force-clean --arch=x86_64 --repo='
+require_fixed "$test_root/state/calls" 'flatpak-builder --force-clean --arch=aarch64 --repo='
+require_fixed "$test_root/state/calls" 'flatpak build-bundle --arch=x86_64 --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo'
+require_fixed "$test_root/state/calls" 'flatpak build-bundle --arch=aarch64 --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo'
+require_fixed "$test_root/state/calls" 'flatpak --user --noninteractive install'
+require_fixed "$test_root/state/calls" 'flatpak info --user --show-arch dev.tea-driven.chronacle.desktop'
+require_fixed "$test_root/state/calls" '/app/bin/chronacle'
+require_fixed "$test_root/state/calls" '/app/lib/Chronacle/resources/pdfium/libpdfium.so'
+require_fixed "$test_root/state/calls" '/app/lib/Chronacle/resources/onnxruntime/libonnxruntime.so'
+require_fixed "$test_root/state/calls" '/app/share/applications/dev.tea-driven.chronacle.desktop.desktop'
+require_fixed "$test_root/state/calls" '/app/share/metainfo/dev.tea-driven.chronacle.desktop.metainfo.xml'
+require_fixed "$test_root/state/calls" 'flatpak run dev.tea-driven.chronacle.desktop'
+
 echo 'Flatpak release contract passed.'
