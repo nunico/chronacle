@@ -59,29 +59,45 @@ smoke_pid=
 smoke_active=0
 smoke_instance_file=
 smoke_instance_id=
+smoke_client_pid_file=
+smoke_client_pid=
 cleanup_started=0
+
+terminate_pid() {
+  target_pid=$1
+  case "$target_pid" in
+    '' | *[!0-9]*) return 0 ;;
+  esac
+
+  if kill -0 "$target_pid" 2>/dev/null; then
+    kill -TERM "$target_pid" 2>/dev/null || :
+    terminate_attempt=0
+    while kill -0 "$target_pid" 2>/dev/null && [ "$terminate_attempt" -lt 5 ]; do
+      sleep 1
+      terminate_attempt=$((terminate_attempt + 1))
+    done
+    if kill -0 "$target_pid" 2>/dev/null; then
+      kill -KILL "$target_pid" 2>/dev/null || :
+    fi
+  fi
+}
 
 stop_smoke() {
   [ "$smoke_active" -eq 1 ] || return 0
 
   if [ -z "$smoke_instance_id" ] && [ -n "$smoke_instance_file" ] &&
     [ -s "$smoke_instance_file" ]; then
-    IFS= read -r smoke_instance_id <"$smoke_instance_file" || smoke_instance_id=
+    smoke_instance_id=$(cat "$smoke_instance_file")
   fi
   if [ -n "$smoke_instance_id" ]; then
     flatpak kill "$smoke_instance_id" >/dev/null 2>&1 || :
   fi
-  if [ -n "$smoke_pid" ] && kill -0 "$smoke_pid" 2>/dev/null; then
-    kill -TERM "$smoke_pid" 2>/dev/null || :
-    stop_attempt=0
-    while kill -0 "$smoke_pid" 2>/dev/null && [ "$stop_attempt" -lt 5 ]; do
-      sleep 1
-      stop_attempt=$((stop_attempt + 1))
-    done
-    if kill -0 "$smoke_pid" 2>/dev/null; then
-      kill -KILL "$smoke_pid" 2>/dev/null || :
-    fi
+  if [ -z "$smoke_client_pid" ] && [ -n "$smoke_client_pid_file" ] &&
+    [ -s "$smoke_client_pid_file" ]; then
+    smoke_client_pid=$(cat "$smoke_client_pid_file")
   fi
+  terminate_pid "$smoke_client_pid"
+  terminate_pid "$smoke_pid"
   if [ -n "$smoke_pid" ]; then
     wait "$smoke_pid" 2>/dev/null || :
   fi
@@ -148,10 +164,23 @@ installed_arch=$(flatpak info --user --show-arch "$app_id")
   fail "installed Flatpak architecture is $installed_arch, expected $flatpak_arch"
 
 smoke_instance_file="$temp_dir/smoke-instance-id"
+smoke_client_pid_file="$temp_dir/smoke-client-pid"
+smoke_launcher="$temp_dir/smoke-launcher.sh"
 : >"$smoke_instance_file"
+: >"$smoke_client_pid_file"
+cat >"$smoke_launcher" <<'LAUNCHER'
+#!/bin/sh
+set -eu
+client_pid_file=$1
+shift
+printf %s "$$" >"$client_pid_file"
+exec "$@"
+LAUNCHER
+chmod +x "$smoke_launcher"
 smoke_active=1
-dbus-run-session -- xvfb-run -a flatpak run --instance-id-fd=3 "$app_id" \
-  3>"$smoke_instance_file" &
+dbus-run-session -- xvfb-run -a "$smoke_launcher" "$smoke_client_pid_file" \
+  flatpak run --die-with-parent --instance-id-fd=9 "$app_id" \
+  9>"$smoke_instance_file" &
 smoke_pid=$!
 instance_wait=0
 while [ ! -s "$smoke_instance_file" ] && [ "$instance_wait" -lt 10 ]; do
@@ -167,8 +196,7 @@ while [ ! -s "$smoke_instance_file" ] && [ "$instance_wait" -lt 10 ]; do
   instance_wait=$((instance_wait + 1))
 done
 [ -s "$smoke_instance_file" ] || fail 'Flatpak did not report an instance ID within ten seconds'
-IFS= read -r smoke_instance_id <"$smoke_instance_file" ||
-  fail 'unable to read the Flatpak smoke instance ID'
+smoke_instance_id=$(cat "$smoke_instance_file")
 [ -n "$smoke_instance_id" ] || fail 'Flatpak reported an empty instance ID'
 
 elapsed=0

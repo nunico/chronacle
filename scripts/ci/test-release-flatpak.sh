@@ -287,15 +287,24 @@ case "${1:-}" in
         ;;
       *)
         case " $* " in
-          *' --instance-id-fd=3 '*) ;;
-          *) echo 'startup smoke must request an instance ID on fd 3' >&2; exit 1 ;;
+          *' --die-with-parent --instance-id-fd=9 '*) ;;
+          *) echo 'startup smoke must request die-with-parent and an instance ID on fd 9' >&2; exit 1 ;;
         esac
+        printf '%s\n' "$$" >"$STUB_STATE/flatpak-client-pid"
+        touch "$STUB_STATE/flatpak-client-started"
+        trap 'touch "$STUB_STATE/flatpak-client-stopped"; exit 143' TERM
+        trap 'touch "$STUB_STATE/flatpak-client-stopped"; exit 130' INT
+        if [ "${STUB_DELAY_INSTANCE:-0}" -eq 1 ]; then
+          delay_step=0
+          while [ "$delay_step" -lt 150 ]; do
+            /bin/sleep 0.2
+            delay_step=$((delay_step + 1))
+          done
+        fi
         smoke_instance="chronacle-smoke-$$"
-        printf '%s\n' "$smoke_instance" >&3
+        printf %s "$smoke_instance" >&9
         printf '%s\n' "$smoke_instance" >"$STUB_STATE/smoke-instance-id"
         printf '%s\n' "$$" >"$STUB_STATE/app-pid"
-        trap 'touch "$STUB_STATE/app-stopped"; exit 143' TERM
-        trap 'touch "$STUB_STATE/app-stopped"; exit 130' INT
         while :; do /bin/sleep 1; done
         ;;
     esac
@@ -331,6 +340,7 @@ cat >"$test_root/bin/xvfb-run" <<'STUB'
 set -eu
 [ "$1" = -a ]
 shift
+exec 3>&-
 "$@" &
 child_pid=$!
 stop_child() {
@@ -347,7 +357,7 @@ STUB
 
 cat >"$test_root/bin/sleep" <<'STUB'
 #!/bin/sh
-exec /bin/sleep "${STUB_SLEEP_SECONDS:-0.05}"
+exec /bin/sleep "${STUB_SLEEP_SECONDS:-0.2}"
 STUB
 
 chmod +x "$test_root/bin/"*
@@ -374,20 +384,25 @@ kill -0 "$sentinel_pid" 2>/dev/null ||
 
 rm -f \
   "$test_root/state/app-pid" \
-  "$test_root/state/app-stopped" \
   "$test_root/state/dbus-reaped" \
+  "$test_root/state/flatpak-client-pid" \
+  "$test_root/state/flatpak-client-started" \
+  "$test_root/state/flatpak-client-stopped" \
   "$test_root/state/flatpak-kill" \
+  "$test_root/state/smoke-instance-id" \
   "$test_root/state/xvfb-reaped"
 STUB_SLEEP_SECONDS=1
-export STUB_SLEEP_SECONDS
+STUB_DELAY_INSTANCE=1
+export STUB_SLEEP_SECONDS STUB_DELAY_INSTANCE
 "$release_script" "$test_root/Chronacle.deb" 2.3.4 "$test_root/output" &
 release_pid=$!
 signal_wait=0
-while [ ! -f "$test_root/state/app-pid" ] && [ "$signal_wait" -lt 100 ]; do
+while [ ! -f "$test_root/state/flatpak-client-started" ] && [ "$signal_wait" -lt 100 ]; do
   /bin/sleep 0.05
   signal_wait=$((signal_wait + 1))
 done
-require_file "$test_root/state/app-pid"
+require_file "$test_root/state/flatpak-client-started"
+delayed_client_pid=$(cat "$test_root/state/flatpak-client-pid")
 kill -TERM "$release_pid"
 if wait "$release_pid"; then
   fail 'a terminated Flatpak release must fail'
@@ -396,14 +411,18 @@ else
 fi
 [ "$signal_status" -eq 143 ] ||
   fail "a TERM-interrupted Flatpak release must exit 143, got $signal_status"
-unset STUB_SLEEP_SECONDS
+unset STUB_SLEEP_SECONDS STUB_DELAY_INSTANCE
 
 signal_temp_dir=$(cat "$test_root/state/temp-dir")
 [ ! -e "$signal_temp_dir" ] || fail 'signal cleanup must remove the temporary build directory'
 [ ! -e "$test_root/output/Chronacle_2.3.4_x86_64.flatpak" ] ||
   fail 'a terminated Flatpak release must not publish an output bundle'
-require_file "$test_root/state/flatpak-kill"
-require_file "$test_root/state/app-stopped"
+[ ! -e "$test_root/state/flatpak-kill" ] ||
+  fail 'pre-ID cancellation must not use an app-wide or stale instance kill'
+require_file "$test_root/state/flatpak-client-stopped"
+if kill -0 "$delayed_client_pid" 2>/dev/null; then
+  fail 'pre-ID cancellation must terminate the Flatpak launch client'
+fi
 require_file "$test_root/state/xvfb-reaped"
 require_file "$test_root/state/dbus-reaped"
 kill -0 "$sentinel_pid" 2>/dev/null ||
@@ -434,7 +453,7 @@ require_fixed "$test_root/state/calls" '/app/share/applications/dev.tea-driven.c
 require_fixed "$test_root/state/calls" '/app/share/metainfo/dev.tea-driven.chronacle.desktop.metainfo.xml'
 require_fixed "$test_root/state/calls" '/app/share/icons/hicolor/32x32/apps/dev.tea-driven.chronacle.desktop.png'
 require_fixed "$test_root/state/calls" '/app/share/icons/hicolor/128x128/apps/dev.tea-driven.chronacle.desktop.png'
-require_fixed "$test_root/state/calls" 'flatpak run --instance-id-fd=3 dev.tea-driven.chronacle.desktop'
+require_fixed "$test_root/state/calls" 'flatpak run --die-with-parent --instance-id-fd=9 dev.tea-driven.chronacle.desktop'
 require_fixed "$test_root/state/calls" 'flatpak kill chronacle-smoke-'
 reject_pattern "$test_root/state/calls" '^flatpak kill dev\.tea-driven\.chronacle\.desktop$'
 
