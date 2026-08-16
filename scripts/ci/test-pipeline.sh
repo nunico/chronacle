@@ -134,15 +134,6 @@ rg -q '^RUN pnpm -C apps/desktop exec tauri build --no-bundle --features rocksdb
   apps/desktop/tests/e2e/ui/Dockerfile \
   || fail 'UI E2E container build must enable rocksdb'
 
-awk '
-  /uses: tauri-apps\/tauri-action@/ { in_action = 1; seen = 1; next }
-  in_action && /^[[:space:]]+with:/ { in_with = 1; next }
-  in_action && in_with && /^[[:space:]]+args:[[:space:]]+--features rocksdb[[:space:]]*$/ {
-    found = 1
-  }
-  END { exit !(seen && found) }
-' .github/workflows/release.yml \
-  || fail 'release packaging must enable rocksdb'
 rg -q '^[[:space:]]*run: cargo test -p Chronacle --features rocksdb[[:space:]]*$' \
   .github/workflows/release.yml \
   || fail 'release validation must exercise the RocksDB-enabled desktop suite'
@@ -180,6 +171,16 @@ function extractJobs() {
   return jobs;
 }
 
+function mappingBlock(text, name, indent) {
+  const prefix = ' '.repeat(indent);
+  const start = new RegExp(`^${prefix}${name}:\\s*$`, 'm').exec(text);
+  if (!start) return '';
+
+  const tail = text.slice(start.index + start[0].length);
+  const sibling = new RegExp(`^${prefix}[A-Za-z0-9_-]+:\\s*`, 'm').exec(tail);
+  return sibling ? tail.slice(0, sibling.index) : tail;
+}
+
 function matrixRecords(job) {
   if (!job) return [];
   const starts = [...job.matchAll(/^ {10}- ([A-Za-z0-9_-]+):\s*(.*)$/gm)];
@@ -207,8 +208,19 @@ function unquote(value) {
   return value.trim().replace(/^(["'])(.*)\1$/, '$2');
 }
 
-function hasTagGuard(text) {
-  return text.includes("startsWith(github.ref, 'refs/tags/v')");
+function isReleaseTagGuard(value) {
+  return /^(?:\$\{\{\s*)?startsWith\(github\.ref, 'refs\/tags\/v'\)(?:\s*\}\})?$/.test(
+    value.trim(),
+  );
+}
+
+function prSafeReleaseInput(withBlock, name) {
+  const input = new RegExp(`^ {10}${name}:\\s*(.+)$`, 'm').exec(withBlock)?.[1] ?? '';
+  return (
+    /^\$\{\{\s*startsWith\(github\.ref, 'refs\/tags\/v'\)\s*&&\s*.+\s*\|\|\s*''\s*\}\}$/.test(
+      input.trim(),
+    ) && input.includes('github.ref_name')
+  );
 }
 
 const on = extractTopLevel('on');
@@ -218,6 +230,8 @@ const flatpak = jobs.get('flatpak') ?? '';
 const publish = jobs.get('publish-release') ?? '';
 const buildRows = matrixRecords(build);
 const flatpakRows = matrixRecords(flatpak);
+const tauriReleaseStep = steps(build).find((step) => step.includes('tauri-apps/tauri-action@')) ?? '';
+const tauriWith = mappingBlock(tauriReleaseStep, 'with', 8);
 
 const nativePairs = [
   ['ubuntu-24.04', 'x86_64-unknown-linux-gnu'],
@@ -250,10 +264,13 @@ requireContract(
   'Linux aarch64 must expose arm64 and aarch64 artifact labels',
 );
 requireContract(
-  /args:\s*--target \$\{\{ matrix\.target \}\} --features rocksdb/.test(build),
+  /^ {10}args:\s*--target \$\{\{ matrix\.target \}\} --features rocksdb\s*$/m.test(tauriWith),
   'native packaging must pass every explicit target to Tauri',
 );
-requireContract(/releaseDraft:\s*true/.test(build), 'native releases must remain drafts during build');
+requireContract(
+  /^ {10}releaseDraft:\s*true\s*$/m.test(tauriWith),
+  'native releases must remain drafts during build',
+);
 requireContract(
   /uses:\s*actions\/upload-artifact@v4/.test(build) &&
     /name:\s*chronacle-deb-\$\{\{ matrix\.flatpak_arch \}\}/.test(build),
@@ -265,8 +282,16 @@ requireContract(
   'every native bundle must be retained as an inspectable workflow artifact',
 );
 
-requireContract(/^[ ]{2}pull_request:\s*$/m.test(on), 'release workflow must run on pull requests');
-requireContract(/^[ ]{4}paths:\s*$/m.test(on), 'release pull request trigger must be path-filtered');
+const pullRequest = mappingBlock(on, 'pull_request', 2);
+const pullRequestPaths = mappingBlock(pullRequest, 'paths', 4);
+const pullRequestPathEntries = [...pullRequestPaths.matchAll(/^ {6}-\s*(.+)$/gm)].map((entry) =>
+  unquote(entry[1]),
+);
+requireContract(pullRequest.length > 0, 'release workflow must run on pull requests');
+requireContract(
+  pullRequestPaths.length > 0,
+  'release pull request trigger must be path-filtered',
+);
 for (const path of [
   '.github/workflows/release.yml',
   'packaging/flatpak/**',
@@ -280,7 +305,10 @@ for (const path of [
   'docs/user-guide.md',
   'docs/architecture.md',
 ]) {
-  requireContract(on.includes(path), `release pull request paths must include ${path}`);
+  requireContract(
+    pullRequestPathEntries.includes(path),
+    `release pull request paths must include ${path}`,
+  );
 }
 
 requireContract(flatpak.length > 0, 'flatpak job must exist');
@@ -304,12 +332,13 @@ requireContract(
 );
 
 const flatpakReleaseStep = steps(flatpak).find((step) => step.includes('gh release upload')) ?? '';
+const flatpakReleaseIf = /^ {8}if:\s*(.+)$/m.exec(flatpakReleaseStep)?.[1] ?? '';
 requireContract(
   /gh release upload[^\n]*\*\.flatpak/.test(flatpakReleaseStep),
   'flatpak bundles must be uploaded to the draft release',
 );
 requireContract(
-  hasTagGuard(flatpakReleaseStep),
+  isReleaseTagGuard(flatpakReleaseIf),
   'flatpak release upload must be guarded by a release tag',
 );
 
@@ -322,12 +351,23 @@ requireContract(
   /gh release edit[^\n]*--draft=false/.test(publish),
   'publish-release must remove draft status with gh release edit',
 );
-requireContract(hasTagGuard(publish), 'publish-release must be guarded by a release tag');
-
-const tauriReleaseStep = steps(build).find((step) => step.includes('tauri-apps/tauri-action@')) ?? '';
+const publishJobIf = /^ {4}if:\s*(.+)$/m.exec(publish)?.[1] ?? '';
 requireContract(
-  hasTagGuard(tauriReleaseStep) && /tagName:/.test(tauriReleaseStep),
-  'native release creation must be disabled outside release tags',
+  isReleaseTagGuard(publishJobIf),
+  'publish-release must have a job-level release-tag guard',
+);
+
+requireContract(
+  prSafeReleaseInput(tauriWith, 'tagName'),
+  'native tagName must select the tag only for release tags and be empty on pull requests',
+);
+requireContract(
+  prSafeReleaseInput(tauriWith, 'releaseName'),
+  'native releaseName must select a name only for release tags and be empty on pull requests',
+);
+requireContract(
+  !/^ {8}if:\s*.*startsWith\(github\.ref, 'refs\/tags\/v'\)/m.test(tauriReleaseStep),
+  'native packaging must remain runnable on pull requests',
 );
 requireContract(
   !/releaseDraft:\s*false/.test(build),
