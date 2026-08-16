@@ -1,5 +1,6 @@
 packages:
   - apps/desktop
+  - apps/website
 allowBuilds:
   esbuild: true
   msw: true
