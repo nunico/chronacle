@@ -271,6 +271,7 @@ const buildRows = matrixRecords(build);
 const flatpakRows = matrixRecords(flatpak);
 const buildSteps = steps(build);
 const flatpakSteps = steps(flatpak);
+const publishSteps = steps(publish);
 const tauriReleaseStep =
   buildSteps.find((step) => stepUses(step, 'tauri-apps/tauri-action@v0')) ?? '';
 const tauriWith = mappingBlock(tauriReleaseStep, 'with', 8);
@@ -438,8 +439,15 @@ requireContract(
   /^ {4}needs:\s*\[build, flatpak\]\s*$/m.test(publish),
   'publish-release must need build and flatpak',
 );
+const publishReleaseStep =
+  publishSteps.find((step) =>
+    runInvokes(
+      step,
+      /^gh release edit\b[^#]*--draft=false(?:\s|$)[^#]*--prerelease=false(?:\s|$)/,
+    ),
+  ) ?? '';
 requireContract(
-  /gh release edit[^\n]*--draft=false/.test(publish),
+  publishReleaseStep.length > 0,
   'publish-release must remove draft status with gh release edit',
 );
 const publishJobIf = /^ {4}if:\s*(.+)$/m.exec(publish)?.[1] ?? '';
