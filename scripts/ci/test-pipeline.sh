@@ -345,6 +345,13 @@ function canonicalAssetUpload(text) {
   const validation = text.slice(planDone, uploadLoop);
   const uploadBody = text.slice(uploadLoop, uploadDone);
   const beforeUpload = text.slice(0, uploadLoop);
+  const uploadCommands = shellCommands(uploadBody);
+  const uploadsAsset = uploadCommands.some(
+    (command) =>
+      /^gh api --method POST "https:\/\/uploads\.github\.com\/repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?name=\$\{encoded_name\}"(?:\s|$)/.test(
+        command,
+      ) && /--input "\$asset"(?:\s|$)/.test(command),
+  );
   return (
     /find release-assets\/native release-assets\/flatpak/.test(text) &&
     /-print0/.test(text) &&
@@ -360,19 +367,19 @@ function canonicalAssetUpload(text) {
     ) &&
     /assets\+=\("\$asset"\)/.test(planBody) &&
     /asset_names\+=\("\$asset_name"\)/.test(planBody) &&
-    /\$\{#assets\[@\]\}/.test(validation) &&
-    /\$\{#asset_names\[@\]\}/.test(validation) &&
-    /sort[^\n]*-u|uniq[^\n]*-d/.test(validation) &&
+    /if \[ "\$\{#assets\[@\]\}" -eq 0 \] \|\| \[ "\$\{#assets\[@\]\}" -ne "\$\{#asset_names\[@\]\}" \]; then/.test(
+      validation,
+    ) &&
+    /if \[ "\$\(printf '[^']*' "\$\{asset_names\[@\]\}" \| sort -u \| wc -l\)" -ne "\$\{#asset_names\[@\]\}" \]; then/.test(
+      validation,
+    ) &&
     /exit 1/.test(validation) &&
     !/gh api\b/.test(beforeUpload) &&
     /asset="\$\{assets\[\$index\]\}"/.test(uploadBody) &&
     /asset_name="\$\{asset_names\[\$index\]\}"/.test(uploadBody) &&
     /@uri/.test(uploadBody) &&
-    !/--hostname uploads\.github\.com/.test(text) &&
-    /--method POST/.test(uploadBody) &&
-    /https:\/\/uploads\.github\.com\/repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?name=\$\{encoded_name\}/.test(
-      uploadBody,
-    ) &&
+    !/--hostname(?:\s+|=)uploads\.github\.com/.test(text) &&
+    uploadsAsset &&
     /Content-Type: application\/octet-stream/.test(uploadBody) &&
     /--input "\$asset"/.test(uploadBody)
   );
@@ -414,6 +421,14 @@ function canonicalPublish(text) {
     /prerelease=false/.test(patchBody) &&
     !/gh release edit/.test(text)
   );
+}
+
+function shellCommands(text) {
+  return text
+    .replace(/\\\n[ \t]*/g, ' ')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('#'));
 }
 
 function stepUses(step, action) {
@@ -626,8 +641,38 @@ requireContract(
   'pipeline parser must require complete unique asset-name validation before API mutation',
 );
 requireContract(
-  !canonicalAssetUpload(canonicalAssetFixture.replace('https://uploads.github.com/', '').replace('gh api --method POST', 'gh api --hostname uploads.github.com --method POST')),
+  !canonicalAssetUpload(
+    canonicalAssetFixture.replace(
+      'printf \'%s\\n\' "${asset_names[@]}" | sort -u',
+      'printf \'%s\\n\' "${assets[@]}" | sort -u',
+    ),
+  ),
+  'pipeline parser must reject uniqueness checks over source paths instead of derived names',
+);
+requireContract(
+  !canonicalAssetUpload(
+    canonicalAssetFixture
+      .replace('https://uploads.github.com/', '')
+      .replace('gh api --method POST', 'gh api --hostname uploads.github.com --method POST'),
+  ),
   'pipeline parser must reject hostname-based upload API calls',
+);
+requireContract(
+  !canonicalAssetUpload(
+    canonicalAssetFixture
+      .replace('https://uploads.github.com/', '')
+      .replace('gh api --method POST', 'gh api --hostname=uploads.github.com --method POST'),
+  ),
+  'pipeline parser must reject equals-style hostname upload API calls',
+);
+requireContract(
+  !canonicalAssetUpload(
+    canonicalAssetFixture.replace(
+      'gh api --method POST "https://uploads.github.com/',
+      'gh api --method POST\n"https://uploads.github.com/',
+    ),
+  ),
+  'pipeline parser must bind the POST method and upload endpoint in one executable command',
 );
 requireContract(
   !hasUniqueDerivedReleaseAssetNames([
