@@ -346,6 +346,14 @@ function canonicalAssetUpload(text) {
   const uploadBody = text.slice(uploadLoop, uploadDone);
   const beforeUpload = text.slice(0, uploadLoop);
   const uploadCommands = shellCommands(uploadBody);
+  const hasCardinalityGuard = hasFailClosedGuard(
+    validation,
+    /if \[ "\$\{#assets\[@\]\}" -eq 0 \] \|\| \[ "\$\{#assets\[@\]\}" -ne "\$\{#asset_names\[@\]\}" \]; then/,
+  );
+  const hasUniquenessGuard = hasFailClosedGuard(
+    validation,
+    /if \[ "\$\(printf '[^']*' "\$\{asset_names\[@\]\}" \| sort -u \| wc -l\)" -ne "\$\{#asset_names\[@\]\}" \]; then/,
+  );
   const uploadsAsset = uploadCommands.some(
     (command) =>
       /^gh api --method POST "https:\/\/uploads\.github\.com\/repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?name=\$\{encoded_name\}"(?:\s|$)/.test(
@@ -367,13 +375,8 @@ function canonicalAssetUpload(text) {
     ) &&
     /assets\+=\("\$asset"\)/.test(planBody) &&
     /asset_names\+=\("\$asset_name"\)/.test(planBody) &&
-    /if \[ "\$\{#assets\[@\]\}" -eq 0 \] \|\| \[ "\$\{#assets\[@\]\}" -ne "\$\{#asset_names\[@\]\}" \]; then/.test(
-      validation,
-    ) &&
-    /if \[ "\$\(printf '[^']*' "\$\{asset_names\[@\]\}" \| sort -u \| wc -l\)" -ne "\$\{#asset_names\[@\]\}" \]; then/.test(
-      validation,
-    ) &&
-    /exit 1/.test(validation) &&
+    hasCardinalityGuard &&
+    hasUniquenessGuard &&
     !/gh api\b/.test(beforeUpload) &&
     /asset="\$\{assets\[\$index\]\}"/.test(uploadBody) &&
     /asset_name="\$\{asset_names\[\$index\]\}"/.test(uploadBody) &&
@@ -429,6 +432,18 @@ function shellCommands(text) {
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line !== '' && !line.startsWith('#'));
+}
+
+function hasFailClosedGuard(text, headerPattern) {
+  const header = headerPattern.exec(text);
+  if (!header) return false;
+
+  const bodyStart = header.index + header[0].length;
+  const terminator = /(?:;|\n)[ \t]*fi\b/.exec(text.slice(bodyStart));
+  if (!terminator) return false;
+
+  const body = text.slice(bodyStart, bodyStart + terminator.index);
+  return /(?:^|[;&| \t])exit[ \t]+[1-9][0-9]*(?:$|[;&| \t])/.test(body);
 }
 
 function stepUses(step, action) {
@@ -639,6 +654,24 @@ requireContract(
     ),
   ),
   'pipeline parser must require complete unique asset-name validation before API mutation',
+);
+requireContract(
+  !canonicalAssetUpload(
+    canonicalAssetFixture.replace(
+      'if [ "${#assets[@]}" -eq 0 ] || [ "${#assets[@]}" -ne "${#asset_names[@]}" ]; then exit 1; fi',
+      'if [ "${#assets[@]}" -eq 0 ] || [ "${#assets[@]}" -ne "${#asset_names[@]}" ]; then echo invalid cardinality; fi',
+    ),
+  ),
+  'pipeline parser must require the asset cardinality guard itself to terminate with failure',
+);
+requireContract(
+  !canonicalAssetUpload(
+    canonicalAssetFixture.replace(
+      'if [ "$(printf \'%s\\n\' "${asset_names[@]}" | sort -u | wc -l)" -ne "${#asset_names[@]}" ]; then exit 1; fi',
+      'if [ "$(printf \'%s\\n\' "${asset_names[@]}" | sort -u | wc -l)" -ne "${#asset_names[@]}" ]; then echo duplicate name; fi',
+    ),
+  ),
+  'pipeline parser must require the asset uniqueness guard itself to terminate with failure',
 );
 requireContract(
   !canonicalAssetUpload(
