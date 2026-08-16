@@ -361,7 +361,11 @@ function canonicalAssetUpload(text) {
   const planBody = text.slice(planLoop, planDone);
   const validation = text.slice(planDone, existingFetch);
   const reconciliation = text.slice(existingFetch, staleEnd);
+  const staleBody = text.slice(staleLoop, staleDone);
+  const staleSource = text.slice(staleDone + 1, staleEnd).trim();
   const uploadBody = text.slice(uploadLoop, uploadDone);
+  const reconciliationCommands = shellCommands(reconciliation);
+  const staleCommands = shellCommands(staleBody);
   const uploadCommands = shellCommands(uploadBody);
   const hasCardinalityGuard = hasFailClosedGuard(
     validation,
@@ -377,36 +381,84 @@ function canonicalAssetUpload(text) {
         command,
       ) && /--input "\$asset"(?:\s|$)/.test(command),
   );
-  const fetchesExactReleaseAssets =
-    /existing_assets=\$\(gh api --paginate --slurp[\s\S]*?"repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?per_page=100"[\s\S]*?\|[\s\S]*?jq ['"]add['"]\)/.test(
-      reconciliation,
-    ) &&
-    (text.match(/repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?per_page=100/g) ?? [])
-      .length === 1;
+  const fetchesExactReleaseAssets = reconciliationCommands.some((command) =>
+    /^existing_assets=\$\(gh api --paginate --slurp "repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?per_page=100" \| jq ['"]add['"]\)$/.test(
+      command,
+    ),
+  );
+  const staleNumeric = staleCommands.findIndex((command) =>
+    /^\[\[ "\$stale_id" =~ \^\[0-9\]\+\$ \]\]$/.test(command),
+  );
+  const staleDelete = staleCommands.findIndex((command) =>
+    /^gh api --method DELETE "repos\/\$\{GITHUB_REPOSITORY\}\/releases\/assets\/\$\{stale_id\}"$/.test(
+      command,
+    ),
+  );
   const deletesStaleAssets =
     /planned_names_json=\$\(printf '[^']*' "\$\{asset_names\[@\]\}" \| jq -R \. \| jq -s \.\)/.test(
       validation,
     ) &&
-    /jq -r --argjson planned_names "\$planned_names_json" ['"]\.\[\] \| select\(\.name as \$name \| \$planned_names \| index\(\$name\) \| not\) \| \.id['"] <<<"\$existing_assets"/.test(
-      reconciliation,
+    /^done < <\(jq -r --argjson planned_names "\$planned_names_json" ['"]\.\[\] \| select\(\.name as \$name \| \$planned_names \| index\(\$name\) \| not\) \| \.id['"] <<<"\$existing_assets"\)$/.test(
+      staleSource,
     ) &&
-    /\[\[ "\$stale_id" =~ \^\[0-9\]\+\$ \]\]/.test(reconciliation) &&
-    /gh api --method DELETE[\s\S]*?"repos\/\$\{GITHUB_REPOSITORY\}\/releases\/assets\/\$\{stale_id\}"/.test(
-      reconciliation,
-    );
-  const replacesSameNameAssets =
-    /matching_assets=\$\(jq --arg name "\$asset_name" ['"]map\(select\(\.name == \$name\)\)['"] <<<"\$existing_assets"\)/.test(
-      uploadBody,
-    ) &&
-    /matching_count=\$\(jq ['"]length['"] <<<"\$matching_assets"\)/.test(uploadBody) &&
-    /if \[ "\$matching_count" -gt 1 \]; then[\s\S]*?exit 1[\s\S]*?elif \[ "\$matching_count" -eq 1 \]; then/.test(
-      uploadBody,
-    ) &&
-    /existing_id=\$\(jq -r ['"]\.\[0\]\.id['"] <<<"\$matching_assets"\)/.test(uploadBody) &&
-    /\[\[ "\$existing_id" =~ \^\[0-9\]\+\$ \]\]/.test(uploadBody) &&
-    /gh api --method DELETE[\s\S]*?"repos\/\$\{GITHUB_REPOSITORY\}\/releases\/assets\/\$\{existing_id\}"/.test(
-      uploadBody,
+    staleNumeric >= 0 &&
+    staleNumeric < staleDelete;
+  const sameNameLookup = uploadCommands.findIndex((command) =>
+    /^matching_assets=\$\(jq --arg name "\$asset_name" ['"]map\(select\(\.name == \$name\)\)['"] <<<"\$existing_assets"\)$/.test(
+      command,
+    ),
   );
+  const sameNameCount = uploadCommands.findIndex((command) =>
+    /^matching_count=\$\(jq ['"]length['"] <<<"\$matching_assets"\)$/.test(command),
+  );
+  const duplicateHeader = /if \[ "\$matching_count" -gt 1 \]; then/.exec(uploadBody);
+  const duplicateBranchEnd = duplicateHeader
+    ? /(?:;|\n)[ \t]*(?:elif|else|fi)\b/.exec(
+        uploadBody.slice(duplicateHeader.index + duplicateHeader[0].length),
+      )
+    : null;
+  const duplicateBranch =
+    duplicateHeader && duplicateBranchEnd
+      ? uploadBody.slice(
+          duplicateHeader.index + duplicateHeader[0].length,
+          duplicateHeader.index + duplicateHeader[0].length + duplicateBranchEnd.index,
+        )
+      : '';
+  const duplicateFailsClosed = shellCommands(duplicateBranch).some((command) =>
+    /^exit[ \t]+[1-9][0-9]*$/.test(command),
+  );
+  const duplicateCommand = uploadCommands.findIndex((command) =>
+    /^if \[ "\$matching_count" -gt 1 \]; then$/.test(command),
+  );
+  const replacementBranch = uploadCommands.findIndex((command) =>
+    /^elif \[ "\$matching_count" -eq 1 \]; then$/.test(command),
+  );
+  const existingId = uploadCommands.findIndex((command) =>
+    /^existing_id=\$\(jq -r ['"]\.\[0\]\.id['"] <<<"\$matching_assets"\)$/.test(command),
+  );
+  const existingNumeric = uploadCommands.findIndex((command) =>
+    /^\[\[ "\$existing_id" =~ \^\[0-9\]\+\$ \]\]$/.test(command),
+  );
+  const existingDelete = uploadCommands.findIndex((command) =>
+    /^gh api --method DELETE "repos\/\$\{GITHUB_REPOSITORY\}\/releases\/assets\/\$\{existing_id\}"$/.test(
+      command,
+    ),
+  );
+  const uploadPost = uploadCommands.findIndex((command) =>
+    /^gh api --method POST "https:\/\/uploads\.github\.com\/repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?name=\$\{encoded_name\}"(?:\s|$)/.test(
+      command,
+    ),
+  );
+  const replacesSameNameAssets =
+    sameNameLookup >= 0 &&
+    sameNameLookup < sameNameCount &&
+    sameNameCount < duplicateCommand &&
+    duplicateFailsClosed &&
+    duplicateCommand < replacementBranch &&
+    replacementBranch < existingId &&
+    existingId < existingNumeric &&
+    existingNumeric < existingDelete &&
+    existingDelete < uploadPost;
   return (
     /\[\[ "\$RELEASE_ID" =~ \^\[0-9\]\+\$ \]\]/.test(text) &&
     /find release-assets\/native release-assets\/flatpak/.test(text) &&
@@ -717,6 +769,17 @@ requireContract(
   canonicalAssetUpload(canonicalAssetFixture),
   'pipeline parser canonical asset fixture must remain valid',
 );
+const wrongAssetEndpointFixture = canonicalAssetFixture.replace(
+  'existing_assets=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" | jq \'add\')',
+  [
+    'existing_assets=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases/latest/assets?per_page=100" | jq \'add\')',
+    'echo \'existing_assets=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" | jq "add")\'',
+  ].join('\n'),
+);
+requireContract(
+  !canonicalAssetUpload(wrongAssetEndpointFixture),
+  'pipeline parser must bind paginated asset retrieval to the exact release ID command',
+);
 const legacyAssetSurvivesFixture = canonicalAssetFixture.replace(
   'select(.name as $name | $planned_names | index($name) | not)',
   'select(.name as $name | $planned_names | index($name))',
@@ -724,6 +787,52 @@ const legacyAssetSurvivesFixture = canonicalAssetFixture.replace(
 requireContract(
   !canonicalAssetUpload(legacyAssetSurvivesFixture),
   'pipeline parser must reject reconciliation that leaves legacy Chronacle.app.tar.gz assets in place',
+);
+const unusedSelectorFixture = canonicalAssetFixture
+  .replace(
+    'while IFS= read -r stale_id; do',
+    'unused_stale_ids=$(jq -r --argjson planned_names "$planned_names_json" \'.[] | select(.name as $name | $planned_names | index($name) | not) | .id\' <<<"$existing_assets")\nwhile IFS= read -r stale_id; do',
+  )
+  .replace(
+    'done < <(jq -r --argjson planned_names "$planned_names_json" \'.[] | select(.name as $name | $planned_names | index($name) | not) | .id\' <<<"$existing_assets")',
+    'done < <(jq -r --argjson planned_names "$planned_names_json" \'.[] | select(.name as $name | $planned_names | index($name)) | .id\' <<<"$existing_assets")',
+  );
+requireContract(
+  !canonicalAssetUpload(unusedSelectorFixture),
+  'pipeline parser must reject an unused correct selector with an inverted active stale source',
+);
+const emptyStaleSourceFixture = canonicalAssetFixture
+  .replace(
+    'while IFS= read -r stale_id; do',
+    'unused_stale_ids=$(jq -r --argjson planned_names "$planned_names_json" \'.[] | select(.name as $name | $planned_names | index($name) | not) | .id\' <<<"$existing_assets")\nwhile IFS= read -r stale_id; do',
+  )
+  .replace(
+    'done < <(jq -r --argjson planned_names "$planned_names_json" \'.[] | select(.name as $name | $planned_names | index($name) | not) | .id\' <<<"$existing_assets")',
+    "done < <(printf '')",
+  );
+requireContract(
+  !canonicalAssetUpload(emptyStaleSourceFixture),
+  'pipeline parser must reject an unused correct selector with an empty active stale source',
+);
+const uploadCommand =
+  'gh api --method POST "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" -H "Content-Type: application/octet-stream" --input "$asset"';
+const uploadBeforeDeleteFixture = canonicalAssetFixture
+  .replace(`${uploadCommand}\n`, '')
+  .replace(
+    'matching_assets=$(jq --arg name "$asset_name" \'map(select(.name == $name))\' <<<"$existing_assets")',
+    `${uploadCommand}\nmatching_assets=$(jq --arg name "$asset_name" 'map(select(.name == $name))' <<<"$existing_assets")`,
+  );
+requireContract(
+  !canonicalAssetUpload(uploadBeforeDeleteFixture),
+  'pipeline parser must reject uploads that occur before same-name replacement deletion',
+);
+const duplicateGuardDoesNotFailFixture = canonicalAssetFixture.replace(
+  'if [ "$matching_count" -gt 1 ]; then\nexit 1\nelif [ "$matching_count" -eq 1 ]; then',
+  'if [ "$matching_count" -gt 1 ]; then\necho duplicate\nelif [ "$matching_count" -eq 1 ]; then\nexit 1',
+);
+requireContract(
+  !canonicalAssetUpload(duplicateGuardDoesNotFailFixture),
+  'pipeline parser must require duplicate same-name assets to fail within that branch',
 );
 requireContract(
   !canonicalAssetUpload(
