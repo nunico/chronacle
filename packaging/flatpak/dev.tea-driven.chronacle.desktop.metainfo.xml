@@ -4,11 +4,10 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>AGPL-3.0-only</project_license>
   <name>Chronacle</name>
-  <summary>A source-grounded TTRPG game master assistant</summary>
+  <summary>A local-first TTRPG game-master assistant</summary>
   <description>
     <p>
-      Chronacle helps game masters search rulebooks, organize campaign knowledge, and get answers
-      with citations to their source material.
+      Load rulebook PDFs, keep structured campaign notes, and ask questions with source citations.
     </p>
   </description>
   <developer id="dev.tea-driven">
@@ -20,10 +19,10 @@
     <color type="primary" scheme_preference="light">#3d5bff</color>
     <color type="primary" scheme_preference="dark">#05060f</color>
   </branding>
-  <recommends>
+  <supports>
     <control>keyboard</control>
     <control>pointing</control>
-  </recommends>
+  </supports>
   <content_rating type="oars-1.1" />
   <launchable type="desktop-id">dev.tea-driven.chronacle.desktop.desktop</launchable>
 </component>
