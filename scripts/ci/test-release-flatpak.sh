@@ -37,7 +37,7 @@ require_file "$metainfo"
 
 require_exact "$manifest" "app-id: $app_id"
 require_exact "$manifest" 'runtime: org.gnome.Platform'
-require_fixed "$manifest" 'runtime-version: "50"'
+require_exact "$manifest" 'runtime-version: "50"'
 require_exact "$manifest" 'sdk: org.gnome.Sdk'
 require_exact "$manifest" 'command: chronacle'
 require_fixed "$manifest" 'buildsystem: simple'
