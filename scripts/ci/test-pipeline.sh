@@ -177,16 +177,20 @@ function mappingBlock(text, name, indent) {
   if (!start) return '';
 
   const tail = text.slice(start.index + start[0].length);
-  const sibling = new RegExp(`^${prefix}[A-Za-z0-9_-]+:\\s*`, 'm').exec(tail);
-  return sibling ? tail.slice(0, sibling.index) : tail;
+  const boundary = new RegExp(`^ {0,${indent}}[A-Za-z0-9_-]+:\\s*`, 'm').exec(tail);
+  return boundary ? tail.slice(0, boundary.index) : tail;
 }
 
 function matrixRecords(job) {
-  if (!job) return [];
-  const starts = [...job.matchAll(/^ {10}- ([A-Za-z0-9_-]+):\s*(.*)$/gm)];
+  const strategy = mappingBlock(job, 'strategy', 4);
+  const matrix = mappingBlock(strategy, 'matrix', 6);
+  const include = mappingBlock(matrix, 'include', 8);
+  if (!include) return [];
+
+  const starts = [...include.matchAll(/^ {10}- ([A-Za-z0-9_-]+):\s*(.*)$/gm)];
   return starts.map((start, index) => {
-    const end = starts[index + 1]?.index ?? job.length;
-    const recordText = job.slice(start.index, end);
+    const end = starts[index + 1]?.index ?? include.length;
+    const recordText = include.slice(start.index, end);
     const record = { [start[1]]: unquote(start[2]) };
     for (const line of recordText.matchAll(/^ {12}([A-Za-z0-9_-]+):\s*(.*)$/gm)) {
       record[line[1]] = unquote(line[2]);
@@ -207,6 +211,11 @@ function steps(job) {
 function stepInput(step, name) {
   const withBlock = mappingBlock(step, 'with', 8);
   return unquote(new RegExp(`^ {10}${name}:\\s*(.+)$`, 'm').exec(withBlock)?.[1] ?? '');
+}
+
+function directValue(text, name, indent) {
+  const value = new RegExp(`^ {${indent}}${name}:\\s*(.+)$`, 'm').exec(text)?.[1] ?? '';
+  return unquote(value);
 }
 
 function stepUses(step, action) {
@@ -253,6 +262,19 @@ function isReleaseTagGuard(value) {
   );
 }
 
+function isLinuxOnlyGuard(value) {
+  return /^(?:\$\{\{\s*)?runner\.os == 'Linux'(?:\s*\}\})?$/.test(value.trim());
+}
+
+function sameRecord(actual, expected) {
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  return (
+    JSON.stringify(actualKeys) === JSON.stringify(expectedKeys) &&
+    expectedKeys.every((key) => actual[key] === expected[key])
+  );
+}
+
 function prSafeReleaseInput(withBlock, name) {
   const input = new RegExp(`^ {10}${name}:\\s*(.+)$`, 'm').exec(withBlock)?.[1] ?? '';
   return (
@@ -264,11 +286,13 @@ function prSafeReleaseInput(withBlock, name) {
 
 const on = extractTopLevel('on');
 const jobs = extractJobs();
+const preCheck = jobs.get('pre-check') ?? '';
 const build = jobs.get('build') ?? '';
 const flatpak = jobs.get('flatpak') ?? '';
 const publish = jobs.get('publish-release') ?? '';
 const buildRows = matrixRecords(build);
 const flatpakRows = matrixRecords(flatpak);
+const preCheckSteps = steps(preCheck);
 const buildSteps = steps(build);
 const flatpakSteps = steps(flatpak);
 const publishSteps = steps(publish);
@@ -289,9 +313,16 @@ const splitStepFixture = [
   '          path: target/${{ matrix.target }}/release/bundle/deb/*.deb',
   '      - run: |',
   '          # scripts/release-flatpak.sh artifacts/*.deb 1.2.3 flatpak-out',
+  '          # releaseDraft: false',
+  '          # gh release edit example --draft=false --prerelease=false',
+  '          echo --draft=false',
   '          echo no-build',
 ].join('\n');
 const splitFixtureSteps = steps(splitStepFixture);
+requireContract(
+  matrixRecords(splitStepFixture).length === 0,
+  'pipeline parser must read matrix rows only from strategy.matrix.include',
+);
 requireContract(
   artifactUploadStep(
     splitFixtureSteps,
@@ -306,37 +337,40 @@ requireContract(
   ),
   'pipeline parser must not treat comments as Flatpak build commands',
 );
+requireContract(
+  !splitFixtureSteps.some((step) =>
+    runInvokes(step, /^gh release edit\b[^#]*--draft=false(?:\s|$)/),
+  ),
+  'pipeline parser must not treat comments or diagnostics as draft publication',
+);
 
-const nativePairs = [
-  ['ubuntu-24.04', 'x86_64-unknown-linux-gnu'],
-  ['ubuntu-24.04-arm', 'aarch64-unknown-linux-gnu'],
-  ['macos-26', 'aarch64-apple-darwin'],
-  ['macos-15-intel', 'x86_64-apple-darwin'],
-  ['windows-2025', 'x86_64-pc-windows-msvc'],
+const nativeRows = [
+  {
+    name: 'linux-x86_64',
+    os: 'ubuntu-24.04',
+    target: 'x86_64-unknown-linux-gnu',
+    deb_arch: 'amd64',
+    flatpak_arch: 'x86_64',
+  },
+  {
+    name: 'linux-aarch64',
+    os: 'ubuntu-24.04-arm',
+    target: 'aarch64-unknown-linux-gnu',
+    deb_arch: 'arm64',
+    flatpak_arch: 'aarch64',
+  },
+  { name: 'macos-arm64', os: 'macos-26', target: 'aarch64-apple-darwin' },
+  { name: 'macos-x86_64', os: 'macos-15-intel', target: 'x86_64-apple-darwin' },
+  { name: 'windows-x86_64', os: 'windows-2025', target: 'x86_64-pc-windows-msvc' },
 ];
 
-requireContract(buildRows.length === nativePairs.length, 'build must define exactly five native matrix rows');
-for (const [os, target] of nativePairs) {
+requireContract(buildRows.length === nativeRows.length, 'build must define exactly five native matrix rows');
+for (const expected of nativeRows) {
   requireContract(
-    buildRows.some((row) => row.os === os && row.target === target),
-    `build matrix must pair ${os} with ${target}`,
+    buildRows.some((row) => sameRecord(row, expected)),
+    `build matrix must define the complete ${expected.name} row`,
   );
 }
-
-requireContract(
-  buildRows.some(
-    (row) =>
-      row.os === 'ubuntu-24.04' && row.deb_arch === 'amd64' && row.flatpak_arch === 'x86_64',
-  ),
-  'Linux x86_64 must expose amd64 and x86_64 artifact labels',
-);
-requireContract(
-  buildRows.some(
-    (row) =>
-      row.os === 'ubuntu-24.04-arm' && row.deb_arch === 'arm64' && row.flatpak_arch === 'aarch64',
-  ),
-  'Linux aarch64 must expose arm64 and aarch64 artifact labels',
-);
 requireContract(
   /^ {10}args:\s*--target \$\{\{ matrix\.target \}\} --features rocksdb\s*$/m.test(tauriWith),
   'native packaging must pass every explicit target to Tauri',
@@ -344,6 +378,20 @@ requireContract(
 requireContract(
   /^ {10}releaseDraft:\s*true\s*$/m.test(tauriWith),
   'native releases must remain drafts during build',
+);
+const versionConsistencyStep =
+  preCheckSteps.find((step) => directValue(step, 'name', 8) === 'Check version consistency') ?? '';
+requireContract(
+  isReleaseTagGuard(directValue(versionConsistencyStep, 'if', 8)),
+  'version consistency must run only for release tags',
+);
+requireContract(
+  directValue(build, 'if', 4) === '',
+  'build job must remain runnable on pull requests',
+);
+requireContract(
+  directValue(flatpak, 'if', 4) === '',
+  'flatpak job must remain runnable on pull requests',
 );
 const debUploadStep = artifactUploadStep(
   buildSteps,
@@ -353,6 +401,10 @@ const debUploadStep = artifactUploadStep(
 requireContract(
   debUploadStep.length > 0,
   'Linux Debian artifacts must be uploaded with architecture labels',
+);
+requireContract(
+  isLinuxOnlyGuard(directValue(debUploadStep, 'if', 8)),
+  'Debian artifact upload must run only for Linux matrix rows',
 );
 const nativeUploadStep = artifactUploadStep(
   buildSteps,
@@ -395,20 +447,45 @@ for (const path of [
 
 requireContract(flatpak.length > 0, 'flatpak job must exist');
 requireContract(/^ {4}needs:\s*build\s*$/m.test(flatpak), 'flatpak job must need build');
-for (const [os, arch] of [
-  ['ubuntu-24.04', 'x86_64'],
-  ['ubuntu-24.04-arm', 'aarch64'],
-]) {
+const expectedFlatpakRows = [
+  { os: 'ubuntu-24.04', arch: 'x86_64' },
+  { os: 'ubuntu-24.04-arm', arch: 'aarch64' },
+];
+requireContract(
+  flatpakRows.length === expectedFlatpakRows.length,
+  'flatpak matrix must define exactly two rows',
+);
+for (const expected of expectedFlatpakRows) {
   requireContract(
-    flatpakRows.some((row) => row.os === os && row.arch === arch),
-    `flatpak matrix must pair ${os} with ${arch}`,
+    flatpakRows.some((row) => sameRecord(row, expected)),
+    `flatpak matrix must pair ${expected.os} with ${expected.arch}`,
   );
 }
+const debDownloadStep =
+  flatpakSteps.find(
+    (step) =>
+      stepUses(step, 'actions/download-artifact@v4') &&
+      stepInput(step, 'name') === 'chronacle-deb-${{ matrix.arch }}' &&
+      stepInput(step, 'path') === 'artifacts',
+  ) ?? '';
 requireContract(
-  flatpakSteps.some((step) =>
-    runInvokes(step, /^(?:exec\s+)?scripts\/release-flatpak\.sh(?:\s|$)/),
-  ),
+  debDownloadStep.length > 0,
+  'flatpak must download the matching Debian artifact into artifacts',
+);
+const flatpakBuildStep =
+  flatpakSteps.find((step) =>
+    runInvokes(
+      step,
+      /^scripts\/release-flatpak\.sh artifacts\/\*\.deb "\$\{GITHUB_REF_NAME#v\}" flatpak-out$/,
+    ),
+  ) ?? '';
+requireContract(
+  flatpakBuildStep.length > 0,
   'flatpak job must invoke the shared release script',
+);
+requireContract(
+  directValue(flatpakBuildStep, 'if', 8) === '',
+  'flatpak builder step must remain runnable on pull requests',
 );
 const flatpakWorkflowUploadStep = artifactUploadStep(
   flatpakSteps,
@@ -465,20 +542,31 @@ requireContract(
   'native releaseName must select a name only for release tags and be empty on pull requests',
 );
 requireContract(
-  !/^ {8}if:\s*.*startsWith\(github\.ref, 'refs\/tags\/v'\)/m.test(tauriReleaseStep),
+  directValue(tauriReleaseStep, 'if', 8) === '',
   'native packaging must remain runnable on pull requests',
 );
-requireContract(
-  !/releaseDraft:\s*false/.test(build),
-  'build must never publish a release directly',
-);
-requireContract(
-  !/releaseDraft:\s*false/.test(flatpak),
-  'flatpak must never publish a release directly',
-);
+for (const [name, jobSteps] of [
+  ['build', buildSteps],
+  ['flatpak', flatpakSteps],
+]) {
+  for (const step of jobSteps.filter((candidate) =>
+    directValue(candidate, 'uses', 8).startsWith('tauri-apps/tauri-action@'),
+  )) {
+    requireContract(
+      stepInput(step, 'releaseDraft') !== 'false',
+      `${name} must never publish a release directly`,
+    );
+  }
+}
 for (const [name, job] of jobs) {
   if (name !== 'publish-release') {
-    requireContract(!job.includes('--draft=false'), `only publish-release may remove draft status, found in ${name}`);
+    const publishesDraft = steps(job).some((step) =>
+      runInvokes(step, /^gh release edit\b[^#]*--draft=false(?:\s|$)/),
+    );
+    requireContract(
+      !publishesDraft,
+      `only publish-release may remove draft status, found in ${name}`,
+    );
   }
 }
 
