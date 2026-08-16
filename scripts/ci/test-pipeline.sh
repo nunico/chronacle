@@ -204,6 +204,45 @@ function steps(job) {
   });
 }
 
+function stepInput(step, name) {
+  const withBlock = mappingBlock(step, 'with', 8);
+  return unquote(new RegExp(`^ {10}${name}:\\s*(.+)$`, 'm').exec(withBlock)?.[1] ?? '');
+}
+
+function stepUses(step, action) {
+  return new RegExp(`^ {8}uses:\\s*${action}\\s*$`, 'm').test(step);
+}
+
+function artifactUploadStep(jobSteps, expectedName, pathPattern) {
+  return (
+    jobSteps.find(
+      (step) =>
+        stepUses(step, 'actions/upload-artifact@v4') &&
+        stepInput(step, 'name') === expectedName &&
+        pathPattern.test(stepInput(step, 'path')),
+    ) ?? ''
+  );
+}
+
+function runLines(step) {
+  const run = /^ {8}run:\s*(.*)$/m.exec(step);
+  if (!run) return [];
+  if (run[1] !== '|') return [unquote(run[1])];
+
+  const tail = step.slice(run.index + run[0].length);
+  const sibling = /^ {8}[A-Za-z0-9_-]+:\s*/m.exec(tail);
+  const body = sibling ? tail.slice(0, sibling.index) : tail;
+  return body
+    .split('\n')
+    .filter((line) => /^ {10}/.test(line))
+    .map((line) => line.slice(10).trim())
+    .filter((line) => line !== '' && !line.startsWith('#'));
+}
+
+function runInvokes(step, commandPattern) {
+  return runLines(step).some((line) => commandPattern.test(line));
+}
+
 function unquote(value) {
   return value.trim().replace(/^(["'])(.*)\1$/, '$2');
 }
@@ -230,8 +269,42 @@ const flatpak = jobs.get('flatpak') ?? '';
 const publish = jobs.get('publish-release') ?? '';
 const buildRows = matrixRecords(build);
 const flatpakRows = matrixRecords(flatpak);
-const tauriReleaseStep = steps(build).find((step) => step.includes('tauri-apps/tauri-action@')) ?? '';
+const buildSteps = steps(build);
+const flatpakSteps = steps(flatpak);
+const tauriReleaseStep =
+  buildSteps.find((step) => stepUses(step, 'tauri-apps/tauri-action@v0')) ?? '';
 const tauriWith = mappingBlock(tauriReleaseStep, 'with', 8);
+
+const splitStepFixture = [
+  '  fixture:',
+  '    steps:',
+  '      - uses: actions/upload-artifact@v4',
+  '        with:',
+  '          name: wrong-name',
+  '          path: target/${{ matrix.target }}/release/bundle/deb/*.deb',
+  '      - uses: example/other-action@v1',
+  '        with:',
+  '          name: chronacle-deb-${{ matrix.flatpak_arch }}',
+  '          path: target/${{ matrix.target }}/release/bundle/deb/*.deb',
+  '      - run: |',
+  '          # scripts/release-flatpak.sh artifacts/*.deb 1.2.3 flatpak-out',
+  '          echo no-build',
+].join('\n');
+const splitFixtureSteps = steps(splitStepFixture);
+requireContract(
+  artifactUploadStep(
+    splitFixtureSteps,
+    'chronacle-deb-${{ matrix.flatpak_arch }}',
+    /^target\/\$\{\{ matrix\.target \}\}\/release\/bundle\/deb\/\*\.deb$/,
+  ).length === 0,
+  'pipeline parser must not combine artifact fields from separate steps',
+);
+requireContract(
+  !splitFixtureSteps.some((step) =>
+    runInvokes(step, /^(?:exec\s+)?scripts\/release-flatpak\.sh(?:\s|$)/),
+  ),
+  'pipeline parser must not treat comments as Flatpak build commands',
+);
 
 const nativePairs = [
   ['ubuntu-24.04', 'x86_64-unknown-linux-gnu'],
@@ -271,14 +344,22 @@ requireContract(
   /^ {10}releaseDraft:\s*true\s*$/m.test(tauriWith),
   'native releases must remain drafts during build',
 );
-requireContract(
-  /uses:\s*actions\/upload-artifact@v4/.test(build) &&
-    /name:\s*chronacle-deb-\$\{\{ matrix\.flatpak_arch \}\}/.test(build),
-  'Linux Debian artifacts must be uploaded with architecture labels',
+const debUploadStep = artifactUploadStep(
+  buildSteps,
+  'chronacle-deb-${{ matrix.flatpak_arch }}',
+  /^target\/\$\{\{ matrix\.target \}\}\/release\/bundle\/deb\/\*\.deb$/,
 );
 requireContract(
-  /uses:\s*actions\/upload-artifact@v4/.test(build) &&
-    /name:\s*chronacle-native-\$\{\{ matrix\.name \}\}/.test(build),
+  debUploadStep.length > 0,
+  'Linux Debian artifacts must be uploaded with architecture labels',
+);
+const nativeUploadStep = artifactUploadStep(
+  buildSteps,
+  'chronacle-native-${{ matrix.name }}',
+  /^target\/\$\{\{ matrix\.target \}\}\/release\/bundle\/?$/,
+);
+requireContract(
+  nativeUploadStep.length > 0,
   'every native bundle must be retained as an inspectable workflow artifact',
 );
 
@@ -323,18 +404,28 @@ for (const [os, arch] of [
   );
 }
 requireContract(
-  flatpak.includes('scripts/release-flatpak.sh'),
+  flatpakSteps.some((step) =>
+    runInvokes(step, /^(?:exec\s+)?scripts\/release-flatpak\.sh(?:\s|$)/),
+  ),
   'flatpak job must invoke the shared release script',
 );
+const flatpakWorkflowUploadStep = artifactUploadStep(
+  flatpakSteps,
+  'chronacle-flatpak-${{ matrix.arch }}',
+  /^flatpak-out\/\*\.flatpak$/,
+);
 requireContract(
-  /uses:\s*actions\/upload-artifact@v4/.test(flatpak) && /\.flatpak/.test(flatpak),
+  flatpakWorkflowUploadStep.length > 0,
   'flatpak bundles must be retained as workflow artifacts',
 );
 
-const flatpakReleaseStep = steps(flatpak).find((step) => step.includes('gh release upload')) ?? '';
+const flatpakReleaseStep =
+  flatpakSteps.find((step) =>
+    runInvokes(step, /^gh release upload\b[^#]*\*\.flatpak(?:\s|$)/),
+  ) ?? '';
 const flatpakReleaseIf = /^ {8}if:\s*(.+)$/m.exec(flatpakReleaseStep)?.[1] ?? '';
 requireContract(
-  /gh release upload[^\n]*\*\.flatpak/.test(flatpakReleaseStep),
+  flatpakReleaseStep.length > 0,
   'flatpak bundles must be uploaded to the draft release',
 );
 requireContract(
