@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.tea-driven.chronacle.desktop</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-only</project_license>
+  <name>Chronacle</name>
+  <summary>A source-grounded TTRPG game master assistant</summary>
+  <description>
+    <p>
+      Chronacle helps game masters search rulebooks, organize campaign knowledge, and get answers
+      with citations to their source material.
+    </p>
+  </description>
+  <developer id="dev.tea-driven">
+    <name>Tea Driven</name>
+  </developer>
+  <url type="homepage">https://github.com/nunico/chronacle</url>
+  <url type="bugtracker">https://github.com/nunico/chronacle/issues</url>
+  <branding>
+    <color type="primary" scheme_preference="light">#3d5bff</color>
+    <color type="primary" scheme_preference="dark">#05060f</color>
+  </branding>
+  <recommends>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </recommends>
+  <content_rating type="oars-1.1" />
+  <launchable type="desktop-id">dev.tea-driven.chronacle.desktop.desktop</launchable>
+</component>

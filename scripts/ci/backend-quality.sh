@@ -4,6 +4,7 @@ set -eu
 export CHRONACLE_SKIP_RUNTIME_DOWNLOADS=1
 
 scripts/ci/test-pipeline.sh
+scripts/ci/test-release-flatpak.sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace

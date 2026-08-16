@@ -1,0 +1,38 @@
+app-id: dev.tea-driven.chronacle.desktop
+runtime: org.gnome.Platform
+runtime-version: "50"
+sdk: org.gnome.Sdk
+command: chronacle
+
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  - --share=network
+
+modules:
+  - name: chronacle
+    buildsystem: simple
+    build-commands:
+      - ar x Chronacle.deb
+      - tar -xzf data.tar.gz
+      - test -x usr/bin/chronacle
+      - test -d usr/lib/Chronacle
+      - test -e "$(find usr/lib/Chronacle -type f -iname '*pdfium*' -print -quit)"
+      - test -e "$(find usr/lib/Chronacle -type f -iname '*onnxruntime*' -print -quit)"
+      - test -f usr/share/applications/Chronacle.desktop
+      - test -f "$(find usr/share/icons/hicolor/32x32/apps -type f -name '*.png' -print -quit)"
+      - test -f "$(find usr/share/icons/hicolor/128x128/apps -type f -name '*.png' -print -quit)"
+      - install -Dm755 usr/bin/chronacle /app/bin/chronacle
+      - mkdir -p /app/lib
+      - cp -a usr/lib/Chronacle /app/lib/Chronacle
+      - sed -i 's/^Icon=.*/Icon=dev.tea-driven.chronacle.desktop/' usr/share/applications/Chronacle.desktop
+      - install -Dm644 usr/share/applications/Chronacle.desktop /app/share/applications/dev.tea-driven.chronacle.desktop.desktop
+      - for icon in usr/share/icons/hicolor/*/apps/*.png; do size="$(basename "$(dirname "$(dirname "$icon")")")"; install -Dm644 "$icon" "/app/share/icons/hicolor/$size/apps/dev.tea-driven.chronacle.desktop.png"; done
+      - install -Dm644 dev.tea-driven.chronacle.desktop.metainfo.xml /app/share/metainfo/dev.tea-driven.chronacle.desktop.metainfo.xml
+    sources:
+      - type: file
+        path: Chronacle.deb
+      - type: file
+        path: dev.tea-driven.chronacle.desktop.metainfo.xml
