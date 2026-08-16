@@ -18,11 +18,22 @@ on:
       - scripts/ci/test-release-flatpak.sh
       - scripts/ci/test-pipeline.sh
       - apps/desktop/src-tauri/build.rs
+      - apps/desktop/src-tauri/tauri.conf.json
+      - Cargo.toml
+      - Cargo.lock
+      - apps/desktop/src-tauri/Cargo.toml
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - apps/desktop/package.json
       - apps/desktop/src-tauri/src/runtime_downloads.rs
       - apps/desktop/src-tauri/src/runtime_downloads_tests.rs
       - README.md
       - docs/user-guide.md
       - docs/architecture.md
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -38,7 +49,10 @@ jobs:
   pre-check:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
@@ -104,10 +118,51 @@ jobs:
         working-directory: apps/desktop
         run: pnpm test --run
 
+  create-release:
+    needs: pre-check
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      - name: Select or create draft release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          matching_releases=$(gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" | \
+            jq 'add | map(select(.tag_name == env.GITHUB_REF_NAME))')
+          release_count=$(jq 'length' <<<"$matching_releases")
+          if [ "$release_count" -gt 1 ]; then
+            echo "Multiple releases already use tag $GITHUB_REF_NAME" >&2
+            exit 1
+          elif [ "$release_count" -eq 1 ]; then
+            existing_draft=$(jq -r '.[0].draft' <<<"$matching_releases")
+            if [ "$existing_draft" != true ]; then
+              echo "Release $GITHUB_REF_NAME already exists and is not a draft" >&2
+              exit 1
+            fi
+            release_id=$(jq -r '.[0].id' <<<"$matching_releases")
+          else
+            created=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+              -f tag_name="$GITHUB_REF_NAME" \
+              -f name="Chronacle $GITHUB_REF_NAME" \
+              -F draft=true \
+              -F prerelease=false)
+            release_id=$(jq -r '.id' <<<"$created")
+          fi
+          [[ "$release_id" =~ ^[0-9]+$ ]]
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
   build:
     needs: pre-check
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -133,7 +188,10 @@ jobs:
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Free disk space (Linux)
         if: runner.os == 'Linux'
@@ -167,15 +225,13 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --config.minimum-release-age=0
 
-      - name: Build native packages and create draft release
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build native packages
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
         with:
           projectPath: apps/desktop
           args: --target ${{ matrix.target }} --features rocksdb
-          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-          releaseName: ${{ startsWith(github.ref, 'refs/tags/v') && format('Chronacle {0}', github.ref_name) || '' }}
+          tagName: ""
+          releaseName: ""
           releaseDraft: true
           prerelease: false
 
@@ -281,7 +337,7 @@ jobs:
   flatpak:
     needs: build
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -292,7 +348,10 @@ jobs:
             arch: aarch64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Install Flatpak tooling
         run: |
@@ -326,20 +385,81 @@ jobs:
           path: flatpak-out/*.flatpak
           if-no-files-found: error
 
-      - name: Upload Flatpak to draft release
-        if: startsWith(github.ref, 'refs/tags/v')
+  upload-release-assets:
+    needs: [create-release, build, flatpak]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download native packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: chronacle-native-*
+          path: release-assets/native
+
+      - name: Download Flatpak packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: chronacle-flatpak-*
+          path: release-assets/flatpak
+
+      - name: Upload verified release assets
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" flatpak-out/*.flatpak --clobber
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]
+          while IFS= read -r -d '' asset; do
+            asset_name=$(basename "$asset")
+            encoded_name=$(jq -rn --arg name "$asset_name" '$name | @uri')
+            existing_assets=$(gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" | \
+              jq --arg name "$asset_name" 'add | map(select(.name == $name))')
+            existing_count=$(jq 'length' <<<"$existing_assets")
+            if [ "$existing_count" -gt 1 ]; then
+              echo "Multiple release assets are named $asset_name" >&2
+              exit 1
+            elif [ "$existing_count" -eq 1 ]; then
+              existing_id=$(jq -r '.[0].id' <<<"$existing_assets")
+              [[ "$existing_id" =~ ^[0-9]+$ ]]
+              gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_id}"
+            fi
+            gh api --hostname uploads.github.com --method POST \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" \
+              -H "Content-Type: application/octet-stream" \
+              --input "$asset"
+          done < <(find release-assets/native release-assets/flatpak -type f \
+            \( -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \
+            -o -name '*.app.tar.gz' -o -name '*.dmg' -o -name '*.msi' \
+            -o -name '*.exe' -o -name '*.flatpak' \) -print0)
 
   publish-release:
-    needs: [build, flatpak]
+    needs: [create-release, upload-release-assets, build, flatpak]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - name: Publish verified release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]
+          release=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}")
+          release_tag=$(jq -r '.tag_name' <<<"$release")
+          release_draft=$(jq -r '.draft' <<<"$release")
+          if [ "$release_tag" != "$GITHUB_REF_NAME" ] || [ "$release_draft" != true ]; then
+            echo "Release ID $RELEASE_ID is not the expected draft for $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false \
+            -F prerelease=false
