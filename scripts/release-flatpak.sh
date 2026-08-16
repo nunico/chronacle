@@ -57,12 +57,20 @@ esac
 temp_dir=
 smoke_pid=
 smoke_active=0
+smoke_instance_file=
+smoke_instance_id=
 cleanup_started=0
 
 stop_smoke() {
   [ "$smoke_active" -eq 1 ] || return 0
 
-  flatpak kill "$app_id" >/dev/null 2>&1 || :
+  if [ -z "$smoke_instance_id" ] && [ -n "$smoke_instance_file" ] &&
+    [ -s "$smoke_instance_file" ]; then
+    IFS= read -r smoke_instance_id <"$smoke_instance_file" || smoke_instance_id=
+  fi
+  if [ -n "$smoke_instance_id" ]; then
+    flatpak kill "$smoke_instance_id" >/dev/null 2>&1 || :
+  fi
   if [ -n "$smoke_pid" ] && kill -0 "$smoke_pid" 2>/dev/null; then
     kill -TERM "$smoke_pid" 2>/dev/null || :
     stop_attempt=0
@@ -139,9 +147,30 @@ installed_arch=$(flatpak info --user --show-arch "$app_id")
 [ "$installed_arch" = "$flatpak_arch" ] ||
   fail "installed Flatpak architecture is $installed_arch, expected $flatpak_arch"
 
-dbus-run-session -- xvfb-run -a flatpak run "$app_id" &
-smoke_pid=$!
+smoke_instance_file="$temp_dir/smoke-instance-id"
+: >"$smoke_instance_file"
 smoke_active=1
+dbus-run-session -- xvfb-run -a flatpak run --instance-id-fd=3 "$app_id" \
+  3>"$smoke_instance_file" &
+smoke_pid=$!
+instance_wait=0
+while [ ! -s "$smoke_instance_file" ] && [ "$instance_wait" -lt 10 ]; do
+  sleep 1
+  if ! kill -0 "$smoke_pid" 2>/dev/null; then
+    if wait "$smoke_pid"; then
+      app_status=0
+    else
+      app_status=$?
+    fi
+    fail "Flatpak exited before reporting its instance ID (status $app_status)"
+  fi
+  instance_wait=$((instance_wait + 1))
+done
+[ -s "$smoke_instance_file" ] || fail 'Flatpak did not report an instance ID within ten seconds'
+IFS= read -r smoke_instance_id <"$smoke_instance_file" ||
+  fail 'unable to read the Flatpak smoke instance ID'
+[ -n "$smoke_instance_id" ] || fail 'Flatpak reported an empty instance ID'
+
 elapsed=0
 while [ "$elapsed" -lt 10 ]; do
   sleep 1
