@@ -21,7 +21,8 @@ case "$deb_path" in
   *) fail "Debian package must have a .deb extension: $deb_path" ;;
 esac
 
-if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+if ! printf '%s\n' "$version" |
+  grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
   fail "version must use strict X.Y.Z syntax: $version"
 fi
 
@@ -54,12 +55,51 @@ case "$deb_arch" in
 esac
 
 temp_dir=
+smoke_pid=
+smoke_active=0
+cleanup_started=0
+
+stop_smoke() {
+  [ "$smoke_active" -eq 1 ] || return 0
+
+  flatpak kill "$app_id" >/dev/null 2>&1 || :
+  if [ -n "$smoke_pid" ] && kill -0 "$smoke_pid" 2>/dev/null; then
+    kill -TERM "$smoke_pid" 2>/dev/null || :
+    stop_attempt=0
+    while kill -0 "$smoke_pid" 2>/dev/null && [ "$stop_attempt" -lt 5 ]; do
+      sleep 1
+      stop_attempt=$((stop_attempt + 1))
+    done
+    if kill -0 "$smoke_pid" 2>/dev/null; then
+      kill -KILL "$smoke_pid" 2>/dev/null || :
+    fi
+  fi
+  if [ -n "$smoke_pid" ]; then
+    wait "$smoke_pid" 2>/dev/null || :
+  fi
+  smoke_active=0
+}
+
 cleanup() {
+  [ "$cleanup_started" -eq 0 ] || return 0
+  cleanup_started=1
+  trap - HUP INT TERM
+  stop_smoke
   if [ -n "$temp_dir" ] && [ -d "$temp_dir" ]; then
     rm -rf -- "$temp_dir"
   fi
 }
-trap cleanup EXIT HUP INT TERM
+
+handle_signal() {
+  signal_status=$1
+  trap - HUP INT TERM
+  exit "$signal_status"
+}
+
+trap cleanup 0
+trap 'handle_signal 129' HUP
+trap 'handle_signal 130' INT
+trap 'handle_signal 143' TERM
 temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/chronacle-flatpak.XXXXXX") ||
   fail 'unable to create temporary build directory'
 
@@ -67,8 +107,9 @@ context="$temp_dir/context"
 repo="$temp_dir/repo"
 build_dir="$temp_dir/build"
 bundle="$temp_dir/Chronacle_${version}_${flatpak_arch}.flatpak"
+temp_home="$temp_dir/home"
 xdg_data="$temp_dir/xdg-data"
-mkdir -p "$context" "$xdg_data"
+mkdir -p "$context" "$temp_home" "$xdg_data"
 
 cp "$manifest" "$context/$app_id.yml"
 cp "$metainfo" "$context/$app_id.metainfo.xml"
@@ -80,8 +121,9 @@ flatpak-builder --force-clean --arch="$flatpak_arch" --repo="$repo" \
 flatpak build-bundle --arch="$flatpak_arch" --runtime-repo="$runtime_repo" \
   "$repo" "$bundle" "$app_id"
 
+HOME=$temp_home
 XDG_DATA_HOME=$xdg_data
-export XDG_DATA_HOME
+export HOME XDG_DATA_HOME
 flatpak --user --noninteractive install "$bundle"
 
 flatpak run --command=sh "$app_id" -c \
@@ -89,19 +131,22 @@ flatpak run --command=sh "$app_id" -c \
    test -f /app/lib/Chronacle/resources/pdfium/libpdfium.so &&
    test -f /app/lib/Chronacle/resources/onnxruntime/libonnxruntime.so &&
    test -f /app/share/applications/dev.tea-driven.chronacle.desktop.desktop &&
-   test -f /app/share/metainfo/dev.tea-driven.chronacle.desktop.metainfo.xml'
+   test -f /app/share/metainfo/dev.tea-driven.chronacle.desktop.metainfo.xml &&
+   test -f /app/share/icons/hicolor/32x32/apps/dev.tea-driven.chronacle.desktop.png &&
+   test -f /app/share/icons/hicolor/128x128/apps/dev.tea-driven.chronacle.desktop.png'
 
 installed_arch=$(flatpak info --user --show-arch "$app_id")
 [ "$installed_arch" = "$flatpak_arch" ] ||
   fail "installed Flatpak architecture is $installed_arch, expected $flatpak_arch"
 
 dbus-run-session -- xvfb-run -a flatpak run "$app_id" &
-app_pid=$!
+smoke_pid=$!
+smoke_active=1
 elapsed=0
 while [ "$elapsed" -lt 10 ]; do
   sleep 1
-  if ! kill -0 "$app_pid" 2>/dev/null; then
-    if wait "$app_pid"; then
+  if ! kill -0 "$smoke_pid" 2>/dev/null; then
+    if wait "$smoke_pid"; then
       app_status=0
     else
       app_status=$?
@@ -111,8 +156,7 @@ while [ "$elapsed" -lt 10 ]; do
   elapsed=$((elapsed + 1))
 done
 
-kill "$app_pid" 2>/dev/null || :
-wait "$app_pid" 2>/dev/null || :
+stop_smoke
 
 mv "$bundle" "$output_dir/Chronacle_${version}_${flatpak_arch}.flatpak"
 echo "Created $output_dir/Chronacle_${version}_${flatpak_arch}.flatpak"
