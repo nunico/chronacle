@@ -36,9 +36,9 @@ require_file "$manifest"
 require_file "$metainfo"
 
 require_exact "$manifest" "app-id: $app_id"
-require_fixed "$manifest" 'runtime: org.gnome.Platform'
+require_exact "$manifest" 'runtime: org.gnome.Platform'
 require_fixed "$manifest" 'runtime-version: "50"'
-require_fixed "$manifest" 'sdk: org.gnome.Sdk'
+require_exact "$manifest" 'sdk: org.gnome.Sdk'
 require_exact "$manifest" 'command: chronacle'
 require_fixed "$manifest" 'buildsystem: simple'
 require_fixed "$manifest" '--socket=wayland'
@@ -57,6 +57,10 @@ require_exact "$manifest" '        path: dev.tea-driven.chronacle.desktop.metain
 require_fixed "$manifest" 'ar x Chronacle.deb'
 require_fixed "$manifest" 'tar -xzf data.tar.gz'
 require_pattern "$manifest" 'test -x .*[Cc]hronacle'
+require_exact "$manifest" '      - test -f usr/lib/Chronacle/resources/pdfium/libpdfium.so'
+require_exact "$manifest" '      - test -f usr/lib/Chronacle/resources/onnxruntime/libonnxruntime.so'
+require_exact "$manifest" '      - test -f usr/share/icons/hicolor/32x32/apps/chronacle.png'
+require_exact "$manifest" '      - test -f usr/share/icons/hicolor/128x128/apps/chronacle.png'
 require_pattern "$manifest" 'test -f .*\.desktop'
 require_fixed "$manifest" '/app/bin/chronacle'
 require_fixed "$manifest" '/app/lib/Chronacle'
@@ -69,6 +73,17 @@ require_exact "$manifest" '      - test -f /app/lib/Chronacle/resources/pdfium/l
 require_exact "$manifest" '      - test -f /app/lib/Chronacle/resources/onnxruntime/libonnxruntime.so'
 require_exact "$manifest" "      - test -f /app/share/icons/hicolor/32x32/apps/$app_id.png"
 require_exact "$manifest" "      - test -f /app/share/icons/hicolor/128x128/apps/$app_id.png"
+
+first_install_line=$(grep -n '^[[:space:]]*- install ' "$manifest" | head -n 1 | cut -d: -f1)
+for source_path in \
+  usr/lib/Chronacle/resources/pdfium/libpdfium.so \
+  usr/lib/Chronacle/resources/onnxruntime/libonnxruntime.so \
+  usr/share/icons/hicolor/32x32/apps/chronacle.png \
+  usr/share/icons/hicolor/128x128/apps/chronacle.png; do
+  assertion_line=$(grep -nF -- "- test -f $source_path" "$manifest" | cut -d: -f1)
+  [ "$assertion_line" -lt "$first_install_line" ] ||
+    fail "$source_path must be asserted before installation begins"
+done
 
 require_fixed "$metainfo" '<component type="desktop-application">'
 require_fixed "$metainfo" "<id>$app_id</id>"

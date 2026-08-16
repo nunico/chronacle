@@ -19,7 +19,11 @@ modules:
       - tar -xzf data.tar.gz
       - test -x usr/bin/chronacle
       - test -d usr/lib/Chronacle
+      - test -f usr/lib/Chronacle/resources/pdfium/libpdfium.so
+      - test -f usr/lib/Chronacle/resources/onnxruntime/libonnxruntime.so
       - test -f usr/share/applications/Chronacle.desktop
+      - test -f usr/share/icons/hicolor/32x32/apps/chronacle.png
+      - test -f usr/share/icons/hicolor/128x128/apps/chronacle.png
       - install -Dm755 usr/bin/chronacle /app/bin/chronacle
       - mkdir -p /app/lib
       - cp -a usr/lib/Chronacle /app/lib/Chronacle
