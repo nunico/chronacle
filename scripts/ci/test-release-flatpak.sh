@@ -41,12 +41,30 @@ require_exact "$manifest" 'runtime-version: "50"'
 require_exact "$manifest" 'sdk: org.gnome.Sdk'
 require_exact "$manifest" 'command: chronacle'
 require_fixed "$manifest" 'buildsystem: simple'
-require_fixed "$manifest" '--socket=wayland'
-require_fixed "$manifest" '--socket=fallback-x11'
-require_fixed "$manifest" '--share=ipc'
-require_fixed "$manifest" '--device=dri'
-require_fixed "$manifest" '--share=network'
-reject_pattern "$manifest" '(^|[[:space:]])--filesystem=(home|host)(:|$|[[:space:]])'
+
+finish_args_headers=$(awk '/^finish-args:[[:space:]]*$/ { count++ } END { print count + 0 }' "$manifest")
+[ "$finish_args_headers" -eq 1 ] || fail "$manifest must define exactly one finish-args list"
+
+expected_finish_args='--socket=wayland
+--socket=fallback-x11
+--share=ipc
+--device=dri
+--share=network'
+actual_finish_args=$(
+  awk '
+    /^finish-args:[[:space:]]*$/ { inside = 1; next }
+    inside && /^[^[:space:]#]/ { exit }
+    inside && /^[[:space:]]*-[[:space:]]+/ {
+      item = $0
+      sub(/^[[:space:]]*-[[:space:]]+/, "", item)
+      sub(/[[:space:]]+$/, "", item)
+      print item
+    }
+  ' "$manifest"
+)
+[ "$actual_finish_args" = "$expected_finish_args" ] ||
+  fail "$manifest finish-args must equal the five approved permissions"
+
 reject_pattern "$manifest" '(^|[[:space:]])(only-arches|skip-arches):'
 reject_pattern "$manifest" '(^|[[:space:]])(url|commit|tag):'
 
