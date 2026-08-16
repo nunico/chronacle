@@ -1,9 +1,8 @@
 # Release pipeline for Chronacle
 #
-# Triggered by a semver tag push (e.g. v0.2.0).
-# Stage 1 — pre-check: enforces version consistency + runs full CI suite.
-# Stage 2 — build: builds native bundles on all three platforms and
-#            publishes them as assets on a GitHub Release.
+# Pull requests exercise every native package and Flatpak without creating a release.
+# Semver tags create a draft, attach all verified packages, and publish only after
+# the complete native and Flatpak matrices succeed.
 
 name: Release
 
@@ -11,6 +10,19 @@ on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - packaging/flatpak/**
+      - scripts/release-flatpak.sh
+      - scripts/ci/test-release-flatpak.sh
+      - scripts/ci/test-pipeline.sh
+      - apps/desktop/src-tauri/build.rs
+      - apps/desktop/src-tauri/src/runtime_downloads.rs
+      - apps/desktop/src-tauri/src/runtime_downloads_tests.rs
+      - README.md
+      - docs/user-guide.md
+      - docs/architecture.md
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -19,20 +31,16 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
-  # Discarded by Swatinem/rust-cache before it persists the cache anyway —
-  # skip paying the on-disk cost for it.
+  # Discarded by Swatinem/rust-cache before it persists the cache anyway.
   CARGO_INCREMENTAL: 0
 
 jobs:
-  # ── Gate: checks + version consistency ───────────────────────────────
   pre-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
       - name: Free disk space
-        # Don't prune docker images here: actions/runner pre-builds this
-        # job's docker-based actions before this step runs.
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
       - name: Install Rust toolchain
@@ -60,7 +68,9 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --config.minimum-release-age=0
 
-      - name: Check version consistency
+      - id: version-consistency
+        name: Check version consistency
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           TAG="${{ github.ref_name }}"
           CONF_VERSION=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
@@ -94,7 +104,6 @@ jobs:
         working-directory: apps/desktop
         run: pnpm test --run
 
-  # ── Build + publish to GitHub Releases ───────────────────────────────
   build:
     needs: pre-check
     permissions:
@@ -102,7 +111,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - name: linux-x86_64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            deb_arch: amd64
+            flatpak_arch: x86_64
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            deb_arch: arm64
+            flatpak_arch: aarch64
+          - name: macos-arm64
+            os: macos-26
+            target: aarch64-apple-darwin
+          - name: macos-x86_64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+          - name: windows-x86_64
+            os: windows-2025
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -113,16 +141,20 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
       - name: Install system deps (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
-            librsvg2-dev libayatana-appindicator3-dev
+            librsvg2-dev libayatana-appindicator3-dev rpm
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -135,14 +167,165 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --config.minimum-release-age=0
 
-      - name: Build and publish
+      - name: Build native packages and create draft release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: apps/desktop
-          args: --features rocksdb
-          tagName: ${{ github.ref_name }}
-          releaseName: Chronacle ${{ github.ref_name }}
-          releaseDraft: false
+          args: --target ${{ matrix.target }} --features rocksdb
+          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/v') && format('Chronacle {0}', github.ref_name) || '' }}
+          releaseDraft: true
           prerelease: false
+
+      - name: Validate Linux packages
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          root="target/${{ matrix.target }}/release/bundle"
+          debs=("$root"/deb/*.deb)
+          appimages=("$root"/appimage/*.AppImage)
+          rpms=("$root"/rpm/*.rpm)
+          [ "${#debs[@]}" -eq 1 ]
+          [ "${#appimages[@]}" -eq 1 ]
+          [ "${#rpms[@]}" -eq 1 ]
+          [ "$(dpkg-deb -f "${debs[0]}" Architecture)" = "${{ matrix.deb_arch }}" ]
+          case "${{ matrix.flatpak_arch }}" in
+            x86_64)
+              file "${appimages[0]}" | grep -Eq 'x86-64|x86_64'
+              [ "$(rpm -qp --qf '%{ARCH}' "${rpms[0]}")" = x86_64 ]
+              ;;
+            aarch64)
+              file "${appimages[0]}" | grep -Eq 'ARM aarch64|aarch64'
+              [ "$(rpm -qp --qf '%{ARCH}' "${rpms[0]}")" = aarch64 ]
+              ;;
+          esac
+
+      - name: Validate macOS packages and startup
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          root="target/${{ matrix.target }}/release/bundle"
+          apps=("$root"/macos/*.app)
+          archives=("$root"/macos/*.app.tar.gz)
+          dmgs=("$root"/dmg/*.dmg)
+          [ "${#apps[@]}" -eq 1 ]
+          [ "${#archives[@]}" -eq 1 ]
+          [ "${#dmgs[@]}" -eq 1 ]
+          executable="${apps[0]}/Contents/MacOS/Chronacle"
+          [ -x "$executable" ]
+          case "${{ matrix.target }}" in
+            aarch64-apple-darwin) file "$executable" | grep -q arm64 ;;
+            x86_64-apple-darwin) file "$executable" | grep -q x86_64 ;;
+          esac
+          find "${apps[0]}/Contents/Resources" -path '*/pdfium/libpdfium.dylib' -type f | grep -q .
+          if [ "${{ matrix.target }}" = aarch64-apple-darwin ]; then
+            find "${apps[0]}/Contents/Resources" -path '*/onnxruntime/libonnxruntime.dylib' -type f | grep -q .
+          else
+            ! find "${apps[0]}/Contents/Resources" -path '*/onnxruntime/libonnxruntime.dylib' -type f | grep -q .
+          fi
+          "$executable" &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true; wait "$app_pid" 2>/dev/null || true' EXIT
+          for _ in {1..10}; do
+            sleep 1
+            kill -0 "$app_pid"
+          done
+
+      - name: Validate Windows packages
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $root = "target/${{ matrix.target }}/release/bundle"
+          $msi = @(Get-ChildItem "$root/msi/*.msi")
+          $nsis = @(Get-ChildItem "$root/nsis/*.exe")
+          if ($msi.Count -ne 1) { throw "Expected exactly one MSI, found $($msi.Count)" }
+          if ($nsis.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($nsis.Count)" }
+
+      - name: Upload Debian package for Flatpak
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: chronacle-deb-${{ matrix.flatpak_arch }}
+          path: target/${{ matrix.target }}/release/bundle/deb/*.deb
+          if-no-files-found: error
+
+      - name: Upload inspectable native bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: chronacle-native-${{ matrix.name }}
+          path: target/${{ matrix.target }}/release/bundle/
+          if-no-files-found: error
+
+  flatpak:
+    needs: build
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Flatpak tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder appstream xvfb dbus-x11
+
+      - name: Configure Flathub and install GNOME runtime
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive --arch="${{ matrix.arch }}" flathub \
+            org.gnome.Platform//50 org.gnome.Sdk//50
+
+      - name: Download matching Debian package
+        uses: actions/download-artifact@v4
+        with:
+          name: chronacle-deb-${{ matrix.arch }}
+          path: artifacts
+
+      - name: Build and smoke-test Flatpak
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
+            GITHUB_REF_NAME="v$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
+          fi
+          scripts/release-flatpak.sh artifacts/*.deb "${GITHUB_REF_NAME#v}" flatpak-out
+
+      - name: Upload inspectable Flatpak
+        uses: actions/upload-artifact@v4
+        with:
+          name: chronacle-flatpak-${{ matrix.arch }}
+          path: flatpak-out/*.flatpak
+          if-no-files-found: error
+
+      - name: Upload Flatpak to draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" flatpak-out/*.flatpak --clobber
+
+  publish-release:
+    needs: [build, flatpak]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Publish verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false
