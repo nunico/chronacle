@@ -154,7 +154,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
-            librsvg2-dev libayatana-appindicator3-dev rpm
+            librsvg2-dev libayatana-appindicator3-dev rpm cpio
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -192,13 +192,29 @@ jobs:
           [ "${#debs[@]}" -eq 1 ]
           [ "${#appimages[@]}" -eq 1 ]
           [ "${#rpms[@]}" -eq 1 ]
+
+          extract_root=$(mktemp -d)
+          trap 'rm -rf -- "$extract_root"' EXIT
+          mkdir "$extract_root/deb" "$extract_root/rpm"
+          dpkg-deb -x "${debs[0]}" "$extract_root/deb"
+          rpm2cpio "${rpms[0]}" | (cd "$extract_root/rpm" && cpio -idm --quiet)
+          deb_executable="$extract_root/deb/usr/bin/chronacle"
+          rpm_executable="$extract_root/rpm/usr/bin/chronacle"
+          [ -x "$deb_executable" ]
+          [ -x "$rpm_executable" ]
+          [ -x "${appimages[0]}" ]
+
           [ "$(dpkg-deb -f "${debs[0]}" Architecture)" = "${{ matrix.deb_arch }}" ]
           case "${{ matrix.flatpak_arch }}" in
             x86_64)
+              file "$deb_executable" | grep -Eq 'x86-64|x86_64'
+              file "$rpm_executable" | grep -Eq 'x86-64|x86_64'
               file "${appimages[0]}" | grep -Eq 'x86-64|x86_64'
               [ "$(rpm -qp --qf '%{ARCH}' "${rpms[0]}")" = x86_64 ]
               ;;
             aarch64)
+              file "$deb_executable" | grep -Eq 'ARM aarch64|aarch64'
+              file "$rpm_executable" | grep -Eq 'ARM aarch64|aarch64'
               file "${appimages[0]}" | grep -Eq 'ARM aarch64|aarch64'
               [ "$(rpm -qp --qf '%{ARCH}' "${rpms[0]}")" = aarch64 ]
               ;;
@@ -323,8 +339,6 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
-
       - name: Publish verified release
         env:
           GH_TOKEN: ${{ github.token }}
