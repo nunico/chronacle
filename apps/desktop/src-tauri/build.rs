@@ -39,19 +39,11 @@ fn download_pdfium() {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
 
-    // bblanchon/pdfium-binaries release asset naming + the resulting lib name
-    let (asset, lib_name) = match (target_os.as_str(), target_arch.as_str()) {
-        ("macos", "aarch64") => ("pdfium-mac-arm64.tgz", "libpdfium.dylib"),
-        ("macos", "x86_64") => ("pdfium-mac-x64.tgz", "libpdfium.dylib"),
-        ("linux", "x86_64") => ("pdfium-linux-x64.tgz", "libpdfium.so"),
-        ("linux", "aarch64") => ("pdfium-linux-arm64.tgz", "libpdfium.so"),
-        ("windows", "x86_64") => ("pdfium-win-x64.tgz", "pdfium.dll"),
-        _ => {
-            println!(
+    let Some((asset, lib_name)) = runtime_downloads::pdfium_asset(&target_os, &target_arch) else {
+        println!(
                 "cargo:warning=Unsupported target {target_os}/{target_arch} — pdfium not downloaded; runtime PDF extraction will fail."
             );
-            return;
-        }
+        return;
     };
 
     let resources_dir =
@@ -104,42 +96,15 @@ fn download_onnxruntime() {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
 
-    // Microsoft ONNX Runtime release asset naming, archive kind, and the
-    // resulting library name we extract to. Windows ships .zip; macOS/Linux .tgz.
-    let (asset, kind, lib_name) = match (target_os.as_str(), target_arch.as_str()) {
-        ("macos", "aarch64") => (
-            format!("onnxruntime-osx-arm64-{ORT_VERSION}.tgz"),
-            Archive::Tar,
-            "libonnxruntime.dylib",
-        ),
-        ("linux", "x86_64") => (
-            format!("onnxruntime-linux-x64-{ORT_VERSION}.tgz"),
-            Archive::Tar,
-            "libonnxruntime.so",
-        ),
-        ("linux", "aarch64") => (
-            format!("onnxruntime-linux-aarch64-{ORT_VERSION}.tgz"),
-            Archive::Tar,
-            "libonnxruntime.so",
-        ),
-        ("windows", "x86_64") => (
-            format!("onnxruntime-win-x64-{ORT_VERSION}.zip"),
-            Archive::Zip,
-            "onnxruntime.dll",
-        ),
-        ("windows", "aarch64") => (
-            format!("onnxruntime-win-arm64-{ORT_VERSION}.zip"),
-            Archive::Zip,
-            "onnxruntime.dll",
-        ),
+    let Some((asset, kind, lib_name)) =
+        runtime_downloads::onnxruntime_asset(&target_os, &target_arch, ORT_VERSION)
+    else {
         // Microsoft does not publish a macOS x86_64 build for ONNX Runtime 1.24
         // (Intel Mac support was dropped). Embeddings are unavailable there.
-        _ => {
-            println!(
-                "cargo:warning=No ONNX Runtime {ORT_VERSION} binary for {target_os}/{target_arch} — local embeddings will be unavailable on this target."
-            );
-            return;
-        }
+        println!(
+            "cargo:warning=No ONNX Runtime {ORT_VERSION} binary for {target_os}/{target_arch} — local embeddings will be unavailable on this target."
+        );
+        return;
     };
 
     let resources_dir =
@@ -161,18 +126,13 @@ fn download_onnxruntime() {
 
     let bytes = http_get(&url, "ONNX Runtime");
     let lib_bytes = match kind {
-        Archive::Tar => extract_lib_from_tar(&bytes, target_os.as_str()),
-        Archive::Zip => extract_lib_from_zip(&bytes, target_os.as_str()),
+        runtime_downloads::ArchiveKind::Tar => extract_lib_from_tar(&bytes, target_os.as_str()),
+        runtime_downloads::ArchiveKind::Zip => extract_lib_from_zip(&bytes, target_os.as_str()),
     };
     let lib_bytes = lib_bytes.unwrap_or_else(|| {
         panic!("ONNX Runtime library ({lib_name}) not found in archive {asset}")
     });
     fs::write(&lib_path, lib_bytes).expect("write ONNX Runtime lib");
-}
-
-enum Archive {
-    Tar,
-    Zip,
 }
 
 /// Does this archive entry look like the main ONNX Runtime shared library for
