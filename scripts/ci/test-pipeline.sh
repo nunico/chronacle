@@ -146,3 +146,205 @@ awk '
 rg -q '^[[:space:]]*run: cargo test -p Chronacle --features rocksdb[[:space:]]*$' \
   .github/workflows/release.yml \
   || fail 'release validation must exercise the RocksDB-enabled desktop suite'
+
+node <<'NODE'
+const fs = require('node:fs');
+
+const workflow = fs.readFileSync('.github/workflows/release.yml', 'utf8');
+const failures = [];
+
+function requireContract(condition, message) {
+  if (!condition) failures.push(message);
+}
+
+function extractTopLevel(name) {
+  const match = new RegExp(`^${name}:\\s*$`, 'm').exec(workflow);
+  if (!match) return '';
+  const tail = workflow.slice(match.index + match[0].length);
+  const end = /^\S[^:]*:\s*$/m.exec(tail);
+  return end ? tail.slice(0, end.index) : tail;
+}
+
+function extractJobs() {
+  const jobsStart = /^jobs:\s*$/m.exec(workflow);
+  if (!jobsStart) return new Map();
+
+  const jobsText = workflow.slice(jobsStart.index + jobsStart[0].length);
+  const starts = [...jobsText.matchAll(/^ {2}([A-Za-z0-9_-]+):\s*$/gm)];
+  const jobs = new Map();
+  for (let index = 0; index < starts.length; index += 1) {
+    const start = starts[index];
+    const end = starts[index + 1]?.index ?? jobsText.length;
+    jobs.set(start[1], jobsText.slice(start.index, end));
+  }
+  return jobs;
+}
+
+function matrixRecords(job) {
+  if (!job) return [];
+  const starts = [...job.matchAll(/^ {10}- ([A-Za-z0-9_-]+):\s*(.*)$/gm)];
+  return starts.map((start, index) => {
+    const end = starts[index + 1]?.index ?? job.length;
+    const recordText = job.slice(start.index, end);
+    const record = { [start[1]]: unquote(start[2]) };
+    for (const line of recordText.matchAll(/^ {12}([A-Za-z0-9_-]+):\s*(.*)$/gm)) {
+      record[line[1]] = unquote(line[2]);
+    }
+    return record;
+  });
+}
+
+function steps(job) {
+  if (!job) return [];
+  const starts = [...job.matchAll(/^ {6}- /gm)];
+  return starts.map((start, index) => {
+    const end = starts[index + 1]?.index ?? job.length;
+    return job.slice(start.index, end);
+  });
+}
+
+function unquote(value) {
+  return value.trim().replace(/^(["'])(.*)\1$/, '$2');
+}
+
+function hasTagGuard(text) {
+  return text.includes("startsWith(github.ref, 'refs/tags/v')");
+}
+
+const on = extractTopLevel('on');
+const jobs = extractJobs();
+const build = jobs.get('build') ?? '';
+const flatpak = jobs.get('flatpak') ?? '';
+const publish = jobs.get('publish-release') ?? '';
+const buildRows = matrixRecords(build);
+const flatpakRows = matrixRecords(flatpak);
+
+const nativePairs = [
+  ['ubuntu-24.04', 'x86_64-unknown-linux-gnu'],
+  ['ubuntu-24.04-arm', 'aarch64-unknown-linux-gnu'],
+  ['macos-26', 'aarch64-apple-darwin'],
+  ['macos-15-intel', 'x86_64-apple-darwin'],
+  ['windows-2025', 'x86_64-pc-windows-msvc'],
+];
+
+requireContract(buildRows.length === nativePairs.length, 'build must define exactly five native matrix rows');
+for (const [os, target] of nativePairs) {
+  requireContract(
+    buildRows.some((row) => row.os === os && row.target === target),
+    `build matrix must pair ${os} with ${target}`,
+  );
+}
+
+requireContract(
+  buildRows.some(
+    (row) =>
+      row.os === 'ubuntu-24.04' && row.deb_arch === 'amd64' && row.flatpak_arch === 'x86_64',
+  ),
+  'Linux x86_64 must expose amd64 and x86_64 artifact labels',
+);
+requireContract(
+  buildRows.some(
+    (row) =>
+      row.os === 'ubuntu-24.04-arm' && row.deb_arch === 'arm64' && row.flatpak_arch === 'aarch64',
+  ),
+  'Linux aarch64 must expose arm64 and aarch64 artifact labels',
+);
+requireContract(
+  /args:\s*--target \$\{\{ matrix\.target \}\} --features rocksdb/.test(build),
+  'native packaging must pass every explicit target to Tauri',
+);
+requireContract(/releaseDraft:\s*true/.test(build), 'native releases must remain drafts during build');
+requireContract(
+  /uses:\s*actions\/upload-artifact@v4/.test(build) &&
+    /name:\s*chronacle-deb-\$\{\{ matrix\.flatpak_arch \}\}/.test(build),
+  'Linux Debian artifacts must be uploaded with architecture labels',
+);
+requireContract(
+  /uses:\s*actions\/upload-artifact@v4/.test(build) &&
+    /name:\s*chronacle-native-\$\{\{ matrix\.name \}\}/.test(build),
+  'every native bundle must be retained as an inspectable workflow artifact',
+);
+
+requireContract(/^[ ]{2}pull_request:\s*$/m.test(on), 'release workflow must run on pull requests');
+requireContract(/^[ ]{4}paths:\s*$/m.test(on), 'release pull request trigger must be path-filtered');
+for (const path of [
+  '.github/workflows/release.yml',
+  'packaging/flatpak/**',
+  'scripts/release-flatpak.sh',
+  'scripts/ci/test-release-flatpak.sh',
+  'scripts/ci/test-pipeline.sh',
+  'apps/desktop/src-tauri/build.rs',
+  'apps/desktop/src-tauri/src/runtime_downloads.rs',
+  'apps/desktop/src-tauri/src/runtime_downloads_tests.rs',
+  'README.md',
+  'docs/user-guide.md',
+  'docs/architecture.md',
+]) {
+  requireContract(on.includes(path), `release pull request paths must include ${path}`);
+}
+
+requireContract(flatpak.length > 0, 'flatpak job must exist');
+requireContract(/^ {4}needs:\s*build\s*$/m.test(flatpak), 'flatpak job must need build');
+for (const [os, arch] of [
+  ['ubuntu-24.04', 'x86_64'],
+  ['ubuntu-24.04-arm', 'aarch64'],
+]) {
+  requireContract(
+    flatpakRows.some((row) => row.os === os && row.arch === arch),
+    `flatpak matrix must pair ${os} with ${arch}`,
+  );
+}
+requireContract(
+  flatpak.includes('scripts/release-flatpak.sh'),
+  'flatpak job must invoke the shared release script',
+);
+requireContract(
+  /uses:\s*actions\/upload-artifact@v4/.test(flatpak) && /\.flatpak/.test(flatpak),
+  'flatpak bundles must be retained as workflow artifacts',
+);
+
+const flatpakReleaseStep = steps(flatpak).find((step) => step.includes('gh release upload')) ?? '';
+requireContract(
+  /gh release upload[^\n]*\*\.flatpak/.test(flatpakReleaseStep),
+  'flatpak bundles must be uploaded to the draft release',
+);
+requireContract(
+  hasTagGuard(flatpakReleaseStep),
+  'flatpak release upload must be guarded by a release tag',
+);
+
+requireContract(publish.length > 0, 'publish-release job must exist');
+requireContract(
+  /^ {4}needs:\s*\[build, flatpak\]\s*$/m.test(publish),
+  'publish-release must need build and flatpak',
+);
+requireContract(
+  /gh release edit[^\n]*--draft=false/.test(publish),
+  'publish-release must remove draft status with gh release edit',
+);
+requireContract(hasTagGuard(publish), 'publish-release must be guarded by a release tag');
+
+const tauriReleaseStep = steps(build).find((step) => step.includes('tauri-apps/tauri-action@')) ?? '';
+requireContract(
+  hasTagGuard(tauriReleaseStep) && /tagName:/.test(tauriReleaseStep),
+  'native release creation must be disabled outside release tags',
+);
+requireContract(
+  !/releaseDraft:\s*false/.test(build),
+  'build must never publish a release directly',
+);
+requireContract(
+  !/releaseDraft:\s*false/.test(flatpak),
+  'flatpak must never publish a release directly',
+);
+for (const [name, job] of jobs) {
+  if (name !== 'publish-release') {
+    requireContract(!job.includes('--draft=false'), `only publish-release may remove draft status, found in ${name}`);
+  }
+}
+
+if (failures.length > 0) {
+  for (const failure of failures) console.error(`pipeline contract failed: ${failure}`);
+  process.exit(1);
+}
+NODE
