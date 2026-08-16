@@ -218,6 +218,49 @@ function directValue(text, name, indent) {
   return unquote(value);
 }
 
+function jobNeeds(job) {
+  const value = directValue(job, 'needs', 4);
+  if (!value) return [];
+  if (value.startsWith('[') && value.endsWith(']')) {
+    return value
+      .slice(1, -1)
+      .split(',')
+      .map((need) => need.trim())
+      .filter(Boolean);
+  }
+  return [value];
+}
+
+function hasExactNeeds(job, expected) {
+  return JSON.stringify(jobNeeds(job).sort()) === JSON.stringify([...expected].sort());
+}
+
+function jobPermission(job, name) {
+  return directValue(mappingBlock(job, 'permissions', 4), name, 6);
+}
+
+function stepEnvValue(step, name) {
+  return directValue(mappingBlock(step, 'env', 8), name, 10);
+}
+
+function hasCheckout(jobSteps) {
+  return jobSteps.some((step) => directValue(step, 'uses', 8).startsWith('actions/checkout@'));
+}
+
+function hasPersistCredentialsFalse(jobSteps) {
+  const checkoutSteps = jobSteps.filter((step) =>
+    directValue(step, 'uses', 8).startsWith('actions/checkout@'),
+  );
+  return (
+    checkoutSteps.length > 0 &&
+    checkoutSteps.every((step) => stepInput(step, 'persist-credentials') === 'false')
+  );
+}
+
+function executableRunText(jobSteps) {
+  return jobSteps.flatMap((step) => runLines(step)).join('\n');
+}
+
 function stepUses(step, action) {
   return new RegExp(`^ {8}uses:\\s*${action}\\s*$`, 'm').test(step);
 }
@@ -275,29 +318,30 @@ function sameRecord(actual, expected) {
   );
 }
 
-function prSafeReleaseInput(withBlock, name) {
-  const input = new RegExp(`^ {10}${name}:\\s*(.+)$`, 'm').exec(withBlock)?.[1] ?? '';
-  return (
-    /^\$\{\{\s*startsWith\(github\.ref, 'refs\/tags\/v'\)\s*&&\s*.+\s*\|\|\s*''\s*\}\}$/.test(
-      input.trim(),
-    ) && input.includes('github.ref_name')
-  );
-}
-
 const on = extractTopLevel('on');
+const globalEnv = extractTopLevel('env');
 const jobs = extractJobs();
 const preCheck = jobs.get('pre-check') ?? '';
+const createRelease = jobs.get('create-release') ?? '';
 const build = jobs.get('build') ?? '';
 const flatpak = jobs.get('flatpak') ?? '';
+const uploadReleaseAssets = jobs.get('upload-release-assets') ?? '';
 const publish = jobs.get('publish-release') ?? '';
 const buildRows = matrixRecords(build);
 const flatpakRows = matrixRecords(flatpak);
 const preCheckSteps = steps(preCheck);
+const createReleaseSteps = steps(createRelease);
 const buildSteps = steps(build);
 const flatpakSteps = steps(flatpak);
+const uploadReleaseAssetSteps = steps(uploadReleaseAssets);
 const publishSteps = steps(publish);
 const tauriReleaseStep =
-  buildSteps.find((step) => stepUses(step, 'tauri-apps/tauri-action@v0')) ?? '';
+  buildSteps.find((step) =>
+    stepUses(
+      step,
+      'tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5',
+    ),
+  ) ?? '';
 const tauriWith = mappingBlock(tauriReleaseStep, 'with', 8);
 
 const splitStepFixture = [
@@ -372,6 +416,10 @@ for (const expected of nativeRows) {
   );
 }
 requireContract(
+  tauriReleaseStep.length > 0,
+  'native packaging must pin tauri-action to the reviewed commit',
+);
+requireContract(
   /^ {10}args:\s*--target \$\{\{ matrix\.target \}\} --features rocksdb\s*$/m.test(tauriWith),
   'native packaging must pass every explicit target to Tauri',
 );
@@ -379,11 +427,70 @@ requireContract(
   /^ {10}releaseDraft:\s*true\s*$/m.test(tauriWith),
   'native releases must remain drafts during build',
 );
+requireContract(
+  stepInput(tauriReleaseStep, 'tagName') === '' &&
+    stepInput(tauriReleaseStep, 'releaseName') === '',
+  'tauri-action must remain build-only',
+);
+requireContract(
+  stepEnvValue(tauriReleaseStep, 'GITHUB_TOKEN') === '',
+  'tauri-action must not receive GITHUB_TOKEN',
+);
 const versionConsistencyStep =
   preCheckSteps.find((step) => directValue(step, 'name', 8) === 'Check version consistency') ?? '';
 requireContract(
   isReleaseTagGuard(directValue(versionConsistencyStep, 'if', 8)),
   'version consistency must run only for release tags',
+);
+requireContract(createRelease.length > 0, 'create-release job must exist');
+requireContract(
+  hasExactNeeds(createRelease, ['pre-check']),
+  'create-release must need pre-check',
+);
+requireContract(
+  isReleaseTagGuard(directValue(createRelease, 'if', 4)),
+  'create-release must have a job-level release-tag guard',
+);
+requireContract(
+  jobPermission(createRelease, 'contents') === 'write',
+  'create-release must have contents write permission',
+);
+requireContract(!hasCheckout(createReleaseSteps), 'create-release must not check out source code');
+const createReleaseOutput = directValue(mappingBlock(createRelease, 'outputs', 4), 'release_id', 6);
+requireContract(
+  createReleaseOutput === '${{ steps.release.outputs.release_id }}',
+  'create-release must expose the exact release ID',
+);
+const createReleaseStep =
+  createReleaseSteps.find((step) => directValue(step, 'id', 8) === 'release') ?? '';
+const createReleaseRun = executableRunText([createReleaseStep]);
+requireContract(
+  /gh api\b/.test(createReleaseRun) &&
+    /--paginate/.test(createReleaseRun) &&
+    /repos\/\$\{GITHUB_REPOSITORY\}\/releases/.test(createReleaseRun) &&
+    /tag_name/.test(createReleaseRun) &&
+    /GITHUB_REF_NAME/.test(createReleaseRun),
+  'create-release must list all releases and select the exact tag',
+);
+requireContract(
+  /draft/.test(createReleaseRun) &&
+    /(?:draft[^\n]*(?:false|not|!=\s*true)|(?:false|not)[^\n]*draft)/.test(
+      createReleaseRun,
+    ) &&
+    /exit 1/.test(createReleaseRun),
+  'create-release must fail if the tag already has a published release',
+);
+requireContract(
+  /(?:length|count)/.test(createReleaseRun) &&
+    /(?:-gt 1|> 1)/.test(createReleaseRun) &&
+    /exit 1/.test(createReleaseRun),
+  'create-release must fail if duplicate releases exist for the tag',
+);
+requireContract(
+  /--method POST/.test(createReleaseRun) &&
+    /draft=true/.test(createReleaseRun) &&
+    /release_id=.*GITHUB_OUTPUT/.test(createReleaseRun),
+  'create-release must create or reuse one draft and output its ID',
 );
 requireContract(
   directValue(build, 'if', 4) === '',
@@ -392,6 +499,41 @@ requireContract(
 requireContract(
   directValue(flatpak, 'if', 4) === '',
   'flatpak job must remain runnable on pull requests',
+);
+for (const [name, job, jobSteps] of [
+  ['build', build, buildSteps],
+  ['flatpak', flatpak, flatpakSteps],
+]) {
+  requireContract(
+    jobPermission(job, 'contents') === 'read',
+    `${name} must have contents read permission`,
+  );
+  requireContract(
+    hasPersistCredentialsFalse(jobSteps),
+    `${name} checkout must disable persisted credentials`,
+  );
+  requireContract(
+    directValue(mappingBlock(job, 'env', 4), 'GITHUB_TOKEN', 6) === '' &&
+      directValue(mappingBlock(job, 'env', 4), 'GH_TOKEN', 6) === '' &&
+      !jobSteps.some(
+        (step) =>
+          stepEnvValue(step, 'GITHUB_TOKEN') !== '' || stepEnvValue(step, 'GH_TOKEN') !== '',
+      ),
+    `${name} must not receive a GitHub token`,
+  );
+  requireContract(
+    !jobSteps.some(
+      (step) =>
+        runInvokes(step, /^gh release upload(?:\s|$)/) ||
+        /releases\/[^\s]+\/assets/.test(executableRunText([step])),
+    ),
+    `${name} must not upload release assets directly`,
+  );
+}
+requireContract(
+  directValue(globalEnv, 'GITHUB_TOKEN', 2) === '' &&
+    directValue(globalEnv, 'GH_TOKEN', 2) === '',
+  'pull-request jobs must not inherit a global GitHub token',
 );
 const debUploadStep = artifactUploadStep(
   buildSteps,
@@ -433,6 +575,14 @@ for (const path of [
   'scripts/ci/test-release-flatpak.sh',
   'scripts/ci/test-pipeline.sh',
   'apps/desktop/src-tauri/build.rs',
+  'apps/desktop/src-tauri/tauri.conf.json',
+  'Cargo.toml',
+  'Cargo.lock',
+  'apps/desktop/src-tauri/Cargo.toml',
+  'package.json',
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+  'apps/desktop/package.json',
   'apps/desktop/src-tauri/src/runtime_downloads.rs',
   'apps/desktop/src-tauri/src/runtime_downloads_tests.rs',
   'README.md',
@@ -497,50 +647,91 @@ requireContract(
   'flatpak bundles must be retained as workflow artifacts',
 );
 
-const flatpakReleaseStep =
-  flatpakSteps.find((step) =>
-    runInvokes(step, /^gh release upload\b[^#]*\*\.flatpak(?:\s|$)/),
-  ) ?? '';
-const flatpakReleaseIf = /^ {8}if:\s*(.+)$/m.exec(flatpakReleaseStep)?.[1] ?? '';
+requireContract(uploadReleaseAssets.length > 0, 'upload-release-assets job must exist');
 requireContract(
-  flatpakReleaseStep.length > 0,
-  'flatpak bundles must be uploaded to the draft release',
+  hasExactNeeds(uploadReleaseAssets, ['create-release', 'build', 'flatpak']),
+  'upload-release-assets must need create-release, build, and flatpak',
 );
 requireContract(
-  isReleaseTagGuard(flatpakReleaseIf),
-  'flatpak release upload must be guarded by a release tag',
+  isReleaseTagGuard(directValue(uploadReleaseAssets, 'if', 4)),
+  'upload-release-assets must have a job-level release-tag guard',
+);
+requireContract(
+  jobPermission(uploadReleaseAssets, 'contents') === 'write',
+  'upload-release-assets must have contents write permission',
+);
+requireContract(
+  !hasCheckout(uploadReleaseAssetSteps),
+  'upload-release-assets must not check out source code',
+);
+for (const pattern of ['chronacle-native-*', 'chronacle-flatpak-*']) {
+  requireContract(
+    uploadReleaseAssetSteps.some(
+      (step) =>
+        stepUses(step, 'actions/download-artifact@v4') &&
+        stepInput(step, 'pattern') === pattern &&
+        stepInput(step, 'path').startsWith('release-assets'),
+    ),
+    `upload-release-assets must download ${pattern} workflow artifacts`,
+  );
+}
+const releaseAssetUploadStep =
+  uploadReleaseAssetSteps.find(
+    (step) =>
+      stepEnvValue(step, 'RELEASE_ID') === '${{ needs.create-release.outputs.release_id }}' &&
+      /gh api\b/.test(executableRunText([step])) &&
+      /--hostname uploads\.github\.com/.test(executableRunText([step])),
+  ) ?? '';
+const releaseAssetUploadRun = executableRunText([releaseAssetUploadStep]);
+requireContract(
+  releaseAssetUploadStep.length > 0 &&
+    /repos\/\$\{GITHUB_REPOSITORY\}\/releases\/(?:\$\{RELEASE_ID\}|\$RELEASE_ID)\/assets/.test(
+      releaseAssetUploadRun,
+    ) &&
+    /--method POST/.test(releaseAssetUploadRun) &&
+    /--input/.test(releaseAssetUploadRun),
+  'upload-release-assets must upload packages against the exact release ID',
+);
+requireContract(
+  !uploadReleaseAssetSteps.some((step) => runInvokes(step, /^gh release upload(?:\s|$)/)),
+  'upload-release-assets must not address the release by tag',
 );
 
 requireContract(publish.length > 0, 'publish-release job must exist');
 requireContract(
-  /^ {4}needs:\s*\[build, flatpak\]\s*$/m.test(publish),
-  'publish-release must need build and flatpak',
+  hasExactNeeds(publish, ['create-release', 'upload-release-assets', 'build', 'flatpak']),
+  'publish-release must need create-release, upload-release-assets, build, and flatpak',
 );
 const publishReleaseStep =
   publishSteps.find((step) =>
+    stepEnvValue(step, 'RELEASE_ID') === '${{ needs.create-release.outputs.release_id }}' &&
     runInvokes(
       step,
-      /^gh release edit\b[^#]*--draft=false(?:\s|$)[^#]*--prerelease=false(?:\s|$)/,
+      /^gh release edit "\$GITHUB_REF_NAME" --draft=false --prerelease=false$/,
     ),
   ) ?? '';
+const publishReleaseRun = executableRunText([publishReleaseStep]);
 requireContract(
-  publishReleaseStep.length > 0,
-  'publish-release must remove draft status with gh release edit',
+  publishReleaseStep.length > 0 &&
+    /gh api\b/.test(publishReleaseRun) &&
+    /repos\/\$\{GITHUB_REPOSITORY\}\/releases\/(?:\$\{RELEASE_ID\}|\$RELEASE_ID)/.test(
+      publishReleaseRun,
+    ) &&
+    /--jq ['"]?\.tag_name/.test(publishReleaseRun) &&
+    /(?:=|!=)[^\n]*GITHUB_REF_NAME/.test(publishReleaseRun),
+  'publish-release must validate the exact release ID before publication',
 );
 const publishJobIf = /^ {4}if:\s*(.+)$/m.exec(publish)?.[1] ?? '';
 requireContract(
   isReleaseTagGuard(publishJobIf),
   'publish-release must have a job-level release-tag guard',
 );
+requireContract(
+  jobPermission(publish, 'contents') === 'write',
+  'publish-release must have contents write permission',
+);
+requireContract(!hasCheckout(publishSteps), 'publish-release must not check out source code');
 
-requireContract(
-  prSafeReleaseInput(tauriWith, 'tagName'),
-  'native tagName must select the tag only for release tags and be empty on pull requests',
-);
-requireContract(
-  prSafeReleaseInput(tauriWith, 'releaseName'),
-  'native releaseName must select a name only for release tags and be empty on pull requests',
-);
 requireContract(
   directValue(tauriReleaseStep, 'if', 8) === '',
   'native packaging must remain runnable on pull requests',
@@ -555,6 +746,15 @@ for (const [name, jobSteps] of [
     requireContract(
       stepInput(step, 'releaseDraft') !== 'false',
       `${name} must never publish a release directly`,
+    );
+  }
+}
+const tagOnlyWriteJobs = new Set(['create-release', 'upload-release-assets', 'publish-release']);
+for (const [name, job] of jobs) {
+  if (jobPermission(job, 'contents') === 'write') {
+    requireContract(
+      tagOnlyWriteJobs.has(name) && isReleaseTagGuard(directValue(job, 'if', 4)),
+      `${name} must not have write permission on pull requests`,
     );
   }
 }
