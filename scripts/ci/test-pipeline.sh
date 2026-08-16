@@ -335,16 +335,33 @@ function canonicalCreateFlow(text) {
 function canonicalAssetUpload(text) {
   const planLoop = text.search(/while IFS= read -r -d '' asset; do/);
   const planDone = text.indexOf('\ndone', planLoop);
+  const existingFetch = text.search(
+    /existing_assets=\$\(gh api --paginate --slurp[\s\S]*?repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?per_page=100[\s\S]*?jq ['"]add['"]\)/,
+  );
+  const staleLoop = text.search(/while IFS= read -r stale_id; do/);
+  const staleDone = text.indexOf('\ndone', staleLoop);
+  const staleEnd = text.indexOf('\n', staleDone + 1);
   const uploadLoop = text.search(/for index in "\$\{!assets\[@\]\}"; do/);
   const uploadDone = text.indexOf('\ndone', uploadLoop);
-  if (!(planLoop >= 0 && planLoop < planDone && planDone < uploadLoop && uploadLoop < uploadDone)) {
+  if (
+    !(
+      planLoop >= 0 &&
+      planLoop < planDone &&
+      planDone < existingFetch &&
+      existingFetch < staleLoop &&
+      staleLoop < staleDone &&
+      staleDone < staleEnd &&
+      staleEnd < uploadLoop &&
+      uploadLoop < uploadDone
+    )
+  ) {
     return false;
   }
 
   const planBody = text.slice(planLoop, planDone);
-  const validation = text.slice(planDone, uploadLoop);
+  const validation = text.slice(planDone, existingFetch);
+  const reconciliation = text.slice(existingFetch, staleEnd);
   const uploadBody = text.slice(uploadLoop, uploadDone);
-  const beforeUpload = text.slice(0, uploadLoop);
   const uploadCommands = shellCommands(uploadBody);
   const hasCardinalityGuard = hasFailClosedGuard(
     validation,
@@ -360,7 +377,38 @@ function canonicalAssetUpload(text) {
         command,
       ) && /--input "\$asset"(?:\s|$)/.test(command),
   );
+  const fetchesExactReleaseAssets =
+    /existing_assets=\$\(gh api --paginate --slurp[\s\S]*?"repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?per_page=100"[\s\S]*?\|[\s\S]*?jq ['"]add['"]\)/.test(
+      reconciliation,
+    ) &&
+    (text.match(/repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?per_page=100/g) ?? [])
+      .length === 1;
+  const deletesStaleAssets =
+    /planned_names_json=\$\(printf '[^']*' "\$\{asset_names\[@\]\}" \| jq -R \. \| jq -s \.\)/.test(
+      validation,
+    ) &&
+    /jq -r --argjson planned_names "\$planned_names_json" ['"]\.\[\] \| select\(\.name as \$name \| \$planned_names \| index\(\$name\) \| not\) \| \.id['"] <<<"\$existing_assets"/.test(
+      reconciliation,
+    ) &&
+    /\[\[ "\$stale_id" =~ \^\[0-9\]\+\$ \]\]/.test(reconciliation) &&
+    /gh api --method DELETE[\s\S]*?"repos\/\$\{GITHUB_REPOSITORY\}\/releases\/assets\/\$\{stale_id\}"/.test(
+      reconciliation,
+    );
+  const replacesSameNameAssets =
+    /matching_assets=\$\(jq --arg name "\$asset_name" ['"]map\(select\(\.name == \$name\)\)['"] <<<"\$existing_assets"\)/.test(
+      uploadBody,
+    ) &&
+    /matching_count=\$\(jq ['"]length['"] <<<"\$matching_assets"\)/.test(uploadBody) &&
+    /if \[ "\$matching_count" -gt 1 \]; then[\s\S]*?exit 1[\s\S]*?elif \[ "\$matching_count" -eq 1 \]; then/.test(
+      uploadBody,
+    ) &&
+    /existing_id=\$\(jq -r ['"]\.\[0\]\.id['"] <<<"\$matching_assets"\)/.test(uploadBody) &&
+    /\[\[ "\$existing_id" =~ \^\[0-9\]\+\$ \]\]/.test(uploadBody) &&
+    /gh api --method DELETE[\s\S]*?"repos\/\$\{GITHUB_REPOSITORY\}\/releases\/assets\/\$\{existing_id\}"/.test(
+      uploadBody,
+  );
   return (
+    /\[\[ "\$RELEASE_ID" =~ \^\[0-9\]\+\$ \]\]/.test(text) &&
     /find release-assets\/native release-assets\/flatpak/.test(text) &&
     /-print0/.test(text) &&
     ['deb', 'AppImage', 'rpm', 'app.tar.gz', 'dmg', 'msi', 'exe', 'flatpak'].every((suffix) =>
@@ -377,7 +425,9 @@ function canonicalAssetUpload(text) {
     /asset_names\+=\("\$asset_name"\)/.test(planBody) &&
     hasCardinalityGuard &&
     hasUniquenessGuard &&
-    !/gh api\b/.test(beforeUpload) &&
+    fetchesExactReleaseAssets &&
+    deletesStaleAssets &&
+    replacesSameNameAssets &&
     /asset="\$\{assets\[\$index\]\}"/.test(uploadBody) &&
     /asset_name="\$\{asset_names\[\$index\]\}"/.test(uploadBody) &&
     /@uri/.test(uploadBody) &&
@@ -627,6 +677,7 @@ requireContract(
   'pipeline parser canonical release fixture must remain valid',
 );
 const canonicalAssetFixture = [
+  '[[ "$RELEASE_ID" =~ ^[0-9]+$ ]]',
   'assets=()',
   'asset_names=()',
   "while IFS= read -r -d '' asset; do",
@@ -640,16 +691,39 @@ const canonicalAssetFixture = [
   "done < <(find release-assets/native release-assets/flatpak -type f \\( -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' -o -name '*.app.tar.gz' -o -name '*.dmg' -o -name '*.msi' -o -name '*.exe' -o -name '*.flatpak' \\) -print0)",
   'if [ "${#assets[@]}" -eq 0 ] || [ "${#assets[@]}" -ne "${#asset_names[@]}" ]; then exit 1; fi',
   'if [ "$(printf \'%s\\n\' "${asset_names[@]}" | sort -u | wc -l)" -ne "${#asset_names[@]}" ]; then exit 1; fi',
+  'planned_names_json=$(printf \'%s\\n\' "${asset_names[@]}" | jq -R . | jq -s .)',
+  'existing_assets=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" | jq \'add\')',
+  'while IFS= read -r stale_id; do',
+  '[[ "$stale_id" =~ ^[0-9]+$ ]]',
+  'gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${stale_id}"',
+  'done < <(jq -r --argjson planned_names "$planned_names_json" \'.[] | select(.name as $name | $planned_names | index($name) | not) | .id\' <<<"$existing_assets")',
   'for index in "${!assets[@]}"; do',
   'asset="${assets[$index]}"',
   'asset_name="${asset_names[$index]}"',
   "encoded_name=$(jq -rn --arg name \"$asset_name\" '$name | @uri')",
+  'matching_assets=$(jq --arg name "$asset_name" \'map(select(.name == $name))\' <<<"$existing_assets")',
+  'matching_count=$(jq \'length\' <<<"$matching_assets")',
+  'if [ "$matching_count" -gt 1 ]; then',
+  'exit 1',
+  'elif [ "$matching_count" -eq 1 ]; then',
+  'existing_id=$(jq -r \'.[0].id\' <<<"$matching_assets")',
+  '[[ "$existing_id" =~ ^[0-9]+$ ]]',
+  'gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_id}"',
+  'fi',
   'gh api --method POST "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" -H "Content-Type: application/octet-stream" --input "$asset"',
   'done',
 ].join('\n');
 requireContract(
   canonicalAssetUpload(canonicalAssetFixture),
   'pipeline parser canonical asset fixture must remain valid',
+);
+const legacyAssetSurvivesFixture = canonicalAssetFixture.replace(
+  'select(.name as $name | $planned_names | index($name) | not)',
+  'select(.name as $name | $planned_names | index($name))',
+);
+requireContract(
+  !canonicalAssetUpload(legacyAssetSurvivesFixture),
+  'pipeline parser must reject reconciliation that leaves legacy Chronacle.app.tar.gz assets in place',
 );
 requireContract(
   !canonicalAssetUpload(
@@ -1061,7 +1135,7 @@ const releaseAssetUploadStep =
   ) ?? '';
 requireContract(
   releaseAssetUploadStep.length > 0,
-  'upload-release-assets must iterate every package and upload it against the exact release ID',
+  'upload-release-assets must reconcile stale assets and upload every package against the exact release ID',
 );
 requireContract(
   !uploadReleaseAssetSteps.some((step) => runInvokes(step, /^gh release upload(?:\s|$)/)),
