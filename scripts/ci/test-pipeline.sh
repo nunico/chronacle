@@ -305,11 +305,14 @@ function canonicalCreateFlow(text) {
   const singleBranch = text.slice(single, zero);
   const zeroBranch = text.slice(zero, end);
   const after = text.slice(end);
+  const aggregatesPages =
+    /--paginate\s+--slurp/.test(text) ||
+    /--paginate[^\n]*[\s\S]*?\|\s*jq\s+-s(?:\s|$)/.test(text);
   return (
     /gh api\b/.test(text) &&
-    /--paginate/.test(text) &&
+    aggregatesPages &&
     /repos\/\$\{GITHUB_REPOSITORY\}\/releases/.test(text) &&
-    /select\(\.tag_name == env\.GITHUB_REF_NAME\)/.test(text) &&
+    /(?:add|flatten)[^\n]*map\(select\(\.tag_name == env\.GITHUB_REF_NAME\)\)/.test(text) &&
     /release_count=.*length/.test(text) &&
     /exit 1/.test(duplicateBranch) &&
     /\.\[0\]\.draft/.test(singleBranch) &&
@@ -470,10 +473,10 @@ requireContract(
   'release workflow must serialize the exact ref without cancelling in-progress releases',
 );
 requireContract(
-  topLevelPermissionsDeclaration === null ||
-    (topLevelPermissionsDeclaration[1] === '' &&
-      directValue(topLevelPermissions, 'contents', 2) === 'read'),
-  'top-level permissions must be absent or contents read',
+  topLevelPermissionsDeclaration !== null &&
+    topLevelPermissionsDeclaration[1] === '' &&
+    directValue(topLevelPermissions, 'contents', 2) === 'read',
+  'top-level permissions must explicitly set contents read',
 );
 
 const splitStepFixture = [
@@ -531,7 +534,7 @@ requireContract(
   'pipeline parser must reject arbitrary release IDs',
 );
 const canonicalCreateFixture = [
-  'matching_releases=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" | jq "map(select(.tag_name == env.GITHUB_REF_NAME))")',
+  'matching_releases=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases" | jq "add | map(select(.tag_name == env.GITHUB_REF_NAME))")',
   "release_count=$(jq 'length' <<<\"$matching_releases\")",
   'if [ "$release_count" -gt 1 ]; then',
   'exit 1',
