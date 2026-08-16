@@ -127,7 +127,12 @@ reject_pattern "$metainfo" '<screenshots([[:space:]>])'
 
 release_script=scripts/release-flatpak.sh
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/chronacle-flatpak-contract.XXXXXX")
+sentinel_pid=
 cleanup_test() {
+  if [ -n "$sentinel_pid" ]; then
+    kill -TERM "$sentinel_pid" 2>/dev/null || :
+    wait "$sentinel_pid" 2>/dev/null || :
+  fi
   rm -rf "$test_root"
 }
 trap cleanup_test 0
@@ -259,7 +264,13 @@ case "${1:-}" in
     ;;
   kill)
     assert_temp_home
-    [ "$2" = dev.tea-driven.chronacle.desktop ]
+    if [ "$2" = dev.tea-driven.chronacle.desktop ]; then
+      kill -TERM "$(cat "$STUB_STATE/same-app-sentinel-pid")" 2>/dev/null || :
+      exit 0
+    fi
+    [ -f "$STUB_STATE/smoke-instance-id" ]
+    expected_instance=$(cat "$STUB_STATE/smoke-instance-id")
+    [ "$2" = "$expected_instance" ]
     touch "$STUB_STATE/flatpak-kill"
     if [ -f "$STUB_STATE/app-pid" ]; then
       kill -TERM "$(cat "$STUB_STATE/app-pid")" 2>/dev/null || :
@@ -275,6 +286,13 @@ case "${1:-}" in
         exit 0
         ;;
       *)
+        case " $* " in
+          *' --instance-id-fd=3 '*) ;;
+          *) echo 'startup smoke must request an instance ID on fd 3' >&2; exit 1 ;;
+        esac
+        smoke_instance="chronacle-smoke-$$"
+        printf '%s\n' "$smoke_instance" >&3
+        printf '%s\n' "$smoke_instance" >"$STUB_STATE/smoke-instance-id"
         printf '%s\n' "$$" >"$STUB_STATE/app-pid"
         trap 'touch "$STUB_STATE/app-stopped"; exit 143' TERM
         trap 'touch "$STUB_STATE/app-stopped"; exit 130' INT
@@ -344,9 +362,15 @@ original_path=$PATH
 PATH="$test_root/bin:$PATH"
 export PATH
 
+/bin/sleep 120 &
+sentinel_pid=$!
+printf '%s\n' "$sentinel_pid" >"$test_root/state/same-app-sentinel-pid"
+
 "$release_script" "$test_root/Chronacle.deb" 0.0.0 "$test_root/output"
 "$release_script" "$test_root/Chronacle.deb" 1.2.3 "$test_root/output"
 "$release_script" "$test_root/Chronacle.deb" 1.2.3 "$test_root/output"
+kill -0 "$sentinel_pid" 2>/dev/null ||
+  fail 'normal smoke cleanup must not terminate another Chronacle instance'
 
 rm -f \
   "$test_root/state/app-pid" \
@@ -382,6 +406,8 @@ require_file "$test_root/state/flatpak-kill"
 require_file "$test_root/state/app-stopped"
 require_file "$test_root/state/xvfb-reaped"
 require_file "$test_root/state/dbus-reaped"
+kill -0 "$sentinel_pid" 2>/dev/null ||
+  fail 'signal cleanup must not terminate another Chronacle instance'
 
 PATH=$original_path
 export PATH
@@ -408,7 +434,8 @@ require_fixed "$test_root/state/calls" '/app/share/applications/dev.tea-driven.c
 require_fixed "$test_root/state/calls" '/app/share/metainfo/dev.tea-driven.chronacle.desktop.metainfo.xml'
 require_fixed "$test_root/state/calls" '/app/share/icons/hicolor/32x32/apps/dev.tea-driven.chronacle.desktop.png'
 require_fixed "$test_root/state/calls" '/app/share/icons/hicolor/128x128/apps/dev.tea-driven.chronacle.desktop.png'
-require_fixed "$test_root/state/calls" 'flatpak run dev.tea-driven.chronacle.desktop'
-require_fixed "$test_root/state/calls" 'flatpak kill dev.tea-driven.chronacle.desktop'
+require_fixed "$test_root/state/calls" 'flatpak run --instance-id-fd=3 dev.tea-driven.chronacle.desktop'
+require_fixed "$test_root/state/calls" 'flatpak kill chronacle-smoke-'
+reject_pattern "$test_root/state/calls" '^flatpak kill dev\.tea-driven\.chronacle\.desktop$'
 
 echo 'Flatpak release contract passed.'
