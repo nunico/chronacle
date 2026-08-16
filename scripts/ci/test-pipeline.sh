@@ -261,6 +261,120 @@ function executableRunText(jobSteps) {
   return jobSteps.flatMap((step) => runLines(step)).join('\n');
 }
 
+function hasTokenExpression(job, jobSteps) {
+  const tokenExpression = /\$\{\{\s*(?:github\.token|secrets\.GITHUB_TOKEN)\s*\}\}/;
+  const jobEnv = mappingEntries(mappingBlock(job, 'env', 4), 6);
+  if (
+    [...jobEnv].some(
+      ([key, value]) => ['GH_TOKEN', 'GITHUB_TOKEN'].includes(key) || tokenExpression.test(value),
+    )
+  ) {
+    return true;
+  }
+
+  return jobSteps.some((step) => {
+    const env = mappingEntries(mappingBlock(step, 'env', 8), 10);
+    const withInputs = mappingEntries(mappingBlock(step, 'with', 8), 10);
+    return (
+      [...env].some(
+        ([key, value]) => ['GH_TOKEN', 'GITHUB_TOKEN'].includes(key) || tokenExpression.test(value),
+      ) ||
+      [...withInputs].some(
+        ([key, value]) => /token/i.test(key) || tokenExpression.test(value),
+      ) ||
+      tokenExpression.test(executableRunText([step]))
+    );
+  });
+}
+
+function mappingEntries(text, indent) {
+  const entries = new Map();
+  const pattern = new RegExp(`^ {${indent}}([A-Za-z0-9_-]+):\\s*(.*)$`, 'gm');
+  for (const match of text.matchAll(pattern)) entries.set(match[1], unquote(match[2]));
+  return entries;
+}
+
+function canonicalCreateFlow(text) {
+  const duplicate = text.search(/if \[ "\$release_count" -gt 1 \]; then/);
+  const single = text.search(/elif \[ "\$release_count" -eq 1 \]; then/);
+  const zero = single < 0 ? -1 : text.indexOf('\nelse', single);
+  const end = zero < 0 ? -1 : text.indexOf('\nfi', zero);
+  if (!(duplicate >= 0 && duplicate < single && single < zero && zero < end)) return false;
+
+  const duplicateBranch = text.slice(duplicate, single);
+  const singleBranch = text.slice(single, zero);
+  const zeroBranch = text.slice(zero, end);
+  const after = text.slice(end);
+  return (
+    /gh api\b/.test(text) &&
+    /--paginate/.test(text) &&
+    /repos\/\$\{GITHUB_REPOSITORY\}\/releases/.test(text) &&
+    /select\(\.tag_name == env\.GITHUB_REF_NAME\)/.test(text) &&
+    /release_count=.*length/.test(text) &&
+    /exit 1/.test(duplicateBranch) &&
+    /\.\[0\]\.draft/.test(singleBranch) &&
+    /!= true/.test(singleBranch) &&
+    /exit 1/.test(singleBranch) &&
+    /release_id=.*\.\[0\]\.id/.test(singleBranch) &&
+    !/--method POST/.test(singleBranch) &&
+    (text.match(/--method POST/g) ?? []).length === 1 &&
+    /--method POST/.test(zeroBranch) &&
+    /tag_name="\$GITHUB_REF_NAME"/.test(zeroBranch) &&
+    /name="Chronacle \$GITHUB_REF_NAME"/.test(zeroBranch) &&
+    /draft=true/.test(zeroBranch) &&
+    /prerelease=false/.test(zeroBranch) &&
+    /release_id=.*\.id/.test(zeroBranch) &&
+    /\[\[ "\$release_id" =~ \^\[0-9\]\+\$ \]\]/.test(after) &&
+    /echo "release_id=\$release_id" >> "\$GITHUB_OUTPUT"/.test(after)
+  );
+}
+
+function canonicalAssetUpload(text) {
+  const loop = text.search(/while IFS= read -r -d '' asset; do/);
+  const done = loop < 0 ? -1 : text.indexOf('\ndone', loop);
+  if (loop < 0 || done < 0) return false;
+  const body = text.slice(loop, done);
+  return (
+    /find release-assets\/native release-assets\/flatpak/.test(text) &&
+    /-print0/.test(text) &&
+    ['deb', 'AppImage', 'rpm', 'app.tar.gz', 'dmg', 'msi', 'exe', 'flatpak'].every((suffix) =>
+      text.includes(`*.${suffix}`),
+    ) &&
+    /basename "\$asset"/.test(body) &&
+    /@uri/.test(body) &&
+    /--hostname uploads\.github\.com/.test(body) &&
+    /--method POST/.test(body) &&
+    /releases\/(?:\$\{RELEASE_ID\}|\$RELEASE_ID)\/assets\?name=\$\{encoded_name\}/.test(body) &&
+    /Content-Type: application\/octet-stream/.test(body) &&
+    /--input "\$asset"/.test(body)
+  );
+}
+
+function canonicalPublish(text) {
+  const releaseEndpoints =
+    text.match(
+      /repos\/\$\{GITHUB_REPOSITORY\}\/releases\/(?:\$\{RELEASE_ID\}|\$RELEASE_ID)/g,
+    ) ?? [];
+  const patch = text.indexOf('--method PATCH');
+  const beforePatch = patch < 0 ? '' : text.slice(0, patch);
+  const patchBody = patch < 0 ? '' : text.slice(patch);
+  return (
+    releaseEndpoints.length >= 2 &&
+    /release_tag=.*\.tag_name/.test(beforePatch) &&
+    /release_draft=.*\.draft/.test(beforePatch) &&
+    /"\$release_tag" != "\$GITHUB_REF_NAME"/.test(beforePatch) &&
+    /"\$release_draft" != true/.test(beforePatch) &&
+    /exit 1/.test(beforePatch) &&
+    /gh api\b/.test(text) &&
+    /repos\/\$\{GITHUB_REPOSITORY\}\/releases\/(?:\$\{RELEASE_ID\}|\$RELEASE_ID)/.test(
+      patchBody,
+    ) &&
+    /draft=false/.test(patchBody) &&
+    /prerelease=false/.test(patchBody) &&
+    !/gh release edit/.test(text)
+  );
+}
+
 function stepUses(step, action) {
   return new RegExp(`^ {8}uses:\\s*${action}\\s*$`, 'm').test(step);
 }
@@ -320,6 +434,9 @@ function sameRecord(actual, expected) {
 
 const on = extractTopLevel('on');
 const globalEnv = extractTopLevel('env');
+const concurrency = extractTopLevel('concurrency');
+const topLevelPermissions = extractTopLevel('permissions');
+const topLevelPermissionsDeclaration = /^permissions:\s*(.*)$/m.exec(workflow);
 const jobs = extractJobs();
 const preCheck = jobs.get('pre-check') ?? '';
 const createRelease = jobs.get('create-release') ?? '';
@@ -335,6 +452,9 @@ const buildSteps = steps(build);
 const flatpakSteps = steps(flatpak);
 const uploadReleaseAssetSteps = steps(uploadReleaseAssets);
 const publishSteps = steps(publish);
+const allTauriActionSteps = [...jobs.values()]
+  .flatMap((job) => steps(job))
+  .filter((step) => directValue(step, 'uses', 8).startsWith('tauri-apps/tauri-action@'));
 const tauriReleaseStep =
   buildSteps.find((step) =>
     stepUses(
@@ -343,6 +463,18 @@ const tauriReleaseStep =
     ),
   ) ?? '';
 const tauriWith = mappingBlock(tauriReleaseStep, 'with', 8);
+
+requireContract(
+  directValue(concurrency, 'group', 2) === '${{ github.workflow }}-${{ github.ref }}' &&
+    directValue(concurrency, 'cancel-in-progress', 2) === 'false',
+  'release workflow must serialize the exact ref without cancelling in-progress releases',
+);
+requireContract(
+  topLevelPermissionsDeclaration === null ||
+    (topLevelPermissionsDeclaration[1] === '' &&
+      directValue(topLevelPermissions, 'contents', 2) === 'read'),
+  'top-level permissions must be absent or contents read',
+);
 
 const splitStepFixture = [
   '  fixture:',
@@ -387,6 +519,60 @@ requireContract(
   ),
   'pipeline parser must not treat comments or diagnostics as draft publication',
 );
+requireContract(
+  !canonicalCreateFlow(
+    'gh api --method POST repos/${GITHUB_REPOSITORY}/releases -F draft=true\n' +
+      'release_id=42\necho "release_id=$release_id" >> "$GITHUB_OUTPUT"',
+  ),
+  'pipeline parser must reject unconditional release creation',
+);
+requireContract(
+  !canonicalCreateFlow('release_id=123\necho "release_id=$release_id" >> "$GITHUB_OUTPUT"'),
+  'pipeline parser must reject arbitrary release IDs',
+);
+const canonicalCreateFixture = [
+  'matching_releases=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" | jq "map(select(.tag_name == env.GITHUB_REF_NAME))")',
+  "release_count=$(jq 'length' <<<\"$matching_releases\")",
+  'if [ "$release_count" -gt 1 ]; then',
+  'exit 1',
+  'elif [ "$release_count" -eq 1 ]; then',
+  "existing_draft=$(jq -r '.[0].draft' <<<\"$matching_releases\")",
+  'if [ "$existing_draft" != true ]; then exit 1; fi',
+  "release_id=$(jq -r '.[0].id' <<<\"$matching_releases\")",
+  'else',
+  'created=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" -f tag_name="$GITHUB_REF_NAME" -f name="Chronacle $GITHUB_REF_NAME" -F draft=true -F prerelease=false)',
+  "release_id=$(jq -r '.id' <<<\"$created\")",
+  'fi',
+  '[[ "$release_id" =~ ^[0-9]+$ ]]',
+  'echo "release_id=$release_id" >> "$GITHUB_OUTPUT"',
+].join('\n');
+requireContract(
+  canonicalCreateFlow(canonicalCreateFixture),
+  'pipeline parser canonical release fixture must remain valid',
+);
+const canonicalAssetFixture = [
+  "find release-assets/native release-assets/flatpak -type f \\( -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' -o -name '*.app.tar.gz' -o -name '*.dmg' -o -name '*.msi' -o -name '*.exe' -o -name '*.flatpak' \\) -print0 |",
+  "while IFS= read -r -d '' asset; do",
+  'asset_name=$(basename "$asset")',
+  "encoded_name=$(jq -rn --arg name \"$asset_name\" '$name | @uri')",
+  'gh api --hostname uploads.github.com --method POST "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" -H "Content-Type: application/octet-stream" --input "$asset"',
+  'done',
+].join('\n');
+requireContract(
+  canonicalAssetUpload(canonicalAssetFixture),
+  'pipeline parser canonical asset fixture must remain valid',
+);
+const canonicalPublishFixture = [
+  'release=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}")',
+  "release_tag=$(jq -r '.tag_name' <<<\"$release\")",
+  "release_draft=$(jq -r '.draft' <<<\"$release\")",
+  'if [ "$release_tag" != "$GITHUB_REF_NAME" ] || [ "$release_draft" != true ]; then exit 1; fi',
+  'gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -F draft=false -F prerelease=false',
+].join('\n');
+requireContract(
+  canonicalPublish(canonicalPublishFixture),
+  'pipeline parser canonical publication fixture must remain valid',
+);
 
 const nativeRows = [
   {
@@ -416,8 +602,8 @@ for (const expected of nativeRows) {
   );
 }
 requireContract(
-  tauriReleaseStep.length > 0,
-  'native packaging must pin tauri-action to the reviewed commit',
+  allTauriActionSteps.length === 1 && tauriReleaseStep.length > 0,
+  'native packaging must use exactly one tauri-action pinned to the reviewed commit',
 );
 requireContract(
   /^ {10}args:\s*--target \$\{\{ matrix\.target \}\} --features rocksdb\s*$/m.test(tauriWith),
@@ -465,32 +651,12 @@ const createReleaseStep =
   createReleaseSteps.find((step) => directValue(step, 'id', 8) === 'release') ?? '';
 const createReleaseRun = executableRunText([createReleaseStep]);
 requireContract(
-  /gh api\b/.test(createReleaseRun) &&
-    /--paginate/.test(createReleaseRun) &&
-    /repos\/\$\{GITHUB_REPOSITORY\}\/releases/.test(createReleaseRun) &&
-    /tag_name/.test(createReleaseRun) &&
-    /GITHUB_REF_NAME/.test(createReleaseRun),
-  'create-release must list all releases and select the exact tag',
+  stepEnvValue(createReleaseStep, 'GH_TOKEN') === '${{ github.token }}',
+  'create-release executable step must bind the job token',
 );
 requireContract(
-  /draft/.test(createReleaseRun) &&
-    /(?:draft[^\n]*(?:false|not|!=\s*true)|(?:false|not)[^\n]*draft)/.test(
-      createReleaseRun,
-    ) &&
-    /exit 1/.test(createReleaseRun),
-  'create-release must fail if the tag already has a published release',
-);
-requireContract(
-  /(?:length|count)/.test(createReleaseRun) &&
-    /(?:-gt 1|> 1)/.test(createReleaseRun) &&
-    /exit 1/.test(createReleaseRun),
-  'create-release must fail if duplicate releases exist for the tag',
-);
-requireContract(
-  /--method POST/.test(createReleaseRun) &&
-    /draft=true/.test(createReleaseRun) &&
-    /release_id=.*GITHUB_OUTPUT/.test(createReleaseRun),
-  'create-release must create or reuse one draft and output its ID',
+  canonicalCreateFlow(createReleaseRun),
+  'create-release must canonically select, reuse, or create exactly one draft release ID',
 );
 requireContract(
   directValue(build, 'if', 4) === '',
@@ -531,8 +697,25 @@ for (const [name, job, jobSteps] of [
   );
 }
 requireContract(
-  directValue(globalEnv, 'GITHUB_TOKEN', 2) === '' &&
-    directValue(globalEnv, 'GH_TOKEN', 2) === '',
+  hasPersistCredentialsFalse(preCheckSteps),
+  'pre-check checkout must disable persisted credentials',
+);
+for (const [name, job, jobSteps] of [
+  ['pre-check', preCheck, preCheckSteps],
+  ['build', build, buildSteps],
+  ['flatpak', flatpak, flatpakSteps],
+]) {
+  requireContract(
+    !hasTokenExpression(job, jobSteps),
+    `${name} must not contain a GitHub token expression`,
+  );
+}
+requireContract(
+  ![...mappingEntries(globalEnv, 2)].some(
+    ([key, value]) =>
+      ['GITHUB_TOKEN', 'GH_TOKEN'].includes(key) ||
+      /\$\{\{\s*(?:github\.token|secrets\.GITHUB_TOKEN)\s*\}\}/.test(value),
+  ),
   'pull-request jobs must not inherit a global GitHub token',
 );
 const debUploadStep = artifactUploadStep(
@@ -664,13 +847,16 @@ requireContract(
   !hasCheckout(uploadReleaseAssetSteps),
   'upload-release-assets must not check out source code',
 );
-for (const pattern of ['chronacle-native-*', 'chronacle-flatpak-*']) {
+for (const [pattern, path] of [
+  ['chronacle-native-*', 'release-assets/native'],
+  ['chronacle-flatpak-*', 'release-assets/flatpak'],
+]) {
   requireContract(
     uploadReleaseAssetSteps.some(
       (step) =>
         stepUses(step, 'actions/download-artifact@v4') &&
         stepInput(step, 'pattern') === pattern &&
-        stepInput(step, 'path').startsWith('release-assets'),
+        stepInput(step, 'path') === path,
     ),
     `upload-release-assets must download ${pattern} workflow artifacts`,
   );
@@ -679,18 +865,12 @@ const releaseAssetUploadStep =
   uploadReleaseAssetSteps.find(
     (step) =>
       stepEnvValue(step, 'RELEASE_ID') === '${{ needs.create-release.outputs.release_id }}' &&
-      /gh api\b/.test(executableRunText([step])) &&
-      /--hostname uploads\.github\.com/.test(executableRunText([step])),
+      stepEnvValue(step, 'GH_TOKEN') === '${{ github.token }}' &&
+      canonicalAssetUpload(executableRunText([step])),
   ) ?? '';
-const releaseAssetUploadRun = executableRunText([releaseAssetUploadStep]);
 requireContract(
-  releaseAssetUploadStep.length > 0 &&
-    /repos\/\$\{GITHUB_REPOSITORY\}\/releases\/(?:\$\{RELEASE_ID\}|\$RELEASE_ID)\/assets/.test(
-      releaseAssetUploadRun,
-    ) &&
-    /--method POST/.test(releaseAssetUploadRun) &&
-    /--input/.test(releaseAssetUploadRun),
-  'upload-release-assets must upload packages against the exact release ID',
+  releaseAssetUploadStep.length > 0,
+  'upload-release-assets must iterate every package and upload it against the exact release ID',
 );
 requireContract(
   !uploadReleaseAssetSteps.some((step) => runInvokes(step, /^gh release upload(?:\s|$)/)),
@@ -705,21 +885,12 @@ requireContract(
 const publishReleaseStep =
   publishSteps.find((step) =>
     stepEnvValue(step, 'RELEASE_ID') === '${{ needs.create-release.outputs.release_id }}' &&
-    runInvokes(
-      step,
-      /^gh release edit "\$GITHUB_REF_NAME" --draft=false --prerelease=false$/,
-    ),
+    stepEnvValue(step, 'GH_TOKEN') === '${{ github.token }}' &&
+    canonicalPublish(executableRunText([step])),
   ) ?? '';
-const publishReleaseRun = executableRunText([publishReleaseStep]);
 requireContract(
-  publishReleaseStep.length > 0 &&
-    /gh api\b/.test(publishReleaseRun) &&
-    /repos\/\$\{GITHUB_REPOSITORY\}\/releases\/(?:\$\{RELEASE_ID\}|\$RELEASE_ID)/.test(
-      publishReleaseRun,
-    ) &&
-    /--jq ['"]?\.tag_name/.test(publishReleaseRun) &&
-    /(?:=|!=)[^\n]*GITHUB_REF_NAME/.test(publishReleaseRun),
-  'publish-release must validate the exact release ID before publication',
+  publishReleaseStep.length > 0,
+  'publish-release must validate and publish the exact release ID through REST',
 );
 const publishJobIf = /^ {4}if:\s*(.+)$/m.exec(publish)?.[1] ?? '';
 requireContract(
@@ -760,9 +931,15 @@ for (const [name, job] of jobs) {
 }
 for (const [name, job] of jobs) {
   if (name !== 'publish-release') {
-    const publishesDraft = steps(job).some((step) =>
-      runInvokes(step, /^gh release edit\b[^#]*--draft=false(?:\s|$)/),
-    );
+    const publishesDraft = steps(job).some((step) => {
+      const run = executableRunText([step]);
+      return (
+        /gh api\b/.test(run) &&
+        /--method PATCH/.test(run) &&
+        /repos\/\$\{GITHUB_REPOSITORY\}\/releases\//.test(run) &&
+        /draft=false/.test(run)
+      );
+    });
     requireContract(
       !publishesDraft,
       `only publish-release may remove draft status, found in ${name}`,
