@@ -443,7 +443,12 @@ function hasFailClosedGuard(text, headerPattern) {
   if (!terminator) return false;
 
   const body = text.slice(bodyStart, bodyStart + terminator.index);
-  return /(?:^|[;&| \t])exit[ \t]+[1-9][0-9]*(?:$|[;&| \t])/.test(body);
+  return body
+    .replace(/\\\n[ \t]*/g, ' ')
+    .split(/[;\n]/)
+    .map((command) => command.trim())
+    .filter((command) => command !== '' && !command.startsWith('#'))
+    .some((command) => /^exit[ \t]+[1-9][0-9]*$/.test(command));
 }
 
 function stepUses(step, action) {
@@ -663,6 +668,33 @@ requireContract(
     ),
   ),
   'pipeline parser must require the asset cardinality guard itself to terminate with failure',
+);
+requireContract(
+  !canonicalAssetUpload(
+    canonicalAssetFixture.replace(
+      'if [ "${#assets[@]}" -eq 0 ] || [ "${#assets[@]}" -ne "${#asset_names[@]}" ]; then exit 1; fi',
+      'if [ "${#assets[@]}" -eq 0 ] || [ "${#assets[@]}" -ne "${#asset_names[@]}" ]; then echo exit 1; fi',
+    ),
+  ),
+  'pipeline parser must not mistake echoed exit text for cardinality failure',
+);
+requireContract(
+  !canonicalAssetUpload(
+    canonicalAssetFixture.replace(
+      'if [ "${#assets[@]}" -eq 0 ] || [ "${#assets[@]}" -ne "${#asset_names[@]}" ]; then exit 1; fi',
+      'if [ "${#assets[@]}" -eq 0 ] || [ "${#assets[@]}" -ne "${#asset_names[@]}" ]; then\n# exit 1\necho continuing\nfi',
+    ),
+  ),
+  'pipeline parser must not mistake commented exit text for cardinality failure',
+);
+requireContract(
+  !canonicalAssetUpload(
+    canonicalAssetFixture.replace(
+      'if [ "${#assets[@]}" -eq 0 ] || [ "${#assets[@]}" -ne "${#asset_names[@]}" ]; then exit 1; fi',
+      'if [ "${#assets[@]}" -eq 0 ] || [ "${#assets[@]}" -ne "${#asset_names[@]}" ]; then true || exit 1; fi',
+    ),
+  ),
+  'pipeline parser must reject conditionally bypassed cardinality failure',
 );
 requireContract(
   !canonicalAssetUpload(
