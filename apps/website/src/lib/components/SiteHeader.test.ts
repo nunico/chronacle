@@ -24,7 +24,7 @@ describe('SiteHeader', () => {
         home: '/',
         manual: '/en/manual',
         source: 'https://github.com/nunico/chronacle',
-        download: '/#download',
+        download: '/',
       },
       onlocalechange: vi.fn(),
     });
@@ -36,10 +36,7 @@ describe('SiteHeader', () => {
       'https://github.com/nunico/chronacle',
     );
     expect(screen.getByRole('group', { name: labels.language })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: labels.download })).toHaveAttribute(
-      'href',
-      '/#download',
-    );
+    expect(screen.getByRole('link', { name: labels.download })).toHaveAttribute('href', '/');
   });
 });
 

@@ -6,46 +6,65 @@
   type Variant = 'primary' | 'outline' | 'ghost';
   type Size = 'default' | 'large' | 'compact';
 
-  interface Props {
-    href: string;
+  const mandatoryExternalRel = ['external', 'noopener', 'noreferrer'] as const;
+
+  function mergeExternalRel(rel: string | undefined): string {
+    const tokens: string[] = [];
+    const requestedTokens = rel?.split(/\s+/).filter(Boolean) ?? [];
+    for (const token of [...requestedTokens, ...mandatoryExternalRel]) {
+      if (!tokens.includes(token)) {
+        tokens.push(token);
+      }
+    }
+    return tokens.join(' ');
+  }
+
+  interface SharedProps {
     children: Snippet;
     variant?: Variant;
     size?: Size;
-    external?: boolean;
     target?: '_blank' | '_self';
     rel?: string;
     class?: string;
   }
 
-  let {
-    href,
-    children,
-    variant = 'primary',
-    size = 'default',
-    external = false,
-    target,
-    rel,
-    class: className = '',
-  }: Props = $props();
+  type Props = SharedProps &
+    ({ external: true; href: string } | { external?: false; href: Pathname });
+
+  let props: Props = $props();
+  let externalRel = $derived(mergeExternalRel(props.rel));
+  let externalAttributes: Record<string, string> = $derived({ rel: externalRel });
 </script>
 
-{#if external}
+{#if props.external}
+  <!-- Keep the external marker visible to SvelteKit; the following spread adds merged tokens. -->
   <a
-    class={['button-link', `button-link--${variant}`, `button-link--${size}`, className]}
-    {href}
-    target={target ?? '_blank'}
-    rel="external noopener noreferrer"
+    class={[
+      'button-link',
+      `button-link--${props.variant ?? 'primary'}`,
+      `button-link--${props.size ?? 'default'}`,
+      props.class,
+    ]}
+    href={props.href}
+    target={props.target ?? '_blank'}
+    rel="external"
+    {...externalAttributes}
   >
-    {@render children()}
+    {@render props.children()}
   </a>
 {:else}
   <a
-    class={['button-link', `button-link--${variant}`, `button-link--${size}`, className]}
-    href={resolve(href as Pathname)}
-    {target}
-    {rel}
+    class={[
+      'button-link',
+      `button-link--${props.variant ?? 'primary'}`,
+      `button-link--${props.size ?? 'default'}`,
+      props.class,
+    ]}
+    href={resolve(props.href)}
+    target={props.target}
+    rel={props.rel}
   >
-    {@render children()}
+    {@render props.children()}
   </a>
 {/if}
 

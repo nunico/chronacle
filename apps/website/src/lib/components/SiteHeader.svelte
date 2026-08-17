@@ -2,8 +2,6 @@
   import type { Locale } from '$lib/i18n/types';
   import type { Pathname } from '$app/types';
 
-  type InternalHref = Pathname | `${Pathname}#${string}` | `${Pathname}?${string}`;
-
   export interface SiteHeaderLabels {
     home: string;
     manual: string;
@@ -19,7 +17,7 @@
     home: Pathname;
     manual: Pathname;
     source: string;
-    download: InternalHref;
+    download: Pathname;
   }
 
   export interface SiteHeaderProps {
@@ -32,6 +30,7 @@
 
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import EyeMark from '$lib/brand/EyeMark.svelte';
   import BookOpen from 'lucide-svelte/icons/book-open';
   import Download from 'lucide-svelte/icons/download';
   import GitFork from 'lucide-svelte/icons/git-fork';
@@ -45,7 +44,7 @@
 <header class="site-header">
   <nav class="site-header__inner" aria-label={labels.navigation}>
     <a class="brand" href={resolve(links.home)} aria-label={labels.home}>
-      <img src="/brand/chronacle-icon.png" alt="" width="38" height="38" />
+      <span class="brand-eye"><EyeMark size={38} /></span>
       <span>Chron<span aria-hidden="true">a</span>cle</span>
     </a>
 
@@ -106,10 +105,10 @@
     text-decoration: none;
   }
 
-  .brand img {
-    border: 1px solid var(--line);
-    border-radius: 11px;
-    box-shadow: var(--glow-arcane);
+  .brand-eye {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .brand > span {
@@ -160,7 +159,7 @@
       padding-inline: var(--s-4);
     }
 
-    .brand > span {
+    .brand > span:last-child {
       display: none;
     }
 
