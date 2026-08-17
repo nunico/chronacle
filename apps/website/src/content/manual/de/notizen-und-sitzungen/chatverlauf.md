@@ -23,7 +23,7 @@ headings:
 
 <!-- German proofreading requested -->
 
-Abgeschlossene Fragen und Antworten werden zeitlich geordnet gespeichert; bei gewählter Kampagne erscheinen nur die für diese Kampagne gespeicherten Nachrichten.
+Fragen und abgeschlossene Antworten werden zeitlich geordnet gespeichert; bei gewählter Kampagne erscheinen nur die für diese Kampagne gespeicherten Nachrichten.
 
 <h2 id="bereich-des-verlaufs">Bereich des Verlaufs</h2>
 
