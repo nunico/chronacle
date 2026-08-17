@@ -14,4 +14,11 @@ describe('Chronacle gradient tokens', () => {
     );
     expect(buttonLink).toContain('background: var(--grad-action);');
   });
+
+  it('keeps outline button hover states free of arcane glow', () => {
+    const outlineHoverRule = buttonLink.match(/\.button-link--outline:hover\s*\{([^}]*)\}/)?.[1];
+
+    expect(outlineHoverRule).toBeDefined();
+    expect(outlineHoverRule).not.toContain('box-shadow');
+  });
 });
