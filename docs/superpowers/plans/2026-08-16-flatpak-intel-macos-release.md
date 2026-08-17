@@ -718,6 +718,35 @@ git commit -m "docs: explain multi-architecture release packages"
 
 - Verify only; modify the owning file and repeat the relevant task if a check fails.
 
+- [ ] **Release-gate amendment: use one vault-watcher debounce authority**
+
+The existing regression test already fails because the native notification source and polling
+fallback can publish the same write as separate batches. In
+`crates/chronacle-providers/src/vault_watcher.rs`, remove the native source's independent pending
+buffer and timeout loop. For every value received from `raw_rx`, map it with `collect` into a small
+local vector and forward each mapped event immediately to `native_event_tx`. Keep the merged
+`event_rx` task as the sole debounce, sort, and dedup stage for native and polling events.
+
+Verify the red state already captured with:
+
+```bash
+CHRONACLE_SKIP_RUNTIME_DOWNLOADS=1 CARGO_BUILD_JOBS=1 mise exec -- \
+  cargo test -p chronacle-providers \
+  vault_watcher::tests::a_burst_of_writes_coalesces_into_one_batch \
+  -- --exact --nocapture
+```
+
+Expected before implementation: FAIL because a second `Upsert("a.md")` arrives within 500 ms.
+
+After implementation, run the same command three times, then run:
+
+```bash
+CARGO_BUILD_JOBS=1 mise exec -- scripts/ci/backend-quality.sh
+```
+
+Expected: all focused repetitions and the complete backend-quality gate pass. Commit
+`vault_watcher.rs` with subject `fix: coalesce vault watcher event sources`.
+
 - [ ] **Step 1: Run focused contracts**
 
 ```bash

@@ -273,6 +273,21 @@ automatic updates. Flathub submission and update delivery remain future work.
 
 ## Acceptance criteria
 
+### Release-gate watcher stabilization
+
+Final backend verification must remain deterministic on macOS. The vault watcher currently feeds
+the same filesystem change through both the native notification source and the polling fallback.
+Those sources must share one debounce authority: the native source maps raw notifications and
+forwards them immediately, while the existing merged-event coalescer owns the quiet window,
+sorting, and deduplication for both sources. This avoids a boundary race where the polling event is
+published just before the native source finishes its own independent debounce and produces a
+duplicate batch. Initialization/watch errors continue to emit `Rescan`, and polling behavior is
+unchanged.
+
+The existing `a_burst_of_writes_coalesces_into_one_batch` test is the regression contract. It must
+fail before the change, pass repeatedly afterward, and the complete backend-quality gate must then
+pass.
+
 The tranche is complete when:
 
 1. the pipeline-structure test passes;
