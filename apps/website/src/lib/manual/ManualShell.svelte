@@ -1,7 +1,10 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import EyeMark from '$lib/brand/EyeMark.svelte';
+  import Icon from '$lib/components/Icon.svelte';
   import type { ManualArticle, ManualHeading } from '$lib/content/types';
+  import Search from 'lucide-svelte/icons/search';
+  import SearchDialog from '$lib/search/SearchDialog.svelte';
   import ArticleNavigation from './ArticleNavigation.svelte';
   import Breadcrumbs from './Breadcrumbs.svelte';
   import ManualDrawer from './ManualDrawer.svelte';
@@ -22,7 +25,7 @@
   }
 </script>
 
-<header class="manual-header">
+<header class="manual-header" data-pagefind-ignore>
   <div class="manual-header__inner">
     <a class="manual-header__brand" href={resolve('/')} aria-label={homeLabel}>
       <EyeMark size={34} glow={false} />
@@ -30,18 +33,28 @@
     </a>
     <span class="manual-header__divider" aria-hidden="true"></span>
     <span class="manual-header__title">{article.locale === 'de' ? 'Handbuch' : 'Manual'}</span>
+    <button
+      class="manual-header__search"
+      type="button"
+      data-manual-search
+      aria-label={article.locale === 'de' ? 'Handbuch durchsuchen' : 'Search the manual'}
+    >
+      <Icon icon={Search} size={16} />
+      <span>{article.locale === 'de' ? 'Suchen' : 'Search'}</span>
+      <kbd>⌘/Ctrl K</kbd>
+    </button>
     <div class="manual-header__drawer">
       <ManualDrawer locale={article.locale} currentSlug={article.slug} />
     </div>
   </div>
 </header>
 
-<noscript>
+<noscript data-pagefind-ignore>
   <ManualFallback locale={article.locale} currentSlug={article.slug} />
 </noscript>
 
 <div class="manual-shell">
-  <aside class="manual-shell__sidebar">
+  <aside class="manual-shell__sidebar" data-pagefind-ignore>
     <ManualSidebar locale={article.locale} currentSlug={article.slug} />
   </aside>
 
@@ -57,10 +70,13 @@
   <aside
     class="manual-shell__toc"
     aria-label={article.locale === 'de' ? 'Seitenübersicht' : 'Page outline'}
+    data-pagefind-ignore
   >
     <TableOfContents {headings} locale={article.locale} />
   </aside>
 </div>
+
+<SearchDialog locale={article.locale} />
 
 <style>
   .manual-header {
@@ -111,8 +127,35 @@
     font-weight: 600;
   }
 
-  .manual-header__drawer {
+  .manual-header__search {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-2);
+    min-width: 12rem;
     margin-left: auto;
+    padding: var(--s-2) var(--s-3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--bg-panel);
+    color: var(--fg-2);
+    font-size: 0.8125rem;
+    cursor: pointer;
+  }
+
+  .manual-header__search:hover {
+    border-color: var(--line-strong);
+    color: var(--fg-1);
+  }
+
+  .manual-header__search kbd {
+    margin-left: auto;
+    color: var(--fg-3);
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+  }
+
+  .manual-header__drawer {
+    margin-left: 0;
   }
 
   .manual-shell {
@@ -176,6 +219,15 @@
       overflow: hidden;
       clip: rect(0 0 0 0);
       white-space: nowrap;
+    }
+
+    .manual-header__search {
+      min-width: 0;
+      margin-left: auto;
+    }
+
+    .manual-header__search kbd {
+      display: none;
     }
   }
 </style>

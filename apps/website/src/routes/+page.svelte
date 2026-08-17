@@ -36,19 +36,21 @@
   <meta name="description" content={copy.metadata.description} />
 </svelte:head>
 
-<SiteHeader
-  {locale}
-  labels={copy.header}
-  links={{ home: '/', manual: manualPath, source: sourceUrl, download: downloadUrl }}
-  onlocalechange={(nextLocale) => (locale = nextLocale)}
-/>
-<Hero copy={copy.hero} {downloadUrl} {manualPath} />
-<ProductExample copy={copy.productExample} />
-<FeatureGrid copy={copy.features} />
-<Workflow copy={copy.workflow} />
-<ProviderPrivacy copy={copy.provider} />
-<DownloadPanel copy={copy.download} {downloadUrl} {manualPath} />
-<SiteFooter
-  labels={copy.footer}
-  links={{ home: '/', manual: manualPath, source: sourceUrl, license: licenseUrl }}
-/>
+<div data-pagefind-ignore="all">
+  <SiteHeader
+    {locale}
+    labels={copy.header}
+    links={{ home: '/', manual: manualPath, source: sourceUrl, download: downloadUrl }}
+    onlocalechange={(nextLocale) => (locale = nextLocale)}
+  />
+  <Hero copy={copy.hero} {downloadUrl} {manualPath} />
+  <ProductExample copy={copy.productExample} />
+  <FeatureGrid copy={copy.features} />
+  <Workflow copy={copy.workflow} />
+  <ProviderPrivacy copy={copy.provider} />
+  <DownloadPanel copy={copy.download} {downloadUrl} {manualPath} />
+  <SiteFooter
+    labels={copy.footer}
+    links={{ home: '/', manual: manualPath, source: sourceUrl, license: licenseUrl }}
+  />
+</div>

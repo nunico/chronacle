@@ -24,6 +24,7 @@
 <nav
   class="article-navigation"
   aria-label={article.locale === 'de' ? 'Artikelnavigation' : 'Article navigation'}
+  data-pagefind-ignore
 >
   <div class="article-navigation__sequence">
     {#if adjacent.previous}
@@ -43,6 +44,7 @@
     class="article-navigation__translation"
     href={resolve(translation.href)}
     hreflang={translation.locale}
+    data-sveltekit-reload
   >
     {labels.language}
   </a>

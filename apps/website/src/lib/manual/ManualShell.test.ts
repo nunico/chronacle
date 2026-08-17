@@ -83,6 +83,7 @@ describe('ManualShell', () => {
       '/en/manual/after',
     );
     expect(screen.getByRole('link', { name: /deutsch/i })).toHaveAttribute('href', '/de/handbuch');
+    expect(screen.getByRole('link', { name: /deutsch/i })).toHaveAttribute('data-sveltekit-reload');
   });
 
   it('prerenders a complete no-JavaScript manual navigation fallback', () => {
@@ -137,6 +138,7 @@ describe('ManualShell', () => {
       title: 'Collision fixture',
       summary: 'Heading collision fixture',
       locale: 'en',
+      section: 'overview',
       onheadings,
     });
 
@@ -182,5 +184,33 @@ describe('ManualShell', () => {
     await fireEvent.keyDown(drawer, { key: 'Escape' });
     expect(drawer).not.toHaveAttribute('open');
     expect(trigger).toHaveFocus();
+  });
+
+  it('opens search from both manual header and overview triggers', async () => {
+    const user = userEvent.setup();
+    render(ManualShell, { article: getArticle('en', 'overview') });
+
+    const triggers = screen.getAllByRole('button', { name: 'Search the manual' });
+    expect(triggers).toHaveLength(2);
+    await user.click(triggers[0]);
+    const dialog = screen.getByRole('dialog', { name: 'Search the manual' });
+    expect(dialog).toHaveAttribute('open');
+    await fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    await user.click(triggers[1]);
+    expect(dialog).toHaveAttribute('open');
+  });
+
+  it('excludes manual chrome and exposes localized Pagefind section metadata', () => {
+    const { container } = render(ManualShell, { article: getArticle('de', 'ueberblick') });
+
+    expect(container.querySelector('.manual-header')).toHaveAttribute('data-pagefind-ignore');
+    expect(container.querySelector('.manual-shell__sidebar')).toHaveAttribute(
+      'data-pagefind-ignore',
+    );
+    expect(container.querySelector('.manual-shell__toc')).toHaveAttribute('data-pagefind-ignore');
+    expect(container.querySelector('[data-pagefind-meta="section"]')).toHaveTextContent(
+      'Überblick',
+    );
   });
 });

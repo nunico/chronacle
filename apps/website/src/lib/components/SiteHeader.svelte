@@ -41,7 +41,7 @@
   let { locale, labels, links, onlocalechange }: SiteHeaderProps = $props();
 </script>
 
-<header class="site-header">
+<header class="site-header" data-pagefind-ignore>
   <nav class="site-header__inner" aria-label={labels.navigation}>
     <a class="brand" href={resolve(links.home)} aria-label={labels.home}>
       <span class="brand-eye"><EyeMark size={38} glow={false} /></span>

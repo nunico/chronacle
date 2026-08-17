@@ -31,7 +31,7 @@
   let { labels, links }: SiteFooterProps = $props();
 </script>
 
-<footer class="site-footer">
+<footer class="site-footer" data-pagefind-ignore>
   <div class="site-footer__inner">
     <div class="site-footer__brand">
       <a href={resolve(links.home)} aria-label={labels.home}>

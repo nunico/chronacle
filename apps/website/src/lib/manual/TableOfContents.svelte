@@ -6,7 +6,7 @@
 </script>
 
 {#if headings.length > 0}
-  <nav class="toc" aria-label={label}>
+  <nav class="toc" aria-label={label} data-pagefind-ignore>
     <h2>{label}</h2>
     <ol>
       {#each headings as heading (heading.id)}

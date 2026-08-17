@@ -19,6 +19,8 @@ headings:
 
 Dieses Handbuch zeigt dir, wie du Chronacle einrichtest, dein Kampagnenmaterial einbindest und seine Werkzeuge bei der Vorbereitung und während deiner Spielrunden nutzt.
 
+<button type="button" class="manual-search-trigger" data-manual-search data-pagefind-ignore>Handbuch durchsuchen</button>
+
 <h3 id="am-spieltisch">Am Spieltisch</h3>
 
 Über den Abschnittsindex gelangst du direkt zu der Antwort, die du gerade brauchst.
