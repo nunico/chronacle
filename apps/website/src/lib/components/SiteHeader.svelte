@@ -17,7 +17,7 @@
     home: Pathname;
     manual: Pathname;
     source: string;
-    download: Pathname;
+    download: string;
   }
 
   export interface SiteHeaderProps {
@@ -67,7 +67,7 @@
         germanLabel={labels.german}
         onchange={onlocalechange}
       />
-      <ButtonLink href={links.download} size="compact">
+      <ButtonLink href={links.download} external size="compact">
         <Icon icon={Download} size={16} />
         <span>{labels.download}</span>
       </ButtonLink>
