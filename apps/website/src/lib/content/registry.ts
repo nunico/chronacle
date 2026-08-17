@@ -14,6 +14,7 @@ const markdownModules = import.meta.glob<MarkdownModule>('/src/content/manual/**
 });
 
 const locales: readonly Locale[] = ['en', 'de'];
+const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
 const sectionOrder = new Map<ManualSectionId, number>(
   manualSections.map((section, index) => [section, index]),
 );
@@ -103,13 +104,23 @@ function toArticle(source: string, module: MarkdownModule): ManualArticle {
   };
 }
 
+function compareCodePoints(left: string, right: string): number {
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
+}
+
 function compareArticles(left: ManualArticle, right: ManualArticle): number {
   return (
     (sectionOrder.get(left.section) ?? manualSections.length) -
       (sectionOrder.get(right.section) ?? manualSections.length) ||
     left.order - right.order ||
-    left.locale.localeCompare(right.locale) ||
-    left.slug.localeCompare(right.slug)
+    compareCodePoints(left.locale, right.locale) ||
+    compareCodePoints(left.slug, right.slug)
   );
 }
 
@@ -162,6 +173,7 @@ export function manualEntries(): {
 
 export function validateArticles(candidateArticles: ManualArticle[]): void {
   const routes = new Set<string>();
+  const slugs = new Set<string>();
   const translations = new Map<string, Set<Locale>>();
 
   for (const article of candidateArticles) {
@@ -186,6 +198,9 @@ export function validateArticles(candidateArticles: ManualArticle[]): void {
     if (!Number.isFinite(article.order)) {
       throw new Error(`Manual article ${article.translationKey} has invalid order`);
     }
+    if (!slugPattern.test(article.slug)) {
+      throw new Error(`Manual article ${article.translationKey} has invalid slug`);
+    }
     if (article.navTitle !== undefined && article.navTitle.trim() === '') {
       throw new Error(`Manual article ${article.translationKey} has invalid navTitle`);
     }
@@ -201,6 +216,12 @@ export function validateArticles(candidateArticles: ManualArticle[]): void {
       throw new Error(`Duplicate route: ${article.href}`);
     }
     routes.add(route);
+
+    const slug = `${article.locale}:${article.slug}`;
+    if (slugs.has(slug)) {
+      throw new Error(`Duplicate slug: ${article.locale}/${article.slug}`);
+    }
+    slugs.add(slug);
 
     const translationLocales = translations.get(article.translationKey) ?? new Set<Locale>();
     if (translationLocales.has(article.locale)) {

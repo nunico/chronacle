@@ -46,6 +46,20 @@ describe('manual content registry', () => {
     expect(() => validateArticles([...overviewPair(), duplicate])).toThrow(/duplicate route/i);
   });
 
+  it('rejects duplicate slugs within a locale even when routes differ', () => {
+    const duplicate = article({
+      translationKey: 'manual.duplicate',
+      section: 'getting-started',
+    });
+    duplicate.href = '/en/manual/overview';
+
+    expect(() => validateArticles([...overviewPair(), duplicate])).toThrow(/duplicate slug/i);
+  });
+
+  it('rejects unsafe slugs', () => {
+    expect(() => validateArticles([article({ slug: '../escape' })])).toThrow(/invalid slug/i);
+  });
+
   it('rejects translation keys without a German counterpart', () => {
     expect(() => validateArticles([article()])).toThrow(/missing de translation/i);
   });
