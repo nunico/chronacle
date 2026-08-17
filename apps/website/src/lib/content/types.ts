@@ -24,9 +24,16 @@ export interface ManualFrontmatter {
   order: number;
   navTitle?: string;
   search?: boolean;
+  headings?: ManualHeading[];
 }
 
 export interface ManualArticle extends ManualFrontmatter {
   component: Component;
   href: string;
+}
+
+export interface ManualHeading {
+  id: string;
+  text: string;
+  level: 2 | 3;
 }
