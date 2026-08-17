@@ -49,5 +49,5 @@ Chronacle kann die indizierte Stelle finden und `[Source: "Das Vermächtnis des 
 
 - **Indiziert** bedeutet, dass der aktuelle Import abgeschlossen wurde. Bei komplexen Seitenaufteilungen kann die Lesereihenfolge trotzdem abweichen.
 - **Fehler** bedeutet, dass die Indizierung nicht erfolgreich abgeschlossen wurde. Lies vor einem neuen Versuch die angezeigte Meldung.
-- Reine Bild-PDFs haben keine Textebene für die aktuelle Texterkennung; eine automatische Schriftbilderkennung gehört nicht zum Importablauf.
+- Reine Bild-PDFs haben keine Textebene, die der aktuelle Textextraktor lesen kann; optische Zeichenerkennung (OCR) gehört nicht zum Importablauf.
 - Meldet Chronacle Quellen mit einem anderen Indizierungsmodell, wähle im Hinweis **Jetzt neu indizieren** oder unter Einstellungen **Alle Quellen neu indizieren**. Andere Quellen bleiben verfügbar, aber Chronacle löscht zuerst die alten Textstellen der Quelle, die gerade neu aufgebaut wird. Deshalb kann diese Quelle vorübergehend aus der Suche verschwinden. Schlägt der Neuaufbau fehl, zeigen die Einstellungen den Fehler an und die Quelle braucht einen erfolgreichen neuen Versuch, bevor sie wieder indiziert ist.
