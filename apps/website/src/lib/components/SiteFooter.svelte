@@ -15,7 +15,7 @@
     home: Pathname;
     manual: Pathname;
     source: string;
-    license: Pathname;
+    license: string;
   }
 
   export interface SiteFooterProps {
@@ -44,7 +44,9 @@
     <nav aria-label={labels.navigation}>
       <a href={resolve(links.manual)}>{labels.manual}</a>
       <a href={links.source} rel="external">{labels.source}</a>
-      <a href={resolve(links.license)}>{labels.license}</a>
+      <a href={links.license} target="_blank" rel="external noopener noreferrer">
+        {labels.license}
+      </a>
     </nav>
 
     <p class="site-footer__legal">{labels.copyright}</p>
