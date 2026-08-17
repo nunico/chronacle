@@ -178,9 +178,9 @@ describe('SearchDialog', () => {
       'href',
       '/de/handbuch',
     );
-    expect(screen.getByRole('link', { name: 'Am Spieltisch' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Fehlerbehebung' })).toHaveAttribute(
       'href',
-      '/de/handbuch/#am-spieltisch',
+      '/de/handbuch/fehlerbehebung/haeufige-probleme',
     );
   });
 
@@ -193,6 +193,26 @@ describe('SearchDialog', () => {
       await screen.findByText('Search is unavailable right now. You can still browse the manual.'),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Manual overview' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Troubleshooting' })).toHaveAttribute(
+      'href',
+      '/en/manual/troubleshooting/common-problems',
+    );
+  });
+
+  it('wraps focus in both directions inside the open dialog', async () => {
+    const { component } = render(SearchDialog, { locale: 'en', search: searchFixture() });
+    component.openSearch();
+    const dialog = await screen.findByRole('dialog', { name: 'Search the manual' });
+    const close = within(dialog).getByRole('button', { name: 'Close search' });
+    const last = within(dialog).getByRole('link', { name: 'Getting started' });
+
+    last.focus();
+    await fireEvent.keyDown(dialog, { key: 'Tab' });
+    expect(close).toHaveFocus();
+
+    close.focus();
+    await fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
+    expect(last).toHaveFocus();
   });
 
   it('closes on Escape and restores focus to its opener', async () => {

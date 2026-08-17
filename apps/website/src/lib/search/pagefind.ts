@@ -19,16 +19,14 @@ interface PagefindModule {
   search(query: string): Promise<PagefindResponse>;
 }
 
-let modulePromise: Promise<PagefindModule> | undefined;
 const pagefindPath = '/pagefind/pagefind.js';
-
-function loadPagefind(): Promise<PagefindModule> {
-  modulePromise ??= import(/* @vite-ignore */ pagefindPath);
-  return modulePromise;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function isPagefindModule(value: unknown): value is PagefindModule {
+  return isRecord(value) && typeof value.init === 'function' && typeof value.search === 'function';
 }
 
 function isPagefindResult(value: unknown): value is PagefindResult {
@@ -49,22 +47,38 @@ function mapData(data: PagefindData): SearchResult {
   };
 }
 
-export const pagefindSearch: ManualSearch = {
-  async init(): Promise<void> {
-    const pagefind = await loadPagefind();
-    await pagefind.init();
-  },
+export function createPagefindSearch(loader: () => Promise<unknown>): ManualSearch {
+  let modulePromise: Promise<PagefindModule> | undefined;
 
-  async search(query: string): Promise<SearchResult[]> {
-    const pagefind = await loadPagefind();
-    const response = await pagefind.search(query);
-    const rawResults = Array.isArray(response.results) ? response.results : [];
-    const data = await Promise.all(
-      rawResults
-        .filter(isPagefindResult)
-        .slice(0, 20)
-        .map((result) => result.data()),
-    );
-    return data.map(mapData);
-  },
-};
+  function loadPagefind(): Promise<PagefindModule> {
+    modulePromise ??= loader().then((pagefind) => {
+      if (!isPagefindModule(pagefind)) {
+        throw new Error('Invalid Pagefind module');
+      }
+      return pagefind;
+    });
+    return modulePromise;
+  }
+
+  return {
+    async init(): Promise<void> {
+      const pagefind = await loadPagefind();
+      await pagefind.init();
+    },
+
+    async search(query: string): Promise<SearchResult[]> {
+      const pagefind = await loadPagefind();
+      const response = await pagefind.search(query);
+      const rawResults = Array.isArray(response.results) ? response.results : [];
+      const data = await Promise.all(
+        rawResults
+          .filter(isPagefindResult)
+          .slice(0, 20)
+          .map((result) => result.data()),
+      );
+      return data.map(mapData);
+    },
+  };
+}
+
+export const pagefindSearch = createPagefindSearch(() => import(/* @vite-ignore */ pagefindPath));

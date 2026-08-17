@@ -14,7 +14,8 @@ export const load: PageLoad = ({ params }) => {
     error(404, 'Manual not found');
   }
 
-  const slug = Array.isArray(params.slug) ? params.slug.join('/') : params.slug;
+  const capturedSlug = Array.isArray(params.slug) ? params.slug.join('/') : params.slug;
+  const slug = capturedSlug.replace(/\/+$/, '');
 
   try {
     const article = getArticle(params.locale as Locale, slug);
