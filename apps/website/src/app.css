@@ -47,7 +47,7 @@
   --info: var(--arcane-400);
   --info-bg: rgb(91 120 255 / 12%);
 
-  --grad-arcane: linear-gradient(135deg, var(--arcane-500), var(--violet-500));
+  --grad-arcane: linear-gradient(135deg, var(--arcane-500), var(--violet-600));
   --grad-gem: radial-gradient(
     circle at 50% 40%,
     var(--gem-bright) 0%,
@@ -267,30 +267,12 @@ main {
   pointer-events: none;
 }
 
-.site-background::before,
-.site-background::after {
+.site-background::before {
   position: absolute;
+  inset: 0;
+  background: radial-gradient(60% 50% at 50% -5%, rgb(123 92 255 / 18%), transparent 60%);
   content: '';
   pointer-events: none;
-}
-
-.site-background::before {
-  width: min(64rem, 110vw);
-  aspect-ratio: 1;
-  top: -30rem;
-  left: 50%;
-  background: url('/brand/tex-aura.png') center / contain no-repeat;
-  opacity: 0.34;
-  transform: translateX(-50%);
-}
-
-.site-background::after {
-  width: min(45rem, 78vw);
-  aspect-ratio: 1;
-  right: -17rem;
-  bottom: -20rem;
-  background: url('/brand/tex-circuit.png') center / contain no-repeat;
-  opacity: 0.08;
 }
 
 @media (prefers-reduced-motion: reduce) {

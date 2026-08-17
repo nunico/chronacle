@@ -109,7 +109,7 @@
     margin: 0;
     padding-top: var(--s-5);
     border-top: 1px solid var(--line-faint);
-    color: var(--fg-4);
+    color: var(--fg-3);
     font-family: var(--font-mono);
     font-size: 0.75rem;
   }

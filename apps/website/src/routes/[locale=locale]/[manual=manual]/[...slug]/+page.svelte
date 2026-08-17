@@ -11,6 +11,4 @@
   <meta name="description" content={data.summary} />
 </svelte:head>
 
-<main>
-  <Article />
-</main>
+<Article />
