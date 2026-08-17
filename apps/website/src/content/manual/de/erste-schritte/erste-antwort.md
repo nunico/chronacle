@@ -28,7 +28,7 @@ headings:
 Stelle dem Orakel eine einzelne, konkrete Frage und gleiche die Antwort über die Quellenmarke mit deinem PDF ab.
 
 1. Prüfe, ob deine Kampagne ausgewählt ist und die Sammlung mit der Quelle abonniert hat.
-2. Öffne **Orakel** und klicke in das Feld **Frag nach einer Regel, einem Namen, einem Ort…**
+2. Öffne **Orakel** und klicke in das Feld **Frage nach einer Regel, einem Namen, einem Ort…**
 3. Tippe eine klare Frage und drücke die Eingabetaste oder wähle **Senden**.
 4. Lies die Antwort und klicke dann auf eine Quellenmarke wie **Mondhelle Wege.pdf p.31**.
 5. Vergleiche die Antwort mit der eingeblendeten **Quelltextstelle**.
