@@ -14,6 +14,16 @@ Here's how to go from nothing to asking your first question in a few minutes.
 
 Install the app on your computer and launch it. You'll see the main window with a chat area on the left and a settings panel on the right.
 
+On an Intel Mac, PDF ingestion and cloud embeddings work immediately. Local embedding modes need
+a compatible ONNX Runtime installed on the system:
+
+```bash
+brew install onnxruntime
+```
+
+This Homebrew library is not bundled with Chronacle or pinned to a particular version by
+Chronacle. If it is not installed, choose cloud embeddings instead.
+
 ### 2. Set up an AI Provider
 
 Before Chronacle can answer questions, it needs a "brain" to do the thinking. Go to the **Settings** section and choose an AI service to connect.
