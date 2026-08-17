@@ -436,22 +436,26 @@ jobs:
             exit 1
           fi
 
+          planned_names_json=$(printf '%s\n' "${asset_names[@]}" | jq -R . | jq -s .)
+          existing_assets=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" | jq 'add')
+          while IFS= read -r stale_id; do
+            [[ "$stale_id" =~ ^[0-9]+$ ]]
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${stale_id}"
+          done < <(jq -r --argjson planned_names "$planned_names_json" '.[] | select(.name as $name | $planned_names | index($name) | not) | .id' <<<"$existing_assets")
+
           for index in "${!assets[@]}"; do
             asset="${assets[$index]}"
             asset_name="${asset_names[$index]}"
             encoded_name=$(jq -rn --arg name "$asset_name" '$name | @uri')
-            existing_assets=$(gh api --paginate --slurp \
-              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" | \
-              jq --arg name "$asset_name" 'add | map(select(.name == $name))')
-            existing_count=$(jq 'length' <<<"$existing_assets")
-            if [ "$existing_count" -gt 1 ]; then
+            matching_assets=$(jq --arg name "$asset_name" 'map(select(.name == $name))' <<<"$existing_assets")
+            matching_count=$(jq 'length' <<<"$matching_assets")
+            if [ "$matching_count" -gt 1 ]; then
               echo "Multiple release assets are named $asset_name" >&2
               exit 1
-            elif [ "$existing_count" -eq 1 ]; then
-              existing_id=$(jq -r '.[0].id' <<<"$existing_assets")
+            elif [ "$matching_count" -eq 1 ]; then
+              existing_id=$(jq -r '.[0].id' <<<"$matching_assets")
               [[ "$existing_id" =~ ^[0-9]+$ ]]
-              gh api --method DELETE \
-                "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_id}"
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_id}"
             fi
             gh api --method POST "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" \
               -H "Content-Type: application/octet-stream" \
