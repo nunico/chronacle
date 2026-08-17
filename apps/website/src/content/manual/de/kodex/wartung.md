@@ -35,11 +35,11 @@ Wähle **Befunde** und dann **Kampagne prüfen**, um die aktive Kampagne zu unte
 
 <h2 id="beispiel">Beispiel</h2>
 
-Das Speichern einer Antwort über **Mara Venn** erzeugt einen **Notizvorschlag**. Vergleiche die aktuelle Notiz mit „Mara schuldet der Gruppe eine Überfahrt bei Mondaufgang.“ Nimm ihn nur an, wenn das im Spiel wahr wurde. Führe danach **Kampagne prüfen** aus und kompiliere einen entstandenen Befund **Veralteter Artikel**.
+Wähle unter einer Antwort über **Mara Venn** die Aktion **Im Kodex speichern**. Chronacle findet möglicherweise nichts Speicherwürdiges oder erstellt einen oder mehrere Vorschläge verschiedener Arten. Entsteht ein **Notizvorschlag** mit „Mara schuldet der Gruppe eine Überfahrt bei Mondaufgang“, vergleiche ihn mit der aktuellen Notiz und nimm ihn nur an, wenn das im Spiel wahr wurde. Führe danach **Kampagne prüfen** aus und prüfe einen entstandenen Befund **Veralteter Artikel**.
 
 <h2 id="sichere-folgen">Sichere Folgen</h2>
 
 - **Kante löschen** entfernt nur die markierte Beziehung, nicht die beteiligten Entitäten.
-- **Kompilieren** bei einem veralteten Befund aktualisiert den Artikel und erledigt den Befund bei Erfolg.
+- **Kompilieren** bei einem veralteten Befund versucht den Artikel einmal zu kompilieren und schließt den Wartungseintrag nach Abschluss des Befehls – auch wenn kein Quellkontext gefunden wurde und der Artikel unverändert blieb. Prüfe den Artikel danach. Hat er sich nicht geändert, stelle den Zugriff auf das passende Quellmaterial wieder her und kompiliere erneut über die normale Aktion **Kompilieren** der Sammlung oder **Artikel neu kompilieren** an der Entität.
 - **Schließen** erledigt den Befund, ohne die vorgeschlagene Inhaltsänderung auszuführen.
 - Ein leerer Posteingang bedeutet nur, dass nichts aussteht. Er beweist nicht die Richtigkeit aller Artikel.

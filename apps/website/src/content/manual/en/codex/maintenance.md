@@ -33,11 +33,11 @@ Choose **Findings**, then **Check campaign** to scan the active campaign. Findin
 
 <h2 id="example">Example</h2>
 
-Saving an answer about **Mara Venn** creates a **Notes suggestion**. Compare the current note with “Mara owes the crew one moonrise crossing.” Accept only if that became true in play. Then run **Check campaign** and compile any resulting **Stale article**.
+Under an answer about **Mara Venn**, choose **Save to Codex**. Chronacle may find nothing worth saving or may create one or more proposals of different kinds. If it creates a **Notes suggestion** saying “Mara owes the crew one moonrise crossing,” compare it with the current note and accept it only if that became true in play. Then run **Check campaign** and review any resulting **Stale article**.
 
 <h2 id="safe-consequences">Safe consequences</h2>
 
 - **Delete edge** removes only the flagged relationship, not either entity.
-- **Compile** on a stale finding refreshes that article and resolves the finding if successful.
+- **Compile** on a stale finding makes one compile attempt, then clears the Maintenance item when the command finishes—even when no source context was found and the article stayed unchanged. Inspect the article afterward. If it did not change, restore access to the relevant source material and compile again through the collection's normal **Compile** action or the entity's **Recompile article** action.
 - **Dismiss** resolves the finding without making its suggested content change.
 - A quiet inbox means no pending items are listed; it is not proof that every article is correct.
