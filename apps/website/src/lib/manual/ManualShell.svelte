@@ -35,6 +35,7 @@
     <span class="manual-header__title">{article.locale === 'de' ? 'Handbuch' : 'Manual'}</span>
     <button
       class="manual-header__search"
+      style="min-width: 44px; min-height: 44px;"
       type="button"
       data-manual-search
       aria-label={article.locale === 'de' ? 'Handbuch durchsuchen' : 'Search the manual'}
@@ -129,9 +130,11 @@
 
   .manual-header__search {
     display: inline-flex;
+    width: 12rem;
+    min-width: 44px;
+    min-height: 44px;
     align-items: center;
     gap: var(--s-2);
-    min-width: 12rem;
     margin-left: auto;
     padding: var(--s-2) var(--s-3);
     border: 1px solid var(--line);
@@ -222,7 +225,8 @@
     }
 
     .manual-header__search {
-      min-width: 0;
+      width: auto;
+      min-width: 44px;
       margin-left: auto;
     }
 

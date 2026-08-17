@@ -201,6 +201,18 @@ describe('ManualShell', () => {
     expect(dialog).toHaveAttribute('open');
   });
 
+  it('keeps the manual header search target at least 44 CSS pixels in both dimensions', () => {
+    render(ManualShell, { article: getArticle('en', 'overview') });
+    const trigger = screen.getAllByRole('button', { name: 'Search the manual' })[0];
+    if (!trigger) {
+      throw new Error('Expected the manual header search trigger');
+    }
+    const style = getComputedStyle(trigger);
+
+    expect(Number.parseFloat(style.minWidth)).toBeGreaterThanOrEqual(44);
+    expect(Number.parseFloat(style.minHeight)).toBeGreaterThanOrEqual(44);
+  });
+
   it('excludes manual chrome and exposes localized Pagefind section metadata', () => {
     const { container } = render(ManualShell, { article: getArticle('de', 'ueberblick') });
 

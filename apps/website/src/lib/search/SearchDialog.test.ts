@@ -5,6 +5,10 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import SearchDialog, { sanitizeExcerptHtml } from './SearchDialog.svelte';
 import type { ManualSearch, SearchResult } from './types';
 
+const { goto } = vi.hoisted(() => ({ goto: vi.fn().mockResolvedValue(undefined) }));
+
+vi.mock('$app/navigation', () => ({ goto }));
+
 const results: SearchResult[] = [
   {
     url: '/en/manual/getting-started#install',
@@ -40,6 +44,7 @@ beforeAll(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  goto.mockClear();
 });
 
 describe('SearchDialog', () => {
@@ -111,6 +116,37 @@ describe('SearchDialog', () => {
     expect(screen.getByText('Try a topic')).toBeInTheDocument();
   });
 
+  it('clears pending work and discards an in-flight response when reopened', async () => {
+    vi.useFakeTimers();
+    let resolveSearch: ((value: SearchResult[]) => void) | undefined;
+    const pending = new Promise<SearchResult[]>((resolve) => {
+      resolveSearch = resolve;
+    });
+    const search = searchFixture({ search: vi.fn().mockReturnValue(pending) });
+    const { component } = render(SearchDialog, { locale: 'en', search });
+    component.openSearch();
+    await vi.runAllTicks();
+    const input = screen.getByRole('combobox', { name: 'Search the manual' });
+
+    await fireEvent.input(input, { target: { value: 'pending debounce' } });
+    await vi.advanceTimersByTimeAsync(100);
+    component.openSearch();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(search.search).not.toHaveBeenCalled();
+
+    await fireEvent.input(input, { target: { value: 'in flight' } });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(search.search).toHaveBeenCalledWith('in flight');
+    component.openSearch();
+    resolveSearch?.(results);
+    await vi.runAllTicks();
+    await tick();
+
+    expect(input).toHaveValue('');
+    expect(screen.queryByRole('option')).not.toBeInTheDocument();
+    expect(screen.getByText('Try a topic')).toBeInTheDocument();
+  });
+
   it('falls back to plain text for unexpected excerpt elements', () => {
     expect(sanitizeExcerptHtml('Read <mark>this</mark><img src=x onerror=alert(1)>')).toBe(
       'Read this',
@@ -122,12 +158,7 @@ describe('SearchDialog', () => {
 
   it('moves the active result with arrow keys and selects it with Enter', async () => {
     vi.useFakeTimers();
-    const onNavigate = vi.fn();
-    const { component } = render(SearchDialog, {
-      locale: 'en',
-      search: searchFixture(),
-      onNavigate,
-    });
+    const { component } = render(SearchDialog, { locale: 'en', search: searchFixture() });
     component.openSearch();
     await vi.runAllTicks();
     const input = screen.getByRole('combobox', { name: 'Search the manual' });
@@ -146,7 +177,24 @@ describe('SearchDialog', () => {
     );
     await fireEvent.keyDown(input, { key: 'Enter' });
 
-    expect(onNavigate).toHaveBeenCalledWith('/en/manual/getting-started#install');
+    expect(goto).toHaveBeenCalledWith('/en/manual/getting-started#install');
+  });
+
+  it('uses client navigation when a result is clicked', async () => {
+    vi.useFakeTimers();
+    const { component } = render(SearchDialog, { locale: 'en', search: searchFixture() });
+    component.openSearch();
+    await vi.runAllTicks();
+    await fireEvent.input(screen.getByRole('combobox', { name: 'Search the manual' }), {
+      target: { value: 'provider' },
+    });
+    await vi.advanceTimersByTimeAsync(200);
+
+    const dialog = screen.getByRole('dialog', { name: 'Search the manual' });
+    await fireEvent.click(screen.getByRole('option', { name: /choose an ai provider/i }));
+
+    expect(goto).toHaveBeenCalledWith('/en/manual/providers');
+    expect(dialog).not.toHaveAttribute('open');
   });
 
   it('announces the localized result count', async () => {
@@ -213,6 +261,16 @@ describe('SearchDialog', () => {
     close.focus();
     await fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
     expect(last).toHaveFocus();
+  });
+
+  it('renders a close control with a 44 by 44 CSS pixel target', async () => {
+    const { component } = render(SearchDialog, { locale: 'en', search: searchFixture() });
+    component.openSearch();
+    const close = await screen.findByRole('button', { name: 'Close search' });
+    const style = getComputedStyle(close);
+
+    expect(Number.parseFloat(style.width)).toBeGreaterThanOrEqual(44);
+    expect(Number.parseFloat(style.height)).toBeGreaterThanOrEqual(44);
   });
 
   it('closes on Escape and restores focus to its opener', async () => {
