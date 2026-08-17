@@ -72,19 +72,33 @@ describe('Chronacle landing page', () => {
   });
 
   it('uses browser preference without reading or writing persistent browser state', async () => {
-    prefer('de-DE');
+    prefer('en-US');
+    const user = userEvent.setup();
     const localStorageSpy = vi.spyOn(window, 'localStorage', 'get');
     const sessionStorageSpy = vi.spyOn(window, 'sessionStorage', 'get');
+    const storageGetSpy = vi.spyOn(Storage.prototype, 'getItem');
+    const storageSetSpy = vi.spyOn(Storage.prototype, 'setItem');
     const cookieGetSpy = vi.spyOn(Document.prototype, 'cookie', 'get');
     const cookieSetSpy = vi.spyOn(Document.prototype, 'cookie', 'set');
 
     render(Page);
+    await user.click(screen.getByRole('button', { name: 'Deutsch' }));
 
     expect(await screen.findByText('Frag deine Bücher. Prüf die Antwort.')).toBeInTheDocument();
     expect(localStorageSpy).not.toHaveBeenCalled();
     expect(sessionStorageSpy).not.toHaveBeenCalled();
+    expect(storageGetSpy).not.toHaveBeenCalled();
+    expect(storageSetSpy).not.toHaveBeenCalled();
     expect(cookieGetSpy).not.toHaveBeenCalled();
     expect(cookieSetSpy).not.toHaveBeenCalled();
+  });
+
+  it('uses the approved accessible vector mark in the hero', () => {
+    prefer('en-US');
+
+    render(Page);
+
+    expect(screen.getByRole('img', { name: 'Chronacle' }).tagName).toBe('svg');
   });
 
   it('uses the latest release URL for security-safe external download links', () => {

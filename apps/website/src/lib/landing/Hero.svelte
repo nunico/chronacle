@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Pathname } from '$app/types';
+  import EyeMark from '$lib/brand/EyeMark.svelte';
   import ButtonLink from '$lib/components/ButtonLink.svelte';
   import Icon from '$lib/components/Icon.svelte';
   import type { LandingCopy } from '$lib/i18n/landing-copy';
@@ -18,7 +19,7 @@
 <section class="hero" aria-labelledby="landing-heading">
   <div class="hero__aura" aria-hidden="true"></div>
   <div class="hero__inner">
-    <img class="hero__mark" src="/brand/chronacle-icon.png" alt="" width="112" height="112" />
+    <span class="hero__mark"><EyeMark size={112} glow={false} label="Chronacle" /></span>
     <p class="hero__eyebrow">{copy.eyebrow}</p>
     <h1 id="landing-heading" aria-label={copy.headingLabel}>{copy.heading}</h1>
     <p class="hero__body">{copy.body}</p>
@@ -63,12 +64,12 @@
   }
 
   .hero__mark {
+    display: inline-flex;
     width: 7rem;
-    height: 7rem;
+    min-height: 5.25rem;
+    align-items: center;
+    justify-content: center;
     margin-bottom: var(--s-6);
-    border: 1px solid var(--line);
-    border-radius: 1.8rem;
-    box-shadow: var(--shadow-3);
   }
 
   .hero__eyebrow {
