@@ -44,7 +44,7 @@
 <header class="site-header">
   <nav class="site-header__inner" aria-label={labels.navigation}>
     <a class="brand" href={resolve(links.home)} aria-label={labels.home}>
-      <span class="brand-eye"><EyeMark size={38} /></span>
+      <span class="brand-eye"><EyeMark size={38} glow={false} /></span>
       <span>Chron<span aria-hidden="true">a</span>cle</span>
     </a>
 

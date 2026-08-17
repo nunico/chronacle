@@ -28,7 +28,7 @@
       </div>
       <article class="answer">
         <header>
-          <span class="answer__eye"><EyeMark size={24} /></span>
+          <span class="answer__eye"><EyeMark size={24} glow={false} /></span>
           <strong>{copy.assistant}</strong>
           <span>{copy.answerLabel}</span>
         </header>

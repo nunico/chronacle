@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 
 const appCss = readFileSync('src/app.css', 'utf8');
 const buttonLink = readFileSync('src/lib/components/ButtonLink.svelte', 'utf8');
+const siteHeader = readFileSync('src/lib/components/SiteHeader.svelte', 'utf8');
+const productExample = readFileSync('src/lib/landing/ProductExample.svelte', 'utf8');
 
 describe('Chronacle gradient tokens', () => {
   it('keeps the approved arcane gradient and uses a darker action gradient for primary controls', () => {
@@ -20,5 +22,10 @@ describe('Chronacle gradient tokens', () => {
 
     expect(outlineHoverRule).toBeDefined();
     expect(outlineHoverRule).not.toContain('box-shadow');
+  });
+
+  it('disables EyeMark glow at landing call sites', () => {
+    expect(siteHeader).toContain('<EyeMark size={38} glow={false} />');
+    expect(productExample).toContain('<EyeMark size={24} glow={false} />');
   });
 });
