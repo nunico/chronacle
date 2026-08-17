@@ -17,6 +17,8 @@ const labels = {
 
 describe('SiteHeader', () => {
   it('exposes the primary destinations and language control by name', () => {
+    const downloadUrl = 'https://github.com/nunico/chronacle/releases/latest';
+
     render(SiteHeader, {
       locale: 'en',
       labels,
@@ -24,7 +26,7 @@ describe('SiteHeader', () => {
         home: '/',
         manual: '/en/manual',
         source: 'https://github.com/nunico/chronacle',
-        download: '/',
+        download: downloadUrl,
       },
       onlocalechange: vi.fn(),
     });
@@ -36,7 +38,10 @@ describe('SiteHeader', () => {
       'https://github.com/nunico/chronacle',
     );
     expect(screen.getByRole('group', { name: labels.language })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: labels.download })).toHaveAttribute('href', '/');
+    const downloadLink = screen.getByRole('link', { name: labels.download });
+    expect(downloadLink).toHaveAttribute('href', downloadUrl);
+    expect(downloadLink).toHaveAttribute('target', '_blank');
+    expect(downloadLink).toHaveAttribute('rel', 'external noopener noreferrer');
   });
 });
 
