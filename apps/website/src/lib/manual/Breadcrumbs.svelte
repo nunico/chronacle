@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { manualBase } from '$lib/i18n/locale';
   import type { ManualArticle } from '$lib/content/types';
   import { sectionLabel } from '$lib/content/sections';
@@ -9,10 +10,13 @@
   const manualLabel = $derived(article.locale === 'de' ? 'Handbuch' : 'Manual');
 </script>
 
-<nav class="breadcrumbs" aria-label={article.locale === 'de' ? 'Brotkrümelnavigation' : 'Breadcrumbs'}>
+<nav
+  class="breadcrumbs"
+  aria-label={article.locale === 'de' ? 'Brotkrümelnavigation' : 'Breadcrumbs'}
+>
   <ol>
-    <li><a href="/">{homeLabel}</a></li>
-    <li><a href={manualBase(article.locale)}>{manualLabel}</a></li>
+    <li><a href={resolve('/')}>{homeLabel}</a></li>
+    <li><a href={resolve(manualBase(article.locale))}>{manualLabel}</a></li>
     <li><span>{sectionLabel(article.locale, article.section)}</span></li>
     <li aria-current="page"><span>{article.title}</span></li>
   </ol>

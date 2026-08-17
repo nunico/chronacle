@@ -19,10 +19,9 @@ function article(overrides: Partial<ManualFrontmatter> = {}): ManualArticle {
   return {
     ...frontmatter,
     component,
-    href:
-      frontmatter.slug === 'overview'
-        ? `/${frontmatter.locale}/${frontmatter.locale === 'en' ? 'manual' : 'handbuch'}`
-        : `/${frontmatter.locale}/${frontmatter.locale === 'en' ? 'manual' : 'handbuch'}/${frontmatter.slug}`,
+    href: (frontmatter.slug === 'overview'
+      ? `/${frontmatter.locale}/${frontmatter.locale === 'en' ? 'manual' : 'handbuch'}`
+      : `/${frontmatter.locale}/${frontmatter.locale === 'en' ? 'manual' : 'handbuch'}/${frontmatter.slug}`) as ManualArticle['href'],
   };
 }
 
@@ -69,5 +68,24 @@ describe('manual content registry', () => {
     Object.assign(invalidSection, { section: 'appendix' });
 
     expect(() => validateArticles([invalidSection, overviewPair()[1]])).toThrow(/unknown section/i);
+  });
+
+  it('rejects duplicate heading IDs within an article', () => {
+    const invalid = article({
+      headings: [
+        { id: 'same-heading', text: 'First heading', level: 2 },
+        { id: 'same-heading', text: 'Second heading', level: 3 },
+      ],
+    });
+
+    expect(() => validateArticles([invalid, overviewPair()[1]])).toThrow(/duplicate heading id/i);
+  });
+
+  it('rejects unsafe heading IDs', () => {
+    const invalid = article({
+      headings: [{ id: 'Not a safe ID', text: 'Heading', level: 2 }],
+    });
+
+    expect(() => validateArticles([invalid, overviewPair()[1]])).toThrow(/invalid heading id/i);
   });
 });

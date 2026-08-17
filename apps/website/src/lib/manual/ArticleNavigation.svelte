@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { articlesFor, getTranslation } from '$lib/content/registry';
   import type { ManualArticle } from '$lib/content/types';
 
@@ -20,22 +21,29 @@
   );
 </script>
 
-<nav class="article-navigation" aria-label={article.locale === 'de' ? 'Artikelnavigation' : 'Article navigation'}>
+<nav
+  class="article-navigation"
+  aria-label={article.locale === 'de' ? 'Artikelnavigation' : 'Article navigation'}
+>
   <div class="article-navigation__sequence">
     {#if adjacent.previous}
-      <a class="article-navigation__previous" href={adjacent.previous.href}>
+      <a class="article-navigation__previous" href={resolve(adjacent.previous.href)}>
         <span>{labels.previous}</span>
         <strong>{adjacent.previous.navTitle ?? adjacent.previous.title}</strong>
       </a>
     {/if}
     {#if adjacent.next}
-      <a class="article-navigation__next" href={adjacent.next.href}>
+      <a class="article-navigation__next" href={resolve(adjacent.next.href)}>
         <span>{labels.next}</span>
         <strong>{adjacent.next.navTitle ?? adjacent.next.title}</strong>
       </a>
     {/if}
   </div>
-  <a class="article-navigation__translation" href={translation.href} hreflang={translation.locale}>
+  <a
+    class="article-navigation__translation"
+    href={resolve(translation.href)}
+    hreflang={translation.locale}
+  >
     {labels.language}
   </a>
 </nav>

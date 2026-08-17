@@ -1,8 +1,9 @@
 import type { Component } from 'svelte';
+import type { Pathname } from '$app/types';
 import { manualBase } from '$lib/i18n/locale';
 import type { Locale, ManualSegment } from '$lib/i18n/types';
 import { manualSections } from './sections';
-import type { ManualArticle, ManualFrontmatter, ManualSectionId } from './types';
+import type { ManualArticle, ManualFrontmatter, ManualHeading, ManualSectionId } from './types';
 
 interface MarkdownModule {
   default: unknown;
@@ -15,6 +16,7 @@ const markdownModules = import.meta.glob<MarkdownModule>('/src/content/manual/**
 
 const locales: readonly Locale[] = ['en', 'de'];
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
+const headingIdPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const sectionOrder = new Map<ManualSectionId, number>(
   manualSections.map((section, index) => [section, index]),
 );
@@ -47,6 +49,44 @@ function requireString(
   return value;
 }
 
+function validateHeadings(headings: readonly ManualHeading[], source: string): void {
+  const ids = new Set<string>();
+  for (const heading of headings) {
+    if (!headingIdPattern.test(heading.id)) {
+      throw new Error(`Manual article ${source} has invalid heading ID`);
+    }
+    if (heading.text.trim() === '' || (heading.level !== 2 && heading.level !== 3)) {
+      throw new Error(`Manual article ${source} has invalid headings`);
+    }
+    if (ids.has(heading.id)) {
+      throw new Error(`Manual article ${source} has duplicate heading ID: ${heading.id}`);
+    }
+    ids.add(heading.id);
+  }
+}
+
+function parseHeadings(value: unknown, source: string): ManualHeading[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`Manual article ${source} has invalid headings`);
+  }
+  const headings = value.map((heading): ManualHeading => {
+    if (
+      !isRecord(heading) ||
+      typeof heading.id !== 'string' ||
+      typeof heading.text !== 'string' ||
+      (heading.level !== 2 && heading.level !== 3)
+    ) {
+      throw new Error(`Manual article ${source} has invalid headings`);
+    }
+    return { id: heading.id, text: heading.text, level: heading.level };
+  });
+  validateHeadings(headings, source);
+  return headings;
+}
+
 function parseFrontmatter(value: unknown, source: string): ManualFrontmatter {
   if (!isRecord(value)) {
     throw new Error(`Manual article ${source} is missing frontmatter`);
@@ -74,21 +114,7 @@ function parseFrontmatter(value: unknown, source: string): ManualFrontmatter {
   if (value.search !== undefined && typeof value.search !== 'boolean') {
     throw new Error(`Manual article ${source} has invalid search`);
   }
-  if (
-    value.headings !== undefined &&
-    (!Array.isArray(value.headings) ||
-      value.headings.some(
-        (heading) =>
-          !isRecord(heading) ||
-          typeof heading.id !== 'string' ||
-          heading.id === '' ||
-          typeof heading.text !== 'string' ||
-          heading.text === '' ||
-          (heading.level !== 2 && heading.level !== 3),
-      ))
-  ) {
-    throw new Error(`Manual article ${source} has invalid headings`);
-  }
+  const headings = parseHeadings(value.headings, source);
 
   return {
     translationKey: requireString(value, 'translationKey', source),
@@ -100,16 +126,19 @@ function parseFrontmatter(value: unknown, source: string): ManualFrontmatter {
     order: value.order,
     ...(value.navTitle === undefined ? {} : { navTitle: value.navTitle }),
     ...(value.search === undefined ? {} : { search: value.search }),
-    ...(value.headings === undefined
-      ? {}
-      : {
-          headings: value.headings.map((heading) => ({
-            id: String((heading as Record<string, unknown>).id),
-            text: String((heading as Record<string, unknown>).text),
-            level: (heading as Record<string, unknown>).level as 2 | 3,
-          })),
-        }),
+    ...(headings === undefined ? {} : { headings }),
   };
+}
+
+function articleHref(frontmatter: ManualFrontmatter): Pathname {
+  if (!slugPattern.test(frontmatter.slug)) {
+    throw new Error(`Manual article ${frontmatter.translationKey} has invalid slug`);
+  }
+  return (
+    frontmatter.section === 'overview'
+      ? manualBase(frontmatter.locale)
+      : `${manualBase(frontmatter.locale)}/${frontmatter.slug}`
+  ) as Pathname;
 }
 
 function toArticle(source: string, module: MarkdownModule): ManualArticle {
@@ -121,10 +150,7 @@ function toArticle(source: string, module: MarkdownModule): ManualArticle {
   return {
     ...frontmatter,
     component: module.default,
-    href:
-      frontmatter.section === 'overview'
-        ? manualBase(frontmatter.locale)
-        : `${manualBase(frontmatter.locale)}/${frontmatter.slug}`,
+    href: articleHref(frontmatter),
   };
 }
 
@@ -231,6 +257,7 @@ export function validateArticles(candidateArticles: ManualArticle[]): void {
     if (article.search !== undefined && typeof article.search !== 'boolean') {
       throw new Error(`Manual article ${article.translationKey} has invalid search`);
     }
+    validateHeadings(article.headings ?? [], article.translationKey);
     if (!isComponent(article.component)) {
       throw new Error(`Manual article ${article.translationKey} has invalid component`);
     }
