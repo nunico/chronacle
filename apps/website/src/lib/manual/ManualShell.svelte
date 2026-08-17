@@ -5,6 +5,7 @@
   import ArticleNavigation from './ArticleNavigation.svelte';
   import Breadcrumbs from './Breadcrumbs.svelte';
   import ManualDrawer from './ManualDrawer.svelte';
+  import ManualFallback from './ManualFallback.svelte';
   import ManualSidebar from './ManualSidebar.svelte';
   import TableOfContents from './TableOfContents.svelte';
 
@@ -34,6 +35,10 @@
     </div>
   </div>
 </header>
+
+<noscript>
+  <ManualFallback locale={article.locale} currentSlug={article.slug} />
+</noscript>
 
 <div class="manual-shell">
   <aside class="manual-shell__sidebar">

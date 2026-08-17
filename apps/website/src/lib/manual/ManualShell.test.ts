@@ -6,6 +6,7 @@ import { getArticle } from '$lib/content/registry';
 import type { ManualArticle } from '$lib/content/types';
 import ManualShell from './ManualShell.svelte';
 import ManualArticleLayout from './ManualArticle.svelte';
+import ManualFallback from './ManualFallback.svelte';
 
 vi.mock('$lib/content/registry', async (importOriginal) => {
   const registry = await importOriginal<typeof import('$lib/content/registry')>();
@@ -82,6 +83,26 @@ describe('ManualShell', () => {
       '/en/manual/after',
     );
     expect(screen.getByRole('link', { name: /deutsch/i })).toHaveAttribute('href', '/de/handbuch');
+  });
+
+  it('prerenders a complete no-JavaScript manual navigation fallback', () => {
+    const { container } = render(ManualShell, { article: getArticle('en', 'overview') });
+
+    expect(container.querySelector('noscript')).not.toBeNull();
+
+    const fallback = render(ManualFallback, {
+      locale: 'en',
+      currentSlug: 'overview',
+    }).container;
+    expect(within(fallback).getByRole('navigation')).toHaveAttribute(
+      'aria-label',
+      'Manual navigation without JavaScript',
+    );
+    expect(fallback.querySelector('a[aria-current="page"]')).toHaveAttribute(
+      'href',
+      '/en/manual',
+    );
+    expect(fallback.querySelectorAll('a')).toHaveLength(3);
   });
 
   it('builds an h2/h3 outline without including h1 or h4 headings', async () => {
