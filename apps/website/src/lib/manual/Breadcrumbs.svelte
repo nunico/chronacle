@@ -24,7 +24,7 @@
 
 <style>
   .breadcrumbs {
-    color: var(--fg-3);
+    color: var(--fg-2);
     font-family: var(--font-sans);
     font-size: 0.75rem;
   }

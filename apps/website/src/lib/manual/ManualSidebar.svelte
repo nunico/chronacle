@@ -56,7 +56,7 @@
 
   h2 {
     margin: 0 0 var(--s-2);
-    color: var(--fg-3);
+    color: var(--fg-2);
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     font-weight: 600;

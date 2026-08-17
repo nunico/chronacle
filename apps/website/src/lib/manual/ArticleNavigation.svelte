@@ -86,7 +86,7 @@
   }
 
   span {
-    color: var(--fg-3);
+    color: var(--fg-2);
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     letter-spacing: 0.06em;
