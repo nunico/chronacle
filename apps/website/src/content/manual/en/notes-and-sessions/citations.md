@@ -38,7 +38,9 @@ Compare the answer's claim with the displayed excerpt. When exact wording, nearb
 
 Chronacle answers:
 
-> The western seed vault opens only after the keeper rings the bronze chime. `[Source: "Orchard Almanac.pdf", p.31, quote: "The western vault opens after the bronze chime sounds."]`
+> The western seed vault opens only after the keeper rings the bronze chime.
+>
+> **Orchard Almanac.pdf p.31**
 
 Choose **Orchard Almanac.pdf p.31** and read the displayed excerpt. Before deciding whether “only” is justified, consult page 31 in your own copy for the surrounding text.
 

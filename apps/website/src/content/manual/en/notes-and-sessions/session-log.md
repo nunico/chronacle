@@ -26,7 +26,7 @@ The **Sessions** view keeps a numbered, campaign-specific log whose title, date,
 <h2 id="record-a-session">Record a session</h2>
 
 1. Select a campaign and open **Sessions**.
-2. Choose **New session**. Chronacle uses the next session number, today's date, and a title such as **Session 4**.
+2. Choose **New session**. Chronacle uses the next session number, prefills a date from the computer's UTC date, and adds a title such as **Session 4**. Check and adjust the date to the local date you played.
 3. Expand the row and edit **Name**, **Date played**, and **Notes**.
 4. Use `[[Entity Name]]` in the recap. Click outside a field to save it.
 

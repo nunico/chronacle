@@ -40,7 +40,9 @@ Vergleiche die Aussage mit dem angezeigten Auszug. Wenn genaue Formulierung, ben
 
 Chronacle antwortet:
 
-> Das westliche Samengewölbe öffnet sich erst, nachdem die Hüterin den Bronzegong schlägt. `[Source: "Gartenalmanach.pdf", p.31, quote: "The western vault opens after the bronze chime sounds."]`
+> Das westliche Samengewölbe öffnet sich erst, nachdem die Hüterin den Bronzegong schlägt.
+>
+> **Gartenalmanach.pdf p.31**
 
 Wähle **Gartenalmanach.pdf p.31** und lies den angezeigten Auszug. Bevor du entscheidest, ob „erst“ gerechtfertigt ist, prüfe den umgebenden Text auf Seite 31 in deinem eigenen Exemplar.
 

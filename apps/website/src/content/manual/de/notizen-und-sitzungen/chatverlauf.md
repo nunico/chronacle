@@ -27,7 +27,7 @@ Abgeschlossene Fragen und Antworten werden zeitlich geordnet gespeichert; bei ge
 
 <h2 id="bereich-des-verlaufs">Bereich des Verlaufs</h2>
 
-Die Frage wird beim Start der Anfrage gespeichert. Eine vollständige Antwort wird nach Abschluss der Erzeugung gespeichert. Beim Kampagnenwechsel lädt Chronacle den Verlauf der neu gewählten Kampagne. Ohne gewählte Kampagne fordert die aktuelle App den gesamten gespeicherten Nachrichtenverlauf an, nicht einen getrennten nur globalen Verlauf.
+Eine Frage wird beim Absenden gespeichert, auch wenn die spätere Antwort abgebrochen wird oder fehlschlägt. Eine vollständige Antwort wird nach Abschluss der Erzeugung gespeichert. Beim Kampagnenwechsel lädt Chronacle den Verlauf der neu gewählten Kampagne. Ohne gewählte Kampagne fordert die aktuelle App den gesamten gespeicherten Nachrichtenverlauf an, nicht einen getrennten nur globalen Verlauf.
 
 <h2 id="gespraech-erneut-lesen">Gespräch erneut lesen</h2>
 

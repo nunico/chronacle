@@ -40,7 +40,7 @@ Create the NPC **Mara Venn** with summary “Ferrymaster of Greyharbor.” In **
 
 > Owes [[Iria Pell]] a favor after the North Quay fire. Promised the crew passage at moonrise.
 
-After saving, the link can open Iria's record, and a campaign question can use Mara's stored facts as context.
+After saving, the preview shows Iria as an entity badge, but that badge is display-only and does not open her record in the current saved-note preview. A campaign question can still use Mara's stored facts as context.
 
 <h2 id="current-limits">Current limits</h2>
 
