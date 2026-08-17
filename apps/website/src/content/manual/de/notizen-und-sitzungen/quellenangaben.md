@@ -34,7 +34,7 @@ Eine Quellenmarke nennt den PDF-Namen und meist eine Seite; beim Öffnen zeigt s
 
 <h2 id="antwort-pruefen">Antwort prüfen</h2>
 
-Vergleiche die Aussage mit dem angezeigten Auszug. Öffne anschließend die ursprüngliche PDF-Seite, wenn genaue Formulierung, benachbarte Ausnahmen oder eine längere Tabelle wichtig sind. Kann der gespeicherte Auszug nicht angezeigt werden, meldet die Oberfläche **Kein unterstützendes Zitat verfügbar.** oder einen Ladefehler.
+Vergleiche die Aussage mit dem angezeigten Auszug. Wenn genaue Formulierung, benachbarte Ausnahmen oder eine längere Tabelle wichtig sind, schlage den weiteren Seitenkontext getrennt in deiner Quelle nach; die Quellenmarke öffnet nicht das ursprüngliche PDF. Kann der gespeicherte Auszug nicht angezeigt werden, meldet die Oberfläche **Kein unterstützendes Zitat verfügbar.** oder einen Ladefehler.
 
 <h2 id="beispiel">Beispiel</h2>
 
@@ -42,7 +42,7 @@ Chronacle antwortet:
 
 > Das westliche Samengewölbe öffnet sich erst, nachdem die Hüterin den Bronzegong schlägt. `[Source: "Gartenalmanach.pdf", p.31, quote: "The western vault opens after the bronze chime sounds."]`
 
-Wähle **Gartenalmanach.pdf p.31**, lies den Auszug und prüfe Seite 31, bevor du entscheidest, ob „erst“ gerechtfertigt ist.
+Wähle **Gartenalmanach.pdf p.31** und lies den angezeigten Auszug. Bevor du entscheidest, ob „erst“ gerechtfertigt ist, prüfe den umgebenden Text auf Seite 31 in deinem eigenen Exemplar.
 
 <h2 id="bedeutung-einer-quellenangabe">Bedeutung einer Quellenangabe</h2>
 

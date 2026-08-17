@@ -32,7 +32,7 @@ A source badge identifies the PDF name and usually a page, and opening it shows 
 
 <h2 id="verify-the-answer">Verify the answer</h2>
 
-Compare the answer's claim with the displayed excerpt, then open the original PDF page when exact wording, nearby exceptions, or a longer table matters. If the stored excerpt cannot be shown, the interface displays **No supporting quote available.** or a load-failure message.
+Compare the answer's claim with the displayed excerpt. When exact wording, nearby exceptions, or a longer table matters, consult your source separately for the wider page context; the citation badge does not open the original PDF. If the stored excerpt cannot be shown, the interface displays **No supporting quote available.** or a load-failure message.
 
 <h2 id="example">Example</h2>
 
@@ -40,7 +40,7 @@ Chronacle answers:
 
 > The western seed vault opens only after the keeper rings the bronze chime. `[Source: "Orchard Almanac.pdf", p.31, quote: "The western vault opens after the bronze chime sounds."]`
 
-Choose **Orchard Almanac.pdf p.31**, read the excerpt, and inspect page 31 before deciding whether “only” is justified.
+Choose **Orchard Almanac.pdf p.31** and read the displayed excerpt. Before deciding whether “only” is justified, consult page 31 in your own copy for the surrounding text.
 
 <h2 id="what-a-citation-means">What a citation means</h2>
 
