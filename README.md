@@ -86,6 +86,37 @@ For full details, see the [Tauri prerequisites guide](https://v2.tauri.app/start
 
 ---
 
+## Install a Release
+
+Release builds are configured for these platforms and architectures:
+
+| Platform | Architectures        | Packages                                                  |
+| -------- | -------------------- | --------------------------------------------------------- |
+| Linux    | x86_64, aarch64      | AppImage, Debian, RPM, Flatpak bundle                     |
+| macOS    | Apple Silicon, Intel | DMG, app archive                                          |
+| Windows  | x86_64               | MSI, NSIS; usable on Windows 11 Arm through x64 emulation |
+
+Download the package for your system from the GitHub release. Flatpak users should select the
+single-file bundle matching their Linux architecture and install it with one of these commands:
+
+```bash
+# x86_64 Linux
+flatpak install --user ./Chronacle_<version>_x86_64.flatpak
+
+# aarch64 Linux
+flatpak install --user ./Chronacle_<version>_aarch64.flatpak
+
+flatpak run dev.tea-driven.chronacle.desktop
+```
+
+These bundles are GitHub release downloads, not a Flathub listing, and do not receive
+repository-backed automatic updates. Flatpak keeps Chronacle's application data in its private
+per-application storage under `~/.var/app/dev.tea-driven.chronacle.desktop/`. PDFs and vault
+directories that you select are accessed through desktop portal grants; the package does not have
+broad access to your home directory.
+
+---
+
 ## Build & Run
 
 ```bash

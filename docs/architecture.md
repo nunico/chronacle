@@ -41,6 +41,44 @@ The app must run on Windows, Linux, and macOS with no complicated setup. It need
 - The frontend communicates with the backend via **Tauri IPC commands** (type-safe, zero-serialization-cost) and **Tauri events** for streaming responses. See ADR-005.
 - WebView2 must be present on Windows (auto-installed by the Tauri bootstrapper).
 
+### Release Packaging
+
+The native release matrix uses explicit runners and Rust targets so a runner-label change cannot
+silently change an artifact's architecture:
+
+| Native target  | Runner             | Rust target                 | Packages              |
+| -------------- | ------------------ | --------------------------- | --------------------- |
+| Linux x86_64   | `ubuntu-24.04`     | `x86_64-unknown-linux-gnu`  | AppImage, Debian, RPM |
+| Linux aarch64  | `ubuntu-24.04-arm` | `aarch64-unknown-linux-gnu` | AppImage, Debian, RPM |
+| macOS arm64    | `macos-26`         | `aarch64-apple-darwin`      | DMG, app archive      |
+| macOS x86_64   | `macos-15-intel`   | `x86_64-apple-darwin`       | DMG, app archive      |
+| Windows x86_64 | `windows-2025`     | `x86_64-pc-windows-msvc`    | MSI, NSIS installer   |
+
+Flatpak packaging consumes the matching Debian workflow artifact rather than rebuilding the
+application:
+
+| Flatpak target | Runner             | Input artifact         | Output                                |
+| -------------- | ------------------ | ---------------------- | ------------------------------------- |
+| x86_64         | `ubuntu-24.04`     | x86_64 Debian package  | `Chronacle_<version>_x86_64.flatpak`  |
+| aarch64        | `ubuntu-24.04-arm` | aarch64 Debian package | `Chronacle_<version>_aarch64.flatpak` |
+
+The architecture-neutral manifest extracts the complete Debian payload, asserts the application
+binary and native libraries are present, and installs them under `/app`. It uses the literal GNOME
+Platform and SDK version 50. The sandbox grants display, GPU, IPC, and network access, but no
+blanket home or host filesystem access. Imported PDFs and selected vault directories are reached
+through persistent desktop portal grants; application state uses Flatpak's per-application XDG
+storage.
+
+Packaged-target support is distinct from bundled runtime-library support. Linux packages bundle
+architecture-matched PDFium and ONNX Runtime. Both macOS packages bundle PDFium, while only the
+Apple Silicon package bundles the pinned ONNX Runtime. PDF ingestion and cloud embeddings work on
+Intel macOS without additional setup; local embeddings use a compatible, unpinned system/Homebrew
+ONNX Runtime installed with `brew install onnxruntime`.
+
+Native Windows ARM64, Flathub publication, Snap, Nix, AUR, signing/notarization, and automatic
+updates are deferred. Windows 11 on Arm can run the x86_64 installer through its x64 emulation
+layer in the meantime.
+
 ---
 
 ## ADR-002: Unified Store — SurrealDB (Relational + Vector + Graph)
@@ -542,6 +580,22 @@ explicit desktop feature so it does not lengthen the PR backend gate: `mise run 
 `mise run build` pass `--features rocksdb`, as must direct Tauri development/build commands.
 Persistence-specific tests opt in explicitly, for example
 `cargo test -p Chronacle --features rocksdb --test rocksdb_persistence`.
+
+### Release Pipeline
+
+Pull requests that touch release inputs run all five native packaging jobs and both Flatpak jobs
+with read-only repository permissions. They upload inspectable workflow artifacts but neither
+create nor modify a GitHub release.
+
+Semver tags follow a fail-closed draft flow. Per-ref, non-cancelling workflow concurrency and a
+single create-or-select job prevent competing runs from racing the draft. That job accepts exactly
+one draft for the tag and passes its numeric release ID forward. Native packages are built and
+checked first; the two Linux Debian artifacts then feed the matching x86_64 and aarch64 Flatpak
+builds and sandbox startup checks. Only after both matrices succeed does one centralized upload job
+reconcile stale assets, validate that the planned names are unique, and upload every asset to that
+exact release ID. The final job re-fetches the same ID, verifies its tag and draft state, and
+publishes it. A failed or cancelled build, Flatpak, validation, reconciliation, or upload leaves
+the release as a draft.
 
 ---
 
