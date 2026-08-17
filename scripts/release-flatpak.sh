@@ -152,8 +152,8 @@ flatpak --user --noninteractive install "$bundle"
 
 flatpak run --command=sh "$app_id" -c \
   'test -x /app/bin/chronacle &&
-   test -f /app/lib/Chronacle/resources/pdfium/libpdfium.so &&
-   test -f /app/lib/Chronacle/resources/onnxruntime/libonnxruntime.so &&
+   test -f /app/bin/../lib/Chronacle/resources/pdfium/libpdfium.so &&
+   test -f /app/bin/../lib/Chronacle/resources/onnxruntime/libonnxruntime.so &&
    test -f /app/share/applications/dev.tea-driven.chronacle.desktop.desktop &&
    test -f /app/share/metainfo/dev.tea-driven.chronacle.desktop.metainfo.xml &&
    test -f /app/share/icons/hicolor/32x32/apps/dev.tea-driven.chronacle.desktop.png &&
