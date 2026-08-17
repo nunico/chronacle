@@ -288,6 +288,19 @@ The existing `a_burst_of_writes_coalesces_into_one_batch` test is the regression
 fail before the change, pass repeatedly afterward, and the complete backend-quality gate must then
 pass.
 
+### Linux packaged-resource resolution
+
+Linux packages install the Chronacle executable under `<prefix>/bin` and its native runtime
+resources under `<prefix>/lib/Chronacle/resources`. PDFium and ONNX Runtime lookup must therefore
+check `<exe-dir>/../lib/Chronacle/resources/<runtime>/<library>` in addition to the existing macOS
+bundle and adjacent-resource layouts. This single lookup rule covers both Debian (`/usr/bin` plus
+`/usr/lib/Chronacle`) and Flatpak (`/app/bin` plus `/app/lib/Chronacle`) without a package-specific
+wrapper or duplicate resources.
+
+Resolver tests must create the Linux package layout in a temporary directory and prove that both
+runtime resolvers select the existing library. The Flatpak contract must also assert the packaged
+layout expected by those resolvers before performing its startup smoke test.
+
 The tranche is complete when:
 
 1. the pipeline-structure test passes;
