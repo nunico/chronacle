@@ -34,8 +34,8 @@
 </script>
 
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import type { Pathname } from '$app/types';
   import Search from 'lucide-svelte/icons/search';
   import X from 'lucide-svelte/icons/x';
   import type { Attachment } from 'svelte/attachments';
@@ -43,17 +43,16 @@
   import type { Locale } from '$lib/i18n/types';
   import { manualBase } from '$lib/i18n/locale';
   import { pagefindSearch } from './pagefind';
-  import type { ManualSearch, SearchResult } from './types';
+  import { asManualPathname, type ManualSearch, type SearchResult } from './types';
 
   interface Props {
     locale: Locale;
     search?: ManualSearch;
-    onNavigate?: (url: string) => void;
   }
 
   type SearchStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-  let { locale, search = pagefindSearch, onNavigate }: Props = $props();
+  let { locale, search = pagefindSearch }: Props = $props();
   let dialog: HTMLDialogElement | undefined;
   let input: HTMLInputElement | undefined;
   let opener: HTMLElement | undefined;
@@ -151,6 +150,11 @@
   }
 
   export function openSearch(nextOpener?: HTMLElement): void {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = undefined;
+    }
+    const sequence = ++requestSequence;
     opener =
       nextOpener ??
       (document.activeElement instanceof HTMLElement ? document.activeElement : undefined);
@@ -167,13 +171,16 @@
     }
     queueMicrotask(() => input?.focus());
     void ensureInitialized().catch(() => {
-      status = 'error';
+      if (sequence === requestSequence) {
+        status = 'error';
+      }
     });
   }
 
   export function closeSearch(): void {
     if (debounceTimer) {
       clearTimeout(debounceTimer);
+      debounceTimer = undefined;
     }
     requestSequence += 1;
     if (dialog?.open && typeof dialog.close === 'function') {
@@ -227,12 +234,12 @@
   }
 
   function navigate(url: string): void {
-    closeSearch();
-    if (onNavigate) {
-      onNavigate(url);
-    } else {
-      window.location.assign(url);
+    const pathname = asManualPathname(url);
+    if (!pathname) {
+      return;
     }
+    closeSearch();
+    void goto(resolve(pathname));
   }
 
   function handleInputKeydown(event: KeyboardEvent): void {
@@ -348,6 +355,7 @@
     <button
       type="button"
       class="search-dialog__close"
+      style="width: 44px; height: 44px;"
       aria-label={labels.close}
       onclick={closeSearch}
     >
@@ -409,7 +417,7 @@
           <li>
             <a
               id={`${componentId}-result-${index}`}
-              href={resolve(result.url as Pathname)}
+              href={resolve(asManualPathname(result.url) ?? overviewHref)}
               role="option"
               aria-selected={index === activeIndex}
               onclick={(event) => {
@@ -483,8 +491,6 @@
 
   .search-dialog__close {
     display: grid;
-    width: 2.5rem;
-    height: 2.5rem;
     flex: 0 0 auto;
     place-items: center;
     border: 1px solid var(--line);

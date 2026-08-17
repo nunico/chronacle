@@ -1,4 +1,4 @@
-import type { ManualSearch, SearchResult } from './types';
+import { asManualPathname, type ManualSearch, type SearchResult } from './types';
 
 interface PagefindData {
   excerpt?: unknown;
@@ -37,10 +37,14 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
-function mapData(data: PagefindData): SearchResult {
+function mapData(data: PagefindData): SearchResult | undefined {
   const meta = isRecord(data.meta) ? data.meta : {};
+  const url = asManualPathname(stringValue(data.url));
+  if (!url) {
+    return undefined;
+  }
   return {
-    url: stringValue(data.url),
+    url,
     title: stringValue(meta.title),
     section: stringValue(meta.section),
     excerptHtml: stringValue(data.excerpt),
@@ -70,13 +74,19 @@ export function createPagefindSearch(loader: () => Promise<unknown>): ManualSear
       const pagefind = await loadPagefind();
       const response = await pagefind.search(query);
       const rawResults = Array.isArray(response.results) ? response.results : [];
-      const data = await Promise.all(
+      const data = await Promise.allSettled(
         rawResults
           .filter(isPagefindResult)
           .slice(0, 20)
           .map((result) => result.data()),
       );
-      return data.map(mapData);
+      return data.flatMap((result) => {
+        if (result.status !== 'fulfilled') {
+          return [];
+        }
+        const mapped = mapData(result.value);
+        return mapped ? [mapped] : [];
+      });
     },
   };
 }
