@@ -74,6 +74,21 @@ function parseFrontmatter(value: unknown, source: string): ManualFrontmatter {
   if (value.search !== undefined && typeof value.search !== 'boolean') {
     throw new Error(`Manual article ${source} has invalid search`);
   }
+  if (
+    value.headings !== undefined &&
+    (!Array.isArray(value.headings) ||
+      value.headings.some(
+        (heading) =>
+          !isRecord(heading) ||
+          typeof heading.id !== 'string' ||
+          heading.id === '' ||
+          typeof heading.text !== 'string' ||
+          heading.text === '' ||
+          (heading.level !== 2 && heading.level !== 3),
+      ))
+  ) {
+    throw new Error(`Manual article ${source} has invalid headings`);
+  }
 
   return {
     translationKey: requireString(value, 'translationKey', source),
@@ -85,6 +100,15 @@ function parseFrontmatter(value: unknown, source: string): ManualFrontmatter {
     order: value.order,
     ...(value.navTitle === undefined ? {} : { navTitle: value.navTitle }),
     ...(value.search === undefined ? {} : { search: value.search }),
+    ...(value.headings === undefined
+      ? {}
+      : {
+          headings: value.headings.map((heading) => ({
+            id: String((heading as Record<string, unknown>).id),
+            text: String((heading as Record<string, unknown>).text),
+            level: (heading as Record<string, unknown>).level as 2 | 3,
+          })),
+        }),
   };
 }
 
