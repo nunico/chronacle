@@ -55,8 +55,8 @@ describe('manual content registry', () => {
       order: 1,
       href: '/de/handbuch/fehlerbehebung/haeufige-probleme',
     });
-    expect(english.headings).toHaveLength(2);
-    expect(german.headings).toHaveLength(2);
+    expect(english.headings).toHaveLength(9);
+    expect(german.headings).toHaveLength(9);
     expect(getTranslation('en', english.slug).href).toBe(german.href);
     expect(manualEntries()).toEqual(
       expect.arrayContaining([
@@ -114,6 +114,19 @@ describe('manual content registry', () => {
       'notizen-und-sitzungen/fragen-stellen',
     ],
     ['questions.citations', 'notes-and-sessions/citations', 'notizen-und-sitzungen/quellenangaben'],
+    ['vault.overview', 'vault/overview', 'vault/ueberblick'],
+    ['vault.files', 'vault/file-format', 'vault/dateiformat'],
+    ['vault.aliases', 'vault/alternate-names', 'vault/alternative-namen'],
+    ['vault.conflicts', 'vault/conflicts', 'vault/konflikte'],
+    ['vault.deleting', 'vault/deleting', 'vault/loeschen'],
+    ['vault.switching', 'vault/switch-folder', 'vault/ordner-wechseln'],
+    ['settings.overview', 'settings/overview', 'einstellungen/ueberblick'],
+    [
+      'troubleshooting.common',
+      'troubleshooting/common-problems',
+      'fehlerbehebung/haeufige-probleme',
+    ],
+    ['glossary.main', 'glossary', 'glossar'],
   ])('loads the canonical %s translation pair', (translationKey, englishSlug, germanSlug) => {
     const english = getArticle('en', englishSlug);
     const german = getArticle('de', germanSlug);

@@ -44,7 +44,7 @@ describe('manual route landmarks', () => {
     expect(result).toMatchObject({
       locale: 'de',
       slug: 'fehlerbehebung/haeufige-probleme',
-      title: 'Häufige Suchprobleme',
+      title: 'Häufige Probleme',
     });
   });
 });
