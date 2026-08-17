@@ -467,10 +467,13 @@ function canonicalAssetUpload(text) {
   const isAssetPost = (command) =>
     /^gh api --method POST "https:\/\/uploads\.github\.com\/repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?name=\$\{encoded_name\}"(?:\s|$)/.test(
       command,
-    );
-  const postInsideReplacement = replacementCommands.some(isAssetPost);
-  const postAfterReplacement =
-    replacementFi >= 0 && shellCommands(uploadBody.slice(replacementFi)).some(isAssetPost);
+    ) && /--input "\$asset"(?:\s|$)/.test(command);
+  const replacementFiCommand = uploadCommands.findIndex(
+    (command, index) => index > replacementBranchCommand && /^fi$/.test(command),
+  );
+  const assetPostCommands = uploadCommands
+    .map((command, index) => ({ command, index }))
+    .filter(({ command }) => isAssetPost(command));
   const replacesSameNameAssets =
     sameNameLookup >= 0 &&
     sameNameLookup < sameNameCount &&
@@ -482,8 +485,9 @@ function canonicalAssetUpload(text) {
     existingId < existingNumeric &&
     existingNumeric < existingDelete &&
     replacementFi >= 0 &&
-    !postInsideReplacement &&
-    postAfterReplacement;
+    replacementFiCommand > replacementBranchCommand &&
+    assetPostCommands.length === 1 &&
+    assetPostCommands[0].index > replacementFiCommand;
   return (
     /\[\[ "\$RELEASE_ID" =~ \^\[0-9\]\+\$ \]\]/.test(text) &&
     /find release-assets\/native release-assets\/flatpak/.test(text) &&
@@ -858,6 +862,14 @@ const uploadBeforeDeleteFixture = canonicalAssetFixture
 requireContract(
   !canonicalAssetUpload(uploadBeforeDeleteFixture),
   'pipeline parser must reject uploads that occur before same-name replacement deletion',
+);
+const earlyExtraUploadFixture = canonicalAssetFixture.replace(
+  'matching_assets=$(jq --arg name "$asset_name" \'map(select(.name == $name))\' <<<"$existing_assets")',
+  `${uploadCommand}\nmatching_assets=$(jq --arg name "$asset_name" 'map(select(.name == $name))' <<<"$existing_assets")`,
+);
+requireContract(
+  !canonicalAssetUpload(earlyExtraUploadFixture),
+  'pipeline parser must reject an additional asset upload before reconciliation',
 );
 const replacementFiBeforeIdFixture = canonicalAssetFixture.replace(
   'elif [ "$matching_count" -eq 1 ]; then\nexisting_id=',
