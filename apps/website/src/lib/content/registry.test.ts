@@ -95,6 +95,25 @@ describe('manual content registry', () => {
     ['sources.collections', 'source-library/collections', 'quellenbibliothek/sammlungen'],
     ['sources.upload', 'source-library/upload-pdfs', 'quellenbibliothek/pdfs-importieren'],
     ['sources.ingestion', 'source-library/indexing', 'quellenbibliothek/indizierung'],
+    ['campaigns.overview', 'campaigns/overview', 'kampagnen/ueberblick'],
+    ['campaigns.manage', 'campaigns/manage', 'kampagnen/verwalten'],
+    ['campaigns.sources', 'campaigns/source-access', 'kampagnen/quellenzugriff'],
+    ['codex.overview', 'codex/overview', 'kodex/ueberblick'],
+    ['codex.compile', 'codex/compile', 'kodex/kompilieren'],
+    ['codex.articles-notes', 'codex/articles-and-notes', 'kodex/artikel-und-notizen'],
+    ['codex.rules', 'codex/rule-types', 'kodex/regelarten'],
+    ['codex.objections', 'codex/redo-with-objections', 'kodex/mit-einwaenden-neu-erstellen'],
+    ['codex.identity', 'codex/names-and-duplicates', 'kodex/namen-und-duplikate'],
+    ['codex.health', 'codex/maintenance', 'kodex/wartung'],
+    ['notes.notes', 'notes-and-sessions/notes', 'notizen-und-sitzungen/notizen'],
+    ['notes.sessions', 'notes-and-sessions/session-log', 'notizen-und-sitzungen/sitzungsprotokoll'],
+    ['notes.chat-history', 'notes-and-sessions/chat-history', 'notizen-und-sitzungen/chatverlauf'],
+    [
+      'questions.ask',
+      'notes-and-sessions/asking-questions',
+      'notizen-und-sitzungen/fragen-stellen',
+    ],
+    ['questions.citations', 'notes-and-sessions/citations', 'notizen-und-sitzungen/quellenangaben'],
   ])('loads the canonical %s translation pair', (translationKey, englishSlug, germanSlug) => {
     const english = getArticle('en', englishSlug);
     const german = getArticle('de', germanSlug);
