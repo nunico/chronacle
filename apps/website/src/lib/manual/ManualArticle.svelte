@@ -1,8 +1,6 @@
 <script module lang="ts">
-  import Callout from './Callout.svelte';
-
   // mdsvex exposes named exports from its layout to manual Markdown documents.
-  export { Callout };
+  export { default as Callout } from './Callout.svelte';
 </script>
 
 <script lang="ts">
@@ -44,9 +42,7 @@
           suffix += 1;
         }
         used.push(id);
-        if (!heading.id) {
-          heading.id = id;
-        }
+        heading.id = id;
         return {
           id,
           text: heading.textContent?.trim() || id,
@@ -63,21 +59,28 @@
       const region = document.createElement('div');
       region.className = 'manual-table-scroll';
       region.setAttribute('role', 'region');
-      region.setAttribute('aria-label', locale === 'de' ? 'Scrollbare Tabelle' : 'Scrollable table');
+      region.setAttribute(
+        'aria-label',
+        locale === 'de' ? 'Scrollbare Tabelle' : 'Scrollable table',
+      );
       region.tabIndex = 0;
       table.before(region);
       region.append(table);
     }
   };
 
-  const indexLabel = $derived(locale === 'de' ? 'Abschnitte auf dieser Seite' : 'Sections on this page');
+  const indexLabel = $derived(
+    locale === 'de' ? 'Abschnitte auf dieser Seite' : 'Sections on this page',
+  );
 </script>
 
 <article class="manual-article">
-  <header data-pagefind-body>
-    <p class="manual-article__eyebrow">{locale === 'de' ? 'Chronacle-Handbuch' : 'Chronacle manual'}</p>
-    <h1>{title}</h1>
-    <p class="manual-article__summary">{summary}</p>
+  <header>
+    <p class="manual-article__eyebrow">
+      {locale === 'de' ? 'Chronacle-Handbuch' : 'Chronacle manual'}
+    </p>
+    <h1 data-pagefind-body>{title}</h1>
+    <p class="manual-article__summary" data-pagefind-body>{summary}</p>
   </header>
 
   {#if headings.length > 0}

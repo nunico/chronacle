@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import EyeMark from '$lib/brand/EyeMark.svelte';
   import type { ManualArticle, ManualHeading } from '$lib/content/types';
   import ArticleNavigation from './ArticleNavigation.svelte';
@@ -11,7 +12,9 @@
 
   const Article = $derived(article.component);
   let headings = $derived<ManualHeading[]>(article.headings ?? []);
-  const homeLabel = $derived(article.locale === 'de' ? 'Zur Chronacle-Startseite' : 'Chronacle home');
+  const homeLabel = $derived(
+    article.locale === 'de' ? 'Zur Chronacle-Startseite' : 'Chronacle home',
+  );
 
   function setHeadings(nextHeadings: ManualHeading[]): void {
     headings = nextHeadings;
@@ -20,7 +23,7 @@
 
 <header class="manual-header">
   <div class="manual-header__inner">
-    <a class="manual-header__brand" href="/" aria-label={homeLabel}>
+    <a class="manual-header__brand" href={resolve('/')} aria-label={homeLabel}>
       <EyeMark size={34} glow={false} />
       <span>Chron<span aria-hidden="true">a</span>cle</span>
     </a>
@@ -37,13 +40,19 @@
     <ManualSidebar locale={article.locale} currentSlug={article.slug} />
   </aside>
 
-  <section class="manual-shell__content" aria-label={article.locale === 'de' ? 'Handbuchartikel' : 'Manual article'}>
+  <section
+    class="manual-shell__content"
+    aria-label={article.locale === 'de' ? 'Handbuchartikel' : 'Manual article'}
+  >
     <Breadcrumbs {article} />
     <Article onheadings={setHeadings} />
     <ArticleNavigation {article} />
   </section>
 
-  <aside class="manual-shell__toc" aria-label={article.locale === 'de' ? 'Seitenübersicht' : 'Page outline'}>
+  <aside
+    class="manual-shell__toc"
+    aria-label={article.locale === 'de' ? 'Seitenübersicht' : 'Page outline'}
+  >
     <TableOfContents {headings} locale={article.locale} />
   </aside>
 </div>

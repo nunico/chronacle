@@ -1,4 +1,5 @@
 import type { Locale, ManualSegment } from './types';
+import type { Pathname } from '$app/types';
 
 const manualSegments: Record<Locale, ManualSegment> = {
   en: 'manual',
@@ -9,7 +10,7 @@ export function browserPreferredLocale(languages: readonly string[]): Locale {
   return languages[0]?.toLowerCase().startsWith('de') ? 'de' : 'en';
 }
 
-export function manualBase(locale: Locale): string {
+export function manualBase(locale: Locale): Pathname {
   return `/${locale}/${manualSegments[locale]}`;
 }
 

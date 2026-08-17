@@ -1,9 +1,11 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
+import { createRawSnippet } from 'svelte';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { getArticle } from '$lib/content/registry';
 import type { ManualArticle } from '$lib/content/types';
 import ManualShell from './ManualShell.svelte';
+import ManualArticleLayout from './ManualArticle.svelte';
 
 vi.mock('$lib/content/registry', async (importOriginal) => {
   const registry = await importOriginal<typeof import('$lib/content/registry')>();
@@ -79,10 +81,7 @@ describe('ManualShell', () => {
       'href',
       '/en/manual/after',
     );
-    expect(screen.getByRole('link', { name: /deutsch/i })).toHaveAttribute(
-      'href',
-      '/de/handbuch',
-    );
+    expect(screen.getByRole('link', { name: /deutsch/i })).toHaveAttribute('href', '/de/handbuch');
   });
 
   it('builds an h2/h3 outline without including h1 or h4 headings', async () => {
@@ -91,8 +90,44 @@ describe('ManualShell', () => {
     const outline = await screen.findByRole('navigation', { name: 'On this page' });
     expect(within(outline).getByRole('link', { name: 'What you will find' })).toBeInTheDocument();
     expect(within(outline).getByRole('link', { name: 'At the table' })).toBeInTheDocument();
-    expect(within(outline).queryByRole('link', { name: 'Chronacle Manual' })).not.toBeInTheDocument();
+    expect(
+      within(outline).queryByRole('link', { name: 'Chronacle Manual' }),
+    ).not.toBeInTheDocument();
     expect(within(outline).queryByRole('link', { name: 'A small detail' })).not.toBeInTheDocument();
+  });
+
+  it('marks only the title, summary, and article body for Pagefind', () => {
+    const { container } = render(ManualShell, { article: getArticle('en', 'overview') });
+
+    const indexed = Array.from(container.querySelectorAll('[data-pagefind-body]'));
+    expect(indexed).toHaveLength(3);
+    expect(indexed[0]).toBe(screen.getByRole('heading', { level: 1, name: 'Chronacle Manual' }));
+    expect(indexed[1]).toHaveTextContent('Learn what this manual covers');
+    expect(indexed[2]).toHaveClass('manual-article__body');
+    expect(container.querySelector('.manual-article__eyebrow')).not.toHaveAttribute(
+      'data-pagefind-body',
+    );
+  });
+
+  it('rewrites colliding discovered heading IDs to their unique TOC targets', () => {
+    const onheadings = vi.fn();
+    const children = createRawSnippet(() => ({
+      render: () => '<div><h2 id="duplicate">First</h2><h3 id="duplicate">Second</h3></div>',
+    }));
+    const { container } = render(ManualArticleLayout, {
+      children,
+      title: 'Collision fixture',
+      summary: 'Heading collision fixture',
+      locale: 'en',
+      onheadings,
+    });
+
+    expect(container.querySelectorAll('h2, h3')[0]).toHaveAttribute('id', 'duplicate');
+    expect(container.querySelectorAll('h2, h3')[1]).toHaveAttribute('id', 'duplicate-2');
+    expect(onheadings).toHaveBeenCalledWith([
+      { id: 'duplicate', text: 'First', level: 2 },
+      { id: 'duplicate-2', text: 'Second', level: 3 },
+    ]);
   });
 
   it('links the German manual back to the single landing route', () => {

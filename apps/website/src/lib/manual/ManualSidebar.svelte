@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { articlesFor } from '$lib/content/registry';
   import { manualSections, sectionLabel } from '$lib/content/sections';
   import type { Locale } from '$lib/i18n/types';
@@ -27,7 +28,7 @@
           {#each sectionArticles as article (article.href)}
             <li>
               <a
-                href={article.href}
+                href={resolve(article.href)}
                 aria-current={article.slug === currentSlug ? 'page' : undefined}
               >
                 {article.navTitle ?? article.title}

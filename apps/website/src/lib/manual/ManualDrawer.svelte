@@ -36,9 +36,9 @@
   function focusableElements(): HTMLElement[] {
     return dialog
       ? Array.from(
-      dialog.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      ),
+          dialog.querySelectorAll<HTMLElement>(
+            'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          ),
         )
       : [];
   }
@@ -114,12 +114,7 @@
 >
   <div class="manual-drawer__header">
     <strong>{label}</strong>
-    <button
-      {@attach attachCloseButton}
-      type="button"
-      aria-label={closeLabel}
-      onclick={closeDrawer}
-    >
+    <button {@attach attachCloseButton} type="button" aria-label={closeLabel} onclick={closeDrawer}>
       <Icon icon={X} size={18} />
     </button>
   </div>

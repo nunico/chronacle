@@ -1,4 +1,5 @@
 import type { Component } from 'svelte';
+import type { Pathname } from '$app/types';
 import type { Locale } from '$lib/i18n/types';
 
 export type ManualSectionId =
@@ -29,7 +30,7 @@ export interface ManualFrontmatter {
 
 export interface ManualArticle extends ManualFrontmatter {
   component: Component;
-  href: string;
+  href: Pathname;
 }
 
 export interface ManualHeading {
