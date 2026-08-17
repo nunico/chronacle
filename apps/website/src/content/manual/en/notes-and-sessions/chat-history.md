@@ -21,7 +21,7 @@ headings:
     level: 2
 ---
 
-Completed questions and answers are saved in time order, and selecting a campaign loads only messages stored for that campaign.
+Questions and completed answers are saved in time order, and selecting a campaign loads only messages stored for that campaign.
 
 <h2 id="how-history-is-scoped">How history is scoped</h2>
 
