@@ -18,7 +18,7 @@
   );
 </script>
 
-<nav class="manual-sidebar" aria-label={label}>
+<nav class="manual-sidebar" aria-label={label} data-pagefind-ignore>
   {#each manualSections as section (section)}
     {@const sectionArticles = articles.filter((article) => article.section === section)}
     {#if sectionArticles.length > 0}

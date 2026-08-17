@@ -19,6 +19,8 @@ headings:
 
 This manual shows you how to set up Chronacle, bring in your campaign material, and use its tools while preparing and running your games.
 
+<button type="button" class="manual-search-trigger" data-manual-search data-pagefind-ignore>Search the manual</button>
+
 <h3 id="at-the-table">At the table</h3>
 
 Use the section index to move directly to the answer you need.

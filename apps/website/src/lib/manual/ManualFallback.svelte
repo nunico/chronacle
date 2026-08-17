@@ -8,7 +8,7 @@
   );
 </script>
 
-<aside class="manual-fallback">
+<aside class="manual-fallback" data-pagefind-ignore>
   <ManualSidebar {locale} {currentSlug} {navigationLabel} />
 </aside>
 

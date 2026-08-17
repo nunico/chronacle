@@ -7,18 +7,20 @@
   import type { Snippet } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import type { Locale } from '$lib/i18n/types';
-  import type { ManualHeading } from '$lib/content/types';
+  import type { ManualHeading, ManualSectionId } from '$lib/content/types';
+  import { sectionLabel } from '$lib/content/sections';
 
   interface Props {
     children: Snippet;
     title: string;
     summary: string;
     locale: Locale;
+    section: ManualSectionId;
     headings?: ManualHeading[];
     onheadings?: (headings: ManualHeading[]) => void;
   }
 
-  let { children, title, summary, locale, headings = [], onheadings }: Props = $props();
+  let { children, title, summary, locale, section, headings = [], onheadings }: Props = $props();
 
   function safeId(text: string): string {
     const id = text
@@ -76,8 +78,8 @@
 
 <article class="manual-article">
   <header>
-    <p class="manual-article__eyebrow">
-      {locale === 'de' ? 'Chronacle-Handbuch' : 'Chronacle manual'}
+    <p class="manual-article__eyebrow" data-pagefind-meta="section">
+      {sectionLabel(locale, section)}
     </p>
     <h1 data-pagefind-body>{title}</h1>
     <p class="manual-article__summary" data-pagefind-body>{summary}</p>
@@ -200,6 +202,21 @@
   .manual-article__body :global(table) {
     width: 100%;
     border-collapse: collapse;
+  }
+
+  .manual-article__body :global(.manual-search-trigger) {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-2);
+    margin: var(--s-4) 0;
+    padding: var(--s-3) var(--s-4);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    background: linear-gradient(135deg, rgb(61 91 255 / 14%), rgb(123 92 255 / 9%));
+    color: var(--gem-bright);
+    font-family: var(--font-sans);
+    font-weight: 650;
+    cursor: pointer;
   }
 
   .manual-article__body :global(th),

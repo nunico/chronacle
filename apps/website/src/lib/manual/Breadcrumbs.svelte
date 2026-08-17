@@ -13,6 +13,7 @@
 <nav
   class="breadcrumbs"
   aria-label={article.locale === 'de' ? 'Brotkrümelnavigation' : 'Breadcrumbs'}
+  data-pagefind-ignore
 >
   <ol>
     <li><a href={resolve('/')}>{homeLabel}</a></li>

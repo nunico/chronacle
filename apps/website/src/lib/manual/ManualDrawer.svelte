@@ -111,6 +111,7 @@
   aria-label={label}
   oncancel={handleCancel}
   onkeydown={handleKeydown}
+  data-pagefind-ignore
 >
   <div class="manual-drawer__header">
     <strong>{label}</strong>
