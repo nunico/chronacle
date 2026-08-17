@@ -117,7 +117,7 @@
   }
 
   .button-link--primary {
-    background: var(--grad-arcane);
+    background: var(--grad-action);
     box-shadow:
       var(--glow-arcane),
       inset 0 1px 0 rgb(255 255 255 / 22%);
