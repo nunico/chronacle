@@ -747,6 +747,36 @@ CARGO_BUILD_JOBS=1 mise exec -- scripts/ci/backend-quality.sh
 Expected: all focused repetitions and the complete backend-quality gate pass. Commit
 `vault_watcher.rs` with subject `fix: coalesce vault watcher event sources`.
 
+- [ ] **Release-gate amendment: resolve Linux packaged native runtimes**
+
+Add test seams in `apps/desktop/src-tauri/src/lib.rs` and
+`crates/chronacle-providers/src/embedding/local.rs` that accept an executable directory. In each
+module, create a temporary `<prefix>/bin` plus
+`<prefix>/lib/Chronacle/resources/<runtime>/<library>` layout and assert that the resolver returns
+the existing Linux package library. Run the focused tests first and confirm they fail before the
+Linux candidate exists.
+
+Then add `<exe-dir>/../lib/Chronacle/resources/pdfium/<library>` and
+`<exe-dir>/../lib/Chronacle/resources/onnxruntime/<library>` to the respective packaged lookup
+orders, retaining the existing macOS bundle and adjacent-resource candidates. Extend
+`scripts/ci/test-release-flatpak.sh` so its manifest contract requires the `/app/bin` executable
+and `/app/lib/Chronacle/resources` layout that the resolver supports.
+
+Verify with:
+
+```bash
+CHRONACLE_SKIP_RUNTIME_DOWNLOADS=1 CARGO_BUILD_JOBS=1 mise exec -- \
+  cargo test -p Chronacle packaged_pdfium -- --nocapture
+CHRONACLE_SKIP_RUNTIME_DOWNLOADS=1 CARGO_BUILD_JOBS=1 mise exec -- \
+  cargo test -p chronacle-providers packaged_onnxruntime -- --nocapture
+mise exec -- scripts/ci/test-release-flatpak.sh
+CARGO_BUILD_JOBS=1 mise exec -- scripts/ci/backend-quality.sh
+```
+
+Expected: both focused resolver tests, the Flatpak contract, and complete backend-quality gate
+pass. Commit the resolver and contract changes with subject
+`fix: resolve Linux packaged native runtimes`.
+
 - [ ] **Step 1: Run focused contracts**
 
 ```bash
