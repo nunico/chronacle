@@ -4,9 +4,7 @@
 
   let { locale, currentSlug }: { locale: Locale; currentSlug: string } = $props();
   const navigationLabel = $derived(
-    locale === 'de'
-      ? 'Handbuchnavigation ohne JavaScript'
-      : 'Manual navigation without JavaScript',
+    locale === 'de' ? 'Handbuchnavigation ohne JavaScript' : 'Manual navigation without JavaScript',
   );
 </script>
 

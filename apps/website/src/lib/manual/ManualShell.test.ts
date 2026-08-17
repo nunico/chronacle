@@ -98,10 +98,7 @@ describe('ManualShell', () => {
       'aria-label',
       'Manual navigation without JavaScript',
     );
-    expect(fallback.querySelector('a[aria-current="page"]')).toHaveAttribute(
-      'href',
-      '/en/manual',
-    );
+    expect(fallback.querySelector('a[aria-current="page"]')).toHaveAttribute('href', '/en/manual');
     expect(fallback.querySelectorAll('a')).toHaveLength(3);
   });
 
