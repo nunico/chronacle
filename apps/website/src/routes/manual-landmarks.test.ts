@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import ManualArticlePage from './[locale=locale]/[manual=manual]/[...slug]/+page.svelte';
+import { load as loadManualArticle } from './[locale=locale]/[manual=manual]/[...slug]/+page';
 import ManualRootPage from './[locale=locale]/[manual=manual]/+page.svelte';
 
 const data = {
@@ -29,5 +30,21 @@ describe('manual route landmarks', () => {
 
     expect(screen.queryByRole('main')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Chronacle Manual' })).toBeInTheDocument();
+  });
+
+  it('loads nested article slugs when the trailing slash is captured by the rest parameter', () => {
+    const result = loadManualArticle({
+      params: {
+        locale: 'de',
+        manual: 'handbuch',
+        slug: 'fehlerbehebung/haeufige-probleme/',
+      },
+    } as Parameters<typeof loadManualArticle>[0]);
+
+    expect(result).toMatchObject({
+      locale: 'de',
+      slug: 'fehlerbehebung/haeufige-probleme',
+      title: 'Häufige Suchprobleme',
+    });
   });
 });

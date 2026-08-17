@@ -1,5 +1,5 @@
 import type { Component } from 'svelte';
-import { getArticle, getTranslation, validateArticles } from './registry';
+import { getArticle, getTranslation, manualEntries, validateArticles } from './registry';
 import type { ManualArticle, ManualFrontmatter } from './types';
 
 const component = (() => undefined) as unknown as Component;
@@ -37,6 +37,41 @@ describe('manual content registry', () => {
 
   it('links the English overview to its German translation', () => {
     expect(getTranslation('en', 'overview').href).toBe('/de/handbuch');
+  });
+
+  it('loads the canonical paired common-problems troubleshooting routes', () => {
+    const english = getArticle('en', 'troubleshooting/common-problems');
+    const german = getArticle('de', 'fehlerbehebung/haeufige-probleme');
+
+    expect(english).toMatchObject({
+      translationKey: 'troubleshooting.common',
+      section: 'troubleshooting',
+      order: 1,
+      href: '/en/manual/troubleshooting/common-problems',
+    });
+    expect(german).toMatchObject({
+      translationKey: 'troubleshooting.common',
+      section: 'troubleshooting',
+      order: 1,
+      href: '/de/handbuch/fehlerbehebung/haeufige-probleme',
+    });
+    expect(english.headings).toHaveLength(2);
+    expect(german.headings).toHaveLength(2);
+    expect(getTranslation('en', english.slug).href).toBe(german.href);
+    expect(manualEntries()).toEqual(
+      expect.arrayContaining([
+        {
+          locale: 'en',
+          manual: 'manual',
+          slug: 'troubleshooting/common-problems',
+        },
+        {
+          locale: 'de',
+          manual: 'handbuch',
+          slug: 'fehlerbehebung/haeufige-probleme',
+        },
+      ]),
+    );
   });
 
   it('rejects duplicate routes within a locale', () => {

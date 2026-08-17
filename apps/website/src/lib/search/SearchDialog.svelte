@@ -77,7 +77,7 @@
           emptyTitle: 'Thema ausprobieren',
           overview: 'Handbuchüberblick',
           gettingStarted: 'Erste Schritte',
-          atTable: 'Am Spieltisch',
+          troubleshooting: 'Fehlerbehebung',
           noResults: 'Keine Ergebnisse gefunden.',
           unavailable:
             'Die Suche ist derzeit nicht verfügbar. Du kannst das Handbuch weiterhin durchsuchen.',
@@ -92,7 +92,7 @@
           emptyTitle: 'Try a topic',
           overview: 'Manual overview',
           gettingStarted: 'Getting started',
-          atTable: 'At the table',
+          troubleshooting: 'Troubleshooting',
           noResults: 'No results found.',
           unavailable: 'Search is unavailable right now. You can still browse the manual.',
           result: 'result',
@@ -104,8 +104,10 @@
   const gettingStartedHref = $derived(
     locale === 'de' ? '/de/handbuch/#inhalt' : '/en/manual/#what-you-will-find',
   );
-  const atTableHref = $derived(
-    locale === 'de' ? '/de/handbuch/#am-spieltisch' : '/en/manual/#at-the-table',
+  const troubleshootingHref = $derived(
+    locale === 'de'
+      ? '/de/handbuch/fehlerbehebung/haeufige-probleme'
+      : '/en/manual/troubleshooting/common-problems',
   );
   const activeResultId = $derived(
     activeIndex >= 0 && results[activeIndex] ? `${componentId}-result-${activeIndex}` : undefined,
@@ -382,7 +384,7 @@
         <p>{labels.unavailable}</p>
         <nav aria-label={locale === 'de' ? 'Handbuchlinks' : 'Manual links'}>
           <a href={resolve(overviewHref)}>{labels.overview}</a>
-          <a href={resolve(atTableHref)}>{labels.atTable}</a>
+          <a href={resolve(troubleshootingHref)}>{labels.troubleshooting}</a>
         </nav>
       </div>
     {:else if query.trim() === ''}
@@ -398,7 +400,7 @@
         <p>{labels.noResults}</p>
         <nav aria-label={locale === 'de' ? 'Handbuchlinks' : 'Manual links'}>
           <a href={resolve(overviewHref)}>{labels.overview}</a>
-          <a href={resolve(atTableHref)}>{labels.atTable}</a>
+          <a href={resolve(troubleshootingHref)}>{labels.troubleshooting}</a>
         </nav>
       </div>
     {:else if results.length > 0}
