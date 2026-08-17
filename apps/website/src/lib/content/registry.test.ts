@@ -74,6 +74,37 @@ describe('manual content registry', () => {
     );
   });
 
+  it.each([
+    ['getting-started.quick-start', 'getting-started/quick-start', 'erste-schritte/schnellstart'],
+    ['getting-started.install', 'getting-started/install', 'erste-schritte/installieren'],
+    [
+      'getting-started.first-answer',
+      'getting-started/first-answer',
+      'erste-schritte/erste-antwort',
+    ],
+    ['providers.choose', 'ai-providers/choose', 'ki-anbieter/auswahl'],
+    ['providers.online', 'ai-providers/online', 'ki-anbieter/online'],
+    ['providers.local', 'ai-providers/local', 'ki-anbieter/lokal'],
+    ['providers.custom', 'ai-providers/custom', 'ki-anbieter/eigene-anbieter'],
+    [
+      'providers.language-search',
+      'ai-providers/language-and-search',
+      'ki-anbieter/sprache-und-suche',
+    ],
+    ['sources.overview', 'source-library/overview', 'quellenbibliothek/ueberblick'],
+    ['sources.collections', 'source-library/collections', 'quellenbibliothek/sammlungen'],
+    ['sources.upload', 'source-library/upload-pdfs', 'quellenbibliothek/pdfs-importieren'],
+    ['sources.ingestion', 'source-library/indexing', 'quellenbibliothek/indizierung'],
+  ])('loads the canonical %s translation pair', (translationKey, englishSlug, germanSlug) => {
+    const english = getArticle('en', englishSlug);
+    const german = getArticle('de', germanSlug);
+
+    expect(english.translationKey).toBe(translationKey);
+    expect(german.translationKey).toBe(translationKey);
+    expect(getTranslation('en', englishSlug).href).toBe(german.href);
+    expect(getTranslation('de', germanSlug).href).toBe(english.href);
+  });
+
   it('rejects duplicate routes within a locale', () => {
     const duplicate = article({ translationKey: 'manual.duplicate' });
 
