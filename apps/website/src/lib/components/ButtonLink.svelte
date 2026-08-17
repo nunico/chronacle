@@ -136,7 +136,6 @@
   .button-link--outline:hover {
     border-color: var(--line-glow);
     background: var(--bg-panel);
-    box-shadow: var(--glow-arcane);
   }
 
   .button-link--ghost {
