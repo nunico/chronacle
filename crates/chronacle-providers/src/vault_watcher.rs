@@ -92,24 +92,10 @@ impl VaultWatcher for NotifyWatcher {
                 return;
             }
 
-            let mut pending: Vec<VaultEvent> = Vec::new();
-            loop {
-                // Wait for the first event of a burst…
-                let Some(first) = raw_rx.recv().await else {
-                    break;
-                };
-                collect(&native_root, first, &mut pending);
-                // …then absorb the burst until a quiet window elapses.
-                loop {
-                    match tokio::time::timeout(debounce, raw_rx.recv()).await {
-                        Ok(Some(ev)) => collect(&native_root, ev, &mut pending),
-                        Ok(None) => return, // channel closed
-                        Err(_elapsed) => break,
-                    }
-                }
-                pending.sort_unstable_by(event_order);
-                pending.dedup();
-                for ev in pending.drain(..) {
+            while let Some(raw) = raw_rx.recv().await {
+                let mut events = Vec::new();
+                collect(&native_root, raw, &mut events);
+                for ev in events {
                     if native_event_tx.send(ev).is_err() {
                         return; // consumer dropped; stop watching
                     }
