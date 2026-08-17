@@ -97,14 +97,17 @@ Release builds are configured for these platforms and architectures:
 | Windows  | x86_64               | MSI, NSIS; usable on Windows 11 Arm through x64 emulation |
 
 Download the package for your system from the GitHub release. Flatpak users should select the
-single-file bundle matching their Linux architecture and install it with one of these commands:
+single-file bundle matching their Linux architecture. Set `VERSION` to the release version without
+the leading `v`, then install it with the matching command:
 
 ```bash
+VERSION=1.2.3
+
 # x86_64 Linux
-flatpak install --user ./Chronacle_<version>_x86_64.flatpak
+flatpak install --user "./Chronacle_${VERSION}_x86_64.flatpak"
 
 # aarch64 Linux
-flatpak install --user ./Chronacle_<version>_aarch64.flatpak
+flatpak install --user "./Chronacle_${VERSION}_aarch64.flatpak"
 
 flatpak run dev.tea-driven.chronacle.desktop
 ```
