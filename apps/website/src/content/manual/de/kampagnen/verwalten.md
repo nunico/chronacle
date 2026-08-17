@@ -37,7 +37,7 @@ Wähle den Papierkorb und dann eine von zwei Folgen: **Kampagne und ihre Notizen
 
 <h2 id="beispiel">Beispiel</h2>
 
-Erstelle **Das Glutarchiv** mit dem System **W12-Hausregeln** und füge `Feldnotizen des Glutarchivs.pdf` zur eigenen Sammlung hinzu. Endet das Spiel, du möchtest dieses sammlungsbezogene Material aber behalten, wähle **Notizen als reguläre Sammlung behalten**. Danach kannst du die Sammlung für eine andere Kampagne abonnieren. Prüfe die Befunde zu entfernten internen Beziehungen in **Wartung**; Chronacle stellt diese Beziehungen nicht automatisch wieder her.
+Erstelle **Das Glutarchiv** mit dem System **W12-Hausregeln** und füge `Feldnotizen des Glutarchivs.pdf` zur eigenen Sammlung hinzu. Wenn das Spiel endet und du dieses sammlungsbezogene Material behalten möchtest, wähle **Notizen als reguläre Sammlung behalten**. Danach kannst du die Sammlung für eine andere Kampagne abonnieren. Prüfe die Befunde zu entfernten internen Beziehungen in **Wartung**; Chronacle stellt diese Beziehungen nicht automatisch wieder her.
 
 <h2 id="beachten">Beachten</h2>
 

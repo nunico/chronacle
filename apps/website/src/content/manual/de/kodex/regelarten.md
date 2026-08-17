@@ -46,5 +46,5 @@ Suche **Schleierschritt**. Chronacle kann ihn unter **Fähigkeit** einordnen und
 <h2 id="tipps">Tipps</h2>
 
 - Unbekannte erzeugte Kategorien werden zu **Eintrag**.
-- Eine **Ressource** wird ausgegeben und erholt; eine **Statistik** wird gelesen oder verändert.
+- Eine **Ressource** wird ausgegeben und wiedergewonnen; eine **Statistik** wird gelesen oder verändert.
 - Kategorie und Zusammenfassung sind erzeugt. Prüfe deshalb die Seitenangabe.

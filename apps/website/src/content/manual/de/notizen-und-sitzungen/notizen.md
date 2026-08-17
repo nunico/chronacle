@@ -42,7 +42,7 @@ Erstelle den NSC **Mara Venn** mit der Zusammenfassung „Fährmeisterin von Gra
 
 > Schuldet [[Iria Pell]] nach dem Brand am Nordkai einen Gefallen. Versprach der Gruppe eine Überfahrt bei Mondaufgang.
 
-Nach dem Speichern kann die Verknüpfung Irias Eintrag öffnen. Eine Kampagnenfrage kann Maras gespeicherte Fakten als Kontext verwenden.
+Nach dem Speichern zeigt die Vorschau Iria als Entitätsmarke. Diese Marke dient in der aktuellen Vorschau gespeicherter Notizen nur zur Anzeige und öffnet Irias Eintrag nicht. Eine Kampagnenfrage kann Maras gespeicherte Fakten trotzdem als Kontext verwenden.
 
 <h2 id="aktuelle-grenzen">Aktuelle Grenzen</h2>
 

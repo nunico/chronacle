@@ -38,7 +38,7 @@ Fragen in dieser Kampagne können passende PDF-Textstellen, kompilierte Regeln u
 
 <h2 id="beispiel">Beispiel</h2>
 
-Abonniere **Der Messinggarten** für **Gartenalmanach** und **Gemeinsame Verfahren**, aber nicht für **Bestiarium der Tiefsee**. Frage:
+Abonniere für die Kampagne **Der Messinggarten** die Sammlungen **Gartenalmanach** und **Gemeinsame Verfahren**, aber nicht **Bestiarium der Tiefsee**. Frage:
 
 > Was öffnet das westliche Samengewölbe?
 

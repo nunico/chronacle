@@ -25,7 +25,7 @@ Completed questions and answers are saved in time order, and selecting a campaig
 
 <h2 id="how-history-is-scoped">How history is scoped</h2>
 
-The question is saved when a request begins; a completed answer is saved when generation finishes. Switching campaigns reloads the thread for the newly selected campaign. With no campaign selected, the current app requests the complete stored message history rather than a separate global-only thread.
+A question is saved when it is sent, including when the later response is cancelled or fails. A completed answer is saved when generation finishes. Switching campaigns reloads the thread for the newly selected campaign. With no campaign selected, the current app requests the complete stored message history rather than a separate global-only thread.
 
 <h2 id="revisit-a-thread">Revisit a thread</h2>
 

@@ -28,7 +28,7 @@ Die Ansicht **Sitzungen** führt ein nummeriertes Kampagnenprotokoll; Titel, Dat
 <h2 id="sitzung-festhalten">Sitzung festhalten</h2>
 
 1. Wähle eine Kampagne und öffne **Sitzungen**.
-2. Wähle **Neue Sitzung**. Chronacle setzt die nächste Sitzungsnummer, das heutige Datum und einen Titel wie **Sitzung 4**.
+2. Wähle **Neue Sitzung**. Chronacle setzt die nächste Sitzungsnummer, trägt ein Datum aus dem UTC-Datum des Computers ein und ergänzt einen Titel wie **Sitzung 4**. Prüfe das Datum und passe es an dein örtliches Spieldatum an.
 3. Klappe die Zeile auf und bearbeite **Name**, **Gespieltes Datum** und **Notizen**.
 4. Verwende `[[Entitätsname]]` im Rückblick. Klicke aus einem Feld heraus, um es zu speichern.
 
