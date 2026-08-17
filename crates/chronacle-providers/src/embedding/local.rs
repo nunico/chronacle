@@ -137,22 +137,24 @@ pub fn ort_dylib_name() -> &'static str {
 /// `crates/chronacle-providers`, which holds no `resources/`. The desktop shell
 /// bridges that gap by setting `ORT_DYLIB_PATH` from its own crate's resource
 /// dir (see `resolve_onnxruntime_library_path`).
+fn packaged_onnxruntime_library_path(exe_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let prefix = exe_dir.parent()?;
+    [
+        prefix
+            .join("Resources/resources/onnxruntime")
+            .join(ORT_DYLIB_NAME),
+        prefix
+            .join("lib/Chronacle/resources/onnxruntime")
+            .join(ORT_DYLIB_NAME),
+        exe_dir.join("resources/onnxruntime").join(ORT_DYLIB_NAME),
+    ]
+    .into_iter()
+    .find(|path| path.exists())
+}
+
 fn bundled_onnxruntime_library_path() -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let exe_dir = exe.parent()?;
-    // macOS bundle: <exe>/../Resources/resources/onnxruntime/<lib>.
-    let mac = exe_dir
-        .join("../Resources/resources/onnxruntime")
-        .join(ORT_DYLIB_NAME);
-    if mac.exists() {
-        return Some(mac);
-    }
-    // Other platforms: <exe>/resources/onnxruntime/<lib>.
-    let other = exe_dir.join("resources/onnxruntime").join(ORT_DYLIB_NAME);
-    if other.exists() {
-        return Some(other);
-    }
-    None
+    packaged_onnxruntime_library_path(exe.parent()?)
 }
 
 /// Locate a system- or Homebrew-installed ONNX Runtime library.
@@ -359,5 +361,25 @@ impl EmbeddingProvider for FastEmbedProvider {
 
     fn model_name(&self) -> &str {
         self.name
+    }
+}
+
+#[cfg(test)]
+mod packaged_resource_tests {
+    use super::*;
+
+    #[test]
+    fn packaged_onnxruntime_resolves_from_linux_lib_directory() {
+        let root = tempfile::TempDir::new().unwrap();
+        let exe_dir = root.path().join("bin");
+        let library = root
+            .path()
+            .join("lib/Chronacle/resources/onnxruntime")
+            .join(ORT_DYLIB_NAME);
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        std::fs::create_dir_all(library.parent().unwrap()).unwrap();
+        std::fs::write(&library, b"test library").unwrap();
+
+        assert_eq!(packaged_onnxruntime_library_path(&exe_dir), Some(library));
     }
 }

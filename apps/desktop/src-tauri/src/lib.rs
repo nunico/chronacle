@@ -200,6 +200,21 @@ fn register_bundled_ort_dylib() {
 /// `CARGO_MANIFEST_DIR` (set at compile time). In a bundled app the dylib is
 /// shipped alongside the executable in the platform-specific resource path.
 #[cfg(feature = "rocksdb")]
+fn packaged_pdfium_library_path(
+    exe_dir: &std::path::Path,
+    name: &str,
+) -> Option<std::path::PathBuf> {
+    let prefix = exe_dir.parent()?;
+    [
+        prefix.join("Resources/resources/pdfium").join(name),
+        prefix.join("lib/Chronacle/resources/pdfium").join(name),
+        exe_dir.join("resources/pdfium").join(name),
+    ]
+    .into_iter()
+    .find(|path| path.exists())
+}
+
+#[cfg(feature = "rocksdb")]
 fn pdfium_library_path() -> std::path::PathBuf {
     let name = if cfg!(target_os = "macos") {
         "libpdfium.dylib"
@@ -215,23 +230,41 @@ fn pdfium_library_path() -> std::path::PathBuf {
     if dev.exists() {
         return dev;
     }
-    // Bundled app: try <exe-dir>/../Resources/resources/pdfium/<lib> on mac,
-    // <exe-dir>/resources/pdfium/<lib> elsewhere.
+    // Packaged app: try the macOS bundle, Linux /usr|app/lib/Chronacle,
+    // and the adjacent-resource layout in that order.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
-            let mac_resources = exe_dir.join("../Resources/resources/pdfium").join(name);
-            if mac_resources.exists() {
-                return mac_resources;
-            }
-            let other = exe_dir.join("resources/pdfium").join(name);
-            if other.exists() {
-                return other;
+            if let Some(packaged) = packaged_pdfium_library_path(exe_dir, name) {
+                return packaged;
             }
         }
     }
     // Last resort: return the dev path (extraction will fail with a clear
     // LibLoad error if the file is genuinely missing).
     dev
+}
+
+#[cfg(all(test, feature = "rocksdb"))]
+mod packaged_resource_tests {
+    use super::*;
+
+    #[test]
+    fn packaged_pdfium_resolves_from_linux_lib_directory() {
+        let root = tempfile::TempDir::new().unwrap();
+        let exe_dir = root.path().join("bin");
+        let library = root
+            .path()
+            .join("lib/Chronacle/resources/pdfium")
+            .join("libpdfium.so");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        std::fs::create_dir_all(library.parent().unwrap()).unwrap();
+        std::fs::write(&library, b"test library").unwrap();
+
+        assert_eq!(
+            packaged_pdfium_library_path(&exe_dir, "libpdfium.so"),
+            Some(library)
+        );
+    }
 }
 
 /// Determines the application data directory, creating it if needed.
