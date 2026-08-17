@@ -1,6 +1,6 @@
 # Flatpak and Intel macOS Release Design
 
-**Date:** 2026-08-16  
+**Date:** 2026-08-16
 **Status:** Approved
 
 ## Goal
