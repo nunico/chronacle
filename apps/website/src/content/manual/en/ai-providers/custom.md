@@ -28,7 +28,7 @@ Add the service address once, attach one or more model IDs, then select it as th
 1. In **Settings**, open **Custom providers** and choose **Add custom provider**.
 2. Enter a recognizable **Provider name**.
 3. Choose **OpenAI-compatible** or **Anthropic-compatible** under **API compatibility**.
-4. Enter the provider's **Base URL** and its **API key (optional)** when required.
+4. Enter the provider's **Base URL** and an API key. Although the registration form labels the key **API key (optional)**, the current **Save & connect** flow requires a nonempty key for every custom provider.
 5. Choose **Save provider**.
 6. On the new provider card, choose **Add model**. Enter the exact **Model ID** used by the service and a clear display name, then choose **Add**.
 7. Return to **LLM provider**, select **Custom: your name**, choose the model, and select **Save & connect**.
@@ -49,5 +49,5 @@ With `Court of Cinders.pdf` in a subscribed collection, the reply can cite `[Sou
 
 - Compatibility refers to the request format the service accepts; it does not mean every model or feature behaves identically.
 - Use the provider's documented base URL and model ID. Chronacle does not discover model IDs automatically.
-- The API key is optional in the form because some endpoints do not require one; follow the endpoint's own requirements.
+- A service that accepts keyless requests cannot currently be connected through **Save & connect**, because Chronacle rejects an empty custom-provider key before testing the service.
 - Custom answer-provider setup does not configure cloud indexing. Set that separately under **Embedding provider** if needed.

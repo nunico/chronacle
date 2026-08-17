@@ -48,4 +48,4 @@ Chronacle can retrieve the indexed passage and cite `[Source: "The Clockmaker's 
 - **Indexed** means the current import completed. It does not guarantee that every complex layout was read in the intended order.
 - **Error** means indexing did not complete successfully. Read the displayed error before retrying.
 - Image-only PDFs have no text layer for the current extractor; optical character recognition is not part of the import flow.
-- If Chronacle reports that sources use another indexing model, use **Re-index now** in the warning or **Re-index all sources** in Settings. Existing sources remain searchable during that re-index operation, and their stored passages are replaced as each source completes.
+- If Chronacle reports that sources use another indexing model, use **Re-index now** in the warning or **Re-index all sources** in Settings. Other sources remain available, but Chronacle deletes the old passages for the source currently being rebuilt, so that source can temporarily disappear from search. If rebuilding it fails, Settings shows the error and that source needs a successful retry before it is indexed again.

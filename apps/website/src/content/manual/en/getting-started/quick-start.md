@@ -23,7 +23,7 @@ headings:
 
 <h2 id="start-here">Start here</h2>
 
-You can go from a new installation to a cited answer by completing four short setup steps.
+You can go from a new installation to a cited answer by completing the setup below.
 
 1. [Install the current release](/en/manual/getting-started/install) and open Chronacle.
 2. If the **AI model required** screen appears, choose **Start download** and wait for **Model ready!**

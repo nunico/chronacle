@@ -30,7 +30,7 @@ Lege die Adresse des Dienstes einmal an, füge die gewünschten Modellkennungen 
 1. Öffne unter **Einstellungen** den Abschnitt **Benutzerdefinierte Anbieter** und wähle **Benutzerdefinierten Anbieter hinzufügen**.
 2. Trage einen eindeutigen **Anbieternamen** ein.
 3. Wähle unter **API-Kompatibilität** entweder **OpenAI-kompatibel** oder **Anthropic-kompatibel**.
-4. Trage die **Basis-URL** des Anbieters und bei Bedarf den **API-Schlüssel (optional)** ein.
+4. Trage die **Basis-URL** des Anbieters und einen API-Schlüssel ein. Obwohl das Registrierungsformular den Schlüssel als **API-Schlüssel (optional)** bezeichnet, verlangt **Speichern und verbinden** derzeit bei jedem benutzerdefinierten Anbieter einen nicht leeren Schlüssel.
 5. Wähle **Anbieter speichern**.
 6. Wähle auf der neuen Anbieterkarte **Modell hinzufügen**. Trage die genaue **Modell-ID** des Dienstes und einen verständlichen Anzeigenamen ein und wähle **Hinzufügen**.
 7. Kehre zu **LLM-Anbieter** zurück, wähle **Benutzerdefiniert: dein Name**, dann das Modell und schließlich **Speichern und verbinden**.
@@ -51,5 +51,5 @@ Wenn `Der Gluthof.pdf` in einer abonnierten Sammlung liegt, kann die Antwort `[S
 
 - Kompatibilität bezeichnet das Anfrageformat des Dienstes. Sie bedeutet nicht, dass jedes Modell oder jede Funktion identisch arbeitet.
 - Verwende die dokumentierte Basis-URL und Modell-ID des Anbieters. Chronacle sucht Modellkennungen nicht automatisch.
-- Das Feld für den API-Schlüssel ist optional, weil manche Endpunkte keinen Schlüssel verlangen. Halte dich an die Vorgaben deines Endpunkts.
+- Ein Dienst ohne Schlüsselpflicht lässt sich derzeit nicht über **Speichern und verbinden** anbinden, weil Chronacle einen leeren Schlüssel für benutzerdefinierte Anbieter ablehnt, bevor es den Dienst prüft.
 - Ein eigener Antwortanbieter richtet keine Cloud-Indizierung ein. Falls du sie brauchst, konfiguriere sie getrennt unter **Einbettungsanbieter**.
