@@ -17,6 +17,14 @@ const markdownModules = import.meta.glob<MarkdownModule>('/src/content/manual/**
 const locales: readonly Locale[] = ['en', 'de'];
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
 const headingIdPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const externalProtocolPattern = /^(?:https?:|mailto:|tel:)/i;
+const protocolPattern = /^[a-z][a-z0-9+.-]*:/i;
+const internalOrigin = 'https://chronacle.invalid';
+const allowedStaticRoutes = new Set([
+  '/',
+  '/legal/open-game-license',
+  '/legal/open-game-license-v1.0a.pdf',
+]);
 const sectionOrder = new Map<ManualSectionId, number>(
   manualSections.map((section, index) => [section, index]),
 );
@@ -87,6 +95,13 @@ function parseHeadings(value: unknown, source: string): ManualHeading[] | undefi
   return headings;
 }
 
+function parseLinks(value: unknown, source: string): string[] {
+  if (!Array.isArray(value) || value.some((link) => typeof link !== 'string')) {
+    throw new Error(`Manual article ${source} has invalid collected links`);
+  }
+  return value;
+}
+
 function parseFrontmatter(value: unknown, source: string): ManualFrontmatter {
   if (!isRecord(value)) {
     throw new Error(`Manual article ${source} is missing frontmatter`);
@@ -102,7 +117,7 @@ function parseFrontmatter(value: unknown, source: string): ManualFrontmatter {
     throw new Error(`Manual article ${source} has unknown section`);
   }
 
-  if (typeof value.order !== 'number' || !Number.isFinite(value.order)) {
+  if (typeof value.order !== 'number' || !Number.isInteger(value.order) || value.order <= 0) {
     throw new Error(`Manual article ${source} has invalid order`);
   }
   if (
@@ -151,6 +166,8 @@ function toArticle(source: string, module: MarkdownModule): ManualArticle {
     ...frontmatter,
     component: module.default,
     href: articleHref(frontmatter),
+    source,
+    links: parseLinks((module.metadata as Record<string, unknown>).manualLinks, source),
   };
 }
 
@@ -224,7 +241,9 @@ export function manualEntries(): {
 export function validateArticles(candidateArticles: ManualArticle[]): void {
   const routes = new Set<string>();
   const slugs = new Set<string>();
+  const orders = new Set<string>();
   const translations = new Map<string, Set<Locale>>();
+  const articlesByPath = new Map<string, ManualArticle>();
 
   for (const article of candidateArticles) {
     if (!isLocale(article.locale)) {
@@ -245,7 +264,7 @@ export function validateArticles(candidateArticles: ManualArticle[]): void {
         throw new Error(`Manual article has invalid ${field}`);
       }
     }
-    if (!Number.isFinite(article.order)) {
+    if (!Number.isInteger(article.order) || article.order <= 0) {
       throw new Error(`Manual article ${article.translationKey} has invalid order`);
     }
     if (!slugPattern.test(article.slug)) {
@@ -267,12 +286,19 @@ export function validateArticles(candidateArticles: ManualArticle[]): void {
       throw new Error(`Duplicate route: ${article.href}`);
     }
     routes.add(route);
+    articlesByPath.set(normalizePath(article.href), article);
 
     const slug = `${article.locale}:${article.slug}`;
     if (slugs.has(slug)) {
       throw new Error(`Duplicate slug: ${article.locale}/${article.slug}`);
     }
     slugs.add(slug);
+
+    const order = `${article.locale}:${article.section}:${article.order}`;
+    if (orders.has(order)) {
+      throw new Error(`Duplicate order ${article.order} in ${article.locale}/${article.section}`);
+    }
+    orders.add(order);
 
     const translationLocales = translations.get(article.translationKey) ?? new Set<Locale>();
     if (translationLocales.has(article.locale)) {
@@ -289,6 +315,71 @@ export function validateArticles(candidateArticles: ManualArticle[]): void {
       if (!translationLocales.has(locale)) {
         throw new Error(`Missing ${locale} translation for ${translationKey}`);
       }
+    }
+  }
+
+  for (const article of candidateArticles) {
+    for (const link of article.links) {
+      validateInternalLink(article, link, articlesByPath);
+    }
+  }
+}
+
+function normalizePath(pathname: string): string {
+  return pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
+}
+
+function invalidLink(article: ManualArticle, link: string, reason: string): never {
+  throw new Error(
+    `Manual article ${article.translationKey} (${article.source}) has invalid internal link "${link}": ${reason}`,
+  );
+}
+
+function validateInternalLink(
+  article: ManualArticle,
+  link: string,
+  articlesByPath: ReadonlyMap<string, ManualArticle>,
+): void {
+  if (link === '' || link !== link.trim() || link.includes('\\')) {
+    invalidLink(article, link, 'malformed URL');
+  }
+  if (externalProtocolPattern.test(link) || link.startsWith('//')) {
+    return;
+  }
+  if (protocolPattern.test(link)) {
+    invalidLink(article, link, 'unsupported URL protocol');
+  }
+
+  let target: URL;
+  try {
+    target = new URL(link, `${internalOrigin}${article.href}`);
+  } catch {
+    invalidLink(article, link, 'malformed URL');
+  }
+
+  if (target.origin !== internalOrigin) {
+    return;
+  }
+
+  const pathname = normalizePath(target.pathname);
+  const targetArticle = articlesByPath.get(pathname);
+  if (!targetArticle && !allowedStaticRoutes.has(pathname)) {
+    invalidLink(article, link, `unknown route ${pathname}`);
+  }
+
+  if (target.hash !== '') {
+    let fragment: string;
+    try {
+      fragment = decodeURIComponent(target.hash.slice(1));
+    } catch {
+      invalidLink(article, link, 'malformed hash fragment');
+    }
+    if (
+      fragment === '' ||
+      !targetArticle ||
+      !(targetArticle.headings ?? []).some((heading) => heading.id === fragment)
+    ) {
+      invalidLink(article, link, `unknown heading ${target.hash}`);
     }
   }
 }

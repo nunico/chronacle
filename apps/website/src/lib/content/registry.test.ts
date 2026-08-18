@@ -19,6 +19,8 @@ function article(overrides: Partial<ManualFrontmatter> = {}): ManualArticle {
   return {
     ...frontmatter,
     component,
+    source: `/src/content/manual/${frontmatter.locale}/${frontmatter.slug}.md`,
+    links: [],
     href: (frontmatter.slug === 'overview'
       ? `/${frontmatter.locale}/${frontmatter.locale === 'en' ? 'manual' : 'handbuch'}`
       : `/${frontmatter.locale}/${frontmatter.locale === 'en' ? 'manual' : 'handbuch'}/${frontmatter.slug}`) as ManualArticle['href'],
@@ -155,6 +157,142 @@ describe('manual content registry', () => {
 
   it('rejects unsafe slugs', () => {
     expect(() => validateArticles([article({ slug: '../escape' })])).toThrow(/invalid slug/i);
+  });
+
+  it.each([0, -1, 1.5])('rejects non-positive-integer article order %s', (order) => {
+    expect(() => validateArticles([article({ order }), overviewPair()[1]])).toThrow(
+      /invalid order/i,
+    );
+  });
+
+  it('rejects duplicate article order within a locale and section', () => {
+    const duplicateOrder = article({
+      translationKey: 'getting-started.second',
+      slug: 'getting-started/second',
+      section: 'getting-started',
+      order: 1,
+    });
+    const first = article({
+      translationKey: 'getting-started.first',
+      slug: 'getting-started/first',
+      section: 'getting-started',
+      order: 1,
+    });
+
+    expect(() =>
+      validateArticles([
+        first,
+        duplicateOrder,
+        article({
+          translationKey: first.translationKey,
+          locale: 'de',
+          slug: 'erste-schritte/erste',
+          section: first.section,
+          order: first.order,
+        }),
+        article({
+          translationKey: duplicateOrder.translationKey,
+          locale: 'de',
+          slug: 'erste-schritte/zweite',
+          section: duplicateOrder.section,
+          order: duplicateOrder.order,
+        }),
+      ]),
+    ).toThrow(/duplicate order.*getting-started/i);
+  });
+
+  it('rejects an unknown absolute manual link and names its source', () => {
+    const linked = article();
+    linked.links = ['/en/manual/missing-page'];
+
+    expect(() => validateArticles([linked, overviewPair()[1]])).toThrow(
+      /manual\.overview.*\/en\/manual\/missing-page/i,
+    );
+  });
+
+  it('rejects a missing heading fragment and names its source', () => {
+    const linked = article({
+      headings: [{ id: 'known-heading', text: 'Known heading', level: 2 }],
+    });
+    linked.links = ['?view=full#missing-heading'];
+
+    expect(() => validateArticles([linked, overviewPair()[1]])).toThrow(
+      /manual\.overview.*\?view=full#missing-heading/i,
+    );
+  });
+
+  it('accepts normalized internal, external, mail, and static links', () => {
+    const first = article({
+      translationKey: 'getting-started.first',
+      slug: 'getting-started/first',
+      section: 'getting-started',
+      order: 1,
+      headings: [{ id: 'details', text: 'Details', level: 2 }],
+    });
+    first.links = [
+      './second?view=full#more-details',
+      '/en/manual/getting-started/second/?view=full#more-details',
+      '#details',
+      '/',
+      '/legal/open-game-license',
+      '/legal/open-game-license-v1.0a.pdf',
+      'https://example.com/reference',
+      'mailto:hello@example.com',
+    ];
+    const second = article({
+      translationKey: 'getting-started.second',
+      slug: 'getting-started/second',
+      section: 'getting-started',
+      order: 2,
+      headings: [{ id: 'more-details', text: 'More details', level: 2 }],
+    });
+
+    expect(() =>
+      validateArticles([
+        first,
+        second,
+        article({
+          translationKey: first.translationKey,
+          locale: 'de',
+          slug: 'erste-schritte/erste',
+          section: first.section,
+          order: first.order,
+          headings: first.headings,
+        }),
+        article({
+          translationKey: second.translationKey,
+          locale: 'de',
+          slug: 'erste-schritte/zweite',
+          section: second.section,
+          order: second.order,
+          headings: second.headings,
+        }),
+      ]),
+    ).not.toThrow();
+  });
+
+  it.each(['../../../outside', '#%E0%A4%A', 'javascript:alert(1)'])(
+    'rejects malformed or escaping internal link %s',
+    (link) => {
+      const linked = article({
+        headings: [{ id: 'known-heading', text: 'Known heading', level: 2 }],
+      });
+      linked.links = [link];
+
+      expect(() => validateArticles([linked, overviewPair()[1]])).toThrow(
+        new RegExp(`manual\\.overview.*${link.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i'),
+      );
+    },
+  );
+
+  it('loads and validates links collected from the complete manual inventory', () => {
+    const inventory = manualEntries();
+
+    expect(inventory.filter(({ locale }) => locale === 'en')).toHaveLength(36);
+    expect(inventory.filter(({ locale }) => locale === 'de')).toHaveLength(36);
+    expect(getArticle('en', 'getting-started/quick-start').links).toContain(
+      '/en/manual/getting-started/install',
+    );
   });
 
   it('rejects translation keys without a German counterpart', () => {
