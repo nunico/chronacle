@@ -32,7 +32,7 @@ Select a campaign, check its source subscriptions, then ask one specific questio
 
 <h2 id="what-chronacle-uses">What Chronacle uses</h2>
 
-Chronacle looks for relevant passages in the subscribed collections and can also use saved campaign entities, session notes, and compiled rules. It sends the question and the retrieved relevant excerpts to the selected AI provider to compose the answer. With no campaign selected, the current search has no subscribed collection, entity, session, or compiled-rule context.
+Chronacle looks for relevant passages in the subscribed collections and can also use saved campaign entities, session notes, and compiled rules. It sends the question and the answer context it supplies to the selected AI provider. That context can include relevant source excerpts, entity names, summaries, notes and compiled Codex articles, session titles and notes, and compiled rules. Campaign entities and sessions are included as full campaign-scoped context rather than relevance-filtered results. With no campaign selected, the current search has no subscribed collection, entity, session, or compiled-rule context.
 
 <h2 id="example">Example</h2>
 

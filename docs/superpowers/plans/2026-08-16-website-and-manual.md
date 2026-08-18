@@ -608,7 +608,7 @@ The typed copy includes header labels, hero, three feature cards, three workflow
 - English provider heading: “Your library lives here.”
 - German provider heading: “Deine Bibliothek bleibt auf diesem Rechner.”
 
-The provider body must state that source files, the search index, and notes are local; compatible online AI providers receive the question and relevant excerpts; local models are supported secondarily. It must not mention accounts, hosted Chronacle services, selective upload controls, or promises that cloud services will never exist.
+The provider body must state that source files, the search index, and notes are local. A configured online answer provider receives the question and the context Chronacle supplies. Depending on the selected campaign, sources, and available data, this can include relevant source excerpts; entity names, summaries, notes, and compiled Codex articles; session titles and notes; and compiled rules. Some campaign entity and session context is supplied in full campaign scope rather than relevance-filtered. A configured remote embedding provider separately receives searchable text and question or search text needed for indexing and retrieval, as applicable. Local models are supported secondarily. The copy must not mention accounts, hosted Chronacle services, selective upload controls, or promises that cloud services will never exist.
 
 - [ ] **Step 4: Implement browser-language initialization and in-place switching**
 

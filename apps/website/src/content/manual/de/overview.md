@@ -15,6 +15,8 @@ headings:
     level: 3
 ---
 
+<!-- German proofreading requested -->
+
 <h2 id="inhalt">Inhalt des Handbuchs</h2>
 
 Dieses Handbuch zeigt dir, wie du Chronacle einrichtest, dein Kampagnenmaterial einbindest und seine Werkzeuge bei der Vorbereitung und während deiner Spielrunden nutzt.

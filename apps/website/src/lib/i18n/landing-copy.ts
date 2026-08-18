@@ -159,7 +159,7 @@ export const landingCopy = {
     provider: {
       eyebrow: 'Storage and AI providers',
       heading: 'Your library lives here.',
-      body: 'Your source files, search index, and notes stay local on this computer. A compatible online AI provider normally receives your question and the relevant source excerpts needed to answer it.',
+      body: 'Your source files, search index, and notes stay local on this computer. A configured online answer provider receives your question and the context Chronacle supplies. Depending on the question, that can include relevant source excerpts, entity names, summaries, notes and compiled Codex articles, session titles and notes, and compiled rules. Some campaign entity and session context is supplied as full campaign-scoped context, not relevance-filtered results. If you configure remote embedding, that endpoint separately receives the searchable text and question/search text needed for indexing and retrieval.',
       localOption: 'Supported local models are available as a secondary option.',
     },
     download: {
@@ -267,7 +267,7 @@ export const landingCopy = {
     provider: {
       eyebrow: 'Speicherort und KI-Anbieter',
       heading: 'Deine Bibliothek bleibt auf diesem Rechner.',
-      body: 'Deine Quelldateien, der Suchindex und deine Notizen bleiben lokal auf diesem Rechner. Ein kompatibler Online-KI-Anbieter erhält normalerweise deine Frage und die relevanten Quellenausschnitte, die für die Antwort nötig sind.',
+      body: 'Deine Quelldateien, der Suchindex und deine Notizen bleiben lokal auf diesem Rechner. Ein eingerichteter Online-Antwortanbieter erhält deine Frage und den Kontext, den Chronacle bereitstellt. Je nach Frage kann das relevante Quellenauszüge, Namen von Entitäten, Zusammenfassungen, Notizen und kompilierte Codex-Artikel, Sitzungstitel und -notizen sowie kompilierte Regeln umfassen. Einige Kampagnenentitäten und Sitzungen werden als vollständiger kampagnenbezogener Kontext und nicht als relevanzgefilterte Ergebnisse bereitgestellt. Wenn du eine entfernte Einbettung einrichtest, erhält dieser Endpunkt getrennt davon den durchsuchbaren Text und den Frage- oder Suchtext, der für Indizierung und Suche nötig ist.',
       localOption: 'Unterstützte lokale Modelle gibt es als zweite Option.',
     },
     download: {

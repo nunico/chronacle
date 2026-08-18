@@ -34,7 +34,7 @@ Wähle eine Kampagne, prüfe ihre Quellenabonnements und stelle dem Orakel dann 
 
 <h2 id="was-chronacle-verwendet">Was Chronacle verwendet</h2>
 
-Chronacle sucht passende Textstellen in den abonnierten Sammlungen und kann außerdem gespeicherte Kampagnenentitäten, Sitzungsnotizen und kompilierte Regeln verwenden. Die Frage und die gefundenen relevanten Auszüge gehen an den gewählten KI-Anbieter, der daraus die Antwort formuliert. Ohne gewählte Kampagne besitzt die aktuelle Suche keinen Kontext aus abonnierten Sammlungen, Entitäten, Sitzungen oder kompilierten Regeln.
+Chronacle sucht passende Textstellen in den abonnierten Sammlungen und kann außerdem gespeicherte Kampagnenentitäten, Sitzungsnotizen und kompilierte Regeln verwenden. Die Frage und der von Chronacle bereitgestellte Antwortkontext gehen an den gewählten KI-Anbieter. Dieser Kontext kann relevante Quellenauszüge, Namen von Entitäten, Zusammenfassungen, Notizen und kompilierte Codex-Artikel, Sitzungstitel und -notizen sowie kompilierte Regeln umfassen. Kampagnenentitäten und Sitzungen werden dabei als vollständiger kampagnenbezogener Kontext statt als relevanzgefilterte Ergebnisse einbezogen. Ohne gewählte Kampagne besitzt die aktuelle Suche keinen Kontext aus abonnierten Sammlungen, Entitäten, Sitzungen oder kompilierten Regeln.
 
 <h2 id="beispiel">Beispiel</h2>
 

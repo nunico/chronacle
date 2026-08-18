@@ -45,7 +45,7 @@ Verbinde Anthropic, wähle ein für dich verfügbares Modell, abonniere für **D
 
 > Warum verhüllt die Astronomin Nera um Mitternacht die östliche Linse?
 
-Chronacle sendet Frage und gefundene Auszüge an den Anbieter und kann danach mit `[Source: "Notizen des Observatoriums.pdf", p.23]` antworten.
+Chronacle sendet die Frage und den bereitgestellten Antwortkontext an den Anbieter und kann danach mit `[Source: "Notizen des Observatoriums.pdf", p.23]` antworten. Dieser Kontext kann relevante Quellenauszüge, Namen von Entitäten, Zusammenfassungen, Notizen und kompilierte Codex-Artikel, Sitzungstitel und -notizen sowie kompilierte Regeln umfassen. Kampagnenentitäten und Sitzungen können als vollständiger kampagnenbezogener Kontext statt als relevanzgefilterte Ergebnisse bereitgestellt werden.
 
 <h2 id="wichtige-details">Wichtige Details</h2>
 

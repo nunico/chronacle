@@ -49,6 +49,6 @@ Die Antwort kann `[Source: "Geheimnisse von Schwarzbrand.pdf", p.74]` verwenden.
 <h2 id="speicherung-und-online-antworten">Speicherung und Online-Antworten</h2>
 
 - Chronacle speichert das importierte PDF und seinen Suchindex in den lokalen Daten der Desktop-App.
-- Ist ein Online-Antwortanbieter aktiv, sendet Chronacle die Frage und passende gefundene Auszüge an diesen Anbieter, damit er die Antwort formuliert.
+- Ist ein Online-Antwortanbieter aktiv, sendet Chronacle ihm die Frage und den bereitgestellten Antwortkontext. Neben relevanten Quellenauszügen kann das Namen von Entitäten, Zusammenfassungen, Notizen und kompilierte Codex-Artikel, Sitzungstitel und -notizen sowie kompilierte Regeln umfassen. Kampagnenentitäten und Sitzungen können vollständiger kampagnenbezogener Kontext statt relevanzgefilterter Ergebnisse sein.
 - Eine Sammlung kann mehreren Kampagnen dienen. Ein gemeinsam verwendetes PDF musst du deshalb nur einmal importieren und indizieren.
 - Lies weiter bei [Sammlungen](/de/handbuch/quellenbibliothek/sammlungen), [PDF-Import](/de/handbuch/quellenbibliothek/pdfs-importieren) oder [Indizierung](/de/handbuch/quellenbibliothek/indizierung).

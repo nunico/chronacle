@@ -37,7 +37,7 @@ Use these meanings when a Chronacle screen or this manual uses an unfamiliar ter
 
 **Index.** The prepared, searchable passages made during PDF processing. Re-indexing rebuilds them from the saved source. See [Understand indexing](/en/manual/source-library/indexing).
 
-**Answer provider.** The configured AI service that writes the final answer from the passages and instructions Chronacle supplies. See [Choose an AI provider](/en/manual/ai-providers/choose).
+**Answer provider.** The configured AI service or local program that writes the final answer from your question and the context Chronacle supplies. That context can include source excerpts, campaign entities and notes, sessions, Codex articles, and compiled rules. See [Choose an AI provider](/en/manual/ai-providers/choose).
 
 **Citation.** A link on an answer that identifies the source and page behind a claim. See [Check citations](/en/manual/notes-and-sessions/citations).
 
@@ -61,4 +61,4 @@ Use these meanings when a Chronacle screen or this manual uses an unfamiliar ter
 
 <h2 id="example">Example</h2>
 
-You import the source _Harbourmaster’s Field Notes_ into the **Valdris References** collection and attach it to the **Shadows of Valdris** campaign. Chronacle splits the source into passages and indexes them. The answer provider uses matching passages to answer “Why does Mara Venn avoid North Quay?” and returns a citation. You save Mara as an entity, keep table facts in Notes, compile a Codex Article, add “The Lantern” as an alias, and record the discovery in session 012. If Mara’s Chronacle note and vault file later change separately, that is a conflict.
+You import the source _Harbourmaster’s Field Notes_ into the **Valdris References** collection and attach it to the **Shadows of Valdris** campaign. Chronacle splits the source into passages and indexes them. The answer provider uses the context Chronacle supplies—including matching passages and available campaign context—to answer “Why does Mara Venn avoid North Quay?” and returns a citation. You save Mara as an entity, keep table facts in Notes, compile a Codex Article, add “The Lantern” as an alias, and record the discovery in session 012. If Mara’s Chronacle note and vault file later change separately, that is a conflict.

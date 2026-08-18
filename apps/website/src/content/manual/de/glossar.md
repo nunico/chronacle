@@ -39,7 +39,7 @@ Nutze diese Bedeutungen, wenn dir auf einem Chronacle-Bildschirm oder in diesem 
 
 **Index.** Die bei der PDF-Verarbeitung vorbereiteten, durchsuchbaren Passagen. Eine Neuindizierung baut sie aus der gespeicherten Quelle neu auf. Siehe [Indizierung verstehen](/de/handbuch/quellenbibliothek/indizierung).
 
-**Antwortanbieter.** Der eingerichtete KI-Dienst, der aus den von Chronacle bereitgestellten Passagen und Anweisungen die endgültige Antwort schreibt. Siehe [Einen KI-Anbieter auswählen](/de/handbuch/ki-anbieter/auswahl).
+**Antwortanbieter.** Der eingerichtete KI-Dienst oder das lokale Programm, das aus deiner Frage und dem von Chronacle bereitgestellten Kontext die endgültige Antwort schreibt. Dieser Kontext kann Quellenauszüge, Kampagnenentitäten und -notizen, Sitzungen, Codex-Artikel und kompilierte Regeln umfassen. Siehe [Einen KI-Anbieter auswählen](/de/handbuch/ki-anbieter/auswahl).
 
 **Quellenangabe.** Ein Verweis an einer Antwort, der Quelle und Seite hinter einer Aussage nennt. Siehe [Quellenangaben prüfen](/de/handbuch/notizen-und-sitzungen/quellenangaben).
 
@@ -63,4 +63,4 @@ Nutze diese Bedeutungen, wenn dir auf einem Chronacle-Bildschirm oder in diesem 
 
 <h2 id="beispiel">Beispiel</h2>
 
-Du importierst die Quelle _Aufzeichnungen der Hafenmeisterin_ in die Sammlung **Valdris-Referenzen** und verbindest sie mit der Kampagne **Shadows of Valdris**. Chronacle teilt die Quelle in Passagen und indiziert sie. Der Antwortanbieter nutzt passende Passagen für die Frage „Warum meidet Mara Venn North Quay?“ und liefert eine Quellenangabe. Du speicherst Mara als Entität, hältst Tischfakten in Notizen fest, kompilierst einen Kodexartikel, ergänzt „Die Laterne“ als Alias und protokollierst die Entdeckung in Sitzung 012. Ändern sich später Maras Chronacle-Notiz und Tresordatei getrennt voneinander, ist das ein Konflikt.
+Du importierst die Quelle _Aufzeichnungen der Hafenmeisterin_ in die Sammlung **Valdris-Referenzen** und verbindest sie mit der Kampagne **Shadows of Valdris**. Chronacle teilt die Quelle in Passagen und indiziert sie. Der Antwortanbieter verwendet den von Chronacle bereitgestellten Kontext – einschließlich passender Passagen und verfügbarem Kampagnenkontext –, um „Warum meidet Mara Venn North Quay?“ zu beantworten, und liefert eine Quellenangabe. Du speicherst Mara als Entität, hältst Tischfakten in Notizen fest, kompilierst einen Kodexartikel, ergänzt „Die Laterne“ als Alias und protokollierst die Entdeckung in Sitzung 012. Ändern sich später Maras Chronacle-Notiz und Tresordatei getrennt voneinander, ist das ein Konflikt.

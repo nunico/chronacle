@@ -1,6 +1,6 @@
 # Chronacle Website and Manual Design
 
-**Date:** 2026-08-16  
+**Date:** 2026-08-16
 **Status:** Approved for implementation planning
 
 ## Summary
@@ -162,7 +162,13 @@ The approved storage/provider copy communicates only current behaviour:
 
 - Chronacle stores source files, its search index, and notes on the user’s computer.
 - Compatible online AI providers are the normal answer-generation setup.
-- An online provider receives the question and relevant source excerpts needed for an answer.
+- A configured online answer provider receives the question and the context Chronacle supplies for
+  the answer. Depending on the selected campaign, sources, and available data, this can include
+  relevant source excerpts; entity names, summaries, notes, and compiled Codex articles; session
+  titles and notes; and compiled rules. Some campaign entity and session context is supplied in full
+  campaign scope rather than relevance-filtered.
+- A configured remote embedding provider separately receives the searchable text and question or
+  search text needed for indexing and retrieval, as applicable.
 - Local models are supported as a secondary option.
 
 The page does not claim that Chronacle will never offer accounts or hosted services. It also does not
