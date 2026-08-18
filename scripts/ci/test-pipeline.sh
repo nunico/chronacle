@@ -142,7 +142,34 @@ node <<'NODE'
 const fs = require('node:fs');
 
 const workflow = fs.readFileSync('.github/workflows/release.yml', 'utf8');
+const releaseScriptPaths = [
+  'scripts/ci/release/check-version-consistency.sh',
+  'scripts/ci/release/create-release.sh',
+  'scripts/ci/release/validate-linux-packages.sh',
+  'scripts/ci/release/validate-macos-packages.sh',
+  'scripts/ci/release/validate-windows-packages.ps1',
+  'scripts/ci/release/build-flatpak.sh',
+  'scripts/ci/release/upload-release-assets.sh',
+  'scripts/ci/release/publish-release.sh',
+];
+const releaseScripts = new Map(
+  releaseScriptPaths.map((path) => {
+    try {
+      return [path, fs.readFileSync(path, 'utf8')];
+    } catch {
+      throw new Error(`release script is missing or unreadable: ${path}`);
+    }
+  }),
+);
 const failures = [];
+
+for (const path of releaseScriptPaths.filter((entry) => entry.endsWith('.sh'))) {
+  try {
+    fs.accessSync(path, fs.constants.X_OK);
+  } catch {
+    failures.push(`release script must be executable: ${path}`);
+  }
+}
 
 function requireContract(condition, message) {
   if (!condition) failures.push(message);
@@ -739,7 +766,10 @@ const tauriReleaseStep =
 const tauriWith = mappingBlock(tauriReleaseStep, 'with', 8);
 const linuxValidationStep =
   buildSteps.find((step) => /^ {6}- name: Validate Linux packages$/m.test(step)) ?? '';
-const linuxValidationRun = executableRunText([linuxValidationStep]);
+const linuxValidationRun = releaseScripts.get('scripts/ci/release/validate-linux-packages.sh');
+const createReleaseSource = releaseScripts.get('scripts/ci/release/create-release.sh');
+const assetUploadSource = releaseScripts.get('scripts/ci/release/upload-release-assets.sh');
+const publishSource = releaseScripts.get('scripts/ci/release/publish-release.sh');
 
 requireContract(
   isReleasePushGuard("github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')"),
@@ -1176,7 +1206,11 @@ requireContract(
   'tauri-action must not receive GITHUB_TOKEN',
 );
 requireContract(
-  canonicalLinuxValidation(linuxValidationRun),
+  runInvokes(linuxValidationStep, /^scripts\/ci\/release\/validate-linux-packages\.sh$/) &&
+    stepEnvValue(linuxValidationStep, 'RELEASE_TARGET') === '${{ matrix.target }}' &&
+    stepEnvValue(linuxValidationStep, 'DEB_ARCH') === '${{ matrix.deb_arch }}' &&
+    stepEnvValue(linuxValidationStep, 'FLATPAK_ARCH') === '${{ matrix.flatpak_arch }}' &&
+    canonicalLinuxValidation(linuxValidationRun),
   'Linux validation must select exactly one release artifact per format and fail with diagnostics',
 );
 requireContract(
@@ -1235,6 +1269,34 @@ requireContract(
   isReleasePushGuard(directValue(versionConsistencyStep, 'if', 8)),
   'version consistency must run only for release tag pushes',
 );
+requireContract(
+  runInvokes(versionConsistencyStep, /^scripts\/ci\/release\/check-version-consistency\.sh$/),
+  'version consistency must invoke its extracted script',
+);
+const macosValidationStep =
+  buildSteps.find((step) => directValue(step, 'name', 8) === 'Validate macOS packages and startup') ?? '';
+const windowsValidationStep =
+  buildSteps.find((step) => directValue(step, 'name', 8) === 'Validate Windows packages') ?? '';
+requireContract(
+  runInvokes(macosValidationStep, /^scripts\/ci\/release\/validate-macos-packages\.sh$/) &&
+    stepEnvValue(macosValidationStep, 'RELEASE_TARGET') === '${{ matrix.target }}' &&
+    /pdfium\/libpdfium\.dylib/.test(releaseScripts.get('scripts/ci/release/validate-macos-packages.sh')) &&
+    /onnxruntime\/libonnxruntime\.dylib/.test(
+      releaseScripts.get('scripts/ci/release/validate-macos-packages.sh'),
+    ),
+  'macOS validation must invoke its extracted script and check bundled runtime libraries',
+);
+requireContract(
+  runInvokes(windowsValidationStep, /^\.\/scripts\/ci\/release\/validate-windows-packages\.ps1$/) &&
+    stepEnvValue(windowsValidationStep, 'RELEASE_TARGET') === '${{ matrix.target }}' &&
+    /Get-ChildItem .*\/msi\/\*\.msi/.test(
+      releaseScripts.get('scripts/ci/release/validate-windows-packages.ps1'),
+    ) &&
+    /Get-ChildItem .*\/nsis\/\*\.exe/.test(
+      releaseScripts.get('scripts/ci/release/validate-windows-packages.ps1'),
+    ),
+  'Windows validation must invoke its extracted PowerShell script and inspect both installers',
+);
 requireContract(createRelease.length > 0, 'create-release job must exist');
 requireContract(
   hasExactNeeds(createRelease, ['pre-check']),
@@ -1256,13 +1318,13 @@ requireContract(
 );
 const createReleaseStep =
   createReleaseSteps.find((step) => directValue(step, 'id', 8) === 'release') ?? '';
-const createReleaseRun = executableRunText([createReleaseStep]);
 requireContract(
   stepEnvValue(createReleaseStep, 'GH_TOKEN') === '${{ github.token }}',
   'create-release executable step must bind the job token',
 );
 requireContract(
-  canonicalCreateFlow(createReleaseRun),
+  runInvokes(createReleaseStep, /^scripts\/ci\/release\/create-release\.sh$/) &&
+    canonicalCreateFlow(createReleaseSource),
   'create-release must canonically select, reuse, or create exactly one draft release ID',
 );
 requireContract(
@@ -1369,6 +1431,7 @@ for (const path of [
   'packaging/flatpak/**',
   'scripts/release-flatpak.sh',
   'scripts/ci/test-release-flatpak.sh',
+  'scripts/ci/release/**',
   'scripts/ci/test-pipeline.sh',
   'apps/desktop/src-tauri/build.rs',
   'apps/desktop/src-tauri/tauri.conf.json',
@@ -1420,12 +1483,20 @@ requireContract(
 );
 const flatpakBuildStep =
   flatpakSteps.find((step) =>
-    runInvokes(step, /^VERSION=\$\(jq -r '\.version' apps\/desktop\/src-tauri\/tauri\.conf\.json\)$/) &&
-    runInvokes(step, /^scripts\/release-flatpak\.sh artifacts\/\*\.deb "\$VERSION" flatpak-out$/),
+    runInvokes(step, /^scripts\/ci\/release\/build-flatpak\.sh$/),
   ) ?? '';
 requireContract(
   flatpakBuildStep.length > 0,
-  'flatpak job must invoke the shared release script',
+  'flatpak job must invoke its extracted build script',
+);
+requireContract(
+  /VERSION=\$\(jq -r '\.version' apps\/desktop\/src-tauri\/tauri\.conf\.json\)/.test(
+    releaseScripts.get('scripts/ci/release/build-flatpak.sh'),
+  ) &&
+    /scripts\/release-flatpak\.sh artifacts\/\*\.deb "\$VERSION" flatpak-out/.test(
+      releaseScripts.get('scripts/ci/release/build-flatpak.sh'),
+    ),
+  'Flatpak wrapper must read the app version and invoke the shared release script',
 );
 requireContract(
   directValue(flatpakBuildStep, 'if', 8) === '',
@@ -1477,10 +1548,10 @@ const releaseAssetUploadStep =
     (step) =>
       stepEnvValue(step, 'RELEASE_ID') === '${{ needs.create-release.outputs.release_id }}' &&
       stepEnvValue(step, 'GH_TOKEN') === '${{ github.token }}' &&
-      canonicalAssetUpload(executableRunText([step])),
+      runInvokes(step, /^scripts\/ci\/release\/upload-release-assets\.sh$/),
   ) ?? '';
 requireContract(
-  releaseAssetUploadStep.length > 0,
+  releaseAssetUploadStep.length > 0 && canonicalAssetUpload(assetUploadSource),
   'upload-release-assets must reconcile stale assets and upload every package against the exact release ID',
 );
 requireContract(
@@ -1497,10 +1568,10 @@ const publishReleaseStep =
   publishSteps.find((step) =>
     stepEnvValue(step, 'RELEASE_ID') === '${{ needs.create-release.outputs.release_id }}' &&
     stepEnvValue(step, 'GH_TOKEN') === '${{ github.token }}' &&
-    canonicalPublish(executableRunText([step])),
+    runInvokes(step, /^scripts\/ci\/release\/publish-release\.sh$/),
   ) ?? '';
 requireContract(
-  publishReleaseStep.length > 0,
+  publishReleaseStep.length > 0 && canonicalPublish(publishSource),
   'publish-release must validate and publish the exact release ID through REST',
 );
 const publishJobIf = /^ {4}if:\s*(.+)$/m.exec(publish)?.[1] ?? '';
