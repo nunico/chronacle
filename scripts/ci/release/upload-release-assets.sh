@@ -2,7 +2,7 @@
 set -euo pipefail
 
 release_id=${RELEASE_ID:?RELEASE_ID is required}
-[[ "$release_id" =~ ^[0-9]+$ ]]
+[[ "$RELEASE_ID" =~ ^[0-9]+$ ]]
 assets=()
 asset_names=()
 while IFS= read -r -d '' asset; do
