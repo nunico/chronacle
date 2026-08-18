@@ -499,8 +499,7 @@ git commit -m "test: specify multi-architecture release topology"
 Add a `pull_request` trigger limited to the release workflow, Flatpak packaging files, Flatpak
 scripts, runtime-download selection files, and the three release-facing documentation files. The
 tag trigger remains unchanged. Guard tag/version consistency, Tauri GitHub-release inputs, Flatpak
-release upload, and final publication so pull requests build and smoke-test artifacts without
-creating or editing a GitHub release.
+release upload, and final publication so only semver tags create or edit a GitHub release.
 
 Define explicit matrix records with `name`, `os`, `target`, `deb_arch`, and `flatpak_arch` fields.
 Use stable names `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`, and
@@ -530,8 +529,7 @@ After Tauri packaging, use platform-specific steps:
 
 Upload every matrix row's complete validated bundle directory as
 `chronacle-native-${{ matrix.name }}` with `actions/upload-artifact@v4`. These workflow artifacts
-make pull-request packaging runs inspectable; tag runs additionally upload the same bundles to the
-draft GitHub release through `tauri-action`.
+make tag and manually dispatched packaging runs inspectable.
 
 - [ ] **Step 3: Add the architecture-matched Flatpak matrix**
 
@@ -589,6 +587,68 @@ git add .github/workflows/release.yml
 git commit -m "feat: release Linux ARM64 and Flatpak packages"
 ```
 
+### Revision: Keep package matrices off pull requests
+
+**Files:**
+
+- Modify: `scripts/ci/test-pipeline.sh`
+- Modify: `.github/workflows/release.yml`
+
+- [ ] **Step 1: Replace the pull-request matrix contract with dispatch guards**
+
+Require `workflow_dispatch` and require both `build` and `flatpak` to use this job guard:
+
+```yaml
+if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+```
+
+Keep `pre-check` unguarded so path-filtered pull requests continue to exercise the release
+contracts and repository checks. Require every GitHub Release mutation job to retain its stricter
+semver-tag-only guard.
+
+- [ ] **Step 2: Run the contract to verify the workflow is red**
+
+Run:
+
+```bash
+mise exec -- scripts/ci/test-pipeline.sh
+```
+
+Expected: FAIL because `workflow_dispatch` and the package-only job guards are absent.
+
+- [ ] **Step 3: Add manual dispatch and package-only guards**
+
+Add an empty `workflow_dispatch:` trigger. Apply the tag-or-manual guard to `build` and `flatpak`.
+Read the Flatpak version from `apps/desktop/src-tauri/tauri.conf.json` so a manual run does not
+mistake its branch name for a package version:
+
+```bash
+VERSION=$(jq -r '.version' apps/desktop/src-tauri/tauri.conf.json)
+scripts/release-flatpak.sh artifacts/*.deb "$VERSION" flatpak-out
+```
+
+- [ ] **Step 4: Run focused verification**
+
+Run:
+
+```bash
+mise exec -- scripts/ci/test-pipeline.sh
+mise exec -- pnpm exec prettier --check .github/workflows/release.yml \
+  docs/superpowers/specs/2026-08-16-flatpak-intel-macos-release-design.md \
+  docs/superpowers/plans/2026-08-16-flatpak-intel-macos-release.md
+```
+
+Expected: both commands exit successfully.
+
+- [ ] **Step 5: Commit the policy change**
+
+```bash
+git add .github/workflows/release.yml scripts/ci/test-pipeline.sh \
+  docs/superpowers/specs/2026-08-16-flatpak-intel-macos-release-design.md \
+  docs/superpowers/plans/2026-08-16-flatpak-intel-macos-release.md
+git commit -m "ci: run release packages only on demand"
+```
+
 ### Task 6: Validate real Flatpak packages on both architectures
 
 **Files:**
@@ -622,12 +682,12 @@ scripts/release-flatpak.sh \
 Expected: the script completes its install/resource/startup smoke test and emits the x86_64 bundle
 using GNOME 50.
 
-- [ ] **Step 3: Exercise both architectures in the pull request**
+- [ ] **Step 3: Exercise both architectures before release**
 
-Push the feature branch and open or update its pull request. The path-filtered release workflow
-runs the five native matrix entries and two Flatpak entries without creating a GitHub release.
+Manually dispatch the release workflow before tagging when a full package preflight is required.
 Verify the `ubuntu-24.04-arm` job produces ARM64 Debian/AppImage/RPM workflow artifacts and that its
-Flatpak job completes the same resource and startup checks natively.
+Flatpak job completes the same resource and startup checks natively. Confirm the manual run does
+not create or modify a GitHub release.
 
 Expected: both Linux matrix rows, both Flatpak rows, both macOS rows, and Windows x86_64 pass; the
 `publish-release` job is skipped and no release is created.

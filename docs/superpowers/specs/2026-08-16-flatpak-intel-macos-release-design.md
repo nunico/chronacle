@@ -67,10 +67,10 @@ release target and smoke-test obligation without unlocking the same degree of ac
 ### Artifact flow
 
 ```text
-version/tag pre-check
+version/tag/manual pre-check
         |
         v
-native package matrix (draft GitHub release)
+native package matrix
         |
         +-- each Linux job uploads its .deb as an architecture-labelled workflow artifact
         |
@@ -78,13 +78,19 @@ native package matrix (draft GitHub release)
 Flatpak matrix: matching Debian artifact + validation + smoke test
         |
         v
-publish-release job changes the draft to a public release
+tag runs: publish-release job changes the draft to a public release
 ```
 
 Every native matrix entry must succeed before Flatpak packaging begins. Each Flatpak matrix entry
 consumes the matching-architecture Debian workflow artifact, not a public release URL. The final
 job publishes the existing draft only when both the native matrix and every Flatpak matrix entry
 succeeded. A failed or cancelled dependency leaves the release as a draft.
+
+Pull requests run only the release pre-checks: workflow contracts, formatting, linting, tests, and
+the RocksDB-enabled desktop suite. The native and Flatpak packaging matrices do not run on pull
+requests. They run for semver tags and through `workflow_dispatch`, which provides an explicit
+manual full-package preflight. Manual runs retain inspectable workflow artifacts but do not create,
+modify, or publish a GitHub Release; only semver-tag runs cross that boundary.
 
 The release remains non-prerelease unless the tag workflow is changed explicitly in a later design.
 
@@ -319,8 +325,9 @@ The tranche is complete when:
    release; and
 10. installation and platform limitations are documented without claiming Flathub availability.
 
-Before creating the Chronacle pull request, `scripts/ci/local-pr.sh` must pass. The packaging jobs
-that cannot run in the local Docker PR gate must also pass in GitHub Actions before merge.
+Before creating the Chronacle pull request, `scripts/ci/local-pr.sh` must pass. Maintainers can use
+the manual release workflow when they need a full native and Flatpak package preflight before
+tagging; otherwise, the complete packaging matrix is enforced by the semver-tag workflow.
 
 ## Deferred work
 
