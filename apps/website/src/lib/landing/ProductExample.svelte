@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import EyeMark from '$lib/brand/EyeMark.svelte';
   import Icon from '$lib/components/Icon.svelte';
   import type { LandingCopy } from '$lib/i18n/landing-copy';
+  import { OPEN_GAME_LICENSE_ROUTE } from '$lib/legal/open-game-content';
   import Quote from 'lucide-svelte/icons/quote';
   import Sparkles from 'lucide-svelte/icons/sparkles';
 
@@ -15,10 +17,11 @@
 <section class="example" aria-labelledby="example-label">
   <div class="example__inner">
     <h2 class="example__label" id="example-label">{copy.label}</h2>
-    <div class="window" role="group" aria-label={copy.windowLabel}>
+    <div class="window" role="group" aria-label={copy.windowLabel} data-open-game-content>
       <div class="window__bar" aria-hidden="true">
         <span></span><span></span><span></span>
       </div>
+      <a class="open-game-marker" href={resolve(OPEN_GAME_LICENSE_ROUTE)}>{copy.metadata}</a>
       <div class="window__question">
         <Icon icon={Sparkles} size={17} />
         <div>
@@ -42,7 +45,6 @@
           </div>
           <blockquote>{copy.excerpt}</blockquote>
         </div>
-        <p class="answer__metadata">{copy.metadata}</p>
       </article>
     </div>
   </div>
@@ -82,6 +84,18 @@
     padding: 0.3rem 0.45rem 0.8rem;
   }
 
+  .open-game-marker {
+    display: block;
+    width: fit-content;
+    margin: 0 auto var(--s-3);
+    color: var(--rune-gold);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    text-align: center;
+    text-decoration-color: rgb(232 184 106 / 48%);
+  }
+
   .window__bar span {
     width: 0.6rem;
     height: 0.6rem;
@@ -102,8 +116,7 @@
   }
 
   .window__question span,
-  .answer header span,
-  .answer__metadata {
+  .answer header span {
     color: var(--fg-2);
     font-family: var(--font-mono);
     font-size: 0.68rem;
@@ -201,10 +214,5 @@
     font-family: var(--font-serif);
     font-size: 0.9rem;
     line-height: 1.55;
-  }
-
-  .answer__metadata {
-    margin: var(--s-3) 0 0;
-    text-align: right;
   }
 </style>

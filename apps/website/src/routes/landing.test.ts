@@ -25,7 +25,7 @@ describe('Chronacle landing page', () => {
     await user.click(screen.getByRole('button', { name: 'Deutsch' }));
 
     expect(screen.getByText('Frag deine Bücher. Prüf die Antwort.')).toBeInTheDocument();
-    expect(screen.getByText('Das Signal bleibt zehn Minuten aktiv.')).toBeInTheDocument();
+    expect(screen.getByText('Das Aufstehen kostet 4,5 Meter Bewegung.')).toBeInTheDocument();
     expect(screen.getByText('Antworten mit Fundstelle')).toBeInTheDocument();
     expect(screen.getByText('Frag, wie du am Tisch fragst')).toBeInTheDocument();
     expect(
@@ -44,6 +44,10 @@ describe('Chronacle landing page', () => {
     expect(licenseLink).toHaveAttribute('href', licenseUrl);
     expect(licenseLink).toHaveAttribute('target', '_blank');
     expect(licenseLink).toHaveAttribute('rel', 'external noopener noreferrer');
+    expect(screen.getByRole('link', { name: 'Open Game License' })).toHaveAttribute(
+      'href',
+      '/legal/open-game-license',
+    );
   });
 
   it('updates the manual destination when the locale changes', async () => {
