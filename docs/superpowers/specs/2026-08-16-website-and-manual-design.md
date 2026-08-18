@@ -164,9 +164,10 @@ The approved storage/provider copy communicates only current behaviour:
 - Compatible online AI providers are the normal answer-generation setup.
 - A configured online answer provider receives the question and the context Chronacle supplies for
   the answer. Depending on the selected campaign, sources, and available data, this can include
-  relevant source excerpts; entity names, summaries, notes, and compiled Codex articles; session
-  titles and notes; and compiled rules. Some campaign entity and session context is supplied in full
-  campaign scope rather than relevance-filtered.
+  relevant source excerpts; entity names, summaries, notes, and compiled Codex articles; player
+  names and character class, level, and status; event start and end dates; session numbers, titles,
+  played dates, and notes; and compiled rules. Some campaign entity and session context is supplied
+  in full campaign scope rather than relevance-filtered.
 - A configured remote embedding provider separately receives the searchable text and question or
   search text needed for indexing and retrieval, as applicable.
 - Local models are supported as a secondary option.

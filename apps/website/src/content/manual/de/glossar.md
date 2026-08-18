@@ -39,7 +39,7 @@ Nutze diese Bedeutungen, wenn dir auf einem Chronacle-Bildschirm oder in diesem 
 
 **Index.** Die bei der PDF-Verarbeitung vorbereiteten, durchsuchbaren Passagen. Eine Neuindizierung baut sie aus der gespeicherten Quelle neu auf. Siehe [Indizierung verstehen](/de/handbuch/quellenbibliothek/indizierung).
 
-**Antwortanbieter.** Der eingerichtete KI-Dienst oder das lokale Programm, das aus deiner Frage und dem von Chronacle bereitgestellten Kontext die endgültige Antwort schreibt. Dieser Kontext kann Quellenauszüge, Kampagnenentitäten und -notizen, Sitzungen, Codex-Artikel und kompilierte Regeln umfassen. Siehe [Einen KI-Anbieter auswählen](/de/handbuch/ki-anbieter/auswahl).
+**Antwortanbieter.** Der eingerichtete KI-Dienst oder das lokale Programm, das aus deiner Frage und dem von Chronacle bereitgestellten Kontext die endgültige Antwort schreibt. Dieser Kontext kann relevante Quellenauszüge; Namen von Entitäten, Zusammenfassungen, Notizen und kompilierte Codex-Artikel; Spielernamen sowie Klasse, Stufe und Status; Start- und Enddaten von Ereignissen; Sitzungsnummern, -titel, Spieldaten und -notizen; sowie kompilierte Regeln umfassen. Siehe [Einen KI-Anbieter auswählen](/de/handbuch/ki-anbieter/auswahl).
 
 **Quellenangabe.** Ein Verweis an einer Antwort, der Quelle und Seite hinter einer Aussage nennt. Siehe [Quellenangaben prüfen](/de/handbuch/notizen-und-sitzungen/quellenangaben).
 

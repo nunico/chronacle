@@ -43,7 +43,7 @@ Connect Anthropic, select a model available to you, subscribe **The Brass Observ
 
 > Why does the astronomer Nera cover the eastern lens at midnight?
 
-Chronacle sends the question and the answer context it supplies to the provider, then can return an answer with `[Source: "Observatory Notes.pdf", p.23]`. That context can include relevant source excerpts, entity names, summaries, notes and compiled Codex articles, session titles and notes, and compiled rules. Campaign entities and sessions can be supplied as full campaign-scoped context rather than relevance-filtered results.
+Chronacle sends the question and the answer context it supplies to the provider, then can return an answer with `[Source: "Observatory Notes.pdf", p.23]`. That context can include relevant source excerpts; entity names, summaries, notes, and compiled Codex articles; player names and character class, level, and status; event start and end dates; session numbers, titles, played dates, and notes; and compiled rules. Campaign entities and sessions can be supplied as full campaign-scoped context rather than relevance-filtered results.
 
 <h2 id="important-details">Important details</h2>
 
