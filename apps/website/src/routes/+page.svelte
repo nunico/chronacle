@@ -16,6 +16,7 @@
   const sourceUrl = 'https://github.com/nunico/chronacle';
   const downloadUrl = 'https://github.com/nunico/chronacle/releases/latest';
   const licenseUrl = 'https://github.com/nunico/chronacle/blob/main/LICENSE';
+  const socialImage = '/brand/chronacle-icon.png';
 
   let locale = $state<Locale>('en');
   let copy = $derived(landingCopy[locale]);
@@ -34,6 +35,14 @@
 <svelte:head>
   <title>{copy.metadata.title}</title>
   <meta name="description" content={copy.metadata.description} />
+  <link rel="canonical" href="/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content={copy.metadata.title} />
+  <meta property="og:description" content={copy.metadata.description} />
+  <meta property="og:image" content={socialImage} />
+  <meta property="og:image:alt" content="Chronacle" />
+  <meta property="og:locale" content={locale === 'de' ? 'de_DE' : 'en_US'} />
+  <meta name="twitter:card" content="summary" />
 </svelte:head>
 
 <div data-pagefind-ignore="all">
