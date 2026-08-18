@@ -1,11 +1,9 @@
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const buildDirectory = fileURLToPath(new URL('../build/', import.meta.url));
-const fallbackFile = resolve(buildDirectory, '404.html');
-
 const contentTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
   ['.html', 'text/html; charset=utf-8'],
@@ -21,19 +19,21 @@ const contentTypes = new Map([
   ['.woff2', 'font/woff2'],
 ]);
 
-function isInsideBuild(candidate) {
-  const pathFromBuild = relative(buildDirectory, candidate);
-  return pathFromBuild === '' || (!pathFromBuild.startsWith(`..${sep}`) && pathFromBuild !== '..');
+function isInsideRoot(rootDirectory, candidate) {
+  const pathFromRoot = relative(rootDirectory, candidate);
+  return pathFromRoot === '' || (!pathFromRoot.startsWith(`..${sep}`) && pathFromRoot !== '..');
 }
 
-async function existingFile(candidate) {
-  if (!isInsideBuild(candidate)) return undefined;
+async function existingFile(realRootDirectory, candidate) {
   try {
-    const details = await stat(candidate);
-    if (details.isFile()) return candidate;
+    const realCandidate = await realpath(candidate);
+    if (!isInsideRoot(realRootDirectory, realCandidate)) return undefined;
+
+    const details = await stat(realCandidate);
+    if (details.isFile()) return realCandidate;
     if (details.isDirectory()) {
-      const indexFile = resolve(candidate, 'index.html');
-      if (!isInsideBuild(indexFile)) return undefined;
+      const indexFile = await realpath(resolve(realCandidate, 'index.html'));
+      if (!isInsideRoot(realRootDirectory, indexFile)) return undefined;
       return (await stat(indexFile)).isFile() ? indexFile : undefined;
     }
   } catch {
@@ -42,16 +42,16 @@ async function existingFile(candidate) {
   return undefined;
 }
 
-async function resolveFile(pathname) {
+async function resolveFile(rootDirectory, realRootDirectory, pathname) {
   const decodedPathname = decodeURIComponent(pathname);
-  const candidate = resolve(buildDirectory, decodedPathname.replace(/^\/+/, ''));
-  if (!isInsideBuild(candidate)) return { invalid: true };
+  const candidate = resolve(rootDirectory, decodedPathname.replace(/^\/+/, ''));
+  if (!isInsideRoot(rootDirectory, candidate)) return { invalid: true };
 
-  const directFile = await existingFile(candidate);
+  const directFile = await existingFile(realRootDirectory, candidate);
   if (directFile) return { file: directFile };
 
   if (extname(candidate) === '') {
-    const htmlFile = await existingFile(`${candidate}.html`);
+    const htmlFile = await existingFile(realRootDirectory, `${candidate}.html`);
     if (htmlFile) return { file: htmlFile };
   }
 
@@ -68,7 +68,23 @@ async function sendFile(response, file, statusCode, headOnly) {
   response.end(headOnly ? undefined : body);
 }
 
-export function createStaticServer() {
+export function createStaticServer(rootDirectory = buildDirectory) {
+  const resolvedRootDirectory = resolve(rootDirectory);
+  let rootConfiguration;
+  const getRootConfiguration = () => {
+    rootConfiguration ??= realpath(resolvedRootDirectory).then(async (realRootDirectory) => {
+      const fallbackFile = await existingFile(
+        realRootDirectory,
+        resolve(resolvedRootDirectory, '404.html'),
+      );
+      if (!fallbackFile) {
+        throw new Error('Static fallback is outside the build directory or missing');
+      }
+      return { fallbackFile, realRootDirectory };
+    });
+    return rootConfiguration;
+  };
+
   return createServer(async (request, response) => {
     const method = request.method ?? 'GET';
     if (method !== 'GET' && method !== 'HEAD') {
@@ -79,7 +95,12 @@ export function createStaticServer() {
 
     try {
       const requestUrl = new URL(request.url ?? '/', 'http://static-preview.invalid');
-      const resolved = await resolveFile(requestUrl.pathname);
+      const { fallbackFile, realRootDirectory } = await getRootConfiguration();
+      const resolved = await resolveFile(
+        resolvedRootDirectory,
+        realRootDirectory,
+        requestUrl.pathname,
+      );
       if (resolved.invalid) {
         response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
         response.end('Invalid path');
