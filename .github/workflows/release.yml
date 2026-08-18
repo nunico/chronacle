@@ -245,12 +245,24 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           root="target/${{ matrix.target }}/release/bundle"
-          debs=("$root"/deb/*.deb)
-          appimages=("$root"/appimage/*.AppImage)
-          rpms=("$root"/rpm/*.rpm)
-          [ "${#debs[@]}" -eq 1 ]
-          [ "${#appimages[@]}" -eq 1 ]
-          [ "${#rpms[@]}" -eq 1 ]
+          debs=("$root"/deb/Chronacle_*.deb)
+          appimages=("$root"/appimage/Chronacle_*.AppImage)
+          rpms=("$root"/rpm/Chronacle-*.rpm)
+          if [ "${#debs[@]}" -ne 1 ]; then
+            printf 'Expected exactly one release-ready Debian package, found %s\n' "${#debs[@]}" >&2
+            printf '  %s\n' "${debs[@]}" >&2
+            exit 1
+          fi
+          if [ "${#appimages[@]}" -ne 1 ]; then
+            printf 'Expected exactly one release-ready AppImage, found %s\n' "${#appimages[@]}" >&2
+            printf '  %s\n' "${appimages[@]}" >&2
+            exit 1
+          fi
+          if [ "${#rpms[@]}" -ne 1 ]; then
+            printf 'Expected exactly one release-ready RPM package, found %s\n' "${#rpms[@]}" >&2
+            printf '  %s\n' "${rpms[@]}" >&2
+            exit 1
+          fi
 
           extract_root=$(mktemp -d)
           trap 'rm -rf -- "$extract_root"' EXIT
@@ -327,7 +339,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: chronacle-deb-${{ matrix.flatpak_arch }}
-          path: target/${{ matrix.target }}/release/bundle/deb/*.deb
+          path: target/${{ matrix.target }}/release/bundle/deb/Chronacle_*.deb
           if-no-files-found: error
 
       - name: Upload inspectable native bundles
@@ -425,7 +437,8 @@ jobs:
             assets+=("$asset")
             asset_names+=("$asset_name")
           done < <(find release-assets/native release-assets/flatpak -type f \
-            \( -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \
+            \( -name 'Chronacle_*.deb' -o -name 'Chronacle_*.AppImage' \
+            -o -name 'Chronacle-*.rpm' \
             -o -name '*.app.tar.gz' -o -name '*.dmg' -o -name '*.msi' \
             -o -name '*.exe' -o -name '*.flatpak' \) -print0)
 

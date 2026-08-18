@@ -492,7 +492,10 @@ function canonicalAssetUpload(text) {
     /\[\[ "\$RELEASE_ID" =~ \^\[0-9\]\+\$ \]\]/.test(text) &&
     /find release-assets\/native release-assets\/flatpak/.test(text) &&
     /-print0/.test(text) &&
-    ['deb', 'AppImage', 'rpm', 'app.tar.gz', 'dmg', 'msi', 'exe', 'flatpak'].every((suffix) =>
+    /-name 'Chronacle_\*\.deb'/.test(text) &&
+    /-name 'Chronacle_\*\.AppImage'/.test(text) &&
+    /-name 'Chronacle-\*\.rpm'/.test(text) &&
+    ['app.tar.gz', 'dmg', 'msi', 'exe', 'flatpak'].every((suffix) =>
       text.includes(`*.${suffix}`),
     ) &&
     /basename "\$asset"/.test(planBody) &&
@@ -583,7 +586,7 @@ function hasFailClosedGuard(text, headerPattern) {
 }
 
 function stepUses(step, action) {
-  return new RegExp(`^ {8}uses:\\s*${action}\\s*$`, 'm').test(step);
+  return new RegExp(`^ {6}(?:- uses:|  uses:)\\s*${action}\\s*$`, 'm').test(step);
 }
 
 function artifactUploadStep(jobSteps, expectedName, pathPattern) {
@@ -594,6 +597,64 @@ function artifactUploadStep(jobSteps, expectedName, pathPattern) {
         stepInput(step, 'name') === expectedName &&
         pathPattern.test(stepInput(step, 'path')),
     ) ?? ''
+  );
+}
+
+function artifactUploadSteps(jobSteps, expectedName) {
+  return jobSteps.filter(
+    (step) =>
+      stepUses(step, 'actions/upload-artifact@v4') && stepInput(step, 'name') === expectedName,
+  );
+}
+
+function canonicalDebUpload(jobSteps) {
+  const matchingSteps = artifactUploadSteps(
+    jobSteps,
+    'chronacle-deb-${{ matrix.flatpak_arch }}',
+  );
+  const step = matchingSteps[0] ?? '';
+  return (
+    matchingSteps.length === 1 &&
+    /^target\/\$\{\{ matrix\.target \}\}\/release\/bundle\/deb\/Chronacle_\*\.deb$/.test(
+      stepInput(step, 'path'),
+    ) &&
+    stepInput(step, 'if-no-files-found') === 'error'
+  );
+}
+
+function canonicalLinuxValidation(text) {
+  const validatesFormat = (arrayName, label) => {
+    const header = new RegExp(
+      `if \\[ "\\$\\{#${arrayName}\\[@\\]\\}" -ne 1 \\]; then`,
+    ).exec(text);
+    if (!header) return false;
+
+    const bodyStart = header.index + header[0].length;
+    const terminator = /(?:;|\n)[ \t]*fi\b/.exec(text.slice(bodyStart));
+    if (!terminator) return false;
+
+    const body = text.slice(bodyStart, bodyStart + terminator.index);
+    const commands = shellCommands(body);
+    const countDiagnostic = commands.findIndex(
+      (command) =>
+        command.includes(`Expected exactly one release-ready ${label}, found %s\\n`) &&
+        command.includes(`\${#${arrayName}[@]}`),
+    );
+    const pathDiagnostic = commands.findIndex(
+      (command) =>
+        command.includes("printf '  %s\\n'") && command.includes(`\${${arrayName}[@]}`),
+    );
+    const exit = commands.findIndex((command) => /^exit [1-9][0-9]*$/.test(command));
+    return countDiagnostic >= 0 && countDiagnostic < pathDiagnostic && pathDiagnostic < exit;
+  };
+
+  return (
+    /debs=\("\$root"\/deb\/Chronacle_\*\.deb\)/.test(text) &&
+    /appimages=\("\$root"\/appimage\/Chronacle_\*\.AppImage\)/.test(text) &&
+    /rpms=\("\$root"\/rpm\/Chronacle-\*\.rpm\)/.test(text) &&
+    validatesFormat('debs', 'Debian package') &&
+    validatesFormat('appimages', 'AppImage') &&
+    validatesFormat('rpms', 'RPM package')
   );
 }
 
@@ -676,6 +737,9 @@ const tauriReleaseStep =
     ),
   ) ?? '';
 const tauriWith = mappingBlock(tauriReleaseStep, 'with', 8);
+const linuxValidationStep =
+  buildSteps.find((step) => /^ {6}- name: Validate Linux packages$/m.test(step)) ?? '';
+const linuxValidationRun = executableRunText([linuxValidationStep]);
 
 requireContract(
   isReleasePushGuard("github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')"),
@@ -728,6 +792,36 @@ requireContract(
     /^target\/\$\{\{ matrix\.target \}\}\/release\/bundle\/deb\/\*\.deb$/,
   ).length === 0,
   'pipeline parser must not combine artifact fields from separate steps',
+);
+const canonicalDebUploadFixture = [
+  '  fixture:',
+  '    steps:',
+  '      - uses: actions/upload-artifact@v4',
+  '        with:',
+  '          name: chronacle-deb-${{ matrix.flatpak_arch }}',
+  '          path: target/${{ matrix.target }}/release/bundle/deb/Chronacle_*.deb',
+  '          if-no-files-found: error',
+].join('\n');
+const duplicateDebUploadFixture = [
+  canonicalDebUploadFixture,
+  '      - uses: actions/upload-artifact@v4',
+  '        with:',
+  '          name: chronacle-deb-${{ matrix.flatpak_arch }}',
+  '          path: target/${{ matrix.target }}/release/bundle/deb/*.deb',
+  '          if-no-files-found: error',
+].join('\n');
+const broadDebUploadFixture = canonicalDebUploadFixture.replace('Chronacle_*.deb', '*.deb');
+requireContract(
+  canonicalDebUpload(steps(canonicalDebUploadFixture)),
+  'pipeline parser canonical Debian upload fixture must remain valid',
+);
+requireContract(
+  !canonicalDebUpload(steps(broadDebUploadFixture)),
+  'pipeline parser must reject a broad Debian artifact upload',
+);
+requireContract(
+  !canonicalDebUpload(steps(duplicateDebUploadFixture)),
+  'pipeline parser must reject additional broad Debian artifact uploads',
 );
 requireContract(
   !splitFixtureSteps.some((step) =>
@@ -784,7 +878,7 @@ const canonicalAssetFixture = [
   'esac',
   'assets+=("$asset")',
   'asset_names+=("$asset_name")',
-  "done < <(find release-assets/native release-assets/flatpak -type f \\( -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' -o -name '*.app.tar.gz' -o -name '*.dmg' -o -name '*.msi' -o -name '*.exe' -o -name '*.flatpak' \\) -print0)",
+  "done < <(find release-assets/native release-assets/flatpak -type f \\( -name 'Chronacle_*.deb' -o -name 'Chronacle_*.AppImage' -o -name 'Chronacle-*.rpm' -o -name '*.app.tar.gz' -o -name '*.dmg' -o -name '*.msi' -o -name '*.exe' -o -name '*.flatpak' \\) -print0)",
   'if [ "${#assets[@]}" -eq 0 ] || [ "${#assets[@]}" -ne "${#asset_names[@]}" ]; then exit 1; fi',
   'if [ "$(printf \'%s\\n\' "${asset_names[@]}" | sort -u | wc -l)" -ne "${#asset_names[@]}" ]; then exit 1; fi',
   'planned_names_json=$(printf \'%s\\n\' "${asset_names[@]}" | jq -R . | jq -s .)',
@@ -812,6 +906,15 @@ const canonicalAssetFixture = [
 requireContract(
   canonicalAssetUpload(canonicalAssetFixture),
   'pipeline parser canonical asset fixture must remain valid',
+);
+requireContract(
+  !canonicalAssetUpload(
+    canonicalAssetFixture
+      .replace("-name 'Chronacle_*.deb'", "-name '*.deb'")
+      .replace("-name 'Chronacle_*.AppImage'", "-name '*.AppImage'")
+      .replace("-name 'Chronacle-*.rpm'", "-name '*.rpm'"),
+  ),
+  'pipeline parser must reject noncanonical Linux release artifacts',
 );
 const wrongAssetEndpointFixture = canonicalAssetFixture.replace(
   'existing_assets=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" | jq \'add\')',
@@ -1072,6 +1175,60 @@ requireContract(
   stepEnvValue(tauriReleaseStep, 'GITHUB_TOKEN') === '',
   'tauri-action must not receive GITHUB_TOKEN',
 );
+requireContract(
+  canonicalLinuxValidation(linuxValidationRun),
+  'Linux validation must select exactly one release artifact per format and fail with diagnostics',
+);
+requireContract(
+  !canonicalLinuxValidation(linuxValidationRun.replace(/exit 1/g, 'true')),
+  'Linux validation guards must fail closed',
+);
+requireContract(
+  !canonicalLinuxValidation(
+    linuxValidationRun.replace(
+      /printf '  %s\\n' "\$\{debs\[@\]\}" >&2/,
+      "printf 'Debian validation failed\\n' >&2",
+    ),
+  ),
+  'Linux validation diagnostics must list the selected paths',
+);
+requireContract(
+  !canonicalLinuxValidation(
+    linuxValidationRun.replace(
+      [
+        "printf 'Expected exactly one release-ready Debian package, found %s\\n' \"${#debs[@]}\" >&2",
+        "printf '  %s\\n' \"${debs[@]}\" >&2",
+        'exit 1',
+        'fi',
+      ].join('\n'),
+      [
+        'exit 1',
+        'fi',
+        "printf 'Expected exactly one release-ready Debian package, found %s\\n' \"${#debs[@]}\" >&2",
+        "printf '  %s\\n' \"${debs[@]}\" >&2",
+      ].join('\n'),
+    ),
+  ),
+  'Linux validation diagnostics must remain inside their guard',
+);
+requireContract(
+  !canonicalLinuxValidation(
+    linuxValidationRun.replace(
+      "printf '  %s\\n' \"${debs[@]}\" >&2\nexit 1",
+      "exit 1\nprintf '  %s\\n' \"${debs[@]}\" >&2",
+    ),
+  ),
+  'Linux validation diagnostics must run before the failing exit',
+);
+requireContract(
+  !canonicalLinuxValidation(
+    linuxValidationRun.replace(
+      "found %s\\n' \"${#debs[@]}\"",
+      "found %s\\n' \"${#appimages[@]}\"",
+    ),
+  ),
+  'Linux validation diagnostics must report the guarded format count',
+);
 const versionConsistencyStep =
   preCheckSteps.find((step) => directValue(step, 'name', 8) === 'Check version consistency') ?? '';
 requireContract(
@@ -1168,13 +1325,10 @@ requireContract(
   ),
   'pull-request jobs must not inherit a global GitHub token',
 );
-const debUploadStep = artifactUploadStep(
-  buildSteps,
-  'chronacle-deb-${{ matrix.flatpak_arch }}',
-  /^target\/\$\{\{ matrix\.target \}\}\/release\/bundle\/deb\/\*\.deb$/,
-);
+const debUploadSteps = artifactUploadSteps(buildSteps, 'chronacle-deb-${{ matrix.flatpak_arch }}');
+const debUploadStep = debUploadSteps[0] ?? '';
 requireContract(
-  debUploadStep.length > 0,
+  canonicalDebUpload(buildSteps),
   'Linux Debian artifacts must be uploaded with architecture labels',
 );
 requireContract(
