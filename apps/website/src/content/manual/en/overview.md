@@ -24,7 +24,3 @@ This manual shows you how to set up Chronacle, bring in your campaign material, 
 <h3 id="at-the-table">At the table</h3>
 
 Use the section index to move directly to the answer you need.
-
-#### A small detail
-
-Each article keeps the important steps close to the relevant explanation.

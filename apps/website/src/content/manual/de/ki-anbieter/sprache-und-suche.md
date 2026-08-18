@@ -49,5 +49,5 @@ Chronacle kann die englische Stelle finden, auf Deutsch antworten und `[Source: 
 
 - **Anzeigesprache** ändert die Bedienelemente und dient bei kurzen oder mehrdeutigen Fragen als Ersatz für die Antwortsprache.
 - **Einbettungsmodus** legt fest, wie Quellentext und Fragen für die Suche indiziert werden. Nach einem Wechsel musst du bestehende Quellen neu indizieren.
-- **LLM-Anbieter** bestimmt, wer die Antwort formuliert. Bei einem Online-Anbieter werden Frage und passende gefundene Auszüge an diesen Anbieter gesendet.
+- **LLM-Anbieter** bestimmt, wer die Antwort formuliert. Ein Online-Anbieter erhält die Frage und den von Chronacle bereitgestellten Antwortkontext. Dieser kann relevante Quellenauszüge, Namen von Entitäten, Zusammenfassungen, Notizen und kompilierte Codex-Artikel, Sitzungstitel und -notizen sowie kompilierte Regeln umfassen. Kampagnenentitäten und Sitzungen können vollständiger kampagnenbezogener Kontext statt relevanzgefilterter Ergebnisse sein.
 - Ein mehrsprachiger Index verbessert die Suche über unterstützte Sprachen hinweg. Er übersetzt weder das gespeicherte PDF noch seine Namen.

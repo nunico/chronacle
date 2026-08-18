@@ -27,7 +27,7 @@ headings:
 
 Wähle einen Anbieter, der Antworten formuliert, und einen Indizierungsmodus, mit dem Chronacle passende Textstellen findet.
 
-1. Öffne **Einstellungen** und suche den Abschnitt **LLM-Anbieter**. Ein LLM-Anbieter ist ein Dienst oder lokales Programm, das aus deiner Frage und passenden Quellenauszügen eine Antwort formuliert.
+1. Öffne **Einstellungen** und suche den Abschnitt **LLM-Anbieter**. Ein LLM-Anbieter ist ein Dienst oder lokales Programm, das aus deiner Frage und dem von Chronacle bereitgestellten Antwortkontext eine Antwort formuliert.
 2. Wähle **OpenAI** oder **Anthropic** für die übliche [Online-Einrichtung](/de/handbuch/ki-anbieter/online), **Ollama (lokal)** für ein [lokales Antwortmodell](/de/handbuch/ki-anbieter/lokal) oder einen registrierten [benutzerdefinierten Anbieter](/de/handbuch/ki-anbieter/eigene-anbieter).
 3. Trage unter **Modell** genau die Kennung ein, die dein Anbieter erwartet.
 4. Wähle **Speichern und verbinden** und achte auf **Verbunden: …**
@@ -51,4 +51,4 @@ Wenn Chronacle die Stelle findet, kann die Antwort auf Deutsch erscheinen und `[
 - Nimm einen Online-Anbieter, wenn du dessen unterstützte Modelle verwenden möchtest und die nötigen Zugangsdaten hast.
 - Nimm Ollama, wenn du bewusst ein lokales Modell betreiben möchtest. Geschwindigkeit und Qualität hängen vom Modell und deinem Rechner ab.
 - Für deutsche, französische oder spanische Quellen sowie sprachübergreifende Fragen eignet sich die mehrsprachige Indizierung.
-- Bei einem Online-Antwortanbieter sendet Chronacle die Frage und die dafür gefundenen Quellenauszüge an diesen Anbieter, damit er die Antwort formuliert.
+- Bei einem Online-Antwortanbieter sendet Chronacle die Frage und den bereitgestellten Antwortkontext an diesen Anbieter. Abhängig von der gewählten Kampagne und den Quellen kann das relevante Quellenauszüge, Namen von Entitäten, Zusammenfassungen, Notizen und kompilierte Codex-Artikel, Sitzungstitel und -notizen sowie kompilierte Regeln umfassen. Kampagnenentitäten und Sitzungen können dabei als vollständiger kampagnenbezogener Kontext statt als relevanzgefilterte Ergebnisse enthalten sein.

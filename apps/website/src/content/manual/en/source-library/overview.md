@@ -47,6 +47,6 @@ The answer can use `[Source: "Secrets of Blackwake.pdf", p.74]`; the **Isles of 
 <h2 id="storage-and-online-answers">Storage and online answers</h2>
 
 - Chronacle stores the imported PDF and its search index in the desktop app's local data.
-- When an online answer provider is active, Chronacle sends the question and relevant retrieved excerpts to that provider to produce the reply.
+- When an online answer provider is active, Chronacle sends it the question and the answer context it supplies. Besides relevant source excerpts, that can include entity names, summaries, notes and compiled Codex articles, session titles and notes, and compiled rules. Campaign entities and sessions can be full campaign-scoped context rather than relevance-filtered results.
 - A collection can serve more than one campaign, so a shared PDF needs to be imported and indexed only once.
 - Continue with [collections](/en/manual/source-library/collections), [PDF import](/en/manual/source-library/upload-pdfs), or [indexing](/en/manual/source-library/indexing).

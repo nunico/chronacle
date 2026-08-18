@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { Component } from 'svelte';
 import { getArticle, getTranslation, manualEntries, validateArticles } from './registry';
 import type { ManualArticle, ManualFrontmatter } from './types';
@@ -293,6 +294,28 @@ describe('manual content registry', () => {
     expect(getArticle('en', 'getting-started/quick-start').links).toContain(
       '/en/manual/getting-started/install',
     );
+  });
+
+  it('keeps every German article marked for proofreading and omits overview filler', () => {
+    const germanSources = import.meta.glob<string>('/src/content/manual/de/**/*.md', {
+      eager: true,
+      query: '?raw',
+      import: 'default',
+    });
+    const englishOverview = readFileSync('src/content/manual/en/overview.md', 'utf8');
+    const germanOverview = readFileSync('src/content/manual/de/overview.md', 'utf8');
+
+    expect(Object.values(germanSources)).toHaveLength(37);
+    expect(
+      Object.values(germanSources).filter((source) =>
+        source.includes('<!-- German proofreading requested -->'),
+      ),
+    ).toHaveLength(37);
+    expect(englishOverview).not.toContain('A small detail');
+    expect(englishOverview).not.toContain(
+      'Each article keeps the important steps close to the relevant explanation.',
+    );
+    expect(germanOverview).toMatch(/^---\n[\s\S]*?\n---\n\n<!-- German proofreading requested -->/);
   });
 
   it('rejects translation keys without a German counterpart', () => {
