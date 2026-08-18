@@ -45,7 +45,7 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
-<section class="error-page" lang={locale} data-pagefind-ignore="all">
+<main id="main-content" class="error-page" lang={locale} data-pagefind-ignore="all">
   <div class="error-page__mark"><EyeMark size={68} glow={false} /></div>
   <p class="error-page__code">404</p>
   <h1>{copy.title}</h1>
@@ -66,7 +66,7 @@
       </button>
     {/if}
   </div>
-</section>
+</main>
 
 {#if isManualRoute}
   <SearchDialog {locale} />

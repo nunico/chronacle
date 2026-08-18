@@ -2,6 +2,8 @@
   import { resolve } from '$app/paths';
   import EyeMark from '$lib/brand/EyeMark.svelte';
   import Icon from '$lib/components/Icon.svelte';
+  import SiteFooter from '$lib/components/SiteFooter.svelte';
+  import { getTranslation } from '$lib/content/registry';
   import type { ManualArticle, ManualHeading } from '$lib/content/types';
   import Search from 'lucide-svelte/icons/search';
   import SearchDialog from '$lib/search/SearchDialog.svelte';
@@ -19,12 +21,43 @@
   const homeLabel = $derived(
     article.locale === 'de' ? 'Zur Chronacle-Startseite' : 'Chronacle home',
   );
+  const translation = $derived(getTranslation(article.locale, article.slug));
+  const copy = $derived(
+    article.locale === 'de'
+      ? {
+          skip: 'Zum Artikel',
+          language: 'English',
+          footer: {
+            home: 'Chronacle Startseite',
+            tagline: 'Quellen prüfen statt Antworten erraten.',
+            navigation: 'Navigation im Seitenfuß',
+            manual: 'Handbuch',
+            source: 'Quellcode',
+            license: 'Projektlizenz',
+            copyright: 'Chronacle · AGPL-3.0 mit Branding-Ausnahme',
+          },
+        }
+      : {
+          skip: 'Skip to article',
+          language: 'Deutsch',
+          footer: {
+            home: 'Chronacle home',
+            tagline: 'Check sources instead of guessing answers.',
+            navigation: 'Footer navigation',
+            manual: 'Manual',
+            source: 'Source',
+            license: 'Project license',
+            copyright: 'Chronacle · AGPL-3.0 with Branding Exception',
+          },
+        },
+  );
 
   function setHeadings(nextHeadings: ManualHeading[]): void {
     headings = nextHeadings;
   }
 </script>
 
+<a class="manual-skip-link" href="#main-content" data-pagefind-ignore>{copy.skip}</a>
 <header class="manual-header" data-pagefind-ignore>
   <div class="manual-header__inner">
     <a class="manual-header__brand" href={resolve('/')} aria-label={homeLabel}>
@@ -33,6 +66,16 @@
     </a>
     <span class="manual-header__divider" aria-hidden="true"></span>
     <span class="manual-header__title">{article.locale === 'de' ? 'Handbuch' : 'Manual'}</span>
+    <a
+      class="manual-header__translation"
+      href={resolve(translation.href)}
+      hreflang={translation.locale}
+      lang={translation.locale}
+      data-sveltekit-reload
+      style="min-width: 44px; min-height: 44px;"
+    >
+      {copy.language}
+    </a>
     <button
       class="manual-header__search"
       style="min-width: 44px; min-height: 44px;"
@@ -54,32 +97,60 @@
   <ManualFallback locale={article.locale} currentSlug={article.slug} />
 </noscript>
 
-<div class="manual-shell">
-  <aside class="manual-shell__sidebar" data-pagefind-ignore>
-    <ManualSidebar locale={article.locale} currentSlug={article.slug} />
-  </aside>
+<main id="main-content">
+  <div class="manual-shell">
+    <aside class="manual-shell__sidebar" data-pagefind-ignore>
+      <ManualSidebar locale={article.locale} currentSlug={article.slug} />
+    </aside>
 
-  <section
-    class="manual-shell__content"
-    aria-label={article.locale === 'de' ? 'Handbuchartikel' : 'Manual article'}
-  >
-    <Breadcrumbs {article} />
-    <Article onheadings={setHeadings} />
-    <ArticleNavigation {article} />
-  </section>
+    <section
+      class="manual-shell__content"
+      aria-label={article.locale === 'de' ? 'Handbuchartikel' : 'Manual article'}
+    >
+      <Breadcrumbs {article} />
+      <Article onheadings={setHeadings} />
+      <ArticleNavigation {article} />
+    </section>
 
-  <aside
-    class="manual-shell__toc"
-    aria-label={article.locale === 'de' ? 'Seitenübersicht' : 'Page outline'}
-    data-pagefind-ignore
-  >
-    <TableOfContents {headings} locale={article.locale} />
-  </aside>
-</div>
+    <aside
+      class="manual-shell__toc"
+      aria-label={article.locale === 'de' ? 'Seitenübersicht' : 'Page outline'}
+      data-pagefind-ignore
+    >
+      <TableOfContents {headings} locale={article.locale} />
+    </aside>
+  </div>
+</main>
 
 <SearchDialog locale={article.locale} />
+<SiteFooter
+  labels={copy.footer}
+  links={{
+    home: '/',
+    manual: article.locale === 'de' ? '/de/handbuch' : '/en/manual',
+    source: 'https://github.com/nunico/chronacle',
+    license: 'https://github.com/nunico/chronacle/blob/main/LICENSE',
+  }}
+/>
 
 <style>
+  .manual-skip-link {
+    position: fixed;
+    z-index: 100;
+    top: var(--s-3);
+    left: var(--s-3);
+    padding: var(--s-2) var(--s-3);
+    border-radius: var(--r-md);
+    background: var(--bg-panel-2);
+    color: var(--gem-bright);
+    font-family: var(--font-sans);
+    transform: translateY(-200%);
+  }
+
+  .manual-skip-link:focus {
+    transform: translateY(0);
+  }
+
   .manual-header {
     position: sticky;
     z-index: 20;
@@ -135,7 +206,7 @@
     min-height: 44px;
     align-items: center;
     gap: var(--s-2);
-    margin-left: auto;
+    margin-left: var(--s-1);
     padding: var(--s-2) var(--s-3);
     border: 1px solid var(--line);
     border-radius: var(--r-md);
@@ -143,6 +214,26 @@
     color: var(--fg-2);
     font-size: 0.8125rem;
     cursor: pointer;
+  }
+
+  .manual-header__translation {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    padding: var(--s-2) var(--s-3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    color: var(--fg-2);
+    font-size: 0.8125rem;
+    font-weight: 650;
+    text-decoration: none;
+  }
+
+  .manual-header__translation:hover {
+    border-color: var(--line-strong);
+    color: var(--fg-1);
   }
 
   .manual-header__search:hover {
@@ -227,11 +318,28 @@
     .manual-header__search {
       width: auto;
       min-width: 44px;
-      margin-left: auto;
+      padding-inline: var(--s-3);
     }
 
+    .manual-header__search > span,
     .manual-header__search kbd {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+  }
+
+  @media (max-width: 28rem) {
+    .manual-header__title,
+    .manual-header__divider {
       display: none;
+    }
+
+    .manual-header__translation {
+      margin-left: auto;
     }
   }
 </style>

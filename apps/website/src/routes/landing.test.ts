@@ -139,6 +139,17 @@ describe('Chronacle landing page', () => {
     expect(document.head.innerHTML).not.toMatch(/localhost|127\.0\.0\.1/);
   });
 
+  it('keeps the site header and footer outside its single main landmark', () => {
+    prefer('en-US');
+    render(Page);
+
+    const main = screen.getByRole('main');
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(main).toHaveAttribute('id', 'main-content');
+    expect(main.contains(document.querySelector('.site-header'))).toBe(false);
+    expect(main.contains(screen.getByRole('contentinfo'))).toBe(false);
+  });
+
   it('uses the latest release URL for security-safe external download links', () => {
     prefer('en-US');
 

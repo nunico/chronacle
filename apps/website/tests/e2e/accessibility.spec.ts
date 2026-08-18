@@ -47,3 +47,24 @@ test('has no serious or critical violations with the mobile drawer open', async 
   await expect(page.getByRole('dialog', { name: 'Manual navigation' })).toBeVisible();
   await expectNoHighImpactViolations(page, testInfo);
 });
+
+for (const [path, headerSelector] of [
+  ['/', '.site-header'],
+  ['/en/manual', '.manual-header'],
+  ['/de/handbuch', '.manual-header'],
+  ['/legal/open-game-license', '.legal-header'],
+] as const) {
+  test(`exposes one main with page-level header and footer landmarks at ${path}`, async ({
+    page,
+  }) => {
+    await page.goto(path);
+    const main = page.getByRole('main');
+    const pageHeader = page.locator(headerSelector);
+    const pageFooter = page.locator('.site-footer');
+    await expect(main).toHaveCount(1);
+    await expect(pageHeader).toHaveRole('banner');
+    await expect(pageFooter).toHaveRole('contentinfo');
+    await expect(main.locator(headerSelector)).toHaveCount(0);
+    await expect(main.locator('.site-footer')).toHaveCount(0);
+  });
+}

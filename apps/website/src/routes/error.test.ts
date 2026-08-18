@@ -31,6 +31,8 @@ describe('website error page', () => {
   it('falls back to English and links home and to the manual overview', () => {
     render(ErrorPage);
 
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(screen.getByRole('main')).toHaveAttribute('id', 'main-content');
     expect(document.querySelector('base')).toHaveAttribute('href', '/');
     expect(screen.getByRole('heading', { name: 'That page is not here.' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Chronacle home' })).toHaveAttribute('href', '/');

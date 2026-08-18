@@ -6,4 +6,4 @@
 </script>
 
 <div class="site-background" aria-hidden="true"></div>
-<main id="main-content">{@render children()}</main>
+{@render children()}
