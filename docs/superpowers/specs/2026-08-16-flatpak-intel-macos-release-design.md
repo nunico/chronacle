@@ -90,7 +90,8 @@ Pull requests run only the release pre-checks: workflow contracts, formatting, l
 the RocksDB-enabled desktop suite. The native and Flatpak packaging matrices do not run on pull
 requests. They run for semver tags and through `workflow_dispatch`, which provides an explicit
 manual full-package preflight. Manual runs retain inspectable workflow artifacts but do not create,
-modify, or publish a GitHub Release; only semver-tag runs cross that boundary.
+modify, or publish a GitHub Release, even when dispatched against a tag ref; only semver tag push
+events cross that boundary.
 
 The release remains non-prerelease unless the tag workflow is changed explicitly in a later design.
 

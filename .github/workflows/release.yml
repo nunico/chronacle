@@ -1,12 +1,14 @@
 # Release pipeline for Chronacle
 #
-# Pull requests exercise every native package and Flatpak without creating a release.
-# Semver tags create a draft, attach all verified packages, and publish only after
-# the complete native and Flatpak matrices succeed.
+# Pull requests run release validation without building packages.
+# Manual dispatches build every package without creating a release. Semver tags
+# create a draft, attach all verified packages, and publish only after the complete
+# native and Flatpak matrices succeed.
 
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
@@ -84,7 +86,7 @@ jobs:
 
       - id: version-consistency
         name: Check version consistency
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           TAG="${{ github.ref_name }}"
           CONF_VERSION=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
@@ -120,7 +122,7 @@ jobs:
 
   create-release:
     needs: pre-check
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -161,6 +163,7 @@ jobs:
 
   build:
     needs: pre-check
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
     strategy:
@@ -336,6 +339,7 @@ jobs:
 
   flatpak:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
     strategy:
@@ -373,10 +377,8 @@ jobs:
       - name: Build and smoke-test Flatpak
         shell: bash
         run: |
-          if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
-            GITHUB_REF_NAME="v$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
-          fi
-          scripts/release-flatpak.sh artifacts/*.deb "${GITHUB_REF_NAME#v}" flatpak-out
+          VERSION=$(jq -r '.version' apps/desktop/src-tauri/tauri.conf.json)
+          scripts/release-flatpak.sh artifacts/*.deb "$VERSION" flatpak-out
 
       - name: Upload inspectable Flatpak
         uses: actions/upload-artifact@v4
@@ -387,7 +389,7 @@ jobs:
 
   upload-release-assets:
     needs: [create-release, build, flatpak]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -464,7 +466,7 @@ jobs:
 
   publish-release:
     needs: [create-release, upload-release-assets, build, flatpak]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
       contents: write

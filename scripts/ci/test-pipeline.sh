@@ -620,8 +620,14 @@ function unquote(value) {
   return value.trim().replace(/^(["'])(.*)\1$/, '$2');
 }
 
-function isReleaseTagGuard(value) {
-  return /^(?:\$\{\{\s*)?startsWith\(github\.ref, 'refs\/tags\/v'\)(?:\s*\}\})?$/.test(
+function isReleasePushGuard(value) {
+  return /^(?:\$\{\{\s*)?github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/v'\)(?:\s*\}\})?$/.test(
+    value.trim(),
+  );
+}
+
+function isPackageRunGuard(value) {
+  return /^(?:\$\{\{\s*)?startsWith\(github\.ref, 'refs\/tags\/v'\) \|\| github\.event_name == 'workflow_dispatch'(?:\s*\}\})?$/.test(
     value.trim(),
   );
 }
@@ -670,6 +676,15 @@ const tauriReleaseStep =
     ),
   ) ?? '';
 const tauriWith = mappingBlock(tauriReleaseStep, 'with', 8);
+
+requireContract(
+  isReleasePushGuard("github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')"),
+  'pipeline parser must accept the release push guard',
+);
+requireContract(
+  !isReleasePushGuard("startsWith(github.ref, 'refs/tags/v')"),
+  'pipeline parser must reject ref-only guards that publish manual tag dispatches',
+);
 
 requireContract(
   directValue(concurrency, 'group', 2) === '${{ github.workflow }}-${{ github.ref }}' &&
@@ -1060,8 +1075,8 @@ requireContract(
 const versionConsistencyStep =
   preCheckSteps.find((step) => directValue(step, 'name', 8) === 'Check version consistency') ?? '';
 requireContract(
-  isReleaseTagGuard(directValue(versionConsistencyStep, 'if', 8)),
-  'version consistency must run only for release tags',
+  isReleasePushGuard(directValue(versionConsistencyStep, 'if', 8)),
+  'version consistency must run only for release tag pushes',
 );
 requireContract(createRelease.length > 0, 'create-release job must exist');
 requireContract(
@@ -1069,8 +1084,8 @@ requireContract(
   'create-release must need pre-check',
 );
 requireContract(
-  isReleaseTagGuard(directValue(createRelease, 'if', 4)),
-  'create-release must have a job-level release-tag guard',
+  isReleasePushGuard(directValue(createRelease, 'if', 4)),
+  'create-release must have a job-level release-push guard',
 );
 requireContract(
   jobPermission(createRelease, 'contents') === 'write',
@@ -1094,12 +1109,12 @@ requireContract(
   'create-release must canonically select, reuse, or create exactly one draft release ID',
 );
 requireContract(
-  directValue(build, 'if', 4) === '',
-  'build job must remain runnable on pull requests',
+  isPackageRunGuard(directValue(build, 'if', 4)),
+  'build job must run only for release tags or manual dispatches',
 );
 requireContract(
-  directValue(flatpak, 'if', 4) === '',
-  'flatpak job must remain runnable on pull requests',
+  isPackageRunGuard(directValue(flatpak, 'if', 4)),
+  'flatpak job must run only for release tags or manual dispatches',
 );
 for (const [name, job, jobSteps] of [
   ['build', build, buildSteps],
@@ -1177,11 +1192,20 @@ requireContract(
 );
 
 const pullRequest = mappingBlock(on, 'pull_request', 2);
+const workflowDispatchDeclaration = /^ {2}workflow_dispatch:\s*$/m.test(on);
 const pullRequestPaths = mappingBlock(pullRequest, 'paths', 4);
 const pullRequestPathEntries = [...pullRequestPaths.matchAll(/^ {6}-\s*(.+)$/gm)].map((entry) =>
   unquote(entry[1]),
 );
 requireContract(pullRequest.length > 0, 'release workflow must run on pull requests');
+requireContract(
+  workflowDispatchDeclaration,
+  'release workflow must support manual full-package preflights',
+);
+requireContract(
+  directValue(preCheck, 'if', 4) === '',
+  'pre-check must remain runnable on pull requests',
+);
 requireContract(
   pullRequestPaths.length > 0,
   'release pull request trigger must be path-filtered',
@@ -1242,10 +1266,8 @@ requireContract(
 );
 const flatpakBuildStep =
   flatpakSteps.find((step) =>
-    runInvokes(
-      step,
-      /^scripts\/release-flatpak\.sh artifacts\/\*\.deb "\$\{GITHUB_REF_NAME#v\}" flatpak-out$/,
-    ),
+    runInvokes(step, /^VERSION=\$\(jq -r '\.version' apps\/desktop\/src-tauri\/tauri\.conf\.json\)$/) &&
+    runInvokes(step, /^scripts\/release-flatpak\.sh artifacts\/\*\.deb "\$VERSION" flatpak-out$/),
   ) ?? '';
 requireContract(
   flatpakBuildStep.length > 0,
@@ -1253,7 +1275,7 @@ requireContract(
 );
 requireContract(
   directValue(flatpakBuildStep, 'if', 8) === '',
-  'flatpak builder step must remain runnable on pull requests',
+  'flatpak builder step must rely on the package job guard',
 );
 const flatpakWorkflowUploadStep = artifactUploadStep(
   flatpakSteps,
@@ -1271,8 +1293,8 @@ requireContract(
   'upload-release-assets must need create-release, build, and flatpak',
 );
 requireContract(
-  isReleaseTagGuard(directValue(uploadReleaseAssets, 'if', 4)),
-  'upload-release-assets must have a job-level release-tag guard',
+  isReleasePushGuard(directValue(uploadReleaseAssets, 'if', 4)),
+  'upload-release-assets must have a job-level release-push guard',
 );
 requireContract(
   jobPermission(uploadReleaseAssets, 'contents') === 'write',
@@ -1329,8 +1351,8 @@ requireContract(
 );
 const publishJobIf = /^ {4}if:\s*(.+)$/m.exec(publish)?.[1] ?? '';
 requireContract(
-  isReleaseTagGuard(publishJobIf),
-  'publish-release must have a job-level release-tag guard',
+  isReleasePushGuard(publishJobIf),
+  'publish-release must have a job-level release-push guard',
 );
 requireContract(
   jobPermission(publish, 'contents') === 'write',
@@ -1340,7 +1362,7 @@ requireContract(!hasCheckout(publishSteps), 'publish-release must not check out 
 
 requireContract(
   directValue(tauriReleaseStep, 'if', 8) === '',
-  'native packaging must remain runnable on pull requests',
+  'native packaging step must rely on the package job guard',
 );
 for (const [name, jobSteps] of [
   ['build', buildSteps],
@@ -1359,7 +1381,7 @@ const tagOnlyWriteJobs = new Set(['create-release', 'upload-release-assets', 'pu
 for (const [name, job] of jobs) {
   if (jobPermission(job, 'contents') === 'write') {
     requireContract(
-      tagOnlyWriteJobs.has(name) && isReleaseTagGuard(directValue(job, 'if', 4)),
+      tagOnlyWriteJobs.has(name) && isReleasePushGuard(directValue(job, 'if', 4)),
       `${name} must not have write permission on pull requests`,
     );
   }
