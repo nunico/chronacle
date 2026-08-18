@@ -37,7 +37,7 @@ Use these meanings when a Chronacle screen or this manual uses an unfamiliar ter
 
 **Index.** The prepared, searchable passages made during PDF processing. Re-indexing rebuilds them from the saved source. See [Understand indexing](/en/manual/source-library/indexing).
 
-**Answer provider.** The configured AI service or local program that writes the final answer from your question and the context Chronacle supplies. That context can include source excerpts, campaign entities and notes, sessions, Codex articles, and compiled rules. See [Choose an AI provider](/en/manual/ai-providers/choose).
+**Answer provider.** The configured AI service or local program that writes the final answer from your question and the context Chronacle supplies. That context can include relevant source excerpts; entity names, summaries, notes, and compiled Codex articles; player names and character class, level, and status; event start and end dates; session numbers, titles, played dates, and notes; and compiled rules. See [Choose an AI provider](/en/manual/ai-providers/choose).
 
 **Citation.** A link on an answer that identifies the source and page behind a claim. See [Check citations](/en/manual/notes-and-sessions/citations).
 

@@ -22,7 +22,9 @@ const answerContextCategories = {
     'summaries',
     'notes',
     'compiled Codex articles',
-    'session titles',
+    'player names and character class, level, and status',
+    'event start and end dates',
+    'session numbers, titles, played dates, and notes',
     'compiled rules',
   ],
   de: [
@@ -31,7 +33,9 @@ const answerContextCategories = {
     'Zusammenfassungen',
     'Notizen',
     'kompilierte Codex-Artikel',
-    'Sitzungstitel',
+    'Spielernamen sowie Klasse, Stufe und Status',
+    'Start- und Enddaten von Ereignissen',
+    'Sitzungsnummern, -titel, Spieldaten und -notizen',
     'kompilierte Regeln',
   ],
 } as const;
@@ -70,6 +74,12 @@ describe('remote-provider disclosures', () => {
       );
       expect(german).not.toMatch(/Frage und (?:die )?(?:gefundenen )?relevanten Auszüge/i);
       expect(german).not.toMatch(/bereitgestellten Passagen und Anweisungen/i);
+      for (const category of answerContextCategories.en) {
+        expect(english).toContain(category);
+      }
+      for (const category of answerContextCategories.de) {
+        expect(german).toContain(category);
+      }
     },
   );
 

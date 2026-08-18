@@ -47,5 +47,5 @@ Chronacle can retrieve the English passage, answer in German, and cite `[Source:
 
 - **Display language** changes Chronacle's controls and is the fallback reply language for short or ambiguous questions.
 - **Embedding mode** changes how source text and questions are indexed for search. Changing it requires re-indexing existing sources.
-- **LLM provider** changes who writes the answer. When it is online, it receives the question and the answer context Chronacle supplies. That can include relevant source excerpts, entity names, summaries, notes and compiled Codex articles, session titles and notes, and compiled rules. Campaign entities and sessions can be full campaign-scoped context rather than relevance-filtered results.
+- **LLM provider** changes who writes the answer. When it is online, it receives the question and the answer context Chronacle supplies. That can include relevant source excerpts; entity names, summaries, notes, and compiled Codex articles; player names and character class, level, and status; event start and end dates; session numbers, titles, played dates, and notes; and compiled rules. Campaign entities and sessions can be full campaign-scoped context rather than relevance-filtered results.
 - A multilingual index improves retrieval across supported languages; it does not translate the stored PDF or rewrite its names.
