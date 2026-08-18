@@ -31,6 +31,8 @@ export interface ManualFrontmatter {
 export interface ManualArticle extends ManualFrontmatter {
   component: Component;
   href: Pathname;
+  source: string;
+  links: string[];
 }
 
 export interface ManualHeading {
