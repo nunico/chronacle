@@ -604,7 +604,8 @@ if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_disp
 
 Keep `pre-check` unguarded so path-filtered pull requests continue to exercise the release
 contracts and repository checks. Require every GitHub Release mutation job to retain its stricter
-semver-tag-only guard.
+`github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')` guard so a manual dispatch
+against a tag ref cannot cross the release boundary.
 
 - [ ] **Step 2: Run the contract to verify the workflow is red**
 

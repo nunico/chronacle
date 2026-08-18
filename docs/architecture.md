@@ -583,17 +583,18 @@ Persistence-specific tests opt in explicitly, for example
 
 ### Release Pipeline
 
-Pull requests that touch release inputs run all five native packaging jobs and both Flatpak jobs
-with read-only repository permissions. They upload inspectable workflow artifacts but neither
-create nor modify a GitHub release.
+Pull requests that touch release inputs run the release pre-check with read-only repository
+permissions; the native and Flatpak packaging matrices remain skipped. A manual dispatch runs all
+five native packaging jobs and both Flatpak jobs and retains inspectable workflow artifacts, but it
+does not create or modify a GitHub release, even when dispatched against a tag ref.
 
-Semver tags follow a fail-closed draft flow. Per-ref, non-cancelling workflow concurrency and a
-single create-or-select job prevent competing runs from racing the draft. That job accepts exactly
-one draft for the tag and passes its numeric release ID forward. Native packages are built and
-checked first; the two Linux Debian artifacts then feed the matching x86_64 and aarch64 Flatpak
-builds and sandbox startup checks. Only after both matrices succeed does one centralized upload job
-reconcile stale assets, validate that the planned names are unique, and upload every asset to that
-exact release ID. The final job re-fetches the same ID, verifies its tag and draft state, and
+Semver tag pushes follow a fail-closed draft flow. Per-ref, non-cancelling workflow concurrency and
+a single create-or-select job prevent competing runs from racing the draft. That job accepts
+exactly one draft for the tag and passes its numeric release ID forward. Native packages are built
+and checked first; the two Linux Debian artifacts then feed the matching x86_64 and aarch64 Flatpak
+builds and sandbox startup checks. Only after both matrices succeed does one centralized upload
+job reconcile stale assets, validate that the planned names are unique, and upload every asset to
+that exact release ID. The final job re-fetches the same ID, verifies its tag and draft state, and
 publishes it. A failed or cancelled build, Flatpak, validation, reconciliation, or upload leaves
 the release as a draft.
 
