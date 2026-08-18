@@ -30,7 +30,9 @@ for tool in flatpak flatpak-builder appstreamcli dpkg-deb ar tar dbus-run-sessio
   command -v "$tool" >/dev/null 2>&1 || fail "required tool is unavailable: $tool"
 done
 
-repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || fail 'unable to resolve the repository root'
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) ||
+  fail 'unable to resolve the release script directory'
+repo_root=$(dirname "$script_dir")
 manifest="$repo_root/packaging/flatpak/$app_id.yml"
 metainfo="$repo_root/packaging/flatpak/$app_id.metainfo.xml"
 [ -f "$manifest" ] || fail "missing Flatpak manifest: $manifest"
