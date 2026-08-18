@@ -18,6 +18,7 @@ on:
       - packaging/flatpak/**
       - scripts/release-flatpak.sh
       - scripts/ci/test-release-flatpak.sh
+      - scripts/ci/release/**
       - scripts/ci/test-pipeline.sh
       - apps/desktop/src-tauri/build.rs
       - apps/desktop/src-tauri/tauri.conf.json
@@ -87,14 +88,7 @@ jobs:
       - id: version-consistency
         name: Check version consistency
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        run: |
-          TAG="${{ github.ref_name }}"
-          CONF_VERSION=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
-          if [ "v${CONF_VERSION}" != "${TAG}" ]; then
-            echo "Tag ${TAG} does not match tauri.conf.json version ${CONF_VERSION}"
-            exit 1
-          fi
-          echo "Tag ${TAG} matches tauri.conf.json version ${CONF_VERSION}"
+        run: scripts/ci/release/check-version-consistency.sh
 
       - name: Format check
         run: cargo fmt --all --check
@@ -134,32 +128,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          matching_releases=$(gh api --paginate --slurp \
-            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" | \
-            jq 'add | map(select(.tag_name == env.GITHUB_REF_NAME))')
-          release_count=$(jq 'length' <<<"$matching_releases")
-          if [ "$release_count" -gt 1 ]; then
-            echo "Multiple releases already use tag $GITHUB_REF_NAME" >&2
-            exit 1
-          elif [ "$release_count" -eq 1 ]; then
-            existing_draft=$(jq -r '.[0].draft' <<<"$matching_releases")
-            if [ "$existing_draft" != true ]; then
-              echo "Release $GITHUB_REF_NAME already exists and is not a draft" >&2
-              exit 1
-            fi
-            release_id=$(jq -r '.[0].id' <<<"$matching_releases")
-          else
-            created=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
-              -f tag_name="$GITHUB_REF_NAME" \
-              -f name="Chronacle $GITHUB_REF_NAME" \
-              -F draft=true \
-              -F prerelease=false)
-            release_id=$(jq -r '.id' <<<"$created")
-          fi
-          [[ "$release_id" =~ ^[0-9]+$ ]]
-          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+        run: scripts/ci/release/create-release.sh
 
   build:
     needs: pre-check
@@ -241,98 +210,25 @@ jobs:
       - name: Validate Linux packages
         if: runner.os == 'Linux'
         shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          root="target/${{ matrix.target }}/release/bundle"
-          debs=("$root"/deb/Chronacle_*.deb)
-          appimages=("$root"/appimage/Chronacle_*.AppImage)
-          rpms=("$root"/rpm/Chronacle-*.rpm)
-          if [ "${#debs[@]}" -ne 1 ]; then
-            printf 'Expected exactly one release-ready Debian package, found %s\n' "${#debs[@]}" >&2
-            printf '  %s\n' "${debs[@]}" >&2
-            exit 1
-          fi
-          if [ "${#appimages[@]}" -ne 1 ]; then
-            printf 'Expected exactly one release-ready AppImage, found %s\n' "${#appimages[@]}" >&2
-            printf '  %s\n' "${appimages[@]}" >&2
-            exit 1
-          fi
-          if [ "${#rpms[@]}" -ne 1 ]; then
-            printf 'Expected exactly one release-ready RPM package, found %s\n' "${#rpms[@]}" >&2
-            printf '  %s\n' "${rpms[@]}" >&2
-            exit 1
-          fi
-
-          extract_root=$(mktemp -d)
-          trap 'rm -rf -- "$extract_root"' EXIT
-          mkdir "$extract_root/deb" "$extract_root/rpm"
-          dpkg-deb -x "${debs[0]}" "$extract_root/deb"
-          rpm2cpio "${rpms[0]}" | (cd "$extract_root/rpm" && cpio -idm --quiet)
-          deb_executable="$extract_root/deb/usr/bin/chronacle"
-          rpm_executable="$extract_root/rpm/usr/bin/chronacle"
-          [ -x "$deb_executable" ]
-          [ -x "$rpm_executable" ]
-          [ -x "${appimages[0]}" ]
-
-          [ "$(dpkg-deb -f "${debs[0]}" Architecture)" = "${{ matrix.deb_arch }}" ]
-          case "${{ matrix.flatpak_arch }}" in
-            x86_64)
-              file "$deb_executable" | grep -Eq 'x86-64|x86_64'
-              file "$rpm_executable" | grep -Eq 'x86-64|x86_64'
-              file "${appimages[0]}" | grep -Eq 'x86-64|x86_64'
-              [ "$(rpm -qp --qf '%{ARCH}' "${rpms[0]}")" = x86_64 ]
-              ;;
-            aarch64)
-              file "$deb_executable" | grep -Eq 'ARM aarch64|aarch64'
-              file "$rpm_executable" | grep -Eq 'ARM aarch64|aarch64'
-              file "${appimages[0]}" | grep -Eq 'ARM aarch64|aarch64'
-              [ "$(rpm -qp --qf '%{ARCH}' "${rpms[0]}")" = aarch64 ]
-              ;;
-          esac
+        run: scripts/ci/release/validate-linux-packages.sh
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+          DEB_ARCH: ${{ matrix.deb_arch }}
+          FLATPAK_ARCH: ${{ matrix.flatpak_arch }}
 
       - name: Validate macOS packages and startup
         if: runner.os == 'macOS'
         shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          root="target/${{ matrix.target }}/release/bundle"
-          apps=("$root"/macos/*.app)
-          archives=("$root"/macos/*.app.tar.gz)
-          dmgs=("$root"/dmg/*.dmg)
-          [ "${#apps[@]}" -eq 1 ]
-          [ "${#archives[@]}" -eq 1 ]
-          [ "${#dmgs[@]}" -eq 1 ]
-          executable="${apps[0]}/Contents/MacOS/Chronacle"
-          [ -x "$executable" ]
-          case "${{ matrix.target }}" in
-            aarch64-apple-darwin) file "$executable" | grep -q arm64 ;;
-            x86_64-apple-darwin) file "$executable" | grep -q x86_64 ;;
-          esac
-          find "${apps[0]}/Contents/Resources" -path '*/pdfium/libpdfium.dylib' -type f | grep -q .
-          if [ "${{ matrix.target }}" = aarch64-apple-darwin ]; then
-            find "${apps[0]}/Contents/Resources" -path '*/onnxruntime/libonnxruntime.dylib' -type f | grep -q .
-          else
-            ! find "${apps[0]}/Contents/Resources" -path '*/onnxruntime/libonnxruntime.dylib' -type f | grep -q .
-          fi
-          "$executable" &
-          app_pid=$!
-          trap 'kill "$app_pid" 2>/dev/null || true; wait "$app_pid" 2>/dev/null || true' EXIT
-          for _ in {1..10}; do
-            sleep 1
-            kill -0 "$app_pid"
-          done
+        run: scripts/ci/release/validate-macos-packages.sh
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
 
       - name: Validate Windows packages
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $root = "target/${{ matrix.target }}/release/bundle"
-          $msi = @(Get-ChildItem "$root/msi/*.msi")
-          $nsis = @(Get-ChildItem "$root/nsis/*.exe")
-          if ($msi.Count -ne 1) { throw "Expected exactly one MSI, found $($msi.Count)" }
-          if ($nsis.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($nsis.Count)" }
+        run: ./scripts/ci/release/validate-windows-packages.ps1
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
 
       - name: Upload Debian package for Flatpak
         if: runner.os == 'Linux'
@@ -388,9 +284,7 @@ jobs:
 
       - name: Build and smoke-test Flatpak
         shell: bash
-        run: |
-          VERSION=$(jq -r '.version' apps/desktop/src-tauri/tauri.conf.json)
-          scripts/release-flatpak.sh artifacts/*.deb "$VERSION" flatpak-out
+        run: scripts/ci/release/build-flatpak.sh
 
       - name: Upload inspectable Flatpak
         uses: actions/upload-artifact@v4
@@ -423,59 +317,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
-        run: |
-          set -euo pipefail
-          [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]
-          assets=()
-          asset_names=()
-          while IFS= read -r -d '' asset; do
-            asset_name=$(basename "$asset")
-            case "$asset" in
-              release-assets/native/chronacle-native-macos-arm64/*/Chronacle.app.tar.gz) asset_name=Chronacle_aarch64.app.tar.gz ;;
-              release-assets/native/chronacle-native-macos-x86_64/*/Chronacle.app.tar.gz) asset_name=Chronacle_x64.app.tar.gz ;;
-            esac
-            assets+=("$asset")
-            asset_names+=("$asset_name")
-          done < <(find release-assets/native release-assets/flatpak -type f \
-            \( -name 'Chronacle_*.deb' -o -name 'Chronacle_*.AppImage' \
-            -o -name 'Chronacle-*.rpm' \
-            -o -name '*.app.tar.gz' -o -name '*.dmg' -o -name '*.msi' \
-            -o -name '*.exe' -o -name '*.flatpak' \) -print0)
-
-          if [ "${#assets[@]}" -eq 0 ] || [ "${#assets[@]}" -ne "${#asset_names[@]}" ]; then
-            echo "Release asset plan is empty or incomplete" >&2
-            exit 1
-          fi
-          if [ "$(printf '%s\n' "${asset_names[@]}" | sort -u | wc -l)" -ne "${#asset_names[@]}" ]; then
-            echo "Release asset names are not unique" >&2
-            exit 1
-          fi
-
-          planned_names_json=$(printf '%s\n' "${asset_names[@]}" | jq -R . | jq -s .)
-          existing_assets=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" | jq 'add')
-          while IFS= read -r stale_id; do
-            [[ "$stale_id" =~ ^[0-9]+$ ]]
-            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${stale_id}"
-          done < <(jq -r --argjson planned_names "$planned_names_json" '.[] | select(.name as $name | $planned_names | index($name) | not) | .id' <<<"$existing_assets")
-
-          for index in "${!assets[@]}"; do
-            asset="${assets[$index]}"
-            asset_name="${asset_names[$index]}"
-            encoded_name=$(jq -rn --arg name "$asset_name" '$name | @uri')
-            matching_assets=$(jq --arg name "$asset_name" 'map(select(.name == $name))' <<<"$existing_assets")
-            matching_count=$(jq 'length' <<<"$matching_assets")
-            if [ "$matching_count" -gt 1 ]; then
-              echo "Multiple release assets are named $asset_name" >&2
-              exit 1
-            elif [ "$matching_count" -eq 1 ]; then
-              existing_id=$(jq -r '.[0].id' <<<"$matching_assets")
-              [[ "$existing_id" =~ ^[0-9]+$ ]]
-              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_id}"
-            fi
-            gh api --method POST "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" \
-              -H "Content-Type: application/octet-stream" \
-              --input "$asset"
-          done
+        run: scripts/ci/release/upload-release-assets.sh
 
   publish-release:
     needs: [create-release, upload-release-assets, build, flatpak]
@@ -489,17 +331,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
-        run: |
-          set -euo pipefail
-          [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]
-          release=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}")
-          release_tag=$(jq -r '.tag_name' <<<"$release")
-          release_draft=$(jq -r '.draft' <<<"$release")
-          if [ "$release_tag" != "$GITHUB_REF_NAME" ] || [ "$release_draft" != true ]; then
-            echo "Release ID $RELEASE_ID is not the expected draft for $GITHUB_REF_NAME" >&2
-            exit 1
-          fi
-          gh api --method PATCH \
-            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
-            -F draft=false \
-            -F prerelease=false
+        run: scripts/ci/release/publish-release.sh
