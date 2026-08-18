@@ -3,6 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
+  preserveOutput: 'always',
   reporter: 'list',
   webServer: {
     command: 'pnpm preview --host 127.0.0.1 --port 4174',

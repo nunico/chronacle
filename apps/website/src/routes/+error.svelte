@@ -33,6 +33,10 @@
           pageTitle: 'Page not found — Chronacle',
         },
   );
+
+  $effect(() => {
+    document.documentElement.lang = locale;
+  });
 </script>
 
 <svelte:head>

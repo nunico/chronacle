@@ -25,6 +25,7 @@ describe('website error page', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    document.documentElement.lang = '';
   });
 
   it('falls back to English and links home and to the manual overview', () => {
@@ -58,6 +59,7 @@ describe('website error page', () => {
       'href',
       '/de/handbuch',
     );
+    expect(document.documentElement).toHaveAttribute('lang', 'de');
     expect(storageGetSpy).not.toHaveBeenCalled();
     expect(storageSetSpy).not.toHaveBeenCalled();
     expect(cookieGetSpy).not.toHaveBeenCalled();

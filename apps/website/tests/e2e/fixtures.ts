@@ -4,6 +4,7 @@ export const test = base.extend({
   page: async ({ page }, use) => {
     const browserFailures: string[] = [];
     const genericResourceErrors: string[] = [];
+    const staticFallbackNotFoundErrors: string[] = [];
     let mainDocumentNotFound = false;
     page.on('pageerror', (error) => browserFailures.push(`pageerror: ${error.message}`));
     page.on('response', (response) => {
@@ -21,6 +22,13 @@ export const test = base.extend({
           text === 'Failed to load resource: the server responded with a status of 404 (Not Found)'
         ) {
           genericResourceErrors.push(text);
+        } else if (
+          // SvelteKit reports the expected unmatched route while hydrating adapter-static's
+          // 404.html. Keep the exemption tied to the exact route, local bundle, and 404 response.
+          text.includes(`Not found: ${new URL(page.url()).pathname}\n`) &&
+          text.includes('http://127.0.0.1:4174/_app/immutable/')
+        ) {
+          staticFallbackNotFoundErrors.push(text);
         } else {
           browserFailures.push(`console: ${text}`);
         }
@@ -31,6 +39,7 @@ export const test = base.extend({
 
     if (!mainDocumentNotFound) {
       browserFailures.push(...genericResourceErrors.map((error) => `console: ${error}`));
+      browserFailures.push(...staticFallbackNotFoundErrors.map((error) => `console: ${error}`));
     }
     expect(browserFailures, 'page errors and console errors').toEqual([]);
   },
