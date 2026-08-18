@@ -29,6 +29,7 @@ WORKDIR /app
 # Keep JavaScript dependency provisioning cached when application source changes.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/desktop/package.json apps/desktop/package.json
+COPY apps/website/package.json apps/website/package.json
 RUN --mount=type=cache,id=chronacle-pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --config.minimum-release-age=0
 
