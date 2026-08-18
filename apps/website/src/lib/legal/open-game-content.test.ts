@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import { landingCopy } from '$lib/i18n/landing-copy';
@@ -5,6 +6,7 @@ import ProductExample from '$lib/landing/ProductExample.svelte';
 import LegalPage from '../../routes/legal/open-game-license/+page.svelte';
 
 const legalPath = '/legal/open-game-license';
+const productExampleSource = readFileSync('src/lib/landing/ProductExample.svelte', 'utf8');
 
 // Regression guard for the names enumerated in the official SRD 5.1 Product Identity notice.
 // This does not attempt to classify every possible form of Product Identity.
@@ -71,7 +73,15 @@ describe('SRD Open Game Content treatment', () => {
       });
       expect(marker).toBeVisible();
       expect(marker).toHaveAttribute('href', legalPath);
+      expect(element.contains(marker)).toBe(true);
+      const answerHeader = container.querySelector('.answer > header');
+      expect(answerHeader).not.toBeNull();
+      expect(answerHeader?.compareDocumentPosition(marker)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     }
+
+    const markerRule = productExampleSource.match(/\.open-game-marker\s*\{[^}]*\}/)?.[0];
+    expect(markerRule).toBeDefined();
+    expect(markerRule).not.toMatch(/position:\s*absolute/);
   });
 
   it.each(['en', 'de'] as const)('marks only the derived %s answer content', (locale) => {
