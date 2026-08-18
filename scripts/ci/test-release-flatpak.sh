@@ -126,6 +126,8 @@ require_fixed "$metainfo" "<launchable type=\"desktop-id\">$app_id.desktop</laun
 reject_pattern "$metainfo" '<screenshots([[:space:]>])'
 
 release_script=scripts/release-flatpak.sh
+release_script_dir=$(CDPATH= cd "$(dirname "$release_script")" && pwd -P)
+release_script="$release_script_dir/$(basename "$release_script")"
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/chronacle-flatpak-contract.XXXXXX")
 sentinel_pid=
 cleanup_test() {
@@ -376,7 +378,7 @@ export PATH
 sentinel_pid=$!
 printf '%s\n' "$sentinel_pid" >"$test_root/state/same-app-sentinel-pid"
 
-"$release_script" "$test_root/Chronacle.deb" 0.0.0 "$test_root/output"
+(cd "$test_root" && "$release_script" "$test_root/Chronacle.deb" 0.0.0 "$test_root/output")
 "$release_script" "$test_root/Chronacle.deb" 1.2.3 "$test_root/output"
 "$release_script" "$test_root/Chronacle.deb" 1.2.3 "$test_root/output"
 kill -0 "$sentinel_pid" 2>/dev/null ||
