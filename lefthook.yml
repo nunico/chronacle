@@ -12,10 +12,8 @@ pre-commit:
     clippy:
       glob: "*.rs"
       run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-    # Frontend tooling (prettier, eslint, prettier-plugin-svelte) lives in the
-    # apps/desktop workspace package, so these run from there via `root:` —
-    # lefthook relativizes {staged_files} to that dir and only passes files
-    # under it.
+    # Each frontend package owns its tooling. `root:` keeps staged paths relative
+    # to the package and prevents one package from linting the other.
     prettier:
       root: "apps/desktop/"
       glob: "*.{ts,svelte,json,css,md,yaml,yml}"
@@ -23,6 +21,15 @@ pre-commit:
       stage_fixed: true
     eslint:
       root: "apps/desktop/"
+      glob: "*.{ts,svelte}"
+      run: pnpm exec eslint {staged_files}
+    website-prettier:
+      root: "apps/website/"
+      glob: "*.{ts,svelte,json,css,md,yaml,yml}"
+      run: pnpm exec prettier --check {staged_files}
+      stage_fixed: true
+    website-eslint:
+      root: "apps/website/"
       glob: "*.{ts,svelte}"
       run: pnpm exec eslint {staged_files}
 
