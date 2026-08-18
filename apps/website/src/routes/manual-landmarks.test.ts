@@ -20,16 +20,60 @@ describe('manual route landmarks', () => {
 
     expect(screen.queryByRole('main')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Chronacle Manual' })).toBeInTheDocument();
+    expect(document.title).toBe('Overview');
+    expect(document.querySelector('link[rel="canonical"]')).toHaveAttribute('href', '/en/manual');
+    expect(document.querySelector('meta[property="og:title"]')).toHaveAttribute(
+      'content',
+      'Overview',
+    );
+    expect(document.querySelector('meta[property="og:description"]')).toHaveAttribute(
+      'content',
+      'Manual overview',
+    );
+    expect(document.querySelector('meta[property="og:image"]')).toHaveAttribute(
+      'content',
+      '/brand/chronacle-icon.png',
+    );
+    expect(document.head.innerHTML).not.toMatch(/localhost|127\.0\.0\.1/);
   });
 
   it('leaves the main landmark to the universal layout on an article route', () => {
     render(ManualArticlePage, {
-      data,
-      params: { locale: 'en', manual: 'manual', slug: 'overview' },
+      data: {
+        locale: 'en',
+        slug: 'getting-started/install',
+        title: 'Install Chronacle',
+        summary: 'Install the current release.',
+      },
+      params: { locale: 'en', manual: 'manual', slug: 'getting-started/install' },
     });
 
     expect(screen.queryByRole('main')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Chronacle Manual' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Install Chronacle' })).toBeInTheDocument();
+    expect(document.title).toBe('Install Chronacle — Chronacle Manual');
+    expect(document.querySelector('link[rel="canonical"]')).toHaveAttribute(
+      'href',
+      '/en/manual/getting-started/install',
+    );
+  });
+
+  it('localizes German overview metadata without duplicating the manual name', () => {
+    render(ManualRootPage, {
+      data: {
+        locale: 'de',
+        slug: 'ueberblick',
+        title: 'Chronacle-Handbuch',
+        summary: 'Der Überblick zum Handbuch.',
+      },
+      params: { locale: 'de', manual: 'handbuch' },
+    });
+
+    expect(document.title).toBe('Chronacle-Handbuch');
+    expect(document.querySelector('link[rel="canonical"]')).toHaveAttribute('href', '/de/handbuch');
+    expect(document.querySelector('meta[property="og:locale"]')).toHaveAttribute(
+      'content',
+      'de_DE',
+    );
   });
 
   it('loads nested article slugs when the trailing slash is captured by the rest parameter', () => {

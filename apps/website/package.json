@@ -7,7 +7,7 @@
     "dev": "vite dev",
     "build": "vite build && pagefind --site build",
     "build:app": "vite build",
-    "preview": "vite preview",
+    "preview": "vite preview --outDir build",
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",

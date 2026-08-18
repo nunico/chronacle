@@ -152,7 +152,7 @@
 
   .manual-header__search kbd {
     margin-left: auto;
-    color: var(--fg-3);
+    color: var(--fg-2);
     font-family: var(--font-mono);
     font-size: 0.625rem;
   }

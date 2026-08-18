@@ -40,6 +40,19 @@ describe('Chronacle landing page', () => {
       'content',
       'Lade Quellen als PDF, führe Kampagnennotizen und stell Fragen mit prüfbaren Fundstellen.',
     );
+    expect(document.querySelector('link[rel="canonical"]')).toHaveAttribute('href', '/');
+    expect(document.querySelector('meta[property="og:title"]')).toHaveAttribute(
+      'content',
+      'Chronacle — belegte Antworten aus deinen Büchern',
+    );
+    expect(document.querySelector('meta[property="og:description"]')).toHaveAttribute(
+      'content',
+      'Lade Quellen als PDF, führe Kampagnennotizen und stell Fragen mit prüfbaren Fundstellen.',
+    );
+    expect(document.querySelector('meta[property="og:image"]')).toHaveAttribute(
+      'content',
+      '/brand/chronacle-icon.png',
+    );
     const licenseLink = screen.getByRole('link', { name: 'Lizenz' });
     expect(licenseLink).toHaveAttribute('href', licenseUrl);
     expect(licenseLink).toHaveAttribute('target', '_blank');
@@ -103,6 +116,27 @@ describe('Chronacle landing page', () => {
     render(Page);
 
     expect(screen.getByRole('img', { name: 'Chronacle' }).tagName).toBe('svg');
+  });
+
+  it('publishes route-absolute English metadata without a development origin', () => {
+    prefer('en-US');
+
+    render(Page);
+
+    expect(document.querySelector('link[rel="canonical"]')).toHaveAttribute('href', '/');
+    expect(document.querySelector('meta[property="og:title"]')).toHaveAttribute(
+      'content',
+      'Chronacle — cited answers from your books',
+    );
+    expect(document.querySelector('meta[property="og:description"]')).toHaveAttribute(
+      'content',
+      'Load source PDFs, keep campaign notes, and ask questions with citations you can inspect.',
+    );
+    expect(document.querySelector('meta[property="og:image"]')).toHaveAttribute(
+      'content',
+      '/brand/chronacle-icon.png',
+    );
+    expect(document.head.innerHTML).not.toMatch(/localhost|127\.0\.0\.1/);
   });
 
   it('uses the latest release URL for security-safe external download links', () => {

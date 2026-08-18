@@ -243,6 +243,12 @@ main {
   scroll-margin-top: 6rem;
 }
 
+.prose a {
+  text-decoration: underline;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.16em;
+}
+
 .prose :is(code, kbd) {
   border: 1px solid var(--line);
   border-radius: var(--r-xs);
