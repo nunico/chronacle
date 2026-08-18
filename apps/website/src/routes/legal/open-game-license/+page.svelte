@@ -22,6 +22,7 @@
 </svelte:head>
 
 <div class="legal-page" data-pagefind-ignore="all">
+  <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="legal-header">
     <a href={resolve('/')} aria-label="Chronacle home">
       <EyeMark size={34} glow={false} />
@@ -29,57 +30,59 @@
     </a>
   </header>
 
-  <article class="legal-card">
-    <p class="eyebrow">Legal</p>
-    <h1>Open Game Content</h1>
-    <p class="lede">
-      The parts identified below use Open Game Content from the System Reference Document 5.1.
-    </p>
-
-    <section aria-labelledby="identification-heading">
-      <h2 id="identification-heading">Identification</h2>
-      <p>
-        In the product example on Chronacle's home page, the ruling, explanation, source line, and
-        quotation inside the answer area marked <strong>{OPEN_GAME_CONTENT_LABEL}</strong> are Open Game
-        Content. The question, Chronacle name, Eye mark, and interface are not included in that designation.
-        No other part of this website is designated as Open Game Content.
+  <main id="main-content">
+    <article class="legal-card">
+      <p class="eyebrow">Legal</p>
+      <h1>Open Game Content</h1>
+      <p class="lede">
+        The parts identified below use Open Game Content from the System Reference Document 5.1.
       </p>
-    </section>
 
-    <section aria-labelledby="supplemental-notice-heading">
-      <h2 id="supplemental-notice-heading">Supplemental COPYRIGHT NOTICE</h2>
-      <p>
-        The following notice covers the original website example. It is separate from the unmodified
-        official PDF below.
-      </p>
-      <p class="notice">Chronacle website example Copyright 2026 Nico Nußbaum.</p>
-    </section>
-
-    <section aria-labelledby="license-heading">
-      <h2 id="license-heading">License and source</h2>
-      <p>
-        Read the complete, unmodified Open Game License Version 1.0a and Section 15 notice in the
-        two-page license copy below.
-      </p>
-      <div class="actions">
-        <a class="primary-link" href={licensePdfUrl}>Open the license PDF</a>
-        <a href={OFFICIAL_SRD_SOURCE_URL} target="_blank" rel="external noopener noreferrer">
-          Open the official SRD 5.1 source document
-        </a>
-      </div>
-      <object
-        class="license-frame"
-        data={licensePdfUrl}
-        type="application/pdf"
-        aria-label="Open Game License Version 1.0a and Section 15 notice"
-      >
+      <section aria-labelledby="identification-heading">
+        <h2 id="identification-heading">Identification</h2>
         <p>
-          This browser cannot display the PDF inline.
-          <a href={licensePdfUrl}>Open the license PDF instead.</a>
+          In the product example on Chronacle's home page, the ruling, explanation, source line, and
+          quotation inside the answer area marked <strong>{OPEN_GAME_CONTENT_LABEL}</strong> are Open
+          Game Content. The question, Chronacle name, Eye mark, and interface are not included in that
+          designation. No other part of this website is designated as Open Game Content.
         </p>
-      </object>
-    </section>
-  </article>
+      </section>
+
+      <section aria-labelledby="supplemental-notice-heading">
+        <h2 id="supplemental-notice-heading">Supplemental COPYRIGHT NOTICE</h2>
+        <p>
+          The following notice covers the original website example. It is separate from the
+          unmodified official PDF below.
+        </p>
+        <p class="notice">Chronacle website example Copyright 2026 Nico Nußbaum.</p>
+      </section>
+
+      <section aria-labelledby="license-heading">
+        <h2 id="license-heading">License and source</h2>
+        <p>
+          Read the complete, unmodified Open Game License Version 1.0a and Section 15 notice in the
+          two-page license copy below.
+        </p>
+        <div class="actions">
+          <a class="primary-link" href={licensePdfUrl}>Open the license PDF</a>
+          <a href={OFFICIAL_SRD_SOURCE_URL} target="_blank" rel="external noopener noreferrer">
+            Open the official SRD 5.1 source document
+          </a>
+        </div>
+        <object
+          class="license-frame"
+          data={licensePdfUrl}
+          type="application/pdf"
+          aria-label="Open Game License Version 1.0a and Section 15 notice"
+        >
+          <p>
+            This browser cannot display the PDF inline.
+            <a href={licensePdfUrl}>Open the license PDF instead.</a>
+          </p>
+        </object>
+      </section>
+    </article>
+  </main>
 
   <SiteFooter
     labels={{
@@ -103,6 +106,23 @@
 <style>
   .legal-page {
     min-height: 100vh;
+  }
+
+  .skip-link {
+    position: fixed;
+    z-index: 100;
+    top: var(--s-3);
+    left: var(--s-3);
+    padding: var(--s-2) var(--s-3);
+    border-radius: var(--r-md);
+    background: var(--bg-panel-2);
+    color: var(--gem-bright);
+    font-family: var(--font-sans);
+    transform: translateY(-200%);
+  }
+
+  .skip-link:focus {
+    transform: translateY(0);
   }
 
   .legal-header {

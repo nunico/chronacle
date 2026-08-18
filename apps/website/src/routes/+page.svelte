@@ -46,20 +46,42 @@
 </svelte:head>
 
 <div data-pagefind-ignore="all">
+  <a class="skip-link" href="#main-content">{locale === 'de' ? 'Zum Inhalt' : 'Skip to content'}</a>
   <SiteHeader
     {locale}
     labels={copy.header}
     links={{ home: '/', manual: manualPath, source: sourceUrl, download: downloadUrl }}
     onlocalechange={(nextLocale) => (locale = nextLocale)}
   />
-  <Hero copy={copy.hero} {downloadUrl} {manualPath} />
-  <ProductExample copy={copy.productExample} />
-  <FeatureGrid copy={copy.features} />
-  <Workflow copy={copy.workflow} />
-  <ProviderPrivacy copy={copy.provider} />
-  <DownloadPanel copy={copy.download} {downloadUrl} {manualPath} />
+  <main id="main-content">
+    <Hero copy={copy.hero} {downloadUrl} {manualPath} />
+    <ProductExample copy={copy.productExample} />
+    <FeatureGrid copy={copy.features} />
+    <Workflow copy={copy.workflow} />
+    <ProviderPrivacy copy={copy.provider} />
+    <DownloadPanel copy={copy.download} {downloadUrl} {manualPath} />
+  </main>
   <SiteFooter
     labels={copy.footer}
     links={{ home: '/', manual: manualPath, source: sourceUrl, license: licenseUrl }}
   />
 </div>
+
+<style>
+  .skip-link {
+    position: fixed;
+    z-index: 100;
+    top: var(--s-3);
+    left: var(--s-3);
+    padding: var(--s-2) var(--s-3);
+    border-radius: var(--r-md);
+    background: var(--bg-panel-2);
+    color: var(--gem-bright);
+    font-family: var(--font-sans);
+    transform: translateY(-200%);
+  }
+
+  .skip-link:focus {
+    transform: translateY(0);
+  }
+</style>

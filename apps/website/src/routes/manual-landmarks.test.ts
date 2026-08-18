@@ -12,13 +12,15 @@ const data = {
 };
 
 describe('manual route landmarks', () => {
-  it('leaves the main landmark to the universal layout on the manual root', () => {
+  it('provides one main landmark between the manual header and footer on the manual root', () => {
     render(ManualRootPage, {
       data,
       params: { locale: 'en', manual: 'manual' },
     });
 
-    expect(screen.queryByRole('main')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(screen.getByRole('main').contains(document.querySelector('.manual-header'))).toBe(false);
+    expect(screen.getByRole('contentinfo')).not.toBe(screen.getByRole('main'));
     expect(screen.getByRole('heading', { name: 'Chronacle Manual' })).toBeInTheDocument();
     expect(document.title).toBe('Overview');
     expect(document.querySelector('link[rel="canonical"]')).toHaveAttribute('href', '/en/manual');
@@ -37,7 +39,7 @@ describe('manual route landmarks', () => {
     expect(document.head.innerHTML).not.toMatch(/localhost|127\.0\.0\.1/);
   });
 
-  it('leaves the main landmark to the universal layout on an article route', () => {
+  it('provides one main landmark on an article route', () => {
     render(ManualArticlePage, {
       data: {
         locale: 'en',
@@ -48,7 +50,7 @@ describe('manual route landmarks', () => {
       params: { locale: 'en', manual: 'manual', slug: 'getting-started/install' },
     });
 
-    expect(screen.queryByRole('main')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('main')).toHaveLength(1);
     expect(screen.getByRole('heading', { name: 'Install Chronacle' })).toBeInTheDocument();
     expect(document.title).toBe('Install Chronacle — Chronacle Manual');
     expect(document.querySelector('link[rel="canonical"]')).toHaveAttribute(

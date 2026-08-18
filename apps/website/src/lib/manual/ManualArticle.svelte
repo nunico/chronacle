@@ -32,11 +32,19 @@
     return id || 'section';
   }
 
+  function validId(id: string): boolean {
+    return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id);
+  }
+
   const collectHeadings: Attachment<HTMLElement> = (node) => {
     const used: string[] = [];
+    const permalinkCleanups: (() => void)[] = [];
+    const headingRows: Array<{ heading: HTMLHeadingElement; row: HTMLDivElement }> = [];
+    const tableRegions: HTMLDivElement[] = [];
     const collected = Array.from(node.querySelectorAll<HTMLHeadingElement>('h2, h3')).map(
       (heading) => {
-        const base = heading.id || safeId(heading.textContent ?? '');
+        const headingText = heading.textContent?.trim() || 'Section';
+        const base = validId(heading.id) ? heading.id : safeId(headingText);
         let id = base;
         let suffix = 2;
         while (used.includes(id)) {
@@ -45,9 +53,52 @@
         }
         used.push(id);
         heading.id = id;
+
+        const row = document.createElement('div');
+        row.className = 'manual-heading-row';
+        heading.before(row);
+        row.append(heading);
+        headingRows.push({ heading, row });
+
+        const link = document.createElement('a');
+        const status = document.createElement('span');
+        const copyLabel =
+          locale === 'de' ? `Link zu ${headingText} kopieren` : `Copy link to ${headingText}`;
+        link.className = 'manual-heading-permalink';
+        link.dataset.manualPermalink = '';
+        link.setAttribute('data-pagefind-ignore', '');
+        link.href = `#${id}`;
+        link.setAttribute('aria-label', copyLabel);
+        link.textContent = '#';
+        status.className = 'manual-heading-permalink__status';
+        status.setAttribute('aria-live', 'polite');
+        link.append(status);
+
+        const copyLink = (event: MouseEvent): void => {
+          if (typeof navigator.clipboard?.writeText !== 'function') {
+            return;
+          }
+          event.preventDefault();
+          const url = new URL(`#${id}`, window.location.href).href;
+          void navigator.clipboard.writeText(url).then(
+            () => {
+              status.textContent = locale === 'de' ? 'Link kopiert' : 'Link copied';
+            },
+            () => {
+              window.location.hash = id;
+            },
+          );
+        };
+        link.addEventListener('click', copyLink);
+        heading.after(link);
+        permalinkCleanups.push(() => {
+          link.removeEventListener('click', copyLink);
+          link.remove();
+        });
+
         return {
           id,
-          text: heading.textContent?.trim() || id,
+          text: headingText,
           level: heading.tagName === 'H2' ? 2 : 3,
         } satisfies ManualHeading;
       },
@@ -68,7 +119,22 @@
       region.tabIndex = 0;
       table.before(region);
       region.append(table);
+      tableRegions.push(region);
     }
+
+    return () => {
+      for (const cleanup of permalinkCleanups) {
+        cleanup();
+      }
+      for (const { heading, row } of headingRows) {
+        row.before(heading);
+        row.remove();
+      }
+      for (const region of tableRegions) {
+        region.before(...region.childNodes);
+        region.remove();
+      }
+    };
   };
 
   const indexLabel = $derived(
@@ -177,6 +243,49 @@
   .manual-article__body :global(h3) {
     margin: var(--s-8) 0 var(--s-3);
     font-size: 1.25rem;
+  }
+
+  .manual-article__body :global(.manual-heading-permalink) {
+    display: inline-flex;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    margin-left: var(--s-2);
+    border: 1px solid transparent;
+    border-radius: var(--r-md);
+    color: var(--fg-2);
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    text-decoration: none;
+    vertical-align: middle;
+  }
+
+  .manual-article__body :global(.manual-heading-row) {
+    display: flex;
+    align-items: center;
+  }
+
+  .manual-article__body :global(.manual-heading-row > h2),
+  .manual-article__body :global(.manual-heading-row > h3) {
+    min-width: 0;
+  }
+
+  .manual-article__body :global(.manual-heading-permalink:hover) {
+    border-color: var(--line);
+    color: var(--gem-bright);
+  }
+
+  .manual-article__body :global(.manual-heading-permalink__status) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .manual-article__body :global(h4) {
