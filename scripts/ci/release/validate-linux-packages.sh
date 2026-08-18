@@ -10,17 +10,17 @@ debs=("$root"/deb/Chronacle_*.deb)
 appimages=("$root"/appimage/Chronacle_*.AppImage)
 rpms=("$root"/rpm/Chronacle-*.rpm)
 if [ "${#debs[@]}" -ne 1 ]; then
-  printf 'Expected exactly one release-ready Debian package, found %s\n' "${debs[@]}" >&2
+  printf 'Expected exactly one release-ready Debian package, found %s\n' "${#debs[@]}" >&2
   printf '  %s\n' "${debs[@]}" >&2
   exit 1
 fi
 if [ "${#appimages[@]}" -ne 1 ]; then
-  printf 'Expected exactly one release-ready AppImage, found %s\n' "${appimages[@]}" >&2
+  printf 'Expected exactly one release-ready AppImage, found %s\n' "${#appimages[@]}" >&2
   printf '  %s\n' "${appimages[@]}" >&2
   exit 1
 fi
 if [ "${#rpms[@]}" -ne 1 ]; then
-  printf 'Expected exactly one release-ready RPM package, found %s\n' "${rpms[@]}" >&2
+  printf 'Expected exactly one release-ready RPM package, found %s\n' "${#rpms[@]}" >&2
   printf '  %s\n' "${rpms[@]}" >&2
   exit 1
 fi

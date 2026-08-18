@@ -235,6 +235,14 @@ function steps(job) {
   });
 }
 
+function stepName(step) {
+  return (
+    /^ {6}- name:\s*(.+)$/m.exec(step)?.[1]?.trim() ??
+    /^ {8}name:\s*(.+)$/m.exec(step)?.[1]?.trim() ??
+    ''
+  );
+}
+
 function stepInput(step, name) {
   const withBlock = mappingBlock(step, 'with', 8);
   return unquote(new RegExp(`^ {10}${name}:\\s*(.+)$`, 'm').exec(withBlock)?.[1] ?? '');
@@ -651,31 +659,17 @@ function canonicalDebUpload(jobSteps) {
 
 function canonicalLinuxValidation(text) {
   const validatesFormat = (arrayName, label) => {
-    const header = new RegExp(
-      `if \\[ "\\$\\{#${arrayName}\\[@\\]\\}" -ne 1 \\]; then`,
-    ).exec(text);
-    if (!header) return false;
-
-    const bodyStart = header.index + header[0].length;
-    const terminator = /(?:;|\n)[ \t]*fi\b/.exec(text.slice(bodyStart));
-    if (!terminator) return false;
-
-    const body = text.slice(bodyStart, bodyStart + terminator.index);
-    const commands = shellCommands(body);
-    const countDiagnostic = commands.findIndex(
-      (command) =>
-        command.includes(`Expected exactly one release-ready ${label}, found %s\\n`) &&
-        command.includes(`\${#${arrayName}[@]}`),
-    );
-    const pathDiagnostic = commands.findIndex(
-      (command) =>
-        command.includes("printf '  %s\\n'") && command.includes(`\${${arrayName}[@]}`),
-    );
-    const exit = commands.findIndex((command) => /^exit [1-9][0-9]*$/.test(command));
-    return countDiagnostic >= 0 && countDiagnostic < pathDiagnostic && pathDiagnostic < exit;
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(
+      `if \\[ "\\$\\{#${arrayName}\\[@\\]\\}" -ne 1 \\]; then\\n` +
+        `\\s*printf 'Expected exactly one release-ready ${escapedLabel}, found %s\\\\n' "\\$\\{#${arrayName}\\[@\\]\\}" >&2\\n` +
+        `\\s*printf '  %s\\\\n' "\\$\\{${arrayName}\\[@\\]\\}" >&2\\n` +
+        `\\s*exit [1-9][0-9]*\\n\\s*fi`,
+    ).test(text);
   };
 
   return (
+    /root="target\/\$\{(?:target|\$\{RELEASE_TARGET\})\}\/release\/bundle"/.test(text) &&
     /debs=\("\$root"\/deb\/Chronacle_\*\.deb\)/.test(text) &&
     /appimages=\("\$root"\/appimage\/Chronacle_\*\.AppImage\)/.test(text) &&
     /rpms=\("\$root"\/rpm\/Chronacle-\*\.rpm\)/.test(text) &&
@@ -706,6 +700,10 @@ function runInvokes(step, commandPattern) {
 
 function unquote(value) {
   return value.trim().replace(/^(["'])(.*)\1$/, '$2');
+}
+
+function literalReplace(text, search, replacement) {
+  return text.split(search).join(replacement);
 }
 
 function isReleasePushGuard(value) {
@@ -1228,7 +1226,7 @@ requireContract(
 );
 requireContract(
   !canonicalLinuxValidation(
-    linuxValidationRun.replace(
+    literalReplace(
       [
         "printf 'Expected exactly one release-ready Debian package, found %s\\n' \"${#debs[@]}\" >&2",
         "printf '  %s\\n' \"${debs[@]}\" >&2",
@@ -1247,7 +1245,7 @@ requireContract(
 );
 requireContract(
   !canonicalLinuxValidation(
-    linuxValidationRun.replace(
+    literalReplace(
       "printf '  %s\\n' \"${debs[@]}\" >&2\nexit 1",
       "exit 1\nprintf '  %s\\n' \"${debs[@]}\" >&2",
     ),
@@ -1264,7 +1262,7 @@ requireContract(
   'Linux validation diagnostics must report the guarded format count',
 );
 const versionConsistencyStep =
-  preCheckSteps.find((step) => directValue(step, 'name', 8) === 'Check version consistency') ?? '';
+  preCheckSteps.find((step) => stepName(step) === 'Check version consistency') ?? '';
 requireContract(
   isReleasePushGuard(directValue(versionConsistencyStep, 'if', 8)),
   'version consistency must run only for release tag pushes',
@@ -1274,9 +1272,9 @@ requireContract(
   'version consistency must invoke its extracted script',
 );
 const macosValidationStep =
-  buildSteps.find((step) => directValue(step, 'name', 8) === 'Validate macOS packages and startup') ?? '';
+  buildSteps.find((step) => stepName(step) === 'Validate macOS packages and startup') ?? '';
 const windowsValidationStep =
-  buildSteps.find((step) => directValue(step, 'name', 8) === 'Validate Windows packages') ?? '';
+  buildSteps.find((step) => stepName(step) === 'Validate Windows packages') ?? '';
 requireContract(
   runInvokes(macosValidationStep, /^scripts\/ci\/release\/validate-macos-packages\.sh$/) &&
     stepEnvValue(macosValidationStep, 'RELEASE_TARGET') === '${{ matrix.target }}' &&
