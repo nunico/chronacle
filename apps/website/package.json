@@ -14,7 +14,7 @@
     "test": "vitest",
     "test:run": "vitest run && pnpm test:preview",
     "test:preview": "node --test scripts/static-preview.test.mjs",
-    "test:pagefind": "vitest run --config vite.pagefind.config.ts",
+    "test:pagefind": "pnpm build && vitest run --config vite.pagefind.config.ts",
     "test:e2e": "pnpm build && playwright test"
   },
   "dependencies": {

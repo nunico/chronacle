@@ -6,7 +6,11 @@
 
 **A desktop TTRPG GM assistant.** Load your own rulebook PDFs, take structured notes, and query an AI agent that answers with source citations.
 
-No cloud dependency, no subscription — the LLM backend is configurable at setup: use a cloud API (OpenAI, Anthropic, OpenRouter) or run locally via Ollama.
+Chronacle stores its source library, notes, and search index on your machine. A configured remote
+answer provider receives the question and relevant excerpts needed to write a response. A configured
+remote embedding provider receives the searchable text and query data needed for its requests. See
+`/en/manual/settings/overview` or `/de/handbuch/einstellungen/ueberblick` on the built site for the
+full data-flow summary.
 
 ---
 
@@ -16,7 +20,7 @@ No cloud dependency, no subscription — the LLM backend is configurable at setu
 - **RAG Query** — Ask your GM questions in natural language. Every answer cites the source page and chunk.
 - **Structured Notes** — Organise campaigns with entities, relationships, and session logs.
 - **Configurable AI** — Bring your own LLM (OpenAI, Anthropic, Ollama) and embedding model.
-- **Local-First** — All data stays on your machine. No accounts, no telemetry.
+- **Local Library** — Source files, notes, and the search index are stored on your machine.
 
 ---
 
@@ -189,7 +193,7 @@ pnpm -C apps/website typecheck        # Svelte and TypeScript checks
 pnpm -C apps/website lint             # ESLint and Prettier checks
 pnpm -C apps/website test:run         # Vitest and static-preview tests
 pnpm -C apps/website test:e2e         # Build and run Playwright browser tests
-pnpm -C apps/website test:pagefind    # Built-index language isolation tests
+pnpm -C apps/website test:pagefind    # Build and test current-language search indexes
 ```
 
 ### Full App

@@ -97,7 +97,7 @@ pnpm -C apps/website typecheck
 pnpm -C apps/website lint
 pnpm -C apps/website test:run
 pnpm -C apps/website test:e2e
-pnpm -C apps/website test:pagefind                 # current-language search index tests
+pnpm -C apps/website test:pagefind                 # build + current-language index tests
 
 # Full app
 pnpm -C apps/desktop tauri dev --features rocksdb  # dev with persistent storage

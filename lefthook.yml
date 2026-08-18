@@ -18,7 +18,6 @@ pre-commit:
       root: "apps/desktop/"
       glob: "*.{ts,svelte,json,css,md,yaml,yml}"
       run: pnpm exec prettier --check {staged_files}
-      stage_fixed: true
     eslint:
       root: "apps/desktop/"
       glob: "*.{ts,svelte}"
@@ -27,7 +26,6 @@ pre-commit:
       root: "apps/website/"
       glob: "*.{ts,svelte,json,css,md,yaml,yml}"
       run: pnpm exec prettier --check {staged_files}
-      stage_fixed: true
     website-eslint:
       root: "apps/website/"
       glob: "*.{ts,svelte}"
