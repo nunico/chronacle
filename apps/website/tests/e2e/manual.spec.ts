@@ -4,7 +4,7 @@ test('opens the paired German article from an English article', async ({ page })
   await page.goto('/en/manual/getting-started/install');
   await expect(page.getByRole('heading', { name: 'Install Chronacle', level: 1 })).toBeVisible();
 
-  const translation = page.getByRole('link', { name: 'Deutsch' });
+  const translation = page.getByRole('banner').getByRole('link', { name: 'Deutsch' });
   await expect(translation).toHaveAttribute('href', '/de/handbuch/erste-schritte/installieren');
   await translation.click();
 

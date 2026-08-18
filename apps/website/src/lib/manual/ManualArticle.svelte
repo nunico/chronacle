@@ -39,7 +39,7 @@
   const collectHeadings: Attachment<HTMLElement> = (node) => {
     const used: string[] = [];
     const permalinkCleanups: (() => void)[] = [];
-    const headingRows: Array<{ heading: HTMLHeadingElement; row: HTMLDivElement }> = [];
+    const headingRows: { heading: HTMLHeadingElement; row: HTMLDivElement }[] = [];
     const tableRegions: HTMLDivElement[] = [];
     const collected = Array.from(node.querySelectorAll<HTMLHeadingElement>('h2, h3')).map(
       (heading) => {

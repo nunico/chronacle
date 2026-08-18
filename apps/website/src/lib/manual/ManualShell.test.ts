@@ -231,7 +231,9 @@ describe('ManualShell', () => {
     const rulesLink = screen.getByRole('link', { name: 'Copy link to Rules' });
     expect(rulesLink).toHaveAttribute('href', '#rules');
     expect(rulesLink).toHaveAttribute('data-pagefind-ignore');
-    expect(rulesLink.closest('.manual-heading-row')).toContainElement(container.querySelector('h2'));
+    expect(rulesLink.closest('.manual-heading-row')).toContainElement(
+      container.querySelector('h2'),
+    );
     await user.click(rulesLink);
     expect(writeText).toHaveBeenCalledWith(new URL('#rules', window.location.href).href);
     expect(await screen.findByText('Link copied')).toBeInTheDocument();
