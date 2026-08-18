@@ -27,6 +27,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import EyeMark from '$lib/brand/EyeMark.svelte';
+  import { OPEN_GAME_LICENSE_ROUTE } from '$lib/legal/open-game-content';
 
   let { labels, links }: SiteFooterProps = $props();
 </script>
@@ -47,6 +48,7 @@
       <a href={links.license} target="_blank" rel="external noopener noreferrer">
         {labels.license}
       </a>
+      <a href={resolve(OPEN_GAME_LICENSE_ROUTE)}>Open Game License</a>
     </nav>
 
     <p class="site-footer__legal">{labels.copyright}</p>
