@@ -71,7 +71,6 @@
   }
 
   .window {
-    position: relative;
     border: 1px solid var(--line-strong);
     border-radius: var(--r-xl);
     background: linear-gradient(180deg, var(--bg-panel), rgb(10 12 26 / 82%));
@@ -82,23 +81,20 @@
   .window__bar {
     display: flex;
     gap: 0.45rem;
-    padding: 0.3rem 0.45rem 2.675rem;
+    padding: 0.3rem 0.45rem 0.8rem;
   }
 
   .open-game-marker {
-    position: absolute;
-    top: 2.45rem;
-    left: 50%;
+    display: block;
     width: fit-content;
     max-width: calc(100% - 2rem);
+    margin: 0 auto var(--s-3);
     color: var(--rune-gold);
     font-family: var(--font-mono);
     font-size: 0.68rem;
     letter-spacing: 0.04em;
     text-align: center;
     text-decoration-color: rgb(232 184 106 / 48%);
-    transform: translateX(-50%);
-    white-space: nowrap;
   }
 
   .window__bar span {
@@ -212,15 +208,5 @@
     font-family: var(--font-serif);
     font-size: 0.9rem;
     line-height: 1.55;
-  }
-
-  @media (max-width: 31rem) {
-    .window__bar {
-      padding-bottom: 3.8rem;
-    }
-
-    .open-game-marker {
-      white-space: normal;
-    }
   }
 </style>
