@@ -2,14 +2,16 @@ import { render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import { landingCopy } from '$lib/i18n/landing-copy';
 import ProductExample from '$lib/landing/ProductExample.svelte';
+import LegalPage from '../../routes/legal/open-game-license/+page.svelte';
 
 const legalPath = '/legal/open-game-license';
 
-// Named Product Identity from the official SRD 5.1 legal information.
-const prohibitedProductIdentityTerms = [
+// Regression guard for the names enumerated in the official SRD 5.1 Product Identity notice.
+// This does not attempt to classify every possible form of Product Identity.
+const enumeratedProductIdentityNames = [
   'Dungeons & Dragons',
   `D${'&D'}`,
-  'Player’s Handbook',
+  "Player's Handbook",
   `Dungeon${' Master'}`,
   'Monster Manual',
   'd20',
@@ -44,7 +46,7 @@ const prohibitedProductIdentityTerms = [
   'beholder',
   'gauth',
   'carrion crawler',
-  'tanar’ri',
+  "tanar'ri",
   'baatezu',
   'displacer beast',
   'githyanki',
@@ -72,12 +74,45 @@ describe('SRD Open Game Content treatment', () => {
     }
   });
 
-  it.each(['en', 'de'] as const)('keeps Product Identity out of the %s example', (locale) => {
-    render(ProductExample, { copy: landingCopy[locale].productExample });
-    const exampleText = screen.getByRole('group').textContent ?? '';
+  it.each(['en', 'de'] as const)('marks only the derived %s answer content', (locale) => {
+    const copy = landingCopy[locale].productExample;
+    const { container } = render(ProductExample, { copy });
+    const markedContent = container.querySelector('[data-open-game-content]');
 
-    for (const term of prohibitedProductIdentityTerms) {
-      expect(exampleText.toLocaleLowerCase('en-US')).not.toContain(term.toLocaleLowerCase('en-US'));
-    }
+    expect(markedContent).not.toBeNull();
+    const marked = within(markedContent as HTMLElement);
+    expect(marked.queryByText(copy.question)).not.toBeInTheDocument();
+    expect(marked.queryByText(copy.assistant)).not.toBeInTheDocument();
+    expect(markedContent?.querySelector('svg')).toBeNull();
+    expect(marked.getByText(copy.verdict)).toBeVisible();
+    expect(marked.getByText(copy.answer)).toBeVisible();
+    expect(marked.getByText(copy.citation)).toBeVisible();
+    expect(marked.getByText(copy.excerpt)).toBeVisible();
+  });
+
+  it.each(['en', 'de'] as const)(
+    "keeps the official notice's enumerated names out of the entire %s example section",
+    (locale) => {
+      const { container } = render(ProductExample, {
+        copy: landingCopy[locale].productExample,
+      });
+      const exampleText = container.querySelector('section')?.textContent ?? '';
+
+      for (const name of enumeratedProductIdentityNames) {
+        expect(exampleText.toLocaleLowerCase('en-US')).not.toContain(
+          name.toLocaleLowerCase('en-US'),
+        );
+      }
+    },
+  );
+
+  it('publishes the supplemental copyright notice separately from the official PDF', () => {
+    render(LegalPage);
+
+    expect(screen.getByRole('heading', { name: 'Supplemental COPYRIGHT NOTICE' })).toBeVisible();
+    expect(
+      screen.getByText('Chronacle website example Copyright 2026 Nico Nußbaum.'),
+    ).toBeVisible();
+    expect(screen.getByText(/separate from the unmodified official PDF/i)).toBeVisible();
   });
 });

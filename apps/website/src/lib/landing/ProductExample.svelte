@@ -4,7 +4,6 @@
   import Icon from '$lib/components/Icon.svelte';
   import type { LandingCopy } from '$lib/i18n/landing-copy';
   import { OPEN_GAME_LICENSE_ROUTE } from '$lib/legal/open-game-content';
-  import Quote from 'lucide-svelte/icons/quote';
   import Sparkles from 'lucide-svelte/icons/sparkles';
 
   interface Props {
@@ -17,11 +16,10 @@
 <section class="example" aria-labelledby="example-label">
   <div class="example__inner">
     <h2 class="example__label" id="example-label">{copy.label}</h2>
-    <div class="window" role="group" aria-label={copy.windowLabel} data-open-game-content>
+    <div class="window" role="group" aria-label={copy.windowLabel}>
       <div class="window__bar" aria-hidden="true">
         <span></span><span></span><span></span>
       </div>
-      <a class="open-game-marker" href={resolve(OPEN_GAME_LICENSE_ROUTE)}>{copy.metadata}</a>
       <div class="window__question">
         <Icon icon={Sparkles} size={17} />
         <div>
@@ -35,15 +33,17 @@
           <strong>{copy.assistant}</strong>
           <span>{copy.answerLabel}</span>
         </header>
-        <p class="answer__verdict">{copy.verdict}</p>
-        <p class="answer__body">{copy.answer}</p>
-        <div class="citation">
-          <div class="citation__title">
-            <Icon icon={Quote} size={14} />
-            <span>{copy.citationLabel}</span>
-            <strong>{copy.citation}</strong>
+        <div class="answer__open-game" data-open-game-content>
+          <a class="open-game-marker" href={resolve(OPEN_GAME_LICENSE_ROUTE)}>{copy.metadata}</a>
+          <p class="answer__verdict">{copy.verdict}</p>
+          <p class="answer__body">{copy.answer}</p>
+          <div class="citation">
+            <div class="citation__title">
+              <span>{copy.citationLabel}</span>
+              <strong>{copy.citation}</strong>
+            </div>
+            <blockquote>{copy.excerpt}</blockquote>
           </div>
-          <blockquote>{copy.excerpt}</blockquote>
         </div>
       </article>
     </div>
@@ -71,6 +71,7 @@
   }
 
   .window {
+    position: relative;
     border: 1px solid var(--line-strong);
     border-radius: var(--r-xl);
     background: linear-gradient(180deg, var(--bg-panel), rgb(10 12 26 / 82%));
@@ -81,19 +82,23 @@
   .window__bar {
     display: flex;
     gap: 0.45rem;
-    padding: 0.3rem 0.45rem 0.8rem;
+    padding: 0.3rem 0.45rem 2.675rem;
   }
 
   .open-game-marker {
-    display: block;
+    position: absolute;
+    top: 2.45rem;
+    left: 50%;
     width: fit-content;
-    margin: 0 auto var(--s-3);
+    max-width: calc(100% - 2rem);
     color: var(--rune-gold);
     font-family: var(--font-mono);
     font-size: 0.68rem;
     letter-spacing: 0.04em;
     text-align: center;
     text-decoration-color: rgb(232 184 106 / 48%);
+    transform: translateX(-50%);
+    white-space: nowrap;
   }
 
   .window__bar span {
@@ -131,20 +136,13 @@
   }
 
   .answer {
-    position: relative;
-    overflow: hidden;
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    background: var(--bg-abyss);
+    background:
+      linear-gradient(90deg, transparent, var(--line-glow), transparent) top center / 70% 1px
+        no-repeat,
+      var(--bg-abyss);
     padding: clamp(1rem, 4vw, 1.5rem);
-  }
-
-  .answer::before {
-    position: absolute;
-    height: 1px;
-    inset: 0 15% auto;
-    background: linear-gradient(90deg, transparent, var(--line-glow), transparent);
-    content: '';
   }
 
   .answer header {
@@ -214,5 +212,15 @@
     font-family: var(--font-serif);
     font-size: 0.9rem;
     line-height: 1.55;
+  }
+
+  @media (max-width: 31rem) {
+    .window__bar {
+      padding-bottom: 3.8rem;
+    }
+
+    .open-game-marker {
+      white-space: normal;
+    }
   }
 </style>

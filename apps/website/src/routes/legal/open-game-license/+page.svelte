@@ -39,10 +39,20 @@
     <section aria-labelledby="identification-heading">
       <h2 id="identification-heading">Identification</h2>
       <p>
-        In the product example on Chronacle's home page, the question, ruling, explanation, source
-        line, and quotation inside the panel marked <strong>{OPEN_GAME_CONTENT_LABEL}</strong> are Open
-        Game Content. No other part of this website is designated as Open Game Content.
+        In the product example on Chronacle's home page, the ruling, explanation, source line, and
+        quotation inside the answer area marked <strong>{OPEN_GAME_CONTENT_LABEL}</strong> are Open Game
+        Content. The question, Chronacle name, Eye mark, and interface are not included in that designation.
+        No other part of this website is designated as Open Game Content.
       </p>
+    </section>
+
+    <section aria-labelledby="supplemental-notice-heading">
+      <h2 id="supplemental-notice-heading">Supplemental COPYRIGHT NOTICE</h2>
+      <p>
+        The following notice covers the original website example. It is separate from the unmodified
+        official PDF below.
+      </p>
+      <p class="notice">Chronacle website example Copyright 2026 Nico Nußbaum.</p>
     </section>
 
     <section aria-labelledby="license-heading">
@@ -168,6 +178,15 @@
     font-family: var(--font-mono);
     font-size: 0.88em;
     font-weight: 550;
+  }
+
+  .notice {
+    border-left: 2px solid var(--rune-gold);
+    padding: var(--s-3) var(--s-4);
+    background: var(--warning-bg);
+    color: var(--fg-1);
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
   }
 
   .actions {
