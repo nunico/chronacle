@@ -70,3 +70,37 @@ test('localizes an unknown manual route through the static fallback', async ({ p
   await expect(page.getByRole('button', { name: 'Handbuch durchsuchen' })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('lang', 'de');
 });
+
+test('serves the raw static fallback before German hydration', async ({ page, request }) => {
+  const fallbackResponse = await request.get('/de/handbuch/noch-eine-fehlende-seite');
+  const fallbackHtml = await fallbackResponse.text();
+
+  expect(fallbackResponse.status()).toBe(404);
+  expect(fallbackResponse.headers()['x-sveltekit-page']).toBeUndefined();
+  expect(fallbackResponse.headers()['content-type']).toContain('text/html');
+  expect(fallbackHtml).toContain('<html lang="en">');
+
+  const pagefindResponse = await request.get('/pagefind/pagefind.js');
+  expect(pagefindResponse.status()).toBe(200);
+  expect(pagefindResponse.headers()['content-type']).toContain('text/javascript');
+
+  const iconResponse = await request.get('/brand/chronacle-icon.png');
+  expect(iconResponse.status()).toBe(200);
+  expect(iconResponse.headers()['content-type']).toContain('image/png');
+
+  const robotsResponse = await request.get('/robots.txt');
+  expect(robotsResponse.status()).toBe(200);
+  expect(robotsResponse.headers()['content-type']).toContain('text/plain');
+
+  const extensionlessResponse = await request.head('/en/manual');
+  expect(extensionlessResponse.status()).toBe(200);
+  expect(extensionlessResponse.headers()['content-type']).toContain('text/html');
+
+  const traversalResponse = await request.get('/%2e%2e%2fpackage.json');
+  expect(traversalResponse.status()).toBe(400);
+  expect(await traversalResponse.text()).toBe('Invalid path');
+
+  const hydratedResponse = await page.goto('/de/handbuch/noch-eine-fehlende-seite');
+  expect(hydratedResponse?.status()).toBe(404);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'de');
+});
