@@ -39,7 +39,7 @@ impl EmbeddingModelMismatch {
 pub async fn check_embedding_model_consistency<C: surrealdb::Connection>(
     db: &surrealdb::Surreal<C>,
     active_model: &str,
-) -> Result<EmbeddingModelMismatch, surrealdb::Error> {
+) -> Result<EmbeddingModelMismatch, Box<surrealdb::Error>> {
     #[derive(serde::Deserialize)]
     struct Row {
         embed_model: Option<String>,
