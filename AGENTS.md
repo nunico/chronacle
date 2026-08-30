@@ -10,13 +10,12 @@ chronacle/
 ├── README.md             # human-facing overview
 ├── Cargo.toml            # Rust workspace root: members = ["crates/*", "apps/desktop/src-tauri"]
 ├── package.json          # pnpm workspace root (minimal, no scripts)
-├── pnpm-workspace.yaml   # packages: [apps/desktop]
+├── pnpm-workspace.yaml   # packages: [apps/desktop, apps/website]
 ├── lefthook.yml          # git hooks (pre-commit, commit-msg) — ADR-007
 ├── mise.toml             # toolchain pinning + task definitions (mise run dev / build)
 ├── deny.toml             # cargo-deny license/advisory policy
 ├── docs/
 │   ├── architecture.md   # authoritative stack + ADRs (source of truth)
-│   ├── user-guide.md     # GM-facing usage docs
 │   └── superpowers/      # design specs + implementation plans
 ├── crates/
 │   ├── chronacle-core/       # dependency traits + DTOs: LlmProvider, VectorStore, BlobStore, EmbeddingProvider
@@ -27,29 +26,33 @@ chronacle/
 │   ├── chronacle-retrieval/  # agent_service (RAG chat + citation)
 │   └── chronacle-domain/     # campaign, session, collection, custom_provider services
 ├── apps/
-│   └── desktop/              # Svelte frontend + Tauri shell
-│       ├── src/              # Svelte 5 frontend
-│       │   ├── components/   # reusable UI components
-│       │   ├── views/        # top-level screens
-│       │   ├── shell/        # app chrome / layout
-│       │   ├── lib/          # frontend utilities, Tauri invoke wrappers
-│       │   ├── App.svelte    # root component
-│       │   └── main.ts       # entrypoint
-│       ├── src-tauri/        # Rust backend (Tauri)
-│       │   ├── src/
-│       │   │   ├── commands/ # Tauri IPC command handlers (invoke targets)
-│       │   │   └── services/ # settings_service (desktop-only; other services live in crates/)
-│       │   ├── capabilities/ # Tauri permission manifests
-│       │   ├── resources/    # bundled assets (ONNX models, etc.)
-│       │   ├── tests/        # Rust integration tests + fixtures
-│       │   └── tauri.conf.json # Tauri app config
-│       ├── tests/e2e/        # end-to-end tests
-│       │   ├── features/     # Gherkin .feature acceptance specs (ADR-011)
-│       │   ├── backend/      # Playwright backend service-layer E2E (every PR)
-│       │   │   └── steps/    # playwright-bdd step definitions for features/
-│       │   └── ui/           # tauri-driver UI E2E (merge to main only)
-│       ├── package.json      # app frontend scripts + deps
-│       └── vite.config.ts    # Vite build config
+│   ├── desktop/              # Svelte frontend + Tauri shell
+│   │   ├── src/              # Svelte 5 frontend
+│   │   │   ├── components/   # reusable UI components
+│   │   │   ├── views/        # top-level screens
+│   │   │   ├── shell/        # app chrome / layout
+│   │   │   ├── lib/          # frontend utilities, Tauri invoke wrappers
+│   │   │   ├── App.svelte    # root component
+│   │   │   └── main.ts       # entrypoint
+│   │   ├── src-tauri/        # Rust backend (Tauri)
+│   │   │   ├── src/
+│   │   │   │   ├── commands/ # Tauri IPC command handlers (invoke targets)
+│   │   │   │   └── services/ # settings_service (desktop-only; other services live in crates/)
+│   │   │   ├── capabilities/ # Tauri permission manifests
+│   │   │   ├── resources/    # bundled assets (ONNX models, etc.)
+│   │   │   ├── tests/        # Rust integration tests + fixtures
+│   │   │   └── tauri.conf.json # Tauri app config
+│   │   ├── tests/e2e/        # end-to-end tests
+│   │   │   ├── features/     # Gherkin .feature acceptance specs (ADR-011)
+│   │   │   ├── backend/      # Playwright backend service-layer E2E (every PR)
+│   │   │   │   └── steps/    # playwright-bdd step definitions for features/
+│   │   │   └── ui/           # tauri-driver UI E2E (merge to main only)
+│   │   ├── package.json      # app frontend scripts + deps
+│   │   └── vite.config.ts    # Vite build config
+│   └── website/              # Static public site + bilingual user manual
+│       ├── src/content/manual/{en,de}/ # Canonical manual sources
+│       ├── tests/e2e/        # Landing, manual, storage, and accessibility tests
+│       └── build/            # Generated static site + Pagefind index
 ├── .agents/skills/       # portable agent skill packages (source of truth)
 ├── .claude/
 │   ├── agents/           # subagent definitions (see Subagents below)
@@ -87,6 +90,15 @@ pnpm -C apps/desktop test:coverage
 scripts/ci/acceptance.sh                           # generates BDD specs, then runs Playwright
 pnpm -C apps/desktop run e2e:ui                    # build first with: tauri build --no-bundle --features rocksdb
 
+# Public website and canonical bilingual manual (commands target apps/website)
+pnpm -C apps/website dev                           # landing at /
+pnpm -C apps/website build                         # static build + Pagefind in apps/website/build
+pnpm -C apps/website typecheck
+pnpm -C apps/website lint
+pnpm -C apps/website test:run
+pnpm -C apps/website test:e2e
+pnpm -C apps/website test:pagefind                 # build + current-language index tests
+
 # Full app
 pnpm -C apps/desktop tauri dev --features rocksdb  # dev with persistent storage
 pnpm -C apps/desktop exec tauri build --features rocksdb # production bundle (or: mise run build)
@@ -100,6 +112,12 @@ such as `cargo test -p Chronacle --features rocksdb --test rocksdb_persistence`.
 the authoritative pre-PR command and executes the Backend quality, Frontend quality, and Acceptance
 tests scripts in the repository's Docker toolchain. Its scope is the PR gates only: it does not run
 merge-only coverage, release builds, or the separate real-app `tauri-driver` UI E2E workflow.
+
+The public landing page has no language prefix. The canonical user manual lives at `/en/manual`
+and `/de/handbuch`; its Markdown sources are under `apps/website/src/content/manual/{en,de}`.
+Pagefind indexes the prerendered static site and manual search stays within the current language.
+English is the source copy. German articles that still need review retain explicit proofreading
+markers; remove a marker only after that article has been reviewed.
 
 ## License
 
@@ -144,14 +162,14 @@ Formatting and linting are enforced by tooling and run automatically via `leftho
 - Use the dependency traits (`Arc<dyn LlmProvider>`, etc.) — never concrete external clients (see Hard constraints).
 - Public items in library crates carry `///` doc comments.
 
-**Frontend (`apps/desktop/src/`) — TypeScript + Svelte 5**
+**Frontend (`apps/desktop/src/`, `apps/website/src/`) — TypeScript + Svelte 5**
 
 - Formatted by Prettier (`.prettierrc`): semicolons, single quotes, trailing commas (`all`), 2-space indent, 100-char print width, `prettier-plugin-svelte` for `.svelte`.
 - Linted by ESLint (`eslint.config.js`): `typescript-eslint` strict + stylistic, `eslint-plugin-svelte` recommended.
   - Arrays: use `array-simple` form — `string[]` for simple, `Array<T>` for complex.
   - Unused vars are warnings; prefix intentionally-unused with `_` (e.g. `_event`).
 - Svelte 5 runes (`$state`, `$derived`, `$props`, `$effect`) — do not use legacy `export let` / reactive `$:` syntax.
-- `.agents/*`, `.claude/*`, `dist/*`, `target/*` are ESLint-ignored — do not lint or reformat them.
+- `.agents/*`, `.claude/*`, `dist/*`, `build/*`, `target/*` are ESLint-ignored — do not lint or reformat them.
 
 **Markdown / config** — Prettier formats `*.{json,css,yaml,yml,md}`; keep it clean or the pre-commit hook fails.
 

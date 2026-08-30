@@ -6,7 +6,11 @@
 
 **A desktop TTRPG GM assistant.** Load your own rulebook PDFs, take structured notes, and query an AI agent that answers with source citations.
 
-No cloud dependency, no subscription — the LLM backend is configurable at setup: use a cloud API (OpenAI, Anthropic, OpenRouter) or run locally via Ollama.
+Chronacle stores its source library, notes, and search index on your machine. A configured remote
+answer provider receives the question and relevant excerpts needed to write a response. A configured
+remote embedding provider receives the searchable text and query data needed for its requests. See
+`/en/manual/settings/overview` or `/de/handbuch/einstellungen/ueberblick` on the built site for the
+full data-flow summary.
 
 ---
 
@@ -16,7 +20,7 @@ No cloud dependency, no subscription — the LLM backend is configurable at setu
 - **RAG Query** — Ask your GM questions in natural language. Every answer cites the source page and chunk.
 - **Structured Notes** — Organise campaigns with entities, relationships, and session logs.
 - **Configurable AI** — Bring your own LLM (OpenAI, Anthropic, Ollama) and embedding model.
-- **Local-First** — All data stays on your machine. No accounts, no telemetry.
+- **Local Library** — Source files, notes, and the search index are stored on your machine.
 
 ---
 
@@ -127,7 +131,7 @@ broad access to your home directory.
 git clone https://github.com/nunico/chronacle.git
 cd chronacle
 
-# Install frontend dependencies (installs the workspace; apps/desktop is a pnpm workspace package)
+# Install frontend dependencies for the desktop app and public website
 pnpm install
 
 # Run in development mode (hot-reload frontend + persistent RocksDB backend)
@@ -175,6 +179,23 @@ pnpm -C apps/desktop test:coverage       # With coverage
 scripts/ci/acceptance.sh                     # Playwright backend acceptance tests
 ```
 
+### Public website and manual
+
+The static SvelteKit site lives in `apps/website`. Its landing page is `/`; the canonical manuals
+are `/en/manual` and `/de/handbuch`. Manual search is built with Pagefind and searches only the
+language currently being browsed. English is the source text; the German first translation is
+marked in source wherever proofreading is still pending.
+
+```bash
+pnpm -C apps/website dev              # Local Vite development server
+pnpm -C apps/website build            # Static build plus Pagefind index in apps/website/build
+pnpm -C apps/website typecheck        # Svelte and TypeScript checks
+pnpm -C apps/website lint             # ESLint and Prettier checks
+pnpm -C apps/website test:run         # Vitest and static-preview tests
+pnpm -C apps/website test:e2e         # Build and run Playwright browser tests
+pnpm -C apps/website test:pagefind    # Build and test current-language search indexes
+```
+
 ### Full App
 
 ```bash
@@ -187,7 +208,7 @@ pnpm -C apps/desktop exec tauri build --features rocksdb    # Production bundle
 CI and local validation share three named repository scripts:
 
 - `scripts/ci/backend-quality.sh` — Rust formatting, Clippy, workspace tests, and `cargo deny`
-- `scripts/ci/frontend-quality.sh` — Svelte checks, ESLint, and Vitest
+- `scripts/ci/frontend-quality.sh` — desktop and website type checks, lint, tests, and static build
 - `scripts/ci/acceptance.sh` — Playwright backend acceptance tests
 
 Before creating a Chronacle pull request, run the authoritative PR gate successfully from the
@@ -218,13 +239,17 @@ chronacle/
 │   ├── chronacle-retrieval/ # RAG agent service (chat + cited answers)
 │   └── chronacle-domain/   # Campaign, session, collection, custom-provider CRUD
 ├── apps/
-│   └── desktop/            # Svelte frontend + Tauri shell
-│       ├── src/            # Svelte 5 + TypeScript frontend
-│       ├── src-tauri/      # Rust Tauri backend (commands, AppState, settings_service)
-│       │   └── tests/      # Rust integration tests + fixtures
-│       ├── tests/e2e/      # Playwright backend E2E + tauri-driver UI E2E
-│       ├── package.json
-│       └── vite.config.ts
+│   ├── desktop/            # Svelte frontend + Tauri shell
+│   │   ├── src/            # Svelte 5 + TypeScript frontend
+│   │   ├── src-tauri/      # Rust Tauri backend (commands, AppState, settings_service)
+│   │   │   └── tests/      # Rust integration tests + fixtures
+│   │   ├── tests/e2e/      # Playwright backend E2E + tauri-driver UI E2E
+│   │   ├── package.json
+│   │   └── vite.config.ts
+│   └── website/            # Static landing page + bilingual searchable manual
+│       ├── src/content/manual/{en,de}/ # Canonical user-manual sources
+│       ├── tests/e2e/      # Public-site Playwright tests
+│       └── build/          # Generated static output (not committed)
 ├── docs/                   # Architecture docs and ADRs
 └── package.json            # pnpm workspace root (minimal)
 ```
