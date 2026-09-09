@@ -1625,6 +1625,42 @@ Feature: Preserve work while moving through a campaign
     And I return to the Initiative rule
     Then the changed rule note is preserved and shown as saving
 
+  Scenario: Retain a focused rule note without saving it during navigation
+    Given I have entered "Unsaved note" in the focused Initiative table notes
+    When I navigate to Oracle while the rule note is still focused
+    Then no rule-note save has been sent
+    When I return to the Initiative rule
+    Then the exact rule note "Unsaved note" is restored
+    And the rule note is shown as unsaved
+
+  Scenario: Reverting a rule note to its saved baseline clears pending state
+    Given I have entered "Unsaved note" in the focused Initiative table notes
+    And the rule note is shown as unsaved
+    When I restore the saved Initiative table note
+    Then the rule note no longer indicates unsaved changes
+    And no rule-note save has been sent
+
+  Scenario: Keep retained rule-note saves separate between collections
+    Given a World Guide Initiative rule-note save is in progress
+    When I navigate to Oracle before the collection rule-note save completes
+    And I open Initiative in the Adventurer Guide
+    Then the World Guide rule-note draft is not shown in the Adventurer Guide
+    And the Adventurer Guide saved rule note is shown
+    When I return to Initiative in the World Guide
+    Then the World Guide rule-note draft is preserved and shown as saving
+
+  Scenario: Keep a rule draft separate from the explicit no-campaign context
+    Given no campaign is available
+    And I have entered "No-campaign rule note" in the focused Initiative table notes
+    When I create campaign "Campaign A"
+    And I open Initiative in the World Guide
+    Then the no-campaign rule-note draft is not shown in campaign A
+    And the saved Initiative table note is shown
+    When I delete campaign "Campaign A" and return to Initiative
+    Then the exact rule note "No-campaign rule note" is restored
+    And the rule note is shown as unsaved
+    And no rule-note save has been sent
+
   Scenario: Continue editing a rule note during a save
     Given a save of an earlier rule-note revision is in progress
     When I make a newer edit to the rule note
@@ -1648,6 +1684,21 @@ Feature: Preserve work while moving through a campaign
     When I retry the unavailable rule-note save with the keyboard
     Then Retry still targets rule "Initiative"
     And focus remains on the rule-note Retry action
+
+  Scenario: Recover an unavailable rule note omitted by a later list
+    Given I have an unsent question in campaign A
+    And I have changed the table notes for rule "Initiative"
+    When saving reports that rule "Initiative" is no longer available
+    And I navigate away and reload the rule list
+    Then the omitted Initiative draft remains available as recovery-only
+    And the unavailable rule-note recovery is localized and actionable
+    And the raw rule backend detail is not shown
+    When I retry the omitted rule-note save with the keyboard
+    Then Retry uses the original Initiative target and content
+    When I discard the omitted rule-note draft with the keyboard
+    Then only the omitted Initiative draft is removed
+    And focus moves to the stable Rules tab
+    And the unsent Oracle question remains intact
 
   Scenario: Preserve queued rule saves from each campaign sharing one target
     Given a Campaign A Initiative rule-note save is in progress
