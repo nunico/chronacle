@@ -652,7 +652,7 @@
         onCreateMissingArticle={(name, findingId) => openCreateKindChooser(name, findingId)}
       />
     {:else if typeof view === 'object' && view.category === 'sessions' && activeCampaignId}
-      <SessionLogView campaignId={activeCampaignId} />
+      <SessionLogView campaignId={activeCampaignId} {draftCoordinator} />
     {:else if typeof view === 'object' && view.category === 'sessions'}
       <div class="no-campaign-msg">
         <p>{i18n.t('shell.noCampaignSessions')}</p>
