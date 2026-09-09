@@ -5,7 +5,9 @@ use tauri::Emitter;
 use tauri::State;
 
 use crate::AppState;
-use chronacle_extraction::codex_service::{CompileProgress, RuleEntry};
+use chronacle_extraction::codex_service::{
+    CompileProgress, RuleEntry, RuleNoteUpdateError as ExtractionRuleNoteUpdateError,
+};
 
 /// Summary returned to the frontend when a codex compile run completes.
 #[derive(Debug, Clone, Serialize)]
@@ -14,6 +16,28 @@ pub struct CompileSummary {
     pub remaining_stale: usize,
     pub entries_created: usize,
     pub entries_updated: usize,
+}
+
+/// Stable error payload returned when a rule-note write cannot be completed.
+#[derive(Debug, Clone, Serialize)]
+pub struct RuleNoteCommandError {
+    code: &'static str,
+    message: String,
+}
+
+impl From<ExtractionRuleNoteUpdateError> for RuleNoteCommandError {
+    fn from(error: ExtractionRuleNoteUpdateError) -> Self {
+        match error {
+            ExtractionRuleNoteUpdateError::NotFound { id } => Self {
+                code: "NOT_FOUND",
+                message: format!("Rule entry {id} not found"),
+            },
+            ExtractionRuleNoteUpdateError::Database { message } => Self {
+                code: "DATABASE",
+                message,
+            },
+        }
+    }
 }
 
 /// Emit a phased progress event to the frontend.
@@ -171,8 +195,10 @@ pub async fn update_rule_notes(
     state: State<'_, Arc<AppState>>,
     id: String,
     notes: Option<String>,
-) -> Result<(), String> {
-    chronacle_extraction::codex_service::update_rule_notes(&state.db, &id, notes).await
+) -> Result<RuleEntry, RuleNoteCommandError> {
+    chronacle_extraction::codex_service::update_rule_notes(&state.db, &id, notes)
+        .await
+        .map_err(RuleNoteCommandError::from)
 }
 
 /// Regenerate a single rule entry honoring a new GM objection. Runs inline —
@@ -318,6 +344,7 @@ pub async fn resolve_alias_collision(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chronacle_extraction::codex_service::RuleNoteUpdateError;
 
     /// Smoke test: all new proposal command functions are referenced so the
     /// compiler verifies their signatures, imports, and return types.
@@ -332,6 +359,37 @@ mod tests {
         let _ = get_lint_findings as fn(_) -> _;
         let _ = resolve_lint_finding as fn(_, _) -> _;
         let _ = resolve_alias_collision as fn(_, _, _, _) -> _;
+    }
+
+    #[test]
+    fn rule_note_missing_target_error_serializes_as_stable_object() {
+        let error = RuleNoteCommandError::from(RuleNoteUpdateError::NotFound {
+            id: "initiative".to_string(),
+        });
+        let serialized =
+            serde_json::to_value(error).expect("rule-note command errors must serialize");
+
+        assert!(serialized.is_object(), "Tauri errors must not be strings");
+        assert_eq!(serialized["code"], "NOT_FOUND");
+        assert_eq!(serialized["message"], "Rule entry initiative not found");
+    }
+
+    #[test]
+    fn rule_note_backend_error_remains_distinct_from_missing_target() {
+        let error = RuleNoteCommandError::from(RuleNoteUpdateError::Database {
+            message: "storage unavailable".to_string(),
+        });
+        let serialized =
+            serde_json::to_value(error).expect("rule-note command errors must serialize");
+
+        assert!(serialized.is_object(), "Tauri errors must not be strings");
+        assert_eq!(serialized["code"], "DATABASE");
+        assert_ne!(serialized["code"], "NOT_FOUND");
+        assert_eq!(serialized["message"], "storage unavailable");
+        assert_ne!(
+            serialized["message"], "This record is no longer available.",
+            "localized recovery copy belongs to the frontend"
+        );
     }
 
     #[tokio::test]

@@ -528,18 +528,44 @@ pub async fn list_rule_entries<C: Connection>(
     Ok(rows.into_iter().map(RuleEntry::from).collect())
 }
 
-/// Update a rule entry's GM notes (freeform, not LLM-derived).
+/// Failures produced while updating a rule entry's GM notes.
+#[derive(Debug, thiserror::Error)]
+pub enum RuleNoteUpdateError {
+    /// The requested rule entry no longer exists.
+    #[error("Rule entry {id} not found")]
+    NotFound { id: String },
+    /// The database could not complete or decode the update.
+    #[error("{message}")]
+    Database { message: String },
+}
+
+/// Update a rule entry's GM notes and return the canonical saved record.
 pub async fn update_rule_notes<C: Connection>(
     db: &surrealdb::Surreal<C>,
     rule_entry_id: &str,
     notes: Option<String>,
-) -> Result<(), String> {
-    db.query("UPDATE type::thing('rule_entry', $id) SET notes = $notes")
+) -> Result<RuleEntry, RuleNoteUpdateError> {
+    let mut response = db
+        .query(
+            "UPDATE type::thing('rule_entry', $id) SET notes = $notes \
+             RETURN AFTER",
+        )
         .bind(("id", rule_entry_id.to_owned()))
         .bind(("notes", notes))
         .await
-        .map_err(|e| format!("Failed to update rule notes: {e}"))?
-        .check()
-        .map_err(|e| format!("Failed to update rule notes: {e}"))?;
-    Ok(())
+        .map_err(|e| RuleNoteUpdateError::Database {
+            message: format!("Failed to update rule notes: {e}"),
+        })?;
+    let rows: Vec<RuleEntryListRow> =
+        response
+            .take(0)
+            .map_err(|e| RuleNoteUpdateError::Database {
+                message: format!("Failed to update rule notes: {e}"),
+            })?;
+    rows.into_iter()
+        .next()
+        .map(RuleEntry::from)
+        .ok_or_else(|| RuleNoteUpdateError::NotFound {
+            id: rule_entry_id.to_owned(),
+        })
 }
