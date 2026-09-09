@@ -26,6 +26,24 @@ export const sourceCatalog = {
     complete: 'Complete',
     failed: 'Failed',
   },
+  drafts: {
+    unsavedChanges: 'Unsaved changes',
+    saving: 'Saving…',
+    saved: 'Saved',
+    couldNotSave: "Couldn't save",
+    retry: 'Retry',
+    discardChanges: 'Discard changes',
+    waitForSavingBeforeDiscard: 'Wait for saving to finish before discarding changes',
+    retainedThisSession: 'Retained for this session only.',
+    targetUnavailable: 'This record is no longer available.',
+    createdNeedsAttention: 'Created, but needs attention',
+    finishCreatedEntity:
+      "The entity was saved, but Chronacle couldn't finish opening it. Resolve changes for the listed record, then retry.",
+    createdEntityConflict:
+      'This record was saved again while creation was finishing. Choose which version to keep.',
+    keepSavedRecord: 'Keep saved record',
+    keepMyDraft: 'Keep my draft',
+  },
   settings: {
     language: 'Display language',
     languageDescription: 'Choose the language used throughout Chronacle.',

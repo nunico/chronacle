@@ -9,6 +9,7 @@
     loadingText?: string;
     iconOnly?: boolean;
     ariaLabel?: string;
+    ariaDescribedby?: string;
     disabled?: boolean;
     type?: 'button' | 'submit' | 'reset';
     onclick?: (event: MouseEvent) => void;
@@ -18,6 +19,7 @@
     class?: string;
     title?: string;
     testId?: string;
+    initialFocus?: boolean;
   }
 
   let {
@@ -26,6 +28,7 @@
     loadingText = 'Saving…',
     iconOnly = false,
     ariaLabel,
+    ariaDescribedby,
     disabled = false,
     type = 'button',
     onclick,
@@ -35,6 +38,7 @@
     class: className = '',
     title,
     testId,
+    initialFocus = false,
   }: Props = $props();
 
   let isDisabled = $derived(disabled || loading);
@@ -52,7 +56,9 @@
   class={['button', 'single-line', variant, { 'icon-only': iconOnly }, className]}
   {title}
   data-testid={testId}
+  data-autofocus={initialFocus || undefined}
   aria-label={iconAriaLabel}
+  aria-describedby={ariaDescribedby}
   aria-busy={loading || undefined}
   disabled={isDisabled}
   {onclick}

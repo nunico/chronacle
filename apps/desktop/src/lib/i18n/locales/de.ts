@@ -26,6 +26,25 @@ const de = {
     complete: 'Abgeschlossen',
     failed: 'Fehlgeschlagen',
   },
+  drafts: {
+    unsavedChanges: 'Ungespeicherte Änderungen',
+    saving: 'Wird gespeichert…',
+    saved: 'Gespeichert',
+    couldNotSave: 'Speichern nicht möglich',
+    retry: 'Erneut versuchen',
+    discardChanges: 'Änderungen verwerfen',
+    waitForSavingBeforeDiscard:
+      'Warte, bis das Speichern abgeschlossen ist, bevor du Änderungen verwirfst',
+    retainedThisSession: 'Nur für diese Sitzung aufbewahrt.',
+    targetUnavailable: 'Dieser Eintrag ist nicht mehr verfügbar.',
+    createdNeedsAttention: 'Erstellt, aber Eingriff erforderlich',
+    finishCreatedEntity:
+      'Die Entität wurde gespeichert, aber Chronacle konnte sie nicht vollständig öffnen. Kläre die Änderungen am aufgelisteten Eintrag und versuche es erneut.',
+    createdEntityConflict:
+      'Dieser Eintrag wurde erneut gespeichert, während die Erstellung abgeschlossen wurde. Wähle aus, welche Version beibehalten werden soll.',
+    keepSavedRecord: 'Gespeicherten Eintrag behalten',
+    keepMyDraft: 'Meinen Entwurf behalten',
+  },
   settings: {
     language: 'Anzeigesprache',
     languageDescription: 'Wähle die Sprache für Chronacle.',

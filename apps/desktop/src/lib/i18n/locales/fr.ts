@@ -26,6 +26,25 @@ const fr = {
     complete: 'Terminé',
     failed: 'Échec',
   },
+  drafts: {
+    unsavedChanges: 'Modifications non enregistrées',
+    saving: 'Enregistrement…',
+    saved: 'Enregistré',
+    couldNotSave: 'Échec de l’enregistrement',
+    retry: 'Réessayer',
+    discardChanges: 'Abandonner les modifications',
+    waitForSavingBeforeDiscard:
+      'Attendez la fin de l’enregistrement avant d’abandonner les modifications',
+    retainedThisSession: 'Conservé uniquement pour cette session.',
+    targetUnavailable: 'Cet élément n’est plus disponible.',
+    createdNeedsAttention: 'Créé, mais une intervention est nécessaire',
+    finishCreatedEntity:
+      'L’entité a été enregistrée, mais Chronacle n’a pas pu terminer son ouverture. Résolvez les modifications de l’élément répertorié, puis réessayez.',
+    createdEntityConflict:
+      'Cet élément a de nouveau été enregistré pendant la création. Choisissez la version à conserver.',
+    keepSavedRecord: 'Conserver l’élément enregistré',
+    keepMyDraft: 'Conserver mon brouillon',
+  },
   settings: {
     language: 'Langue d’affichage',
     languageDescription: 'Choisissez la langue utilisée dans Chronacle.',
