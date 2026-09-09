@@ -59,7 +59,7 @@ interface SaveRequest {
 
 interface SaveLane {
   active: boolean;
-  queued: SaveRequest | null;
+  queued: SaveRequest[];
 }
 
 function errorMessage(error: unknown): string {
@@ -139,12 +139,18 @@ export class DraftCoordinator {
         writer: writer as unknown as SaveWriter<DraftValue>,
         waiters: [{ resolve }],
       };
-      const lane = this.lanes.get(request.target) ?? { active: false, queued: null };
+      const lane = this.lanes.get(request.target) ?? { active: false, queued: [] };
       this.lanes.set(request.target, lane);
 
       if (lane.active) {
-        request.waiters.unshift(...(lane.queued?.waiters ?? []));
-        lane.queued = request;
+        const previousIndex = lane.queued.findIndex(({ scope: queuedScope }) => {
+          return queuedScope === request.scope;
+        });
+        if (previousIndex !== -1) {
+          const [previous] = lane.queued.splice(previousIndex, 1);
+          if (previous) request.waiters.unshift(...previous.waiters);
+        }
+        lane.queued.push(request);
         return;
       }
 
@@ -189,7 +195,7 @@ export class DraftCoordinator {
     if (!this.canDiscardAll()) return 'blocked-active-save';
 
     for (const lane of this.lanes.values()) {
-      if (lane.queued) this.resolve(lane.queued);
+      for (const queued of lane.queued) this.resolve(queued);
     }
     this.lanes.clear();
     this.drafts.clear();
@@ -458,8 +464,7 @@ export class DraftCoordinator {
   private finish(request: SaveRequest, lane: SaveLane): void {
     this.resolve(request);
     lane.active = false;
-    const queued = lane.queued;
-    lane.queued = null;
+    const queued = lane.queued.shift();
 
     if (queued) {
       lane.active = true;
@@ -475,16 +480,18 @@ export class DraftCoordinator {
 
   private cancelQueued(scope: string): void {
     for (const lane of this.lanes.values()) {
-      if (lane.queued?.scope === scope) {
-        this.resolve(lane.queued);
-        lane.queued = null;
+      const retained: SaveRequest[] = [];
+      for (const queued of lane.queued) {
+        if (queued.scope === scope) this.resolve(queued);
+        else retained.push(queued);
       }
+      lane.queued = retained;
     }
   }
 
   private hasQueued(scope: string): boolean {
     for (const lane of this.lanes.values()) {
-      if (lane.queued?.scope === scope) return true;
+      if (lane.queued.some(({ scope: queuedScope }) => queuedScope === scope)) return true;
     }
     return false;
   }
