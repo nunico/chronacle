@@ -1,6 +1,7 @@
 import { expect } from '@playwright/test';
 import { Given, When, Then } from './fixtures';
 import { installIpcMock } from '../ipc-mock';
+import type { GraphNode } from '../../../../src/lib/commands';
 
 interface IpcCall {
   cmd: string;
@@ -74,12 +75,13 @@ Then('the set vault path command was sent with null', async ({ page }) => {
 // ── D4b: producer-dispatch scenarios ─────────────────────────────────────────
 
 /** A minimal `GraphNode` for the entity list mock. */
-function entityNode(name: string): Record<string, unknown> {
+function entityNode(name: string): GraphNode {
   return {
     id: 'npc1',
     kind: 'npc',
     campaign_id: 'camp1',
     name,
+    aliases: [],
     summary: null,
     notes: 'Original notes.',
     created_at: null,

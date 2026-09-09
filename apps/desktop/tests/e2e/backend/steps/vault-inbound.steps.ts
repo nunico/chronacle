@@ -1,6 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { Given, When, Then } from './fixtures';
 import { installIpcMock } from '../ipc-mock';
+import type { GraphNode } from '../../../../src/lib/commands';
 
 // ── Backend-only invariants ──────────────────────────────────────────────
 // The mocked-IPC backend suite has no real filesystem or database, so a GM
@@ -41,12 +42,13 @@ async function getIpcCalls(page: Page): Promise<IpcCall[]> {
 }
 
 /** A minimal `GraphNode` for the entity list mock, matching vault-sync.steps.ts. */
-function entityNode(name: string, notes: string): Record<string, unknown> {
+function entityNode(name: string, notes: string): GraphNode {
   return {
     id: 'npc1',
     kind: 'npc',
     campaign_id: 'camp1',
     name,
+    aliases: [],
     summary: null,
     notes,
     created_at: null,
