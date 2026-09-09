@@ -35,6 +35,10 @@ const fr = {
     discardChanges: 'Abandonner les modifications',
     waitForSavingBeforeDiscard:
       'Attendez la fin de l’enregistrement avant d’abandonner les modifications',
+    discardAndClose: 'Abandonner et fermer',
+    waitForSavingBeforeClose:
+      'Attendez la fin de l’enregistrement avant d’abandonner et de fermer.',
+    safeToClose: 'L’enregistrement est terminé. Vous pouvez fermer en toute sécurité.',
     retainedThisSession: 'Conservé uniquement pour cette session.',
     targetUnavailable: 'Cet élément n’est plus disponible.',
     createdNeedsAttention: 'Créé, mais une intervention est nécessaire',
