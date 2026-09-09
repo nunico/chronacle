@@ -1884,6 +1884,82 @@ describe('DraftCoordinator discard and close risk', () => {
     expect(statusOf(required(coordinator.get(queued), 'the discarded queued draft'))).toBe('saved');
   });
 
+  it('removes only a deleted scope after blocking its active write and settling its queued intent', async () => {
+    type DeleteCleanupResult = 'removed' | 'blocked-active-save' | 'missing';
+    type DeleteAwareCoordinator = DraftCoordinator & {
+      removeAfterDelete(scope: string): DeleteCleanupResult;
+    };
+
+    const coordinator = new DraftCoordinator();
+    const deleteAwareCoordinator = coordinator as DeleteAwareCoordinator;
+    const deletedWriter = new ControlledWriter<{ title: string }>();
+    const sameTargetWriter = new ControlledWriter<{ title: string }>();
+    const queuedDeletedWriter = new ControlledWriter<{ title: string }>();
+    const deletedScope = 'session:camp-a:session-7';
+    const sameTargetScope = 'session:camp-b:session-7';
+    const unrelatedScope = 'session:camp-a:session-8';
+    const deletedTarget = 'session:session-7';
+    coordinator.open(deletedScope, deletedTarget, { title: 'Saved seven' });
+    coordinator.open(sameTargetScope, deletedTarget, { title: 'Other campaign seven' });
+    coordinator.open(unrelatedScope, 'session:session-8', { title: 'Saved eight' });
+    coordinator.revise(unrelatedScope, { title: 'Unrelated pending eight' });
+
+    coordinator.revise(deletedScope, { title: 'Seven saving' });
+    const activeDeletedSave = coordinator.requestSave(deletedScope, deletedWriter.write);
+
+    expect(deleteAwareCoordinator.removeAfterDelete(deletedScope)).toBe('blocked-active-save');
+    expect(coordinator.get<{ title: string }>(deletedScope)?.value).toEqual({
+      title: 'Seven saving',
+    });
+    expect(coordinator.get<{ title: string }>(unrelatedScope)?.value).toEqual({
+      title: 'Unrelated pending eight',
+    });
+
+    required(deletedWriter.attempts[0], 'the active deleted-scope write').completion.resolve({
+      title: 'Seven saving',
+    });
+    await activeDeletedSave;
+
+    coordinator.revise(sameTargetScope, { title: 'Other campaign saving' });
+    const sameTargetSave = coordinator.requestSave(sameTargetScope, sameTargetWriter.write);
+    coordinator.revise(deletedScope, { title: 'Seven queued after acknowledgment' });
+    let queuedDeletedSaveSettled = false;
+    const queuedDeletedSave = coordinator
+      .requestSave(deletedScope, queuedDeletedWriter.write)
+      .then(() => {
+        queuedDeletedSaveSettled = true;
+      });
+
+    expect(queuedDeletedWriter.attempts).toHaveLength(0);
+    expect(coordinator.atRiskCount()).toBe(3);
+    expect(deleteAwareCoordinator.removeAfterDelete(deletedScope)).toBe('removed');
+    await queuedDeletedSave;
+
+    expect(queuedDeletedSaveSettled).toBe(true);
+    expect(coordinator.get(deletedScope)).toBeUndefined();
+    expect(queuedDeletedWriter.attempts).toHaveLength(0);
+    expect(coordinator.get<{ title: string }>(sameTargetScope)?.value).toEqual({
+      title: 'Other campaign saving',
+    });
+    expect(coordinator.get<{ title: string }>(unrelatedScope)?.value).toEqual({
+      title: 'Unrelated pending eight',
+    });
+    expect(coordinator.atRiskCount()).toBe(2);
+
+    required(sameTargetWriter.attempts[0], 'the preserved same-target write').completion.resolve({
+      title: 'Other campaign saving',
+    });
+    await sameTargetSave;
+
+    expect(sameTargetWriter.persisted).toEqual([{ title: 'Other campaign saving' }]);
+    expect(deletedWriter.persisted).toEqual([{ title: 'Seven saving' }]);
+    expect(queuedDeletedWriter.persisted).toEqual([]);
+    expect(coordinator.get(deletedScope)).toBeUndefined();
+    expect(coordinator.get<{ title: string }>(unrelatedScope)?.value).toEqual({
+      title: 'Unrelated pending eight',
+    });
+  });
+
   it('reports and refuses discardAll while any write is active without hiding its outcome', async () => {
     const coordinator = new DraftCoordinator();
     const savingWriter = new ControlledWriter<string>();
