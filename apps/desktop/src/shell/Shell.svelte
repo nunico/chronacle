@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { flushSync, onMount } from 'svelte';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { open } from '@tauri-apps/plugin-dialog';
   import {
@@ -47,6 +47,22 @@
   } from '../lib/shortcuts';
   import { i18n } from '../lib/locale.svelte';
   import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
+  import CloseDraftsDialog from '../components/CloseDraftsDialog.svelte';
+  import {
+    createTauriWindowClosePort,
+    type WindowCloseEvent,
+    type WindowClosePort,
+  } from '../lib/drafts/window-close';
+
+  interface Props {
+    draftCoordinator?: DraftCoordinator;
+    windowClosePort?: WindowClosePort;
+  }
+
+  let {
+    draftCoordinator = new DraftCoordinator(),
+    windowClosePort = createTauriWindowClosePort(),
+  }: Props = $props();
 
   const ENTITY_KIND_MAP: Partial<Record<NoteCategoryId, EntityKind>> = {
     npcs: 'npc',
@@ -66,7 +82,39 @@
   // Drafts outlive whichever conditional route is currently mounted. Keeping
   // this coordinator at the shell boundary makes navigation a presentation
   // concern instead of a destructive editing event.
-  const draftCoordinator = new DraftCoordinator();
+  let closeDialogOpen = $state(false);
+
+  function handleNativeClose(event: WindowCloseEvent): void {
+    if (!closeDialogOpen && draftCoordinator.atRiskCount() === 0) return;
+
+    event.preventDefault();
+    if (!closeDialogOpen) {
+      flushSync(() => {
+        closeDialogOpen = true;
+      });
+    }
+  }
+
+  onMount(() => {
+    let destroyed = false;
+    let unlisten: (() => void) | null = null;
+
+    void windowClosePort
+      .onCloseRequested(handleNativeClose)
+      .then((registeredUnlisten) => {
+        if (destroyed) registeredUnlisten();
+        else unlisten = registeredUnlisten;
+      })
+      .catch(() => {
+        // Keep startup usable if the native listener boundary is unavailable.
+        // Native verification covers the supported Tauri runtime path.
+      });
+
+    return () => {
+      destroyed = true;
+      unlisten?.();
+    };
+  });
 
   interface PendingCreate {
     kind: EntityKind;
@@ -181,7 +229,7 @@
     // Don't fire while the GM is typing in a field.
     if (isEditableTarget(e.target)) return;
     // While a modal/picker owns the screen, let it have the keyboard.
-    if (switcherOpen || showPicker || graphFor || createChooser) return;
+    if (switcherOpen || showPicker || graphFor || createChooser || closeDialogOpen) return;
     // With the help overlay open, only `?` (toggle off) is live; Esc handled above.
     if (showHelp) {
       if (e.key === '?') {
@@ -697,6 +745,14 @@
   </main>
 
   <Toast />
+
+  {#if closeDialogOpen}
+    <CloseDraftsDialog
+      {draftCoordinator}
+      oncancel={() => (closeDialogOpen = false)}
+      ondestroy={() => windowClosePort.destroy()}
+    />
+  {/if}
 
   {#if createChooser}
     <div class="picker-overlay">

@@ -35,6 +35,10 @@ const de = {
     discardChanges: 'Änderungen verwerfen',
     waitForSavingBeforeDiscard:
       'Warte, bis das Speichern abgeschlossen ist, bevor du Änderungen verwirfst',
+    discardAndClose: 'Verwerfen und schließen',
+    waitForSavingBeforeClose:
+      'Warte, bis das Speichern abgeschlossen ist, bevor du Änderungen verwirfst und schließt.',
+    safeToClose: 'Speichern abgeschlossen. Du kannst jetzt sicher schließen.',
     retainedThisSession: 'Nur für diese Sitzung aufbewahrt.',
     targetUnavailable: 'Dieser Eintrag ist nicht mehr verfügbar.',
     createdNeedsAttention: 'Erstellt, aber Eingriff erforderlich',

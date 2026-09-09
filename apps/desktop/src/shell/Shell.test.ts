@@ -4,6 +4,8 @@ import Shell from './Shell.svelte';
 import { open } from '@tauri-apps/plugin-dialog';
 import { clearToasts } from '../lib/toast.svelte';
 import { i18n } from '../lib/locale.svelte';
+import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
+import type { WindowClosePort } from '../lib/drafts/window-close';
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn(),
@@ -38,6 +40,11 @@ const getMaintenanceCounts = vi.fn();
 const getProposals = vi.fn();
 const onEmbeddingModelMismatch = vi.fn();
 const getEntities = vi.fn();
+const chatSend = vi.fn().mockResolvedValue(undefined);
+const createEntity = vi.fn();
+const updateEntity = vi.fn();
+const updateSession = vi.fn();
+const updateRuleNotes = vi.fn();
 
 vi.mock('../lib/commands', () => ({
   getCampaigns: (...a: unknown[]) => getCampaigns(...a),
@@ -49,13 +56,13 @@ vi.mock('../lib/commands', () => ({
   reindexAllSources: (...a: unknown[]) => reindexAllSources(...a),
   uploadSource: (...a: unknown[]) => uploadSource(...a),
   createCollection: (...a: unknown[]) => createCollection(...a),
-  chatSend: vi.fn().mockResolvedValue(undefined),
+  chatSend: (...a: unknown[]) => chatSend(...a),
   getChunkForCitation: vi.fn().mockResolvedValue(null),
   getMruCollectionId: vi.fn().mockReturnValue(null),
   setMruCollectionId: vi.fn(),
   getEntities: (...a: unknown[]) => getEntities(...a),
-  createEntity: vi.fn(),
-  updateEntity: vi.fn(),
+  createEntity: (...a: unknown[]) => createEntity(...a),
+  updateEntity: (...a: unknown[]) => updateEntity(...a),
   deleteEntity: vi.fn(),
   getEntityRelations: vi.fn().mockResolvedValue([]),
   listVaultConflicts: vi.fn().mockResolvedValue([]),
@@ -65,6 +72,8 @@ vi.mock('../lib/commands', () => ({
   rejectProposal: vi.fn(),
   saveChatToCodex: vi.fn().mockResolvedValue(0),
   getSources: vi.fn().mockResolvedValue([]),
+  updateSession: (...a: unknown[]) => updateSession(...a),
+  updateRuleNotes: (...a: unknown[]) => updateRuleNotes(...a),
 }));
 
 vi.mock('../lib/events', () => ({
@@ -76,6 +85,27 @@ async function openPicker() {
   const uploadBtn = await screen.findByRole('button', { name: /Upload PDF/i });
   await fireEvent.click(uploadBtn);
   return screen.findByRole('dialog');
+}
+
+class FakeWindowClosePort implements WindowClosePort {
+  private handlers = new Set<(event: { preventDefault(): void }) => void>();
+  readonly unlisten = vi.fn();
+  readonly destroy = vi.fn().mockResolvedValue(undefined);
+  readonly onCloseRequested = vi.fn(
+    async (handler: (event: { preventDefault(): void }) => void) => {
+      this.handlers.add(handler);
+      return () => {
+        this.handlers.delete(handler);
+        this.unlisten();
+      };
+    },
+  );
+
+  requestClose() {
+    const event = { preventDefault: vi.fn() };
+    for (const handler of this.handlers) handler(event);
+    return event;
+  }
 }
 
 describe('Shell upload flow', () => {
@@ -443,5 +473,180 @@ describe('Shell keyboard shortcuts', () => {
 
     expect(screen.getByLabelText('Notes')).toHaveValue('Mira has the silver key');
     expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+  });
+});
+
+describe('Shell native close protection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    i18n.setLocale('en');
+    eventHandlers.clear();
+    clearToasts();
+    globalThis.localStorage?.clear();
+    getCampaigns.mockResolvedValue([{ id: 'camp-1', name: 'Test Campaign', system: 'D&D 5e' }]);
+    onEmbeddingModelMismatch.mockImplementation(async () => () => {});
+    getCollections.mockResolvedValue([{ id: 'col-1', name: 'Core Books' }]);
+    getChatHistory.mockResolvedValue([]);
+    getEmbeddingModelMismatch.mockResolvedValue({ active_model: 'mock', stale: [] });
+    getEntityCounts.mockResolvedValue({
+      npc: 0,
+      location: 0,
+      faction: 0,
+      creature: 0,
+      item: 0,
+      event: 0,
+      player_character: 0,
+      misc: 0,
+    });
+    getSessions.mockResolvedValue([]);
+    getMaintenanceCounts.mockResolvedValue({ pending_proposals: 0, unresolved_findings: 0 });
+    getProposals.mockResolvedValue([]);
+    getEntities.mockResolvedValue([]);
+  });
+
+  it('registers once, leaves a clean native close unprevented, and unlistens on teardown', async () => {
+    const port = new FakeWindowClosePort();
+    const coordinator = new DraftCoordinator();
+    const rendered = render(Shell, {
+      props: { windowClosePort: port, draftCoordinator: coordinator },
+    });
+    await waitFor(() => expect(port.onCloseRequested).toHaveBeenCalledOnce());
+
+    const event = port.requestClose();
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Unsaved changes' })).toBeNull();
+    expect(port.destroy).not.toHaveBeenCalled();
+    rendered.unmount();
+    expect(port.unlisten).toHaveBeenCalledOnce();
+  });
+
+  it('unlistens if asynchronous registration finishes after Shell is destroyed', async () => {
+    let resolveRegistration!: (unlisten: () => void) => void;
+    const unlisten = vi.fn();
+    const port: WindowClosePort = {
+      onCloseRequested: vi.fn(
+        () =>
+          new Promise<() => void>((resolve) => {
+            resolveRegistration = resolve;
+          }),
+      ),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    };
+    const rendered = render(Shell, {
+      props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() },
+    });
+    expect(port.onCloseRequested).toHaveBeenCalledOnce();
+
+    rendered.unmount();
+    resolveRegistration(unlisten);
+
+    await waitFor(() => expect(unlisten).toHaveBeenCalledOnce());
+  });
+
+  it.each([
+    {
+      label: 'pending Oracle',
+      arrange(coordinator: DraftCoordinator) {
+        coordinator.open('oracle:camp-1', null, '');
+        coordinator.revise('oracle:camp-1', 'Unsent question');
+      },
+    },
+    {
+      label: 'pending entity',
+      arrange(coordinator: DraftCoordinator) {
+        coordinator.open('entity:camp-1:npc:mira', 'entity:npc:mira', { name: 'Mira' });
+        coordinator.revise('entity:camp-1:npc:mira', { name: 'Mira the Bold' });
+      },
+    },
+    {
+      label: 'pending rule note',
+      arrange(coordinator: DraftCoordinator) {
+        coordinator.open('rule:camp-1:book:r1', 'rule:r1', { notes: 'Saved note' });
+        coordinator.revise('rule:camp-1:book:r1', { notes: 'Changed note' });
+      },
+    },
+    {
+      label: 'saving session',
+      arrange(coordinator: DraftCoordinator) {
+        coordinator.open('session:camp-1:s1', 'session:s1', 'Saved');
+        coordinator.revise('session:camp-1:s1', 'Changed');
+        void coordinator.requestSave<string>(
+          'session:camp-1:s1',
+          () => new Promise<string>(() => {}),
+        );
+      },
+    },
+    {
+      label: 'failed rule note',
+      async arrange(coordinator: DraftCoordinator) {
+        coordinator.open('rule:camp-1:book:r1', 'rule:r1', { notes: 'Saved note' });
+        coordinator.revise('rule:camp-1:book:r1', { notes: 'Changed note' });
+        await coordinator.requestSave<{ notes: string }>(
+          'rule:camp-1:book:r1',
+          async (): Promise<{ notes: string }> => {
+            throw new Error('Database unavailable');
+          },
+        );
+      },
+    },
+  ])('prevents close without replacing the opener for $label work', async ({ arrange }) => {
+    const port = new FakeWindowClosePort();
+    const coordinator = new DraftCoordinator();
+    await arrange(coordinator);
+    render(Shell, { props: { windowClosePort: port, draftCoordinator: coordinator } });
+    const composer = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+    composer.focus();
+    await waitFor(() => expect(port.onCloseRequested).toHaveBeenCalledOnce());
+
+    const first = port.requestClose();
+    const duplicate = port.requestClose();
+
+    expect(first.preventDefault).toHaveBeenCalledOnce();
+    expect(duplicate.preventDefault).toHaveBeenCalledOnce();
+    expect(screen.getAllByRole('dialog', { name: 'Unsaved changes' })).toHaveLength(1);
+    expect(port.onCloseRequested).toHaveBeenCalledOnce();
+    await fireEvent.keyDown(screen.getByRole('dialog', { name: 'Unsaved changes' }), {
+      key: 'Escape',
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Unsaved changes' })).toBeNull(),
+    );
+    expect(document.activeElement).toBe(composer);
+    expect(coordinator.atRiskCount()).toBe(1);
+  });
+
+  it('cancels back to the exact opener and only explicit discard destroys without saving', async () => {
+    const port = new FakeWindowClosePort();
+    const coordinator = new DraftCoordinator();
+    coordinator.open('oracle:camp-1', null, '');
+    coordinator.revise('oracle:camp-1', 'Where is the silver key?');
+    render(Shell, { props: { windowClosePort: port, draftCoordinator: coordinator } });
+    const composer = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+    composer.focus();
+    await waitFor(() => expect(port.onCloseRequested).toHaveBeenCalledOnce());
+
+    port.requestClose();
+    await fireEvent.keyDown(screen.getByRole('dialog', { name: 'Unsaved changes' }), {
+      key: 'Escape',
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Unsaved changes' })).toBeNull(),
+    );
+    expect(document.activeElement).toBe(composer);
+    expect(coordinator.atRiskCount()).toBe(1);
+
+    port.requestClose();
+    const discard = screen.getByRole('button', { name: 'Discard and close' });
+    discard.focus();
+    await fireEvent.keyDown(discard, { key: 'Enter' });
+
+    await waitFor(() => expect(port.destroy).toHaveBeenCalledOnce());
+    expect(coordinator.atRiskCount()).toBe(0);
+    expect(chatSend).not.toHaveBeenCalled();
+    expect(createEntity).not.toHaveBeenCalled();
+    expect(updateEntity).not.toHaveBeenCalled();
+    expect(updateSession).not.toHaveBeenCalled();
+    expect(updateRuleNotes).not.toHaveBeenCalled();
   });
 });
