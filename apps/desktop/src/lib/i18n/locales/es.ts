@@ -26,6 +26,24 @@ const es = {
     complete: 'Completado',
     failed: 'Error',
   },
+  drafts: {
+    unsavedChanges: 'Cambios sin guardar',
+    saving: 'Guardando…',
+    saved: 'Guardado',
+    couldNotSave: 'No se pudo guardar',
+    retry: 'Reintentar',
+    discardChanges: 'Descartar cambios',
+    waitForSavingBeforeDiscard: 'Espera a que termine el guardado antes de descartar los cambios',
+    retainedThisSession: 'Conservado solo durante esta sesión.',
+    targetUnavailable: 'Este registro ya no está disponible.',
+    createdNeedsAttention: 'Creado, pero requiere atención',
+    finishCreatedEntity:
+      'La entidad se guardó, pero Chronacle no pudo terminar de abrirla. Resuelve los cambios del registro mostrado y vuelve a intentarlo.',
+    createdEntityConflict:
+      'Este registro se volvió a guardar mientras terminaba la creación. Elige qué versión conservar.',
+    keepSavedRecord: 'Conservar el registro guardado',
+    keepMyDraft: 'Conservar mi borrador',
+  },
   settings: {
     language: 'Idioma de visualización',
     languageDescription: 'Elige el idioma que se usa en Chronacle.',
