@@ -538,7 +538,11 @@
                 </div>
               {:else}
                 <div class="rules-tab">
-                  <RulesPanel collectionId={c.id} />
+                  <RulesPanel
+                    campaignId={activeCampaignId}
+                    collectionId={c.id}
+                    {draftCoordinator}
+                  />
                 </div>
               {/if}
             {/if}

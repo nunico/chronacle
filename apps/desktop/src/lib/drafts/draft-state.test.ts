@@ -50,6 +50,21 @@ describe('draft editing identities', () => {
     );
   });
 
+  it('keeps rule drafts stable and distinct in the explicit no-campaign context', () => {
+    const noCampaign = ruleScope(null, 'world-guide', 'initiative');
+
+    expect(noCampaign).toBe('rule:no-campaign:world-guide:initiative');
+    expect(ruleScope(null, 'world-guide', 'initiative')).toBe(noCampaign);
+    expect(
+      new Set([
+        noCampaign,
+        ruleScope('camp-a', 'world-guide', 'initiative'),
+        ruleScope(null, 'other-collection', 'initiative'),
+        ruleScope(null, 'world-guide', 'surprise'),
+      ]).size,
+    ).toBe(4);
+  });
+
   it('uses the caller-owned UUID as a stable identity for an unsaved new entity', () => {
     const clientDraftId = 'fd776b47-f07b-44ac-83a8-a3d45ad70c49';
 
