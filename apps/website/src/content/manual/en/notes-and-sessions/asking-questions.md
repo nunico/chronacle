@@ -19,6 +19,9 @@ headings:
   - id: stops-and-errors
     text: Stops and errors
     level: 2
+  - id: keep-an-unsent-question
+    text: Keep an unsent question
+    level: 2
 ---
 
 Select a campaign, check its source subscriptions, then ask one specific question in the Oracle.
@@ -47,3 +50,7 @@ Chronacle can combine Mara's saved note, the session recap, and the relevant pro
 - Choose **Stop generating** to halt the current answer. Any partial text stays visible but is not saved as a completed assistant message.
 - A failed request appears as **The oracle could not answer.** with **Retry** and the error detail.
 - A fluent answer can still be wrong; verify important claims through its citations and your notes.
+
+<h2 id="keep-an-unsent-question">Keep an unsent question</h2>
+
+You can open another view and return without losing text in the composer. Chronacle keeps a separate question for each campaign and for **No campaign**, and returning never sends it automatically. The question is retained only while the app is running; see [Keep drafts and recover saves](/en/manual/notes-and-sessions/saving-and-recovery) before closing Chronacle.

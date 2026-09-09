@@ -13,6 +13,9 @@ headings:
   - id: what-persists
     text: What persists
     level: 2
+  - id: keep-an-entity-draft
+    text: Keep an entity draft
+    level: 2
   - id: example
     text: Example
     level: 2
@@ -33,6 +36,10 @@ Campaign notes are saved as entities in eight notebooks: Player Characters, NPCs
 <h2 id="what-persists">What persists</h2>
 
 Your name, alternate names, summary, notes, and kind-specific fields are stored with the campaign. Editing them marks any generated **Codex Article** stale, but does not replace your writing. Saved relationships appear in the entity's **Relationships** section and graph.
+
+<h2 id="keep-an-entity-draft">Keep an entity draft</h2>
+
+Edits remain in their campaign and entity draft when you open another view or record. A new entity is not created until you choose **Create**; an existing entity changes only when you choose **Save**. Check **Unsaved changes**, **Saving…**, **Saved**, or **Couldn't save** to distinguish retained text from acknowledged stored content. Use **Retry** after a failure. To abandon an entity draft, choose **Cancel**, then confirm **Discard changes**. For an existing entity, this restores its saved version; for a new entity, it removes that unsaved draft. Other drafts remain intact. See [Keep drafts and recover saves](/en/manual/notes-and-sessions/saving-and-recovery) for missing records, creation conflicts, and closing the app.
 
 <h2 id="example">Example</h2>
 

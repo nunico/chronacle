@@ -3,7 +3,7 @@ translationKey: questions.ask
 locale: de
 slug: notizen-und-sitzungen/fragen-stellen
 title: Eine belegte Frage stellen
-summary: Frage in natürlicher Sprache, nachdem du Kampagne und maßgebliche Quellen ausgewählt hast.
+summary: Stelle eine Frage in natürlicher Sprache, nachdem du Kampagne und maßgebliche Quellen ausgewählt hast.
 section: notes-and-sessions
 order: 4
 headings:
@@ -19,9 +19,10 @@ headings:
   - id: abbrechen-und-fehler
     text: Abbrechen und Fehler
     level: 2
+  - id: ungesendete-frage-behalten
+    text: Ungesendete Frage behalten
+    level: 2
 ---
-
-<!-- German proofreading requested -->
 
 Wähle eine Kampagne, prüfe ihre Quellenabonnements und stelle dem Orakel dann eine konkrete Frage.
 
@@ -49,3 +50,7 @@ Chronacle kann Maras gespeicherte Notiz, den Sitzungsrückblick und das passende
 - Mit **Generierung stoppen** hältst du die aktuelle Antwort an. Ein Teiltext bleibt sichtbar, wird aber nicht als vollständige Assistentenantwort gespeichert.
 - Eine fehlgeschlagene Anfrage erscheint als **Das Orakel konnte nicht antworten.** mit **Erneut versuchen** und der Fehlerangabe.
 - Auch eine flüssige Antwort kann falsch sein. Prüfe wichtige Aussagen anhand ihrer Quellenangaben und deiner Notizen.
+
+<h2 id="ungesendete-frage-behalten">Ungesendete Frage behalten</h2>
+
+Du kannst eine andere Ansicht öffnen und zurückkehren, ohne den Text im Eingabefeld zu verlieren. Chronacle bewahrt für jede Kampagne und für den Bereich **Keine Kampagne** jeweils eine eigene Frage auf. Beim Zurückkehren wird sie niemals automatisch gesendet. Die Frage bleibt nur erhalten, solange die App läuft. Lies vor dem Schließen von Chronacle [Entwürfe behalten und Speichervorgänge wiederholen](/de/handbuch/notizen-und-sitzungen/speichern-und-wiederherstellen).

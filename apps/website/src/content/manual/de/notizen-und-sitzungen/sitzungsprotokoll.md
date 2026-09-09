@@ -13,6 +13,9 @@ headings:
   - id: erwartetes-ergebnis
     text: Erwartetes Ergebnis
     level: 2
+  - id: speicherstatus-beobachten
+    text: Speicherstatus beobachten
+    level: 2
   - id: beispiel
     text: Beispiel
     level: 2
@@ -21,20 +24,22 @@ headings:
     level: 2
 ---
 
-<!-- German proofreading requested -->
-
-Die Ansicht **Sitzungen** führt ein nummeriertes Kampagnenprotokoll; Titel, Datum und Notizen werden beim Verlassen des jeweiligen Felds gespeichert.
+Die Ansicht **Sitzungen** führt ein nummeriertes Kampagnenprotokoll; Titel, Datum und Notizen werden nach einem gewöhnlichen Fokuswechsel innerhalb der jeweiligen Sitzung automatisch gespeichert.
 
 <h2 id="sitzung-festhalten">Sitzung festhalten</h2>
 
 1. Wähle eine Kampagne und öffne **Sitzungen**.
 2. Wähle **Neue Sitzung**. Chronacle setzt die nächste Sitzungsnummer, trägt ein Datum aus dem UTC-Datum des Computers ein und ergänzt einen Titel wie **Sitzung 4**. Prüfe das Datum und passe es an dein örtliches Spieldatum an.
 3. Klappe die Zeile auf und bearbeite **Name**, **Gespieltes Datum** und **Notizen**.
-4. Verwende `[[Entitätsname]]` im Rückblick. Klicke aus einem Feld heraus, um es zu speichern.
+4. Verwende `[[Entitätsname]]` im Rückblick. Wechsle den Fokus zu einem anderen Bedienelement derselben Sitzung, um das Speichern anzufordern.
 
 <h2 id="erwartetes-ergebnis">Erwartetes Ergebnis</h2>
 
 Sitzungen erscheinen aufsteigend nach Sitzungsnummer. Ihr Text wird mit der Kampagne gespeichert und kann spätere Kampagnenfragen unterstützen. Beim Speichern nicht leerer Notizen können außerdem Vorschläge in **Wartung** entstehen, die du annimmst oder ablehnst.
+
+<h2 id="speicherstatus-beobachten">Speicherstatus beobachten</h2>
+
+Wenn du den Fokus zu einem anderen Bedienelement derselben Sitzung bewegst, fordert Chronacle automatisch das Speichern an. Wechselst du direkt zu einer anderen Sitzung oder Ansicht, bleibt die Änderung als **Ungespeicherte Änderungen** erhalten, ohne dass die Navigation als Speicheranforderung gilt. **Wird gespeichert…**, **Gespeichert** und **Speichern nicht möglich** zeigen den weiteren Fortschritt. Scheitert das Speichern, bleibt dein Text in dieser Sitzung erhalten und **Erneut versuchen** wiederholt den Vorgang für denselben Eintrag. Du kannst während des Speicherns weiterarbeiten; der Abschluss eines früheren Vorgangs kennzeichnet neueren Text nicht als gespeichert. Unter [Entwürfe behalten und Speichervorgänge wiederholen](/de/handbuch/notizen-und-sitzungen/speichern-und-wiederherstellen) findest du Hinweise zu Navigation und Schließen.
 
 <h2 id="beispiel">Beispiel</h2>
 
@@ -47,5 +52,5 @@ Frage später: „Was blieb nach dem Brand am Nordkai ungeklärt?“ Prüfe die 
 <h2 id="aktuelle-grenzen">Aktuelle Grenzen</h2>
 
 - Die Sitzungsnummer wird beim Erstellen vergeben und kann im aktuellen Formular nicht geändert werden.
-- Die Ereigniszahl zeigt ausdrücklich dieser Sitzung zugewiesene Ereignisse, nicht jede in den Notizen verknüpfte Entität.
+- Die Ereigniszahl zeigt Ereignisse, die ausdrücklich dieser Sitzung zugewiesen sind, nicht jede in den Notizen verknüpfte Entität.
 - **Löschen** entfernt die Sitzung nach einer Bestätigung dauerhaft.

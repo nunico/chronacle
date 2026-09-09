@@ -112,6 +112,11 @@ describe('manual content registry', () => {
     ['notes.sessions', 'notes-and-sessions/session-log', 'notizen-und-sitzungen/sitzungsprotokoll'],
     ['notes.chat-history', 'notes-and-sessions/chat-history', 'notizen-und-sitzungen/chatverlauf'],
     [
+      'notes.saving-recovery',
+      'notes-and-sessions/saving-and-recovery',
+      'notizen-und-sitzungen/speichern-und-wiederherstellen',
+    ],
+    [
       'questions.ask',
       'notes-and-sessions/asking-questions',
       'notizen-und-sitzungen/fragen-stellen',
@@ -289,14 +294,14 @@ describe('manual content registry', () => {
   it('loads and validates links collected from the complete manual inventory', () => {
     const inventory = manualEntries();
 
-    expect(inventory.filter(({ locale }) => locale === 'en')).toHaveLength(36);
-    expect(inventory.filter(({ locale }) => locale === 'de')).toHaveLength(36);
+    expect(inventory.filter(({ locale }) => locale === 'en')).toHaveLength(37);
+    expect(inventory.filter(({ locale }) => locale === 'de')).toHaveLength(37);
     expect(getArticle('en', 'getting-started/quick-start').links).toContain(
       '/en/manual/getting-started/install',
     );
   });
 
-  it('keeps every German article marked for proofreading and omits overview filler', () => {
+  it('counts remaining German proofreading markers and omits overview filler', () => {
     const germanSources = import.meta.glob<string>('/src/content/manual/de/**/*.md', {
       eager: true,
       query: '?raw',
@@ -305,12 +310,12 @@ describe('manual content registry', () => {
     const englishOverview = readFileSync('src/content/manual/en/overview.md', 'utf8');
     const germanOverview = readFileSync('src/content/manual/de/overview.md', 'utf8');
 
-    expect(Object.values(germanSources)).toHaveLength(37);
+    expect(Object.values(germanSources)).toHaveLength(38);
     expect(
       Object.values(germanSources).filter((source) =>
         source.includes('<!-- German proofreading requested -->'),
       ),
-    ).toHaveLength(37);
+    ).toHaveLength(33);
     expect(englishOverview).not.toContain('A small detail');
     expect(englishOverview).not.toContain(
       'Each article keeps the important steps close to the relevant explanation.',
