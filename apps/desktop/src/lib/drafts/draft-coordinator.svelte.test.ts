@@ -1554,6 +1554,54 @@ describe('DraftCoordinator save lanes', () => {
     expect(statusOf(required(coordinator.get(campaignB), 'the Campaign B draft'))).toBe('saved');
   });
 
+  it('preserves queued intents from distinct scopes sharing a target while coalescing each scope tail', async () => {
+    const coordinator = new DraftCoordinator();
+    const firstAWriter = new ControlledWriter<{ notes: string }>();
+    const campaignBWriter = new ControlledWriter<{ notes: string }>();
+    const latestAWriter = new ControlledWriter<{ notes: string }>();
+    const target = 'rule:initiative';
+    const campaignA = 'rule:camp-a:world-guide:initiative';
+    const campaignB = 'rule:camp-b:world-guide:initiative';
+    coordinator.open(campaignA, target, { notes: 'Shared saved note' });
+    coordinator.open(campaignB, target, { notes: 'Shared saved note' });
+
+    coordinator.revise(campaignA, { notes: 'Campaign A first request' });
+    const firstA = coordinator.requestSave(campaignA, firstAWriter.write);
+    coordinator.revise(campaignB, { notes: 'Campaign B queued request' });
+    const queuedB = coordinator.requestSave(campaignB, campaignBWriter.write);
+    coordinator.revise(campaignA, { notes: 'Campaign A newest request' });
+    const latestA = coordinator.requestSave(campaignA, latestAWriter.write);
+
+    expect(firstAWriter.attempts).toHaveLength(1);
+    expect(campaignBWriter.attempts).toHaveLength(0);
+    expect(latestAWriter.attempts).toHaveLength(0);
+
+    required(firstAWriter.attempts[0], 'Campaign A active request').completion.resolve({
+      notes: 'Campaign A first request',
+    });
+    await vi.waitFor(() => expect(campaignBWriter.attempts).toHaveLength(1));
+    expect(required(campaignBWriter.attempts[0], 'Campaign B preserved request').value).toEqual({
+      notes: 'Campaign B queued request',
+    });
+    expect(latestAWriter.attempts).toHaveLength(0);
+
+    required(campaignBWriter.attempts[0], 'Campaign B preserved request').completion.resolve({
+      notes: 'Campaign B queued request',
+    });
+    await vi.waitFor(() => expect(latestAWriter.attempts).toHaveLength(1));
+    expect(required(latestAWriter.attempts[0], 'Campaign A newest request').value).toEqual({
+      notes: 'Campaign A newest request',
+    });
+
+    required(latestAWriter.attempts[0], 'Campaign A newest request').completion.resolve({
+      notes: 'Campaign A newest request',
+    });
+    await Promise.all([firstA, queuedB, latestA]);
+
+    expect(statusOf(required(coordinator.get(campaignA), 'Campaign A final draft'))).toBe('saved');
+    expect(statusOf(required(coordinator.get(campaignB), 'Campaign B final draft'))).toBe('saved');
+  });
+
   it('preserves newer edits when an earlier save completes without a queued request', async () => {
     const coordinator = new DraftCoordinator();
     const writer = new ControlledWriter<{ title: string }>();
