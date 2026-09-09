@@ -1,3 +1,26 @@
+<script module lang="ts">
+  import type { DraftValue } from '../lib/drafts/draft-state';
+
+  /** Normalized, JSON-like value retained by the frontend draft coordinator. */
+  export interface EntityDraftValue extends Readonly<Record<string, DraftValue>> {
+    readonly name: string;
+    readonly aliases: readonly string[];
+    readonly summary: string;
+    readonly notes: string;
+    readonly dateStart: string;
+    readonly dateEnd: string;
+    readonly isOngoing: boolean;
+    readonly sequenceIndex: string;
+    readonly era: string;
+    readonly durationLabel: string;
+    readonly sessionId: string;
+    readonly playerName: string;
+    readonly characterClass: string;
+    readonly characterLevel: string;
+    readonly status: string;
+  }
+</script>
+
 <script lang="ts">
   import {
     getEntityRelations,
@@ -27,6 +50,11 @@
     onOpenEntity?: (id: string, kind: string) => void;
     initialName?: string;
     ondirtychange?: (dirty: boolean) => void;
+    draftValue?: EntityDraftValue;
+    onvaluechange?: (value: EntityDraftValue) => void;
+    submitDisabled?: boolean;
+    existing?: boolean;
+    editingScope?: string;
   }
 
   let {
@@ -40,54 +68,62 @@
     onOpenEntity,
     initialName,
     ondirtychange,
+    draftValue,
+    onvaluechange,
+    submitDisabled = false,
+    existing = node !== null,
+    editingScope = '',
   }: Props = $props();
 
   // Writable $derived: each field seeds from `node` and recomputes when a
   // different entity is selected, while remaining editable via bind:value
   // (user edits override the derived until `node` changes again).
-  let name = $derived(node?.name ?? initialName ?? '');
-  let aliases = $derived(node?.aliases ?? []);
-  let summary = $derived(node?.summary ?? '');
-  let notes = $derived(node?.notes ?? '');
+  let name = $derived(draftValue?.name ?? node?.name ?? initialName ?? '');
+  let aliases = $derived([...(draftValue?.aliases ?? node?.aliases ?? [])]);
+  let summary = $derived(draftValue?.summary ?? node?.summary ?? '');
+  let notes = $derived(draftValue?.notes ?? node?.notes ?? '');
   // event fields
-  let dateStart = $derived(node?.date_start ?? '');
-  let dateEnd = $derived(node?.date_end ?? '');
-  let isOngoing = $derived(node?.is_ongoing ?? false);
-  let sequenceIndex = $derived(node?.sequence_index?.toString() ?? '');
-  let era = $derived(node?.era ?? '');
-  let durationLabel = $derived(node?.duration_label ?? '');
+  let dateStart = $derived(draftValue?.dateStart ?? node?.date_start ?? '');
+  let dateEnd = $derived(draftValue?.dateEnd ?? node?.date_end ?? '');
+  let isOngoing = $derived(draftValue?.isOngoing ?? node?.is_ongoing ?? false);
+  let sequenceIndex = $derived(draftValue?.sequenceIndex ?? node?.sequence_index?.toString() ?? '');
+  let era = $derived(draftValue?.era ?? node?.era ?? '');
+  let durationLabel = $derived(draftValue?.durationLabel ?? node?.duration_label ?? '');
   // event session FK
-  let sessionId = $derived(node?.session_id ?? '');
+  let sessionId = $derived(draftValue?.sessionId ?? node?.session_id ?? '');
   // pc fields
-  let playerName = $derived(node?.player_name ?? '');
-  let characterClass = $derived(node?.character_class ?? '');
-  let characterLevel = $derived(node?.character_level?.toString() ?? '');
-  let status = $derived(node?.status ?? '');
+  let playerName = $derived(draftValue?.playerName ?? node?.player_name ?? '');
+  let characterClass = $derived(draftValue?.characterClass ?? node?.character_class ?? '');
+  let characterLevel = $derived(
+    draftValue?.characterLevel ?? node?.character_level?.toString() ?? '',
+  );
+  let status = $derived(draftValue?.status ?? node?.status ?? '');
 
   let nameError = $state('');
+  let previousEditingScope: string | undefined;
 
-  function snapshot(fields: {
-    name: string;
-    aliases: string[];
-    summary: string;
-    notes: string;
-    dateStart: string;
-    dateEnd: string;
-    isOngoing: boolean;
-    sequenceIndex: string;
-    era: string;
-    durationLabel: string;
-    sessionId: string;
-    playerName: string;
-    characterClass: string;
-    characterLevel: string;
-    status: string;
-  }) {
-    return JSON.stringify(fields);
+  function currentValue(): EntityDraftValue {
+    return {
+      name,
+      aliases: [...aliases],
+      summary,
+      notes,
+      dateStart,
+      dateEnd,
+      isOngoing,
+      sequenceIndex,
+      era,
+      durationLabel,
+      sessionId,
+      playerName,
+      characterClass,
+      characterLevel,
+      status,
+    };
   }
 
   const initialSnapshot = $derived.by(() =>
-    snapshot({
+    JSON.stringify({
       name: node?.name ?? initialName ?? '',
       aliases: node?.aliases ?? [],
       summary: node?.summary ?? '',
@@ -107,25 +143,21 @@
   );
 
   function notifyDirty() {
-    const current = snapshot({
-      name,
-      aliases,
-      summary,
-      notes,
-      dateStart,
-      dateEnd,
-      isOngoing,
-      sequenceIndex,
-      era,
-      durationLabel,
-      sessionId,
-      playerName,
-      characterClass,
-      characterLevel,
-      status,
-    });
-    ondirtychange?.(current !== initialSnapshot);
+    const current = currentValue();
+    onvaluechange?.(current);
+    ondirtychange?.(JSON.stringify(current) !== initialSnapshot);
   }
+
+  $effect(() => {
+    const currentEditingScope = editingScope;
+    if (previousEditingScope === undefined) {
+      previousEditingScope = currentEditingScope;
+      return;
+    }
+    if (currentEditingScope === previousEditingScope) return;
+    previousEditingScope = currentEditingScope;
+    nameError = '';
+  });
 
   $effect(() => {
     notifyDirty();
@@ -211,24 +243,25 @@
       nameError = i18n.t('errors.validationRequired', { field: i18n.t('entityUi.name') });
       return;
     }
+    const value = currentValue();
     const input: EntityInput = {
-      name: name.trim(),
+      name: value.name.trim(),
       // Always the complete array — omitting this field means "preserve" on
       // the backend, so a partial edit would otherwise silently no-op.
-      aliases,
-      summary: summary || null,
-      notes: notes || null,
-      dateStart: dateStart || null,
-      dateEnd: dateEnd || null,
-      isOngoing: isOngoing || null,
-      sequenceIndex: sequenceIndex ? parseInt(sequenceIndex, 10) : null,
-      era: era || null,
-      durationLabel: durationLabel || null,
-      sessionId: sessionId || null,
-      playerName: playerName || null,
-      characterClass: characterClass || null,
-      characterLevel: characterLevel ? parseInt(characterLevel, 10) : null,
-      status: status || null,
+      aliases: [...value.aliases],
+      summary: value.summary || null,
+      notes: value.notes || null,
+      dateStart: value.dateStart || null,
+      dateEnd: value.dateEnd || null,
+      isOngoing: value.isOngoing || null,
+      sequenceIndex: value.sequenceIndex ? parseInt(value.sequenceIndex, 10) : null,
+      era: value.era || null,
+      durationLabel: value.durationLabel || null,
+      sessionId: value.sessionId || null,
+      playerName: value.playerName || null,
+      characterClass: value.characterClass || null,
+      characterLevel: value.characterLevel ? parseInt(value.characterLevel, 10) : null,
+      status: value.status || null,
     };
     onsave?.(input);
   }
@@ -260,7 +293,13 @@
   </FormField>
 
   <div class="field">
-    <AliasField {aliases} onchange={(a) => (aliases = a)} />
+    <AliasField
+      {aliases}
+      onchange={(value) => {
+        aliases = value;
+        notifyDirty();
+      }}
+    />
   </div>
 
   <FormField label={i18n.t('entityUi.summary')} controlId="ef-summary">
@@ -336,8 +375,8 @@
   {/if}
 
   <div class="actions">
-    <Button testId="entity-form-submit" type="submit"
-      >{node ? i18n.t('common.save') : i18n.t('entityUi.create')}</Button
+    <Button testId="entity-form-submit" type="submit" disabled={submitDisabled}
+      >{existing ? i18n.t('common.save') : i18n.t('entityUi.create')}</Button
     >
     <Button testId="entity-form-cancel" variant="ghost" onclick={() => oncancel?.()}
       >{i18n.t('common.cancel')}</Button

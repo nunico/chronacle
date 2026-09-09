@@ -4,6 +4,7 @@ import OracleView from './OracleView.svelte';
 import * as commands from '../lib/commands';
 import { toasts, clearToasts } from '../lib/toast.svelte';
 import { i18n } from '../lib/locale.svelte';
+import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -132,7 +133,9 @@ describe('OracleView', () => {
       render(OracleView, {
         props: { activeCampaignId: 'camp-1', onOpenUpload: vi.fn() },
       });
-      const input = await screen.findByPlaceholderText('Frage nach einer Regel, einem Namen, einem Ort…');
+      const input = await screen.findByPlaceholderText(
+        'Frage nach einer Regel, einem Namen, einem Ort…',
+      );
       await fireEvent.input(input, { target: { value: 'Quelle est la règle ?' } });
       await fireEvent.keyDown(input, { key: 'Enter' });
       await waitFor(() => {
@@ -307,5 +310,123 @@ describe('OracleView', () => {
     await screen.findByText('How does cover work?');
     await screen.findByText('Something went wrong.');
     expect(screen.queryByRole('button', { name: /Save to Codex/i })).toBeNull();
+  });
+
+  describe('composer draft lifecycle', () => {
+    function renderOracle(coordinator: DraftCoordinator, activeCampaignId: string | null) {
+      return render(OracleView, {
+        props: {
+          activeCampaignId,
+          onOpenUpload: vi.fn(),
+          draftCoordinator: coordinator,
+        },
+      });
+    }
+
+    it('restores an unsent question after unmount without submitting it', async () => {
+      const coordinator = new DraftCoordinator();
+      const first = renderOracle(coordinator, 'camp-1');
+      const composer = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+
+      await fireEvent.input(composer, { target: { value: 'What wakes the glass dragon?' } });
+      first.unmount();
+      renderOracle(coordinator, 'camp-1');
+
+      expect(await screen.findByDisplayValue('What wakes the glass dragon?')).toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+      expect(screen.getByRole('status')).toHaveTextContent('Retained for this session only.');
+      expect(m.chatSend).not.toHaveBeenCalled();
+    });
+
+    it('keeps Campaign A, Campaign B, and no-campaign questions isolated', async () => {
+      const coordinator = new DraftCoordinator();
+      const rendered = renderOracle(coordinator, 'camp-a');
+      const composer = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+      await fireEvent.input(composer, { target: { value: 'Campaign A secret' } });
+
+      await rendered.rerender({
+        activeCampaignId: 'camp-b',
+        onOpenUpload: vi.fn(),
+        draftCoordinator: coordinator,
+      });
+      expect(screen.getByPlaceholderText('Ask a rule, a name, a place…')).toHaveValue('');
+      await fireEvent.input(screen.getByPlaceholderText('Ask a rule, a name, a place…'), {
+        target: { value: 'Campaign B secret' },
+      });
+
+      await rendered.rerender({
+        activeCampaignId: null,
+        onOpenUpload: vi.fn(),
+        draftCoordinator: coordinator,
+      });
+      expect(screen.getByPlaceholderText('Ask a rule, a name, a place…')).toHaveValue('');
+      await fireEvent.input(screen.getByPlaceholderText('Ask a rule, a name, a place…'), {
+        target: { value: 'No campaign question' },
+      });
+
+      await rendered.rerender({
+        activeCampaignId: 'camp-a',
+        onOpenUpload: vi.fn(),
+        draftCoordinator: coordinator,
+      });
+      expect(screen.getByPlaceholderText('Ask a rule, a name, a place…')).toHaveValue(
+        'Campaign A secret',
+      );
+      expect(m.chatSend).not.toHaveBeenCalled();
+
+      await rendered.rerender({
+        activeCampaignId: 'camp-b',
+        onOpenUpload: vi.fn(),
+        draftCoordinator: coordinator,
+      });
+      expect(screen.getByPlaceholderText('Ask a rule, a name, a place…')).toHaveValue(
+        'Campaign B secret',
+      );
+
+      await rendered.rerender({
+        activeCampaignId: null,
+        onOpenUpload: vi.fn(),
+        draftCoordinator: coordinator,
+      });
+      expect(screen.getByPlaceholderText('Ask a rule, a name, a place…')).toHaveValue(
+        'No campaign question',
+      );
+    });
+
+    it('clears only the intentionally submitted campaign question', async () => {
+      const coordinator = new DraftCoordinator();
+      const rendered = renderOracle(coordinator, 'camp-a');
+      const composer = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+      await fireEvent.input(composer, { target: { value: 'Question for A' } });
+
+      await rendered.rerender({
+        activeCampaignId: 'camp-b',
+        onOpenUpload: vi.fn(),
+        draftCoordinator: coordinator,
+      });
+      const campaignBComposer = screen.getByPlaceholderText('Ask a rule, a name, a place…');
+      await fireEvent.input(campaignBComposer, { target: { value: 'Question for B' } });
+      await fireEvent.keyDown(campaignBComposer, { key: 'Enter' });
+      await waitFor(() =>
+        expect(m.chatSend).toHaveBeenCalledWith('Question for B', 'camp-b', 'en'),
+      );
+
+      await rendered.rerender({
+        activeCampaignId: 'camp-a',
+        onOpenUpload: vi.fn(),
+        draftCoordinator: coordinator,
+      });
+      expect(screen.getByPlaceholderText('Ask a rule, a name, a place…')).toHaveValue(
+        'Question for A',
+      );
+
+      await rendered.rerender({
+        activeCampaignId: 'camp-b',
+        onOpenUpload: vi.fn(),
+        draftCoordinator: coordinator,
+      });
+      expect(screen.getByPlaceholderText('Ask a rule, a name, a place…')).toHaveValue('');
+      expect(m.chatSend).toHaveBeenCalledTimes(1);
+    });
   });
 });

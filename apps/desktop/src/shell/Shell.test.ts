@@ -37,6 +37,7 @@ const createCollection = vi.fn();
 const getMaintenanceCounts = vi.fn();
 const getProposals = vi.fn();
 const onEmbeddingModelMismatch = vi.fn();
+const getEntities = vi.fn();
 
 vi.mock('../lib/commands', () => ({
   getCampaigns: (...a: unknown[]) => getCampaigns(...a),
@@ -52,11 +53,12 @@ vi.mock('../lib/commands', () => ({
   getChunkForCitation: vi.fn().mockResolvedValue(null),
   getMruCollectionId: vi.fn().mockReturnValue(null),
   setMruCollectionId: vi.fn(),
-  getEntities: vi.fn().mockResolvedValue([]),
+  getEntities: (...a: unknown[]) => getEntities(...a),
   createEntity: vi.fn(),
   updateEntity: vi.fn(),
   deleteEntity: vi.fn(),
   getEntityRelations: vi.fn().mockResolvedValue([]),
+  listVaultConflicts: vi.fn().mockResolvedValue([]),
   getMaintenanceCounts: (...a: unknown[]) => getMaintenanceCounts(...a),
   getProposals: (...a: unknown[]) => getProposals(...a),
   acceptProposal: vi.fn(),
@@ -102,6 +104,7 @@ describe('Shell upload flow', () => {
     getSessions.mockResolvedValue([]);
     getMaintenanceCounts.mockResolvedValue({ pending_proposals: 0, unresolved_findings: 0 });
     getProposals.mockResolvedValue([]);
+    getEntities.mockResolvedValue([]);
   });
 
   it('shows real entity and session counts in the rail', async () => {
@@ -308,6 +311,7 @@ describe('Shell keyboard shortcuts', () => {
     getSessions.mockResolvedValue([]);
     getMaintenanceCounts.mockResolvedValue({ pending_proposals: 0, unresolved_findings: 0 });
     getProposals.mockResolvedValue([]);
+    getEntities.mockResolvedValue([]);
   });
 
   it('? opens the shortcuts help overlay and Escape closes it', async () => {
@@ -354,5 +358,90 @@ describe('Shell keyboard shortcuts', () => {
     // Pressing ? while focused in the name field must NOT open the overlay.
     await fireEvent.keyDown(nameField, { key: '?' });
     expect(screen.queryByText(/Keyboard shortcuts/i)).toBeNull();
+  });
+
+  it('keeps one Oracle draft coordinator alive while the view is unmounted', async () => {
+    render(Shell);
+    const composer = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+    await fireEvent.input(composer, { target: { value: 'Remember the silver key' } });
+
+    await fireEvent.click(screen.getByRole('button', { name: /Campaign & sources/i }));
+    expect(screen.queryByPlaceholderText('Ask a rule, a name, a place…')).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: /^Oracle$/i }));
+
+    expect(await screen.findByPlaceholderText('Ask a rule, a name, a place…')).toHaveValue(
+      'Remember the silver key',
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+  });
+
+  it('keeps Oracle drafts isolated while switching campaigns in the shell', async () => {
+    getCampaigns.mockResolvedValue([
+      { id: 'camp-1', name: 'Campaign A', system: 'D&D 5e' },
+      { id: 'camp-2', name: 'Campaign B', system: 'D&D 5e' },
+    ]);
+    render(Shell);
+    const composer = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+    await fireEvent.input(composer, { target: { value: 'Campaign A question' } });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Switch campaign' }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Campaign B/ }));
+    expect(screen.getByPlaceholderText('Ask a rule, a name, a place…')).toHaveValue('');
+    await fireEvent.input(screen.getByPlaceholderText('Ask a rule, a name, a place…'), {
+      target: { value: 'Campaign B question' },
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Switch campaign' }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Campaign A/ }));
+    expect(screen.getByPlaceholderText('Ask a rule, a name, a place…')).toHaveValue(
+      'Campaign A question',
+    );
+  });
+
+  it('restores an entity draft after navigating through another shell view', async () => {
+    getEntities.mockImplementation(async (_campaignId, kind) => {
+      if (kind !== 'npc') return [];
+      return [
+        {
+          id: 'mira',
+          kind: 'npc',
+          campaign_id: 'camp-1',
+          name: 'Mira',
+          aliases: [],
+          summary: 'Scout',
+          notes: 'Saved note',
+          created_at: null,
+          updated_at: null,
+          date_start: null,
+          date_end: null,
+          is_ongoing: null,
+          sequence_index: null,
+          era: null,
+          duration_label: null,
+          session_id: null,
+          player_name: null,
+          character_class: null,
+          character_level: null,
+          status: null,
+          codex_article: null,
+          codex_stale: null,
+          codex_compiled_at: null,
+        },
+      ];
+    });
+    render(Shell);
+    await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+    await fireEvent.click(screen.getByRole('button', { name: /NPCs/i }));
+    await fireEvent.click(await screen.findByText('Mira'));
+    await fireEvent.input(screen.getByLabelText('Notes'), {
+      target: { value: 'Mira has the silver key' },
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: /^Oracle$/i }));
+    await fireEvent.click(screen.getByRole('button', { name: /NPCs/i }));
+    await fireEvent.click(await screen.findByText('Mira'));
+
+    expect(screen.getByLabelText('Notes')).toHaveValue('Mira has the silver key');
+    expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
   });
 });
