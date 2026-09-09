@@ -205,6 +205,10 @@ intentional state-loading effect.
   and authoritative when it settles. Matching campaign and kind are necessary
   but not sufficient: a response owned by an unmounted or obsolete manager is
   never accepted.
+- **Load authority snapshot:** the `lastAcknowledgedAttemptId` observed for each
+  already-open scope when a list request begins. If that authority advances
+  before the request settles, the older response cannot refresh that now-clean
+  scope. This is adapter-local ordering evidence, not a backend version.
 
 ## Domain Boundaries
 
@@ -245,10 +249,14 @@ scope, target, and revision for Retry.
 ### Application coordination
 
 `apps/desktop/src/lib/drafts/draft-coordinator.svelte.ts` owns the app-lifetime
-map of drafts and one save lane per persistence target. It serializes writes,
-coalesces repeated requests to the newest requested revision, and applies
-success/failure only to the attempt's original scope. `Shell.svelte` creates one
-coordinator and passes it to editor adapters. Navigation changes no draft state.
+map of drafts and one save lane per persistence target. A lane keeps one active
+request plus an ordered queue. Repeated queued requests from the same editing
+scope are removed and replaced by that scope's newest request at the tail,
+carrying their waiters forward; requests from a different scope that shares the
+target are never discarded as coalescing. This preserves request order and the
+latest final intent while preventing overlap. Success/failure applies only to
+the attempt's original scope. `Shell.svelte` creates one coordinator and passes
+it to editor adapters. Navigation changes no draft state.
 The coordinator reuses its monotonic attempt sequence as the authority
 generation and keeps private provenance per scope. `open` can establish or
 refresh authoritative-list provenance, while an applicable acknowledgment
@@ -268,6 +276,13 @@ applicability and canonical validation to the rules. It catches validation only
 for an applicable active attempt and records a recoverable failure; a stale
 completion is a no-op and cannot create a failure on the current draft.
 
+Deletion is coordinated separately from save-state transitions. A successful
+backend delete calls the coordinator's narrow `removeAfterDelete(scope)`
+operation, which cancels only that scope's queued intent and removes only that
+scope. It refuses removal while the same scope has an active write. The session
+adapter owns the delete request and its temporary deleting state; the pure draft
+rules do not model UI confirmation or backend deletion.
+
 The coordinator deliberately does not decide whether a component instance is
 still alive. Each asynchronous editor adapter must reject settlement from an
 unmounted or superseded instance before calling `open`, revising presentation,
@@ -276,6 +291,17 @@ instances, so a campaign/kind equality check alone cannot make an old response
 safe: an obsolete manager may share the same props as its replacement and still
 settle later. This liveness rule belongs to application/adapter coordination,
 not the pure draft state machine and not the Rust business domain.
+
+Session and rule-list adapters additionally snapshot the
+`lastAcknowledgedAttemptId` of their already-open exact-prefix scopes when each
+load starts. At settlement, component liveness, request generation, campaign,
+and collection checks run first. For each returned record, reconciliation is
+skipped when its current authority is newer than the request's snapshot. This
+prevents a response that began before a save acknowledgment from replacing the
+newly acknowledged canonical baseline merely because the draft is clean by the
+time the response arrives. A subsequent accepted request captures the new
+authority and may refresh that clean scope. No wall clock, database version, or
+generic request-order service is introduced.
 
 The coordinator also exposes narrow application operations used by the entity
 adapter:
@@ -306,6 +332,7 @@ interface CreatePromotionIssue {
 }
 
 listByPrefix<T extends DraftValue>(prefix: string): readonly DraftRecord<T>[];
+removeAfterDelete(scope: string): "removed" | "blocked-active-save" | "missing";
 resolveScope(scope: string): string;
 tryRemapAfterCreate<T extends DraftValue>(
   sourceScope: string,
@@ -328,13 +355,15 @@ resolveCreatePromotion<T extends DraftValue>(
 `listByPrefix` returns a frozen array of immutable draft records. It allows a
 mounted entity manager to derive retained-new and unavailable-existing rows for
 its campaign/kind without owning a second app-lifetime registry. It is a
-read-only query, not a subscription or persistence API. `tryRemapAfterCreate`
-is the structured, application-facing operation used by EntityManager after a
-successful Create acknowledgment. The source retains the authority generation
-of the Create attempt. Ordinarily the destination is absent, so the operation
-atomically changes the client draft's scope and target to the exact returned
-backend identity while preserving its canonical baseline, current value,
-revision bookkeeping, and any newer unacknowledged edit.
+read-only query, not a subscription or persistence API. `removeAfterDelete` is
+called only after confirmed backend deletion succeeds; it refuses an active
+same-scope write, cancels that scope's queued intent, and removes no other scope.
+`tryRemapAfterCreate` is the structured, application-facing operation used by
+EntityManager after a successful Create acknowledgment. The source retains the
+authority generation of the Create attempt. Ordinarily the destination is
+absent, so the operation atomically changes the client draft's scope and target
+to the exact returned backend identity while preserving its canonical baseline,
+current value, revision bookkeeping, and any newer unacknowledged edit.
 
 A list response may instead open the returned record scope after the backend
 commits Create but before its response reaches the initiating adapter. Promotion
@@ -403,6 +432,21 @@ nor the old redirect.
 
 - Oracle, EntityForm/EntityManager, SessionRow, and RulesPanel translate DOM
   input into typed draft values and render coordinator state.
+- Session adapters use the exact normalized boundary
+  `{ sessionNumber: number, title: string, datePlayed: string, notes: string }`.
+  Campaign ID, record ID, timestamps, linked entities, loading state, and row
+  expansion are not draft content. `SessionRow` converts that value to
+  `SessionInput`; a returned `Session` is normalized through the same boundary
+  before acknowledgment. The row adapter also owns the transient confirmed-delete
+  state: it disables fields and all Delete, Retry, and Discard actions while the
+  delete command is pending, suppresses blur-triggered saves in that state, and
+  re-enables the retained draft and recovery actions if deletion fails.
+- Rule-note adapters use the exact normalized boundary `{ notes: string }`.
+  Backend `null` and an empty textarea both normalize to `""`; the writer alone
+  converts `""` back to `null` for IPC. Rule identity, collection, campaign,
+  compiled body, category, page references, stale state, search, expansion, and
+  objection text are not rule-note draft content. A returned `RuleEntry` is
+  normalized through the same boundary before acknowledgment.
 - Every adapter that awaits backend data owns a component-instance liveness
   guard. Cleanup invalidates that instance before any late completion can
   reconcile the app-lifetime coordinator or publish presentation. A replacement
@@ -432,13 +476,13 @@ change is to make rule-note persistence provide a truthful acknowledgment.
 
 ## Editing Scope and Target Identities
 
-| Draft kind      | Editing scope                                       | Persistence target                         |
-| --------------- | --------------------------------------------------- | ------------------------------------------ |
-| Oracle          | `oracle:{campaign-id}` or `oracle:no-campaign`      | none                                       |
-| Existing entity | `entity:{campaign-id}:{kind}:{record-id}`           | `entity:{kind}:{record-id}`                |
-| New entity      | `entity-new:{campaign-id}:{kind}:{client-draft-id}` | the draft scope until Create returns an ID |
-| Session         | `session:{campaign-id}:{session-id}`                | `session:{session-id}`                     |
-| Rule note       | `rule:{campaign-id}:{collection-id}:{rule-id}`      | `rule:{rule-id}`                           |
+| Draft kind      | Editing scope                                                 | Persistence target                         |
+| --------------- | ------------------------------------------------------------- | ------------------------------------------ |
+| Oracle          | `oracle:{campaign-id}` or `oracle:no-campaign`                | none                                       |
+| Existing entity | `entity:{campaign-id}:{kind}:{record-id}`                     | `entity:{kind}:{record-id}`                |
+| New entity      | `entity-new:{campaign-id}:{kind}:{client-draft-id}`           | the draft scope until Create returns an ID |
+| Session         | `session:{campaign-id}:{session-id}`                          | `session:{session-id}`                     |
+| Rule note       | `rule:{campaign-id-or-no-campaign}:{collection-id}:{rule-id}` | `rule:{rule-id}`                           |
 
 The new-record client identity is allocated before backend creation and remains
 stable until successful Create or explicit discard. The current product supports
@@ -466,10 +510,21 @@ an existing saved-domain record, not an unavailable or unsaved-new row; it is
 used only for selection/form presentation and is never inserted into the
 backend `entities` result or wikilink map.
 
-Rule notes include campaign in the editing scope because the requirement forbids
-draft text appearing after a campaign switch. Their persistence lane uses the
-rule ID because a regular collection and its notes may be shared by campaigns;
-that prevents overlapping writes to the same aggregate.
+Rule notes include the active campaign—or the explicit `no-campaign` context—in
+the editing scope because CampaignView permits collection browsing without an
+active campaign and the requirement forbids draft text appearing after a
+campaign switch. Their persistence lane uses the rule ID because a regular
+collection and its notes may be shared by campaigns; that prevents overlapping
+writes to the same aggregate.
+
+Session scopes include campaign even though a session ID is globally unique, so
+an obsolete list or retained draft cannot appear after a campaign switch. The
+lane omits campaign because every presentation of that session addresses the
+same backend aggregate. Session-list loads reconcile only the exact
+`session:{campaign-id}:` prefix. Rule-list loads reconcile only the exact
+`rule:{campaign-id-or-no-campaign}:{collection-id}:` prefix; switching either
+campaign or collection selects a different draft set while the shared
+`rule:{rule-id}` lane continues to serialize writes to a shared rule entry.
 
 ## Invariants
 
@@ -487,8 +542,10 @@ that prevents overlapping writes to the same aggregate.
    result, but it never replaces the current value or clears a newer
    unacknowledged revision. This remains true when the canonical result happens
    to equal the newer value.
-8. Only one write is active for a persistence target. Repeated requests coalesce
-   to the newest requested revision.
+8. Only one write is active for a persistence target. Repeated queued requests
+   from one editing scope coalesce to its newest requested revision at the end
+   of the target queue. A request from another scope sharing that target remains
+   ordered and is never silently replaced by another scope's coalescing.
 9. Failure preserves current value, scope, target, revision, and retryability.
 10. Retry writes the latest value in the same scope to the same target.
 11. Every exposed `DraftRecord` is readonly and runtime-frozen as a complete
@@ -608,54 +665,98 @@ that prevents overlapping writes to the same aggregate.
     on the applicable completion becomes a recoverable failure that clears only
     that in-flight attempt, preserves all draft work, and remains retryable for
     the same scope and target.
+33. A session or rule list response cannot replace authority established after
+    that request began. The adapter snapshots each known scope's acknowledged
+    attempt generation at request start and declines a clean refresh when the
+    scope has a newer generation at settlement. The next accepted request may
+    refresh it.
+34. Session and rule autosave are triggered only by an ordinary blur that
+    remains in the same editing scope, or by explicit Retry. Input changes the
+    draft immediately but never starts a write by itself. Focus moving to another
+    app view or editing scope is navigation: the adapter suppresses the resulting
+    blur save and retains the draft as pending. Recovery controls and Discard also
+    suppress focus-loss blur; Retry owns its explicit request, while Discard
+    starts no IPC. Navigation neither discards nor retargets an already pending,
+    queued, saving, or failed request.
+35. Session canonical trimming and rule-note `null` normalization are learned
+    only from their applicable returned records. An adapter never constructs a
+    successful baseline from its request payload or from `void` completion.
+36. A session or rule failure is rendered only in the exact scope that started
+    it. Switching campaign, collection, or record can hide that editor but
+    cannot move its error, Retry, value, or target to the newly selected scope.
+37. Confirmed session deletion is mutually exclusive with session editing and
+    recovery. While deletion is pending, fields and Delete, Retry, and Discard
+    are unavailable, and blur or recovery interaction cannot start or queue a
+    save. Delete failure restores those controls without changing the draft.
+38. Successful session deletion removes only the deleted session's editing
+    scope and cancels only its queued save intent. It cannot remove or rewrite an
+    unsent Oracle question or another session, campaign, or record draft.
+39. Keyboard Discard of a session suppresses its focus-loss autosave, restores
+    the complete saved baseline without IPC, and hands focus to that row's stable
+    session header.
 
 ## Draft and Save Lifecycle
 
 ### Transition table
 
-| Current observable state                            | Event                                                                             | State / behavior                                                                                                                                                                                                                                                                  |
-| --------------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Saved/clean                                         | Edit to a different value                                                         | **Unsaved changes**; increment revision                                                                                                                                                                                                                                           |
-| Unsaved                                             | Edit back to already-known baseline                                               | Clear unacknowledged marker; Clean/Saved; no write                                                                                                                                                                                                                                |
-| Unsaved                                             | Request save                                                                      | **Saving…**; capture scope, target, revision, value                                                                                                                                                                                                                               |
-| Saving                                              | Edit again                                                                        | Current value/revision advances; attempt payload stays immutable; UI remains Saving with newer unsaved content                                                                                                                                                                    |
-| Saving                                              | Another save request                                                              | Do not overlap; remember only the newest requested revision                                                                                                                                                                                                                       |
-| Saving                                              | Current-revision acknowledgment                                                   | Baseline becomes canonical acknowledgment; **Saved**; clear failure                                                                                                                                                                                                               |
-| Saving                                              | Older-revision acknowledgment, newer edit                                         | Preserve current value; baseline becomes acknowledged payload; preserve the newer unacknowledged revision and remain **Unsaved changes**, even if the values now match; otherwise begin queued latest save                                                                        |
-| Saving                                              | Stale/wrong-scope completion, including malformed canonical content               | Check applicability first and ignore the completion without inspecting its canonical payload; preserve that scope's current state                                                                                                                                                 |
-| Saving                                              | Applicable completion with malformed canonical content                            | **Couldn't save**; clear only the applicable in-flight attempt, preserve draft and baseline, and expose Retry for the same scope/target                                                                                                                                           |
-| Saving                                              | Rejection                                                                         | **Couldn't save**; preserve draft; expose Retry                                                                                                                                                                                                                                   |
-| Failed                                              | Retry                                                                             | Capture latest revision for same target; **Saving…**                                                                                                                                                                                                                              |
-| Queued, not active                                  | Discard changes                                                                   | Cancel that scope's queued request; restore only that scope's baseline; clear its error                                                                                                                                                                                           |
-| Active backend write                                | Discard changes                                                                   | Block the action and announce that saving must finish; do not claim to undo the write                                                                                                                                                                                             |
-| Settled with newer edit                             | Discard changes                                                                   | Restore only that scope to the baseline established by the completed write; clear remaining error/queued request                                                                                                                                                                  |
-| New entity Create active                            | Edit again                                                                        | Keep Create disabled; preserve the newer revision in the client scope; do not queue or start another Create                                                                                                                                                                       |
-| New entity Create active                            | Cancel, discard, or replacement intent                                            | Keep the destructive action disabled and describe that creation must finish first; preserve the client draft and permit no second Create                                                                                                                                          |
-| New entity Create active                            | Successful acknowledgment for current revision                                    | Atomically remap the draft to the returned existing-record ID and target; canonical response becomes baseline; show **Saved**; subsequent explicit save uses Update                                                                                                               |
-| New entity Create active                            | Successful acknowledgment for older revision                                      | Atomically remap to the returned existing-record ID and target; canonical response becomes baseline; preserve the newer value as **Unsaved changes**; enable explicit Save, which uses Update, never Create                                                                       |
-| Create acknowledged, matching projection            | List opened the exact returned target and canonical value without newer authority | Atomically replace the untouched projection with the acknowledged source draft, preserve any newer source revision, install the redirect, and continue with Update/Save semantics                                                                                                 |
-| Create acknowledged, destination newer or divergent | Source has no post-Create pending revision                                        | Preserve the fully clean destination; remove the redundant source and install its redirect; derive row, preview, selected form, and Saved status from that destination rather than the older Create response; perform no backend write                                            |
-| Create acknowledged, destination newer or divergent | Source has a pending post-Create revision                                         | Preserve both drafts and their distinct presentations; show a persistent promotion conflict; disable another Create; require explicit **Keep saved record** or **Keep my draft** without automatic persistence                                                                    |
-| Create acknowledged, destination unsafe             | Destination is at-risk or target-mismatched                                       | Preserve both drafts and their distinct presentations; show a persistent promotion failure; disable another Create; Retry reattempts only local promotion after the transient conflict is resolved                                                                                |
-| Structured promotion result                         | EntityManager updates selection and rows                                          | For `source-promoted`, project the returned source draft; for `destination-converged`, project the returned destination draft; for blocked, project source and destination independently; never reinsert the Create response as presentation authority and never write implicitly |
-| Resumed client scope, Create settles                | Reactive scope redirect appears                                                   | Resolve to the returned record scope; preserve current content/status; present the acknowledged entity even if the already-completed list load omitted it; clean stays **Saved**, newer revision stays **Unsaved changes**                                                        |
-| Remapped entity draft                               | Targeted discard via source or destination                                        | Affect only the resolved destination draft and remove redirects to it; never retarget or discard an unrelated record                                                                                                                                                              |
-| Hidden retained new entity                          | Competing create-from-link request                                                | Offer **Keep editing** to reopen it unchanged or **Discard and create** to remove only it and seed the requested name                                                                                                                                                             |
-| Existing entity absent from reload                  | Retained at-risk draft exists                                                     | Synthesize an unavailable list row from the immutable draft; preserve row status, reopen, Retry, and targeted Discard                                                                                                                                                             |
-| Pending entity draft                                | Frontend required-field validation fails                                          | Keep **Unsaved changes**; show field error; issue no IPC                                                                                                                                                                                                                          |
-| Saving entity draft                                 | Backend validation rejection                                                      | **Couldn't save**; preserve target and content; expose Retry for the same record                                                                                                                                                                                                  |
-| Another entity is active                            | Earlier entity's delayed failure settles                                          | Record failure on the originating coordinator scope only; do not show its field error or failure on the active entity                                                                                                                                                             |
-| Entity form changes editing scope                   | Form-local validation exists                                                      | Clear the old scope's frontend-only validation message; retain both scoped draft values and any coordinator failures                                                                                                                                                              |
-| Entity list load completes                          | Captured campaign/kind is current and issuing adapter is live                     | Reconcile every backend row into its coordinator scope before publishing presentation rows; clean scopes refresh and at-risk scopes retain local snapshots                                                                                                                        |
-| Entity list load completes                          | Issuing adapter was unmounted or superseded                                       | Ignore the response completely, even if campaign/kind still match; do not reconcile the app-lifetime coordinator or publish presentation                                                                                                                                          |
-| Cached entity row                                   | Click after reconciliation/save acknowledgment                                    | Select the existing coordinator scope without applying the cached row baseline again; preserve the acknowledged canonical value                                                                                                                                                   |
-| Clean reconciled entity scope                       | A later current-context list load completes                                       | Reconcile the later backend row and refresh baseline/value; no request-version infrastructure is introduced                                                                                                                                                                       |
-| At-risk work                                        | Native close request                                                              | Prevent close; focus Cancel in **Unsaved changes** dialog                                                                                                                                                                                                                         |
-| Close dialog, write active                          | Discard and close                                                                 | Keep close prevented; disable the destructive action and announce that saving must finish                                                                                                                                                                                         |
-| Close dialog, write settles with risk               | Save acknowledgment/failure                                                       | Keep the original close request prevented; enable Discard and close for any remaining unsaved/failed draft                                                                                                                                                                        |
-| Close dialog, all risk settles clean                | Save acknowledgment                                                               | Keep the original close prevented; announce **Saving finished. It is safe to close.** and replace the destructive action with **Close**                                                                                                                                           |
-| Close dialog                                        | Escape/Cancel                                                                     | Keep drafts; restore focus to opener                                                                                                                                                                                                                                              |
-| Close dialog, no active write                       | Discard and close                                                                 | Clear coordinator, call forced native destroy; start no save                                                                                                                                                                                                                      |
+| Current observable state                            | Event                                                                                 | State / behavior                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Saved/clean                                         | Edit to a different value                                                             | **Unsaved changes**; increment revision                                                                                                                                                                                                                                           |
+| Unsaved                                             | Edit back to already-known baseline                                                   | Clear unacknowledged marker; Clean/Saved; no write                                                                                                                                                                                                                                |
+| Unsaved                                             | Request save                                                                          | **Saving…**; capture scope, target, revision, value                                                                                                                                                                                                                               |
+| Saving                                              | Edit again                                                                            | Current value/revision advances; attempt payload stays immutable; UI remains Saving with newer unsaved content                                                                                                                                                                    |
+| Saving                                              | Another save request for the same scope                                               | Do not overlap; remove that scope's older queued request and append only its newest requested revision, preserving waiters and cross-scope request order                                                                                                                          |
+| Saving                                              | Request from another scope with the same target                                       | Do not overlap and do not coalesce it away; retain it in the target queue so its own scope receives its own acknowledgment or failure                                                                                                                                             |
+| Saving                                              | Current-revision acknowledgment                                                       | Baseline becomes canonical acknowledgment; **Saved**; clear failure                                                                                                                                                                                                               |
+| Saving                                              | Older-revision acknowledgment, newer edit                                             | Preserve current value; baseline becomes acknowledged payload; preserve the newer unacknowledged revision and remain **Unsaved changes**, even if the values now match; otherwise begin queued latest save                                                                        |
+| Saving                                              | Stale/wrong-scope completion, including malformed canonical content                   | Check applicability first and ignore the completion without inspecting its canonical payload; preserve that scope's current state                                                                                                                                                 |
+| Saving                                              | Applicable completion with malformed canonical content                                | **Couldn't save**; clear only the applicable in-flight attempt, preserve draft and baseline, and expose Retry for the same scope/target                                                                                                                                           |
+| Saving                                              | Rejection                                                                             | **Couldn't save**; preserve draft; expose Retry                                                                                                                                                                                                                                   |
+| Failed                                              | Retry                                                                                 | Capture latest revision for same target; **Saving…**                                                                                                                                                                                                                              |
+| Queued, not active                                  | Discard changes                                                                       | Cancel that scope's queued request; restore only that scope's baseline; clear its error                                                                                                                                                                                           |
+| Active backend write                                | Discard changes                                                                       | Block the action and announce that saving must finish; do not claim to undo the write                                                                                                                                                                                             |
+| Settled with newer edit                             | Discard changes                                                                       | Restore only that scope to the baseline established by the completed write; clear remaining error/queued request                                                                                                                                                                  |
+| New entity Create active                            | Edit again                                                                            | Keep Create disabled; preserve the newer revision in the client scope; do not queue or start another Create                                                                                                                                                                       |
+| New entity Create active                            | Cancel, discard, or replacement intent                                                | Keep the destructive action disabled and describe that creation must finish first; preserve the client draft and permit no second Create                                                                                                                                          |
+| New entity Create active                            | Successful acknowledgment for current revision                                        | Atomically remap the draft to the returned existing-record ID and target; canonical response becomes baseline; show **Saved**; subsequent explicit save uses Update                                                                                                               |
+| New entity Create active                            | Successful acknowledgment for older revision                                          | Atomically remap to the returned existing-record ID and target; canonical response becomes baseline; preserve the newer value as **Unsaved changes**; enable explicit Save, which uses Update, never Create                                                                       |
+| Create acknowledged, matching projection            | List opened the exact returned target and canonical value without newer authority     | Atomically replace the untouched projection with the acknowledged source draft, preserve any newer source revision, install the redirect, and continue with Update/Save semantics                                                                                                 |
+| Create acknowledged, destination newer or divergent | Source has no post-Create pending revision                                            | Preserve the fully clean destination; remove the redundant source and install its redirect; derive row, preview, selected form, and Saved status from that destination rather than the older Create response; perform no backend write                                            |
+| Create acknowledged, destination newer or divergent | Source has a pending post-Create revision                                             | Preserve both drafts and their distinct presentations; show a persistent promotion conflict; disable another Create; require explicit **Keep saved record** or **Keep my draft** without automatic persistence                                                                    |
+| Create acknowledged, destination unsafe             | Destination is at-risk or target-mismatched                                           | Preserve both drafts and their distinct presentations; show a persistent promotion failure; disable another Create; Retry reattempts only local promotion after the transient conflict is resolved                                                                                |
+| Structured promotion result                         | EntityManager updates selection and rows                                              | For `source-promoted`, project the returned source draft; for `destination-converged`, project the returned destination draft; for blocked, project source and destination independently; never reinsert the Create response as presentation authority and never write implicitly |
+| Resumed client scope, Create settles                | Reactive scope redirect appears                                                       | Resolve to the returned record scope; preserve current content/status; present the acknowledged entity even if the already-completed list load omitted it; clean stays **Saved**, newer revision stays **Unsaved changes**                                                        |
+| Remapped entity draft                               | Targeted discard via source or destination                                            | Affect only the resolved destination draft and remove redirects to it; never retarget or discard an unrelated record                                                                                                                                                              |
+| Hidden retained new entity                          | Competing create-from-link request                                                    | Offer **Keep editing** to reopen it unchanged or **Discard and create** to remove only it and seed the requested name                                                                                                                                                             |
+| Existing entity absent from reload                  | Retained at-risk draft exists                                                         | Synthesize an unavailable list row from the immutable draft; preserve row status, reopen, Retry, and targeted Discard                                                                                                                                                             |
+| Pending entity draft                                | Frontend required-field validation fails                                              | Keep **Unsaved changes**; show field error; issue no IPC                                                                                                                                                                                                                          |
+| Saving entity draft                                 | Backend validation rejection                                                          | **Couldn't save**; preserve target and content; expose Retry for the same record                                                                                                                                                                                                  |
+| Another entity is active                            | Earlier entity's delayed failure settles                                              | Record failure on the originating coordinator scope only; do not show its field error or failure on the active entity                                                                                                                                                             |
+| Entity form changes editing scope                   | Form-local validation exists                                                          | Clear the old scope's frontend-only validation message; retain both scoped draft values and any coordinator failures                                                                                                                                                              |
+| Entity list load completes                          | Captured campaign/kind is current and issuing adapter is live                         | Reconcile every backend row into its coordinator scope before publishing presentation rows; clean scopes refresh and at-risk scopes retain local snapshots                                                                                                                        |
+| Entity list load completes                          | Issuing adapter was unmounted or superseded                                           | Ignore the response completely, even if campaign/kind still match; do not reconcile the app-lifetime coordinator or publish presentation                                                                                                                                          |
+| Cached entity row                                   | Click after reconciliation/save acknowledgment                                        | Select the existing coordinator scope without applying the cached row baseline again; preserve the acknowledged canonical value                                                                                                                                                   |
+| Clean reconciled entity scope                       | A later current-context list load completes                                           | Reconcile the later backend row and refresh baseline/value; no request-version infrastructure is introduced                                                                                                                                                                       |
+| Session/rule field                                  | Input                                                                                 | Normalize the complete editor value and revise only its exact scope; show **Unsaved changes**; start no write until blur or Retry                                                                                                                                                 |
+| Session/rule field                                  | Ordinary blur within the same editing scope                                           | Request the latest revision through the record-target lane; show **Saving…**; later navigation may unmount presentation but does not cancel or retarget the attempt                                                                                                               |
+| Focused session/rule field                          | Focus moves to another app view or editing scope                                      | Treat the focus change as navigation; suppress blur-save IPC and retain the current revision as **Unsaved changes** in its original scope                                                                                                                                         |
+| Focused session/rule field                          | Retry, Discard, or another recovery action is activated                               | Suppress the focus-loss blur save; Retry owns the one explicit save request, while Discard restores its applicable baseline without IPC                                                                                                                                           |
+| Session/rule list request                           | Context, request generation, and component instance remain current                    | Reconcile returned records only after comparing each existing scope's current acknowledged generation with the request-start snapshot; derive displayed editable values from coordinator drafts                                                                                   |
+| Session/rule list request                           | Context changed, adapter unmounted, a newer load started, or scope authority advanced | Ignore the obsolete response or skip only the newer-authority scope; never replace a retained value, failure, or newly acknowledged clean baseline                                                                                                                                |
+| Session/rule save                                   | Applicable canonical record returns                                                   | Normalize the returned record and acknowledge that attempt; never construct the baseline from the request; a newer local revision remains **Unsaved changes**                                                                                                                     |
+| Session/rule save                                   | Target is missing or write fails                                                      | Keep the exact scope and value as **Couldn't save** with target-preserving Retry and Discard; no other campaign, collection, session, or rule changes                                                                                                                             |
+| Failed session draft                                | NOT_FOUND detail returns                                                              | Preserve the exact value and target; render localized unavailable-target recovery rather than raw backend detail; Retry still addresses the same session                                                                                                                          |
+| Dirty session field                                 | Keyboard Discard moves focus                                                          | Suppress the resulting blur autosave; restore the complete saved baseline without IPC; focus the stable session header; leave every unrelated draft intact                                                                                                                        |
+| Session write active                                | Delete requested                                                                      | Keep Delete unavailable and announce that the session save must finish; do not start deletion                                                                                                                                                                                     |
+| Settled session                                     | Delete confirmed                                                                      | Enter deleting state; disable fields and Delete, Retry, and Discard; ignore blur/recovery save triggers while the backend delete is pending                                                                                                                                       |
+| Session deletion pending                            | Delete fails                                                                          | Preserve the draft and recovery state; re-enable fields and actions; start no save implicitly                                                                                                                                                                                     |
+| Session deletion pending                            | Delete succeeds                                                                       | Cancel only that scope's queued save intent; remove exactly that scope and its row; preserve all unrelated drafts                                                                                                                                                                 |
+| At-risk work                                        | Native close request                                                                  | Prevent close; focus Cancel in **Unsaved changes** dialog                                                                                                                                                                                                                         |
+| Close dialog, write active                          | Discard and close                                                                     | Keep close prevented; disable the destructive action and announce that saving must finish                                                                                                                                                                                         |
+| Close dialog, write settles with risk               | Save acknowledgment/failure                                                           | Keep the original close request prevented; enable Discard and close for any remaining unsaved/failed draft                                                                                                                                                                        |
+| Close dialog, all risk settles clean                | Save acknowledgment                                                                   | Keep the original close prevented; announce **Saving finished. It is safe to close.** and replace the destructive action with **Close**                                                                                                                                           |
+| Close dialog                                        | Escape/Cancel                                                                         | Keep drafts; restore focus to opener                                                                                                                                                                                                                                              |
+| Close dialog, no active write                       | Discard and close                                                                     | Clear coordinator, call forced native destroy; start no save                                                                                                                                                                                                                      |
 
 ### Sequence diagram
 
@@ -903,12 +1004,60 @@ resulting retained or replacement form only after the explicit choice.
 
 ### Sessions
 
-Title, date, and notes remain blur-save fields. Input immediately creates an
-Unsaved state. Blur requests a save through the shared per-session lane. Rapid
-field changes cannot overlap writes; a request received during a write is
-coalesced to the latest requested revision. Failure is inline on the session row
-with Retry and retained text. Navigation and campaign switching use scoped
-drafts; stale loads and save completions cannot inject another campaign's data.
+Title, date, and notes remain blur-save fields. The normalized draft is the
+complete `SessionInput` shape—session number plus the three editable strings—so
+every attempt is a coherent aggregate update. Record identity, campaign,
+timestamps, expansion, and linked entities remain outside the value. Input
+immediately creates **Unsaved changes** but does not write. Blur requests a save
+through `session:{session-id}`. Rapid field changes cannot overlap writes; a
+request received during a write is coalesced to the latest requested revision.
+The returned `Session`, including backend title trimming, is the only successful
+canonical acknowledgment.
+
+Blur-save is editing-scope aware. An ordinary focus change that stays within the
+same session scope may request autosave. Focus moving to another app view,
+campaign, or record scope is navigation, so the adapter suppresses the resulting
+blur request and retains the focused edit as **Unsaved changes**. Recovery
+controls suppress that incidental blur too: Retry owns its explicit save request,
+while Discard restores the baseline without IPC.
+
+`Shell` passes the app-lifetime coordinator through `SessionLogView` and
+`SessionList` to every keyed `SessionRow`. The view reloads in a campaign-keyed
+effect, with component liveness and a monotonically increasing local request
+generation. It captures known session acknowledgment generations before the
+load starts. Only the still-current request can reconcile rows into the exact
+campaign prefix, and a row whose save authority advanced after the request
+started retains that acknowledged baseline. Editable header and form values are
+always projected from coordinator records rather than cached list rows.
+
+Failure is persistent and inline in the same session row with its retained
+title, date, and notes, keyboard-operable Retry, and targeted Discard. A
+not-found response is mapped to localized unavailable-target recovery copy; raw
+backend detail is not rendered. It never removes the draft or changes another
+row, and Retry keeps the same session target. If a later campaign list omits
+that failed scope, the view presents a recovery-only unavailable row from its
+complete session draft; after targeted discard the absent clean row disappears.
+Navigation, campaign switching, and an accepted stale load cannot inject another
+campaign's value or error. Successful Retry returns focus to the title when that
+session row is expanded; if the row is collapsed, it uses the stable session
+header as the same-scope fallback. Repeated failure restores focus to that same
+row's replacement Retry button.
+
+Session Discard is an explicit, keyboard-operable action. Activating it while an
+edited field has focus suppresses the blur autosave caused by focus movement,
+restores the complete saved baseline without IPC, and moves focus to the stable
+session header. It affects no other draft, including an unsent Oracle question.
+
+Deleting a session is already an explicit destructive intent. While its write
+is active, Delete remains unavailable with the wait-for-saving explanation so an
+update cannot race behind deletion. With no active write, the existing
+confirmation remains required. From confirmation until the delete command
+settles, every field and the Delete, Retry, and Discard actions are disabled;
+blur, Retry, and any other attempted interaction cannot start or queue a session
+save behind deletion. A successful delete cancels only that scope's queued
+request through `removeAfterDelete`, removes exactly that coordinator scope, and
+removes the row. A delete failure leaves the draft and recovery state intact and
+re-enables the fields and recovery actions.
 
 The existing New Session button continues to create a default backend session
 immediately; designing a separate new-session form is outside this draft-loss
@@ -917,14 +1066,40 @@ an unrelated consistency issue below.
 
 ### Rule-entry table notes
 
-Rule notes remain blur-save. Each note has a campaign/collection/record editing
-scope and a record-target save lane. Collapse, tab changes, collection changes,
-view navigation, and campaign switches retain and isolate values. Failure is
-inline beneath that textarea with Retry.
+Rule notes remain blur-save. Each normalized draft is `{ notes: string }`;
+backend `null` is `""` while editing and an empty attempted value is converted
+back to `null` only at IPC. Compiled body, record metadata, expansion, search,
+and redo-objection state never affect note dirty state. Each note has a
+campaign/collection/record editing scope and a `rule:{rule-id}` target lane.
+Thus Campaign A and B never display each other's retained drafts while two
+presentations of a shared rule record still cannot write concurrently.
 
-`update_rule_notes` returns the updated `RuleEntry` (or a not-found error) rather
-than `void`. That returned record is the canonical acknowledgment. This service
-change stays in the existing Codex rule aggregate; it adds no persistence model.
+`CampaignView` passes both active campaign and the app-lifetime coordinator to
+`RulesPanel`. Loads are keyed by campaign plus collection and use the same
+liveness, request-generation, and request-start acknowledgment snapshot rule as
+sessions. Collapse, Books/Rules tab changes, collection changes, view
+navigation, and campaign switches retain and isolate values. A returned list
+row refreshes a clean draft only when no newer acknowledgment occurred after
+that list request began. The textarea always reads the coordinator projection,
+never `notesDraft` or a cached `RuleEntry` baseline.
+
+Failure is inline beneath that exact textarea with target-preserving Retry and
+Discard. Rejection is caught by the coordinator path, so no unhandled promise is
+emitted. Retry success focuses the same rule textarea; repeated failure restores
+focus to that rule's replacement Retry control. Not-found remains recoverable
+and cannot mutate another entry. A missing at-risk rule on reload may be exposed
+as a recovery-only unavailable row identified by its retained target ID; it is
+presentation, never persisted rule content.
+
+`update_rule_notes` changes from `Result<(), String>` to
+`Result<RuleEntry, String>`. The service executes `UPDATE ... RETURN AFTER`,
+parses exactly one row, and returns a not-found error for zero rows. The Tauri
+command preserves that result and `commands.ts` exposes `Promise<RuleEntry>`.
+The adapter normalizes the returned record through `{ notes: string }`; it never
+acknowledges from `void` or by echoing the request. This remains inside the
+existing Codex rule aggregate and generic SurrealDB connection boundary: no new
+trait, repository, persistence model, schema, dependency, or Rust draft domain
+is added.
 
 ### Deleted or unavailable targets
 
@@ -1367,6 +1542,122 @@ Feature: Preserve work while moving through a campaign
     Then the changed rule note is shown as saved
     And the rule-note failure indication is cleared
 
+  Scenario: Keep an in-flight session draft separate between campaigns
+    Given a save of my changed session title is in progress
+    When I switch to campaign B
+    Then campaign A's session draft is not shown in campaign B
+    When I return to campaign A
+    Then the changed session title is preserved
+    And its save is still in progress
+
+  Scenario: Reverting a session edit to its saved baseline clears pending state
+    Given I have changed a session title without blurring it
+    When I restore the original session title
+    Then the session no longer indicates unsaved changes
+    And no session save has been sent
+
+  Scenario: Preserve a session draft when its target is unavailable
+    Given I have changed a session title
+    When saving reports that the session is no longer available
+    Then the changed session title remains available
+    And the session shows the localized unavailable-target recovery
+    And the raw session backend detail is not shown
+    When I retry the unavailable session save
+    Then Retry still targets the same session
+
+  Scenario: Do not let a session list requested before acknowledgment restore old content
+    Given a save of my changed session title is in progress
+    And the next Campaign A session list completes with the earlier saved title
+    When I navigate to Oracle before the save completes
+    And I return to Sessions before the held list completes
+    And the pending session save completes
+    And the held session list completes
+    Then the changed session title is preserved
+    And it is shown as saved
+    When a later session list loads newer canonical content
+    Then the newer canonical session title is shown
+
+  Scenario: Ignore a session list from an obsolete same-campaign view
+    Given the next Campaign A session list is held with obsolete content
+    When I open Sessions and leave before that list completes
+    And the backend session gains newer canonical content
+    And I return to Sessions
+    Then the newer canonical session title is shown
+    When the obsolete session list completes
+    Then the newer canonical session title is still shown
+
+  Scenario: Wait for a session save before deleting it
+    Given I have an unsent question in campaign A
+    And a save of an earlier session draft revision is in progress
+    Then Delete is unavailable for that session
+    And I am told to wait for the session save to finish
+    When the earlier save completes
+    And I activate Delete and explicitly confirm deletion
+    Then the session and only its retained draft are removed
+
+  Scenario: Prevent session writes while confirmed deletion is pending
+    Given I have an unsent question in campaign A
+    And a session save has failed while its title field is focused
+    When I confirm deleting the session and deletion remains in progress
+    Then the session fields and its Delete, Retry, and Discard actions are unavailable
+    When I attempt to retry while the session deletion is pending
+    Then no session save starts behind deletion
+    When the pending session deletion completes
+    Then the session and only its retained draft are removed
+
+  Scenario: Discard a session draft with the keyboard
+    Given I have an unsent question in campaign A
+    And I have changed a session title without blurring it
+    When I activate the session Discard action with the keyboard
+    Then the saved session title is restored
+    And focus moves to the stable session header
+    And the unsent Oracle question remains intact
+
+  Scenario: Retain a rule note while navigating and keep campaigns separate
+    Given a save of my changed rule note is in progress
+    When I navigate to Oracle before the rule-note save completes
+    And I return to the Initiative rule
+    Then the changed rule note is preserved and shown as saving
+    When I switch to campaign B
+    And I return to the Initiative rule
+    Then campaign A's changed rule note is not shown in campaign B
+    When I return to campaign A
+    And I return to the Initiative rule
+    Then the changed rule note is preserved and shown as saving
+
+  Scenario: Continue editing a rule note during a save
+    Given a save of an earlier rule-note revision is in progress
+    When I make a newer edit to the rule note
+    And the earlier rule-note save completes
+    Then my newer rule-note edit remains intact
+    And the rule note is not incorrectly marked as saved
+
+  Scenario: Coalesce rapid rule-note saves without overlapping writes
+    Given rule-note saves are being held open
+    When I request rapid saves for three different rule notes
+    Then the rule-note save attempts do not overlap
+    When the pending rule-note saves are acknowledged
+    Then the newest rule note is preserved
+    And only the newest rule-note revision is shown as saved
+
+  Scenario: Keep an unavailable rule-note failure on its row and target
+    Given I have changed the table notes for rule "Initiative"
+    When saving reports that rule "Initiative" is no longer available
+    Then the changed rule note remains available
+    And the rule note shows an actionable unavailable-target failure
+    When I retry the unavailable rule-note save with the keyboard
+    Then Retry still targets rule "Initiative"
+    And focus remains on the rule-note Retry action
+
+  Scenario: Preserve queued rule saves from each campaign sharing one target
+    Given a Campaign A Initiative rule-note save is in progress
+    When Campaign B requests its Initiative rule-note save
+    And Campaign A requests a newer Initiative rule-note save
+    Then Initiative rule-note writes do not overlap
+    When all three Initiative rule-note writes are acknowledged
+    Then each campaign's requested rule-note write was preserved in order
+    And the newest Campaign A rule note is persisted as saved
+
   Scenario: Navigate while an automatic save is pending
     Given a save of my changed session title is in progress
     When I navigate to Oracle before the save completes
@@ -1374,6 +1665,14 @@ Feature: Preserve work while moving through a campaign
     And I return to Sessions
     Then the changed session title is preserved
     And it is shown as saved
+
+  Scenario: Retain a focused session edit when navigating to another view
+    Given I have changed a session title without blurring it
+    When I navigate to Oracle
+    Then no session save has been sent
+    When I return to Sessions
+    Then the changed session title is preserved
+    And it remains shown as unsaved
 
   Scenario: Coalesce multiple rapid saves without overwriting newer content
     Given session saves are being held open
@@ -1470,7 +1769,9 @@ Feature: Preserve work while moving through a campaign
   destination acknowledgment, source-to-destination convergence, explicit
   promotion-conflict resolution, refusal to absorb any at-risk or
   target-mismatched destination, invalid promotion rejection, coalescing, and
-  deferred promises without timers.
+  target-queue coalescing that replaces only the same scope while preserving
+  distinct scopes sharing a target, waiter settlement, chronological final
+  intent, and deferred promises without timers.
 - Svelte component tests verify restored values, status announcements, inline
   failure, backend-validation Retry versus frontend required-field validation,
   create-r1/edit-r2 remapping without duplicate creation, cross-instance scope
@@ -1496,6 +1797,20 @@ Feature: Preserve work while moving through a campaign
   while saving, post-settlement recovery, discard confirmation, and focus
   restoration. Deferred promises,
   rather than clocks or timers, control the list and update completion order.
+- Session adapter tests use complete normalized values to prove title trimming,
+  date/notes retention, baseline reversion without IPC, per-session coalescing,
+  equal-content stale acknowledgment, campaign isolation, recovery-only missing
+  rows, scope-aware blur suppression during navigation and recovery actions, and
+  the request-start authority snapshot. They explicitly resolve a
+  pre-acknowledgment list response after the save acknowledgment, then prove a
+  genuinely later load can refresh the clean scope. Retry focus assertions cover
+  expanded-title success, collapsed-header fallback, and repeated-failure Retry
+  retention.
+- Rule-note adapter tests normalize `null`/empty consistently and cover
+  campaign-plus-collection isolation, collapse/remount retention, target-lane
+  serialization across two campaign scopes for the same shared rule, stale
+  completion, no unhandled rejection, missing-target Retry/Discard, and
+  successful/repeated-failure focus handoff for the exact textarea.
 - Executable Gherkin drives the real frontend through the established IPC mock.
   The mock gains deterministic deferred responses and an in-memory persisted
   record model, so assertions cover visible values and persistence outcomes, not
@@ -1505,8 +1820,9 @@ Feature: Preserve work while moving through a campaign
   and Retry scenarios continue to cover the user-facing result of an applicable
   malformed acknowledgment, while focused state/coordinator tests establish the
   ordering and immutability guarantees directly.
-- Rust unit/service tests make rule-note update return the updated record and
-  reject a missing ID.
+- Rust service tests make rule-note update return the updated record—including
+  the canonical `notes` value—and reject a missing ID; the Tauri command smoke
+  test and frontend wrapper typecheck verify the return type reaches the adapter.
 - A Linux `tauri-driver` check exercises the actual native close-request event,
   including an already-running save; mocked browser/component coverage does not
   substitute for it.

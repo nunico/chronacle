@@ -50,6 +50,10 @@ and `git diff --stat`. Do not commit, push, merge, or create a PR.
 - `apps/desktop/tests/e2e/backend/steps/draft-save-reliability.steps.ts`
 - `apps/desktop/tests/e2e/backend/ipc-mock.ts`
 - `apps/desktop/tests/e2e/ui/draft-close.e2e.mjs`
+- Create `apps/desktop/src/views/SessionLogView.test.ts` for Slice 3 campaign/load
+  integration coverage
+- Create `apps/desktop/src/components/SessionList.test.ts` for Slice 3 row-level
+  scope/status integration coverage
 
 **Slice 1 implementer-owned:**
 
@@ -83,13 +87,18 @@ and `git diff --stat`. Do not commit, push, merge, or create a PR.
 
 **Slice 3 implementer-owned:**
 
+- Modify `apps/desktop/src/shell/Shell.svelte`
+- Modify `apps/desktop/src/views/CampaignView.svelte`
 - Modify `apps/desktop/src/views/SessionLogView.svelte`
-- Create `apps/desktop/src/views/SessionLogView.test.ts`
 - Modify `apps/desktop/src/components/SessionList.svelte`
 - Modify `apps/desktop/src/components/SessionRow.svelte`
 - Modify `apps/desktop/src/components/SessionRow.test.ts`
 - Modify `apps/desktop/src/components/RulesPanel.svelte`
 - Modify `apps/desktop/src/components/RulesPanel.test.ts`
+- Modify `apps/desktop/src/lib/drafts/draft-state.ts`
+- Modify `apps/desktop/src/lib/drafts/draft-state.test.ts`
+- Modify `apps/desktop/src/lib/drafts/draft-coordinator.svelte.ts`
+- Modify `apps/desktop/src/lib/drafts/draft-coordinator.svelte.test.ts`
 - Modify `apps/desktop/src/lib/commands.ts`
 - Modify `apps/desktop/src-tauri/src/commands/codex_commands.rs`
 - Modify `crates/chronacle-extraction/src/codex_service/rules.rs`
@@ -977,81 +986,258 @@ and `git diff --stat`. Do not commit, push, merge, or create a PR.
 
 ## Task 4: Make Session and Rule Autosave Reliable
 
-**Owner:** Slice 3 implementer after test engineer red tests.
+**Owners:** acceptance/integration test engineer first; Slice 3 implementer for
+focused tests and production; independent test engineer and reviewers afterward.
+No two owners edit the same file concurrently.
 
-- [ ] Write/red-run SessionRow tests with deferred `updateSession`: visible
-      Unsaved/Saving/Saved states, failure retains all three fields, Retry saves the
-      same session, edit r2 during r1 completion remains pending even when r1's
-      canonical response equals r2, r2 becomes Saved only after its own
-      acknowledgment, three rapid blur requests never overlap and coalesce to
-      newest, keyboard Retry success restores focus to the title before Retry is
-      removed, and repeated failure retains/restores focus on the Retry action.
-- [ ] Write/red-run RulesPanel equivalents for table notes, collection/record
-      isolation, collapse/remount retention, rejection without unhandled promise,
-      retry, stale completion, unavailable target, success focus handoff to the
-      same rule textarea, and repeated-failure focus retention on Retry.
-- [ ] Write/red-run `SessionLogView.test.ts` proving Campaign B never displays
-      Campaign A's session/draft and stale Campaign A loading cannot win.
-- [ ] Write a failing Rust service test before changing production:
+- [ ] Test engineer maintains the Slice 3 Gherkin in the executable
+      `draft-save-reliability.feature`, keeps the design's acceptance block
+      byte-identical to that source, and implements only its step/harness files.
+      Cover session baseline reversion, campaign isolation, failure/Retry,
+      edit-during-save, pending navigation, rapid requests, unavailable targets,
+      rule tab/remount retention, campaign/collection isolation, and rule races.
+      The session unavailable journey must assert localized recovery text, absence
+      of raw backend detail, and same-target Retry. The deletion journeys must
+      assert active-save blocking, confirmed-delete disabling of fields and
+      Delete/Retry/Discard, no save starting behind deletion, exact-scope cleanup,
+      and unrelated Oracle retention. The keyboard Discard journey must prove the
+      focus-loss blur starts no save, restores the complete saved baseline, and
+      focuses the stable session header. The focused-navigation journey must prove
+      that moving from a dirty session field to another app view starts no IPC and
+      restores that edit as pending when its scope is reopened.
+      Create `SessionLogView.test.ts` for component-instance liveness, A→B→A
+      request-generation ordering, request-start acknowledgment snapshots, and
+      recovery-only missing session rows. Use `SessionList.test.ts` for row-local
+      failure/status and record isolation. Use deferred promises, never sleeps.
+- [ ] Test engineer runs the new contract before production changes:
+
+  ```bash
+  pnpm -C apps/desktop test:run src/views/SessionLogView.test.ts \
+    src/components/SessionList.test.ts
+  pnpm -C apps/desktop exec bddgen
+  pnpm -C apps/desktop e2e:backend -- --grep "Preserve work"
+  ```
+
+  Expected: focused journeys fail because the current adapters lose drafts,
+  overlap writes, and expose no actionable state. Existing non-Slice-3 journeys
+  remain green. Report exact behavioral failures rather than weakening steps.
+
+- [ ] Implementation subagent first runs those same red tests. Then extend
+      `SessionRow.test.ts` with deterministic deferred `updateSession` tests for:
+      the complete value `{ sessionNumber, title, datePlayed, notes }`; input-only
+      Unsaved; baseline reversion without IPC; blur Saving/Saved; canonical title
+      trimming; all-field retention on rejection; same-target Retry; r2 during r1;
+      r1 canonical content equal to r2; three rapid blurs coalesced without overlap;
+      pending navigation/remount; not-found Retry/Discard; and keyboard focus on
+      the same title after expanded-row success, stable session header after
+      collapsed-row success, or replacement Retry after repeated failure. Prove
+      that focus moving to another app view or editing scope is navigation and
+      does not invoke autosave, while ordinary blur within the same editing scope
+      may request it. Recovery controls must suppress their incidental blur so
+      Retry owns exactly one request and Discard owns none.
+      Also prove Delete is unavailable during an active write; after confirmation,
+      fields and Delete/Retry/Discard are disabled and blur or Retry cannot start
+      or queue a save. Successful deletion cancels queued work and clears only
+      that scope. Delete failure retains the draft and re-enables editing and
+      recovery. Keyboard Discard must suppress its focus-loss blur save, restore
+      the complete baseline without IPC, and focus the stable session header.
+- [ ] Extend `RulesPanel.test.ts` with deterministic deferred tests for:
+      `{ notes: string }` normalization (`null` ↔ empty textarea); input-only
+      Unsaved; baseline reversion; blur Saving/Saved; collapse and remount;
+      campaign, no-campaign, collection, and record isolation; two campaign scopes
+      sharing one serialized `rule:{id}` lane; r2 during r1; rapid blur coalescing;
+      caught rejection; canonical returned notes; not-found Retry/Discard; and
+      same-textarea/replacement-Retry focus. Run these tests red before production:
+
+  ```bash
+  pnpm -C apps/desktop test:run src/components/SessionRow.test.ts \
+    src/components/SessionList.test.ts src/components/RulesPanel.test.ts \
+    src/views/SessionLogView.test.ts
+  ```
+
+  Expected: the current components have local mutable drafts, direct overlapping
+  invokes, console/unhandled failures, and no shared status or Retry.
+
+- [ ] In `rules_tests.rs`, add a red service test using the existing
+      `setup_db_with_collection` fixture and an actual seeded `rule_entry`:
 
   ```rust
   #[tokio::test]
   async fn update_rule_notes_returns_saved_entry_and_rejects_missing_id() {
-      let db = setup_test_db().await;
-      let entry = seed_rule_entry(&db, "house rules", None).await;
+      let (db, col_id) = setup_db_with_collection().await;
+      db.query(
+          "CREATE rule_entry SET collection = type::thing('collection', $cid), \
+           name = 'Grappling', category = 'mechanic', body = 'rules', \
+           notes = NULL, page_refs = [], sources = [], \
+           compiled_at = time::now(), stale = false",
+      )
+      .bind(("cid", col_id.clone()))
+      .await
+      .unwrap();
+      let entry = list_rule_entries(&db, &col_id).await.unwrap().remove(0);
+
       let saved = update_rule_notes(&db, &entry.id, Some("roll once".into()))
           .await
           .expect("existing rule must acknowledge");
+      assert_eq!(saved.id, entry.id);
       assert_eq!(saved.notes.as_deref(), Some("roll once"));
-      assert!(update_rule_notes(&db, "missing", None).await.is_err());
+
+      let error = update_rule_notes(&db, "missing", None)
+          .await
+          .expect_err("missing rule must not be acknowledged");
+      assert!(error.to_lowercase().contains("not found"));
   }
   ```
 
-- [ ] Run red:
+  Run: `cargo test -p chronacle-extraction update_rule_notes_returns_saved_entry -- --nocapture`
+
+  Expected: compile failure because `update_rule_notes` still returns `()`.
+
+- [ ] Add a red coordinator test with two rule scopes sharing `rule:r1`: hold A1
+      active, queue B1, then request A2. Assert maximum concurrency is one, B1 is
+      not dropped, execution order is A1→B1→A2, each applicable completion updates
+      only its own scope, all returned promises settle, and A2 is the final
+      persisted intent. Change each target lane from one queued slot to an ordered
+      queue. A new queued request removes only an older request for the same scope,
+      transfers its waiters, and appends the replacement; distinct scopes remain
+      ordered. Update queued cancellation, `hasQueued`, lane completion, and
+      discard-all accordingly. Run red then green:
 
   ```bash
-  pnpm -C apps/desktop test:run src/components/SessionRow.test.ts \
-    src/views/SessionLogView.test.ts src/components/RulesPanel.test.ts
-  cargo test -p chronacle-extraction update_rule_notes_returns_saved_entry -- --nocapture
+  pnpm -C apps/desktop test:run \
+    src/lib/drafts/draft-coordinator.svelte.test.ts
   ```
 
-  Expected: UI states/recovery fail; Rust return type/absence behavior fails.
+- [ ] Change `ruleScope` to accept `string | null` and encode null as
+      `no-campaign`; add its focused identity/isolation test before implementation.
+      Do not change target identity: every scope for the same rule still writes
+      through `rule:{rule-id}`.
+- [ ] Add a focused red coordinator test for `removeAfterDelete(scope)`. It must
+      refuse an active write, settle/cancel only the deleted scope's queued intent,
+      remove exactly that scope after successful backend deletion, preserve other
+      scopes sharing the target plus unrelated drafts, and settle canceled request
+      promises without invoking their writer. Implement only this narrow lifecycle
+      operation; delete confirmation and pending UI state remain adapter/application
+      coordination, not pure draft-state rules.
+- [ ] Pass the app-lifetime coordinator from `Shell` through `SessionLogView` →
+      `SessionList` → `SessionRow`. Normalize each backend row and returned
+      acknowledgment through:
 
-- [ ] Pass the shared coordinator SessionLog → SessionList → SessionRow. Open
-      `session:{campaign}:{id}`, revise on input, and request save on blur. Retry
-      calls the same adapter with current scoped content. Apply returned canonical
-      Session as acknowledgment; update the list without overwriting a newer draft.
-      Normalize session editor values to `DraftValue`. Reload sessions in a
-      campaign-keyed effect with a captured-scope stale guard, so only an
-      authoritative current-context result reaches `open`; clean scopes refresh
-      while at-risk scopes retain their local snapshots. Await Retry; after the DOM
-      settles, focus the same session title when success removes Retry or retain/
-      restore focus to Retry when failure remains.
-- [ ] Pass coordinator and active campaign through CampaignView → RulesPanel.
-      Open `rule:{campaign}:{collection}:{id}`, retain on collapse/navigation, and
-      blur-save through the rule target lane. Catch all promise rejection and render
-      `SaveStatus` adjacent to the textarea. Normalize note values before they cross
-      the draft boundary and pass only current-context collection loads to `open`.
-      Apply the same awaited focus rule to that rule's textarea/Retry; never move
-      focus to another rule row.
-- [ ] Change Rust `update_rule_notes` to `UPDATE ... RETURN AFTER`, parse exactly
-      one `RuleEntry`, and return an error if absent. Propagate `Result<RuleEntry,
-String>` through the Tauri command and `Promise<RuleEntry>` through
-      `commands.ts`. Use returned notes as the canonical baseline.
-- [ ] Run green:
+  ```ts
+  interface SessionDraftValue {
+    readonly sessionNumber: number;
+    readonly title: string;
+    readonly datePlayed: string;
+    readonly notes: string;
+  }
+  ```
+
+      Open `session:{campaignId}:{session.id}` with target
+      `session:{session.id}`. Revise on every input; request save only on ordinary
+      blur that remains in that editing scope or on Retry. Treat focus movement to
+      another app view, campaign, or record scope as navigation: suppress the
+      resulting blur request and retain the current revision as pending. Recovery
+      controls also suppress incidental blur; Retry starts its explicit request
+      and Discard starts none. The writer uses the immutable attempt value, returns
+      the normalized `Session`, and never mutates cached rows as acknowledgment
+      authority.
+      `SessionRow` renders `SaveStatus` from the coordinator record and derives its
+      collapsed title/date plus expanded fields from that record. Keep Delete
+      disabled/described during an active write. After the existing confirmation,
+      set a row-local deleting state before focus can leave the action: disable all
+      session fields and Delete, Retry, and Discard, and make blur/Retry handlers
+      no-ops so no save starts or queues behind deletion. On success call the
+      coordinator's narrow `removeAfterDelete(scope)` operation to cancel only
+      that scope's queued intent, remove only that scope, and remove the row. On
+      delete failure preserve the draft and recovery state and re-enable the
+      fields and actions. A keyboard Discard sets a one-shot blur-suppression guard
+      before moving focus, restores the complete baseline without IPC, and focuses
+      the stable session header. Map session not-found failures to localized
+      unavailable-target recovery copy; never render raw backend detail, and keep
+      Retry bound to the original session target. After successful Retry, focus the
+      title if its row remains expanded; use the stable session header if it is
+      collapsed. Repeated failure retains or restores focus on Retry.
+
+- [ ] Replace SessionLog's `onMount`-only load with a campaign-keyed effect. Each
+      load captures component liveness, a monotonically increasing request number,
+      campaign ID, and a map of current `lastAcknowledgedAttemptId` values for the
+      exact `session:{campaignId}:` prefix. At completion, reject an obsolete
+      instance/request/context. Before `open(..., "authoritative-list")`, skip a
+      row whose current acknowledgment generation is newer than the request-start
+      snapshot. Reconcile before publishing presentation, merge absent at-risk
+      scopes as recovery-only unavailable rows, and never reapply a cached row on
+      later expansion. A genuinely later load may refresh a clean scope.
+- [ ] Pass `activeCampaignId` (including null) and the same coordinator through
+      `CampaignView` to `RulesPanel`. Normalize only:
+
+  ```ts
+  interface RuleNoteDraftValue {
+    readonly notes: string;
+  }
+  ```
+
+      Open
+      `rule:{campaignId ?? "no-campaign"}:{collectionId}:{entry.id}` with target
+      `rule:{entry.id}`. Convert returned `null` to `""`; convert `""` to `null`
+      only in the writer. Revise on input and save only on blur/Retry. Remove
+      `notesDraft` as authority; search, expansion, body, redo objection, and page
+      references remain presentation state. Catch every save through the
+      coordinator and place `SaveStatus` adjacent to the exact textarea.
+
+- [ ] Give RulesPanel loads the same component-liveness, campaign+collection
+      request-generation, exact-prefix acknowledgment snapshot, reconcile-before-
+      publish, and recovery-only unavailable-row rules as sessions. An A-scope
+      completion updates only A even while B displays the same shared rule; target
+      lanes serialize A and B attempts. Retry awaits settlement, then focuses the
+      same textarea on success or the replacement Retry on repeated failure.
+- [ ] Change the Codex rule service to return truthful canonical persistence:
+
+  ```rust
+  pub async fn update_rule_notes<C: Connection>(
+      db: &surrealdb::Surreal<C>,
+      rule_entry_id: &str,
+      notes: Option<String>,
+  ) -> Result<RuleEntry, String>
+  ```
+
+      Execute `UPDATE type::thing('rule_entry', $id) SET notes = $notes RETURN AFTER`,
+      deserialize the first response into `Vec<RuleEntryListRow>`, map exactly one
+      row through the existing `From` implementation, and return a descriptive
+      not-found error when empty. Keep this in the existing generic-Connection
+      Codex service; add no trait, schema, dependency, or draft state to Rust.
+      Propagate `Result<RuleEntry, String>` through `codex_commands.rs` and
+      `Promise<RuleEntry>` through `commands.ts`.
+
+- [ ] Implementation subagent runs green and Svelte analysis:
 
   ```bash
   cargo test -p chronacle-extraction update_rule_notes -- --nocapture
   cargo test -p Chronacle codex_commands -- --nocapture
-  pnpm -C apps/desktop test:run src/components/SessionRow.test.ts \
+  pnpm -C apps/desktop test:run src/lib/drafts/draft-state.test.ts \
+    src/lib/drafts/draft-coordinator.svelte.test.ts \
+    src/components/SessionRow.test.ts src/components/SessionList.test.ts \
     src/views/SessionLogView.test.ts src/components/RulesPanel.test.ts \
-    src/views/CampaignView.test.ts
+    src/views/CampaignView.test.ts \
+    src/shell/Shell.test.ts
   pnpm -C apps/desktop typecheck
+  pnpm -C apps/desktop exec svelte-check --tsconfig ./tsconfig.json
+  pnpm -C apps/desktop lint
+  npx -y @sveltejs/mcp svelte-autofixer \
+    apps/desktop/src/views/SessionLogView.svelte --svelte-version 5
+  npx -y @sveltejs/mcp svelte-autofixer \
+    apps/desktop/src/components/SessionRow.svelte --svelte-version 5
+  npx -y @sveltejs/mcp svelte-autofixer \
+    apps/desktop/src/components/RulesPanel.svelte --svelte-version 5
   ```
 
-- [ ] Test engineer independently executes session/rule failure, race,
-      navigation, rapid-save, and unavailable-target Gherkin. Complete both reviews,
-      fix, rerun, and re-review.
+- [ ] Test engineer independently runs the focused tests, complete Slice 3
+      Gherkin, full frontend suite, typecheck/lint, Rust service tests, and inspects
+      visible values plus persisted IPC-mock state. Specification reviewer then
+      compares the exact Gherkin/design/code; only after approval does the
+      code/architecture reviewer assess DDD placement, race correctness,
+      accessibility, and regression risk. Implementer fixes substantiated
+      findings; test engineer reruns affected checks; both reviewers re-review
+      until Slice 3 is accepted.
 
 ## Task 5: Guard Normal Native Close
 
