@@ -13,6 +13,9 @@ headings:
   - id: was-gespeichert-bleibt
     text: Was gespeichert bleibt
     level: 2
+  - id: entitaetsentwurf-behalten
+    text: Entitätsentwurf behalten
+    level: 2
   - id: beispiel
     text: Beispiel
     level: 2
@@ -20,8 +23,6 @@ headings:
     text: Aktuelle Grenzen
     level: 2
 ---
-
-<!-- German proofreading requested -->
 
 Kampagnennotizen werden als Entitäten in acht Notizbüchern gespeichert: Spielercharaktere, NSCs, Orte, Fraktionen, Kreaturen, Gegenstände, Ereignisse und Verschiedenes.
 
@@ -34,7 +35,11 @@ Kampagnennotizen werden als Entitäten in acht Notizbüchern gespeichert: Spiele
 
 <h2 id="was-gespeichert-bleibt">Was gespeichert bleibt</h2>
 
-Name, alternative Namen, Zusammenfassung, Notizen und artspezifische Felder werden mit der Kampagne gespeichert. Änderungen daran markieren einen erzeugten **Kodexartikel** als veraltet, ersetzen aber nicht deinen Text. Gespeicherte Verbindungen erscheinen unter **Beziehungen** und im Graphen der Entität.
+Name, Alternativnamen, Zusammenfassung, Notizen und artspezifische Felder werden mit der Kampagne gespeichert. Änderungen daran markieren einen erzeugten **Kodexartikel** als veraltet, ersetzen aber nicht deinen Text. Gespeicherte Verbindungen erscheinen unter **Beziehungen** und im Graphen der Entität.
+
+<h2 id="entitaetsentwurf-behalten">Entitätsentwurf behalten</h2>
+
+Änderungen bleiben im Entwurf ihrer Kampagne und Entität erhalten, wenn du eine andere Ansicht oder einen anderen Eintrag öffnest. Eine neue Entität entsteht erst mit **Erstellen**; eine bestehende ändert sich erst mit **Speichern**. An **Ungespeicherte Änderungen**, **Wird gespeichert…**, **Gespeichert** oder **Speichern nicht möglich** erkennst du, ob Chronacle den Text nur aufbewahrt oder das Speichern bestätigt hat. Nutze nach einem Fehler **Erneut versuchen**. Um einen Entitätsentwurf aufzugeben, wähle **Abbrechen** und bestätige danach **Änderungen verwerfen**. Bei einer bestehenden Entität wird dadurch die gespeicherte Fassung wiederhergestellt; bei einer neuen wird dieser ungespeicherte Entwurf entfernt. Andere Entwürfe bleiben unberührt. Unter [Entwürfe behalten und Speichervorgänge wiederholen](/de/handbuch/notizen-und-sitzungen/speichern-und-wiederherstellen) findest du Hinweise zu nicht mehr verfügbaren Einträgen, Konflikten beim Erstellen und dem Schließen der App.
 
 <h2 id="beispiel">Beispiel</h2>
 
