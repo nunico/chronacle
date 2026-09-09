@@ -46,6 +46,7 @@
     type NavTarget,
   } from '../lib/shortcuts';
   import { i18n } from '../lib/locale.svelte';
+  import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
 
   const ENTITY_KIND_MAP: Partial<Record<NoteCategoryId, EntityKind>> = {
     npcs: 'npc',
@@ -61,6 +62,11 @@
   const KIND_TO_CATEGORY = Object.fromEntries(
     Object.entries(ENTITY_KIND_MAP).map(([cat, kind]) => [kind, cat]),
   ) as Record<EntityKind, NoteCategoryId>;
+
+  // Drafts outlive whichever conditional route is currently mounted. Keeping
+  // this coordinator at the shell boundary makes navigation a presentation
+  // concern instead of a destructive editing event.
+  const draftCoordinator = new DraftCoordinator();
 
   interface PendingCreate {
     kind: EntityKind;
@@ -613,6 +619,7 @@
     {#if view === 'oracle'}
       <OracleView
         {activeCampaignId}
+        {draftCoordinator}
         onOpenUpload={() => openFilePicker()}
         focusNonce={chatFocusNonce}
         onSavedToCodex={() => refreshMaintenanceCount()}
@@ -620,6 +627,7 @@
     {:else if view === 'campaign'}
       <CampaignView
         {activeCampaignId}
+        {draftCoordinator}
         {campaigns}
         {setActiveCampaignId}
         onOpenUpload={(colId) => openFilePicker(colId)}
@@ -653,6 +661,7 @@
       <EntityManager
         campaignId={activeCampaignId}
         kind={ENTITY_KIND_MAP[view.category] as EntityKind}
+        {draftCoordinator}
         createNonce={entityCreateNonce}
         openId={pendingOpen && pendingOpen.kind === ENTITY_KIND_MAP[view.category]
           ? pendingOpen.id

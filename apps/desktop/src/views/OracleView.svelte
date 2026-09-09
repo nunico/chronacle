@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import {
     chatSend,
@@ -26,12 +26,16 @@
   import { showToast } from '../lib/toast.svelte';
   import { i18n } from '../lib/locale.svelte';
   import { resolveResponseLanguage } from '../lib/i18n/detect-language';
+  import SaveStatus from '../components/SaveStatus.svelte';
+  import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
+  import { oracleScope, statusOf, type DraftRecord } from '../lib/drafts/draft-state';
 
   let {
     activeCampaignId,
     onOpenUpload,
     focusNonce = 0,
     onSavedToCodex,
+    draftCoordinator = new DraftCoordinator(),
   }: {
     activeCampaignId: string | null;
     onOpenUpload: () => void;
@@ -39,6 +43,7 @@
     focusNonce?: number;
     /// Called after a successful Save-to-Codex distillation with the count created.
     onSavedToCodex?: (count: number) => void;
+    draftCoordinator?: DraftCoordinator;
   } = $props();
 
   let savingToCodex = $state<number | null>(null);
@@ -66,7 +71,9 @@
   }
 
   let messages = $state<Array<{ role: string; content: string }>>([]);
-  let input = $state('');
+  let composerScope = $derived(oracleScope(activeCampaignId));
+  let composerDraft = $state<DraftRecord<string> | undefined>(undefined);
+  let input = $derived(composerDraft?.value ?? '');
   let isLoading = $state(false);
   let currentResponse = $state('');
   let unlistenListener: UnlistenFn | null = null;
@@ -75,6 +82,11 @@
   let popoverEl = $state<HTMLDivElement | undefined>(undefined);
   let atBottom = $state(true);
   let hasSources = $state(true);
+
+  $effect(() => {
+    const nextScope = oracleScope(activeCampaignId);
+    composerDraft = untrack(() => draftCoordinator.open(nextScope, null, ''));
+  });
 
   type ExtractionStatus = 'running' | 'done' | 'empty' | 'cancelled' | 'error';
   let extraction = $state<{
@@ -202,9 +214,15 @@
     const t = (text ?? input).trim();
     if (!t || isLoading || extraction?.status === 'running') return;
 
+    const submittedScope = composerScope;
+    const submittedCampaignId = activeCampaignId;
+    const submittedFromComposer = text === undefined;
+
     const cmd = parseCommand(t);
     if (cmd.kind !== 'chat') {
-      input = '';
+      if (submittedFromComposer) {
+        composerDraft = draftCoordinator.revise(submittedScope, '');
+      }
       if (inputEl) {
         inputEl.style.height = 'auto';
         inputEl.focus();
@@ -214,7 +232,9 @@
     }
 
     messages = [...messages, { role: 'user', content: t }];
-    input = '';
+    if (submittedFromComposer) {
+      composerDraft = draftCoordinator.revise(submittedScope, '');
+    }
     if (inputEl) {
       inputEl.style.height = 'auto';
       inputEl.focus();
@@ -223,7 +243,7 @@
     isLoading = true;
     currentResponse = '';
     try {
-      await chatSend(t, activeCampaignId, resolveResponseLanguage(t, i18n.locale));
+      await chatSend(t, submittedCampaignId, resolveResponseLanguage(t, i18n.locale));
     } catch (e) {
       messages = [...messages, { role: 'error', content: String(e) }];
       isLoading = false;
@@ -609,9 +629,12 @@
     <Icon name="sparkles" size={20} />
     <textarea
       bind:this={inputEl}
-      bind:value={input}
+      value={input}
       onkeydown={handleKeydown}
-      oninput={autoGrow}
+      oninput={(event) => {
+        composerDraft = draftCoordinator.revise(composerScope, event.currentTarget.value);
+        autoGrow();
+      }}
       rows="1"
       placeholder={i18n.t('oracle.askPlaceholder')}
     ></textarea>
@@ -651,6 +674,14 @@
       </button>
     {/if}
   </div>
+  {#if input.length > 0}
+    <div class="composer-status">
+      <SaveStatus
+        status={composerDraft ? statusOf(composerDraft) : 'saved'}
+        retainedThisSession={composerDraft ? statusOf(composerDraft) === 'pending' : false}
+      />
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -911,6 +942,10 @@
   }
   .composer-wrap {
     padding: 12px 26px 20px;
+  }
+  .composer-status {
+    max-width: 760px;
+    margin: 6px auto 0;
   }
   .composer {
     max-width: 760px;

@@ -27,6 +27,7 @@
   import RulesPanel from '../components/RulesPanel.svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import { i18n } from '../lib/locale.svelte';
+  import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
 
   let {
     activeCampaignId,
@@ -34,12 +35,14 @@
     setActiveCampaignId,
     onOpenUpload,
     refreshCampaigns,
+    draftCoordinator = new DraftCoordinator(),
   }: {
     activeCampaignId: string | null;
     campaigns: Campaign[];
     setActiveCampaignId: (id: string | null) => void;
     onOpenUpload: (collectionId: string) => void;
     refreshCampaigns: () => Promise<void>;
+    draftCoordinator?: DraftCoordinator;
   } = $props();
 
   let collections = $state<Collection[]>([]);
@@ -543,7 +546,7 @@
         {/each}
       </section>
     {:else if activeTab === 'entities' && active}
-      <EntityManager campaignId={active.id} kind="npc" />
+      <EntityManager campaignId={active.id} kind="npc" {draftCoordinator} />
     {:else if activeTab === 'entities'}
       <p class="muted">{i18n.t('campaign.selectCampaign')}</p>
     {/if}

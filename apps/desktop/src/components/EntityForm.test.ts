@@ -167,6 +167,74 @@ describe('EntityForm', () => {
     expect(screen.getByText(/name is required/i)).toBeTruthy();
   });
 
+  it.each([
+    {
+      boundary: 'record',
+      editingScope: 'entity:camp1:npc:torvin',
+      kind: 'npc' as EntityKind,
+      node: mockNode({ id: 'torvin', name: 'Torvin' }),
+    },
+    {
+      boundary: 'campaign',
+      editingScope: 'entity:camp2:npc:mira',
+      kind: 'npc' as EntityKind,
+      node: mockNode({ id: 'mira', campaign_id: 'camp2', name: 'Mira' }),
+    },
+    {
+      boundary: 'kind',
+      editingScope: 'entity:camp1:location:mira',
+      kind: 'location' as EntityKind,
+      node: mockNode({ id: 'mira', kind: 'location', name: 'Mira' }),
+    },
+  ])(
+    'clears a local required-name error when the $boundary editing scope changes',
+    async (next) => {
+      const rendered = render(EntityForm, {
+        props: {
+          editingScope: 'entity:camp1:npc:mira',
+          kind: 'npc' as EntityKind,
+          node: mockNode({ id: 'mira', name: '' }),
+          onsave: vi.fn(),
+        },
+      });
+      await fireEvent.submit(screen.getByRole('form'));
+      expect(screen.getByText('Name is required.')).toBeInTheDocument();
+
+      await rendered.rerender({
+        editingScope: next.editingScope,
+        kind: next.kind,
+        node: next.node,
+        onsave: vi.fn(),
+      });
+
+      expect(screen.queryByText('Name is required.')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Name', { exact: true })).toHaveValue(next.node.name);
+    },
+  );
+
+  it('retains a local required-name error across unrelated rerenders of the same scope', async () => {
+    const rendered = render(EntityForm, {
+      props: {
+        editingScope: 'entity:camp1:npc:mira',
+        kind: 'npc' as EntityKind,
+        node: mockNode({ id: 'mira', name: '' }),
+        onsave: vi.fn(),
+      },
+    });
+    await fireEvent.submit(screen.getByRole('form'));
+    expect(screen.getByText('Name is required.')).toBeInTheDocument();
+
+    await rendered.rerender({
+      editingScope: 'entity:camp1:npc:mira',
+      kind: 'npc' as EntityKind,
+      node: mockNode({ id: 'mira', name: '' }),
+      onsave: vi.fn(),
+      submitDisabled: true,
+    });
+
+    expect(screen.getByText('Name is required.')).toBeInTheDocument();
+  });
+
   it('shows session dropdown for event kind', () => {
     const sessions = [
       mockSession(),
