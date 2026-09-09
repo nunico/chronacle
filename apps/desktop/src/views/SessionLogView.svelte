@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import {
     getSessions,
@@ -9,14 +9,22 @@
     type EntityKind,
   } from '../lib/commands';
   import SessionList from '../components/SessionList.svelte';
+  import {
+    sessionDraftValue,
+    sessionWithDraft,
+    type SessionDraftValue,
+  } from '../components/SessionRow.svelte';
   import Button from '../components/ui/Button.svelte';
   import { i18n } from '../lib/locale.svelte';
+  import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
+  import { sessionScope, statusOf } from '../lib/drafts/draft-state';
 
   interface Props {
     campaignId: string;
+    draftCoordinator?: DraftCoordinator;
   }
 
-  const { campaignId }: Props = $props();
+  let { campaignId, draftCoordinator = new DraftCoordinator() }: Props = $props();
 
   const ALL_KINDS: EntityKind[] = [
     'npc',
@@ -29,37 +37,106 @@
     'misc',
   ];
 
-  let sessions = $state<Session[]>([]);
+  let backendSessions = $state<Session[]>([]);
   let loading = $state(true);
   let entityMap = new SvelteMap<string, { id: string; kind: string }>();
+  let mounted = true;
+  let sessionRequest = 0;
+  let entityRequest = 0;
 
-  onMount(async () => {
-    await Promise.all([loadSessions(), loadEntities()]);
-    loading = false;
+  onDestroy(() => {
+    mounted = false;
   });
 
-  async function loadSessions() {
-    try {
-      sessions = await getSessions(campaignId);
-    } catch (e) {
-      console.error('Failed to load sessions:', e);
-      sessions = [];
-    }
-  }
+  let sessionPrefix = $derived(`session:${campaignId}:`);
+  let sessions = $derived.by(() => {
+    const retained = draftCoordinator.listByPrefix<SessionDraftValue>(sessionPrefix);
+    const byScope = new Map(retained.map((draft) => [draft.scope, draft]));
+    const presented = backendSessions.map((session) => {
+      const draft = byScope.get(sessionScope(campaignId, session.id));
+      return draft ? sessionWithDraft(session, draft.value) : session;
+    });
+    const backendIds = new Set(backendSessions.map(({ id }) => id));
 
-  async function loadEntities() {
-    try {
-      const results = await Promise.all(ALL_KINDS.map((k) => getEntities(campaignId, k)));
-      entityMap.clear();
-      for (const list of results) {
-        for (const node of list) {
-          entityMap.set(node.name, { id: node.id, kind: node.kind });
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load entities for WikiText:', e);
+    for (const draft of retained) {
+      const id = draft.scope.slice(sessionPrefix.length);
+      if (backendIds.has(id) || statusOf(draft) === 'saved') continue;
+      presented.push({
+        id,
+        campaign_id: campaignId,
+        session_number: draft.value.sessionNumber,
+        title: draft.value.title,
+        date_played: draft.value.datePlayed,
+        notes: draft.value.notes,
+        created_at: null,
+        updated_at: null,
+      });
     }
-  }
+
+    return presented;
+  });
+
+  $effect(() => {
+    const requestedCampaign = campaignId;
+    const request = ++sessionRequest;
+    const prefix = `session:${requestedCampaign}:`;
+    const acknowledgmentsAtStart = untrack(
+      () =>
+        new Map(
+          draftCoordinator
+            .listByPrefix<SessionDraftValue>(prefix)
+            .map((draft) => [draft.scope, draft.lastAcknowledgedAttemptId]),
+        ),
+    );
+    loading = true;
+
+    getSessions(requestedCampaign).then(
+      (loaded) => {
+        if (!mounted || request !== sessionRequest || campaignId !== requestedCampaign) return;
+        for (const session of loaded) {
+          const scope = sessionScope(requestedCampaign, session.id);
+          const currentAcknowledgment =
+            draftCoordinator.get<SessionDraftValue>(scope)?.lastAcknowledgedAttemptId ?? 0;
+          const requestAcknowledgment = acknowledgmentsAtStart.get(scope) ?? 0;
+          if (currentAcknowledgment > requestAcknowledgment) continue;
+          draftCoordinator.open(
+            scope,
+            `session:${session.id}`,
+            sessionDraftValue(session),
+            'authoritative-list',
+          );
+        }
+        backendSessions = loaded;
+        loading = false;
+      },
+      (error: unknown) => {
+        if (!mounted || request !== sessionRequest || campaignId !== requestedCampaign) return;
+        console.error('Failed to load sessions:', error);
+        backendSessions = [];
+        loading = false;
+      },
+    );
+  });
+
+  $effect(() => {
+    const requestedCampaign = campaignId;
+    const request = ++entityRequest;
+    Promise.all(ALL_KINDS.map((kind) => getEntities(requestedCampaign, kind))).then(
+      (results) => {
+        if (!mounted || request !== entityRequest || campaignId !== requestedCampaign) return;
+        entityMap.clear();
+        for (const list of results) {
+          for (const node of list) {
+            entityMap.set(node.name, { id: node.id, kind: node.kind });
+          }
+        }
+      },
+      (error: unknown) => {
+        if (!mounted || request !== entityRequest || campaignId !== requestedCampaign) return;
+        console.error('Failed to load entities for WikiText:', error);
+      },
+    );
+  });
 
   async function handleNewSession() {
     const nextNumber =
@@ -72,18 +149,26 @@
         datePlayed: today,
         notes: '',
       });
-      sessions = [...sessions, created];
+      draftCoordinator.open(
+        sessionScope(campaignId, created.id),
+        `session:${created.id}`,
+        sessionDraftValue(created),
+        'authoritative-list',
+      );
+      backendSessions = [...backendSessions, created];
     } catch (e) {
       console.error('Failed to create session:', e);
     }
   }
 
   function handleUpdate(updated: Session) {
-    sessions = sessions.map((s) => (s.id === updated.id ? updated : s));
+    backendSessions = backendSessions.map((session) =>
+      session.id === updated.id ? updated : session,
+    );
   }
 
   function handleDelete(id: string) {
-    sessions = sessions.filter((s) => s.id !== id);
+    backendSessions = backendSessions.filter((session) => session.id !== id);
   }
 </script>
 
@@ -100,7 +185,14 @@
   {:else if sessions.length === 0}
     <div class="empty">{i18n.t('sessions.empty')}</div>
   {:else}
-    <SessionList {sessions} {entityMap} onUpdate={handleUpdate} onDelete={handleDelete} />
+    <SessionList
+      {campaignId}
+      {sessions}
+      {entityMap}
+      onUpdate={handleUpdate}
+      onDelete={handleDelete}
+      {draftCoordinator}
+    />
   {/if}
 </div>
 
