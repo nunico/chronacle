@@ -777,8 +777,8 @@ export async function getRuleEntries(collectionId: string): Promise<RuleEntry[]>
 }
 
 /** Update a rule entry's freeform GM notes. */
-export async function updateRuleNotes(id: string, notes: string | null): Promise<void> {
-  return invoke('update_rule_notes', { id, notes });
+export async function updateRuleNotes(id: string, notes: string | null): Promise<RuleEntry> {
+  return invoke<RuleEntry>('update_rule_notes', { id, notes });
 }
 
 /** Regenerate a single rule entry honoring a new GM objection. */

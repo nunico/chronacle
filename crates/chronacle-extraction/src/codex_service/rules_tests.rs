@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::codex_service::rules::compile_rules_with_cap;
+use crate::codex_service::rules::RuleNoteUpdateError;
 use crate::codex_service::{compile_rules, list_rule_entries, redo_rule_entry, update_rule_notes};
 use crate::extraction_service::test_support::{
     setup_db_with_collection, MockEmbeddingProvider, MockLlm,
@@ -551,4 +552,50 @@ async fn list_and_update_rule_notes_round_trip() {
         .unwrap();
     let entries = list_rule_entries(&db, &col_id).await.unwrap();
     assert_eq!(entries[0].notes.as_deref(), Some("clarify escape DC"));
+}
+
+#[tokio::test]
+async fn update_rule_notes_returns_saved_entry_and_rejects_missing_id() {
+    let (db, col_id) = setup_db_with_collection().await;
+    db.query(
+        "CREATE rule_entry SET collection = type::thing('collection', $cid), \
+             name = 'Initiative', category = 'mechanic', body = 'initiative rules', \
+             notes = NULL, page_refs = [], sources = [], \
+             compiled_at = time::now(), stale = false RETURN VALUE id",
+    )
+    .bind(("cid", col_id.clone()))
+    .await
+    .unwrap();
+    let entry = list_rule_entries(&db, &col_id)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap();
+
+    let saved = update_rule_notes(&db, &entry.id, Some("roll once".to_string()))
+        .await
+        .expect("existing rule must acknowledge with its canonical record");
+
+    assert_eq!(saved.id, entry.id);
+    assert_eq!(saved.notes.as_deref(), Some("roll once"));
+    let error: RuleNoteUpdateError = update_rule_notes(&db, "missing", None)
+        .await
+        .expect_err("a missing rule ID must not be acknowledged as saved");
+    assert!(matches!(
+        error,
+        RuleNoteUpdateError::NotFound { id } if id == "missing"
+    ));
+}
+
+#[test]
+fn rule_note_update_error_distinguishes_database_failures() {
+    let error = RuleNoteUpdateError::Database {
+        message: "storage unavailable".to_string(),
+    };
+
+    assert!(matches!(
+        error,
+        RuleNoteUpdateError::Database { message } if message == "storage unavailable"
+    ));
 }

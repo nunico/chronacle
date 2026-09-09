@@ -35,7 +35,9 @@ pub use proposals::{
     maintenance_counts, reject_proposal, CodexProposal, MaintenanceCounts, ProposalPayload,
     MAX_PROPOSALS_PER_DISTILL,
 };
-pub use rules::{compile_rules, list_rule_entries, redo_rule_entry, update_rule_notes};
+pub use rules::{
+    compile_rules, list_rule_entries, redo_rule_entry, update_rule_notes, RuleNoteUpdateError,
+};
 pub use status::{codex_status, CodexStatus};
 
 /// Errors from codex compilation.
