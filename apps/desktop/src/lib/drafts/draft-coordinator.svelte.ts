@@ -19,6 +19,7 @@ import {
 type SaveWriter<T extends DraftValue> = (value: DraftSnapshot<T>) => Promise<T>;
 type DiscardResult = 'discarded' | 'blocked-active-save' | 'missing';
 type DiscardAllResult = Exclude<DiscardResult, 'missing'>;
+type DeleteCleanupResult = 'removed' | 'blocked-active-save' | 'missing';
 
 export type CreatePromotionBlockReason =
   | 'missing-source'
@@ -178,6 +179,21 @@ export class DraftCoordinator {
     this.createPromotionIssues.delete(resolvedScope);
     this.removeRedirectsFor(resolvedScope);
     return 'discarded';
+  }
+
+  removeAfterDelete(scope: string): DeleteCleanupResult {
+    const resolvedScope = this.resolveScope(scope);
+    const draft = this.drafts.get(resolvedScope);
+    if (!draft) return 'missing';
+    if (draft.inFlight !== null) return 'blocked-active-save';
+
+    this.cancelQueued(resolvedScope);
+    this.drafts.delete(resolvedScope);
+    this.authoritativeListScopes.delete(resolvedScope);
+    this.createPromotionIssues.delete(scope);
+    this.createPromotionIssues.delete(resolvedScope);
+    this.removeRedirectsFor(resolvedScope);
+    return 'removed';
   }
 
   hasActiveWrites(): boolean {
