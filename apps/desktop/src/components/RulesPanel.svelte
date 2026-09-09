@@ -1,14 +1,40 @@
 <script lang="ts">
+  import { flushSync, onDestroy, tick, untrack } from 'svelte';
   import { getRuleEntries, updateRuleNotes, redoRuleEntry, type RuleEntry } from '../lib/commands';
   import { i18n } from '../lib/locale.svelte';
   import type { MessageKey } from '../lib/i18n/messages';
+  import SaveStatus from './SaveStatus.svelte';
   import Button from './ui/Button.svelte';
+  import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
+  import { shouldAutoSaveAfterBlur } from '../lib/drafts/draft-focus-policy';
+  import {
+    ruleScope,
+    statusOf,
+    type DraftRecord,
+    type DraftValue,
+  } from '../lib/drafts/draft-state';
+  import { rememberedRuleEntry, rememberRuleEntry } from '../lib/drafts/rule-note-presentation';
 
-  interface Props {
-    collectionId: string;
+  interface RuleNoteDraftValue extends Readonly<Record<string, DraftValue>> {
+    readonly notes: string;
   }
 
-  let { collectionId }: Props = $props();
+  interface PresentedRuleEntry {
+    entry: RuleEntry;
+    unavailable: boolean;
+  }
+
+  interface Props {
+    campaignId?: string | null;
+    collectionId: string;
+    draftCoordinator?: DraftCoordinator;
+  }
+
+  let {
+    campaignId = null,
+    collectionId,
+    draftCoordinator = new DraftCoordinator(),
+  }: Props = $props();
 
   const CATEGORY_ORDER = [
     'mechanic',
@@ -30,41 +56,104 @@
     entry: 'entityUi.categoryEntry',
   };
 
-  let entries = $state<RuleEntry[]>([]);
+  let entries = $state.raw<RuleEntry[]>([]);
   let loading = $state(false);
   let search = $state('');
   let expandedId = $state<string | null>(null);
-  let notesDraft = $state<Record<string, string>>({});
   let redoOpenId = $state<string | null>(null);
   let objectionDraft = $state('');
   let error = $state<string | null>(null);
   let redoError = $state<string | null>(null);
+  let panelElement = $state<HTMLDivElement>();
+  let loadGeneration = 0;
+  let destroyed = false;
 
-  async function load() {
+  function targetFor(ruleId: string): string {
+    return `rule:${ruleId}`;
+  }
+
+  function valueFrom(entry: RuleEntry): RuleNoteDraftValue {
+    return { notes: entry.notes ?? '' };
+  }
+
+  let scopePrefix = $derived(ruleScope(campaignId, collectionId, ''));
+  let retainedDrafts = $derived(draftCoordinator.listByPrefix<RuleNoteDraftValue>(scopePrefix));
+
+  let presentedEntries = $derived.by(() => {
+    const rows: PresentedRuleEntry[] = entries.map((entry) => ({ entry, unavailable: false }));
+    const listedIds = new Set(entries.map((entry) => entry.id));
+    for (const draft of retainedDrafts) {
+      if (statusOf(draft) === 'saved') continue;
+      const ruleId = draft.target?.startsWith('rule:') ? draft.target.slice('rule:'.length) : '';
+      if (!ruleId || listedIds.has(ruleId)) continue;
+      const remembered = rememberedRuleEntry(draftCoordinator, draft.scope);
+      if (!remembered) continue;
+      rows.push({ entry: remembered, unavailable: true });
+    }
+    return rows;
+  });
+
+  async function load(requestCampaignId = campaignId, requestCollectionId = collectionId) {
+    const requestGeneration = ++loadGeneration;
+    const requestPrefix = ruleScope(requestCampaignId, requestCollectionId, '');
+    const acknowledgmentsAtStart = new Map(
+      draftCoordinator
+        .listByPrefix<RuleNoteDraftValue>(requestPrefix)
+        .map((draft) => [draft.scope, draft.lastAcknowledgedAttemptId] as const),
+    );
     loading = true;
     try {
-      entries = await getRuleEntries(collectionId);
+      const loaded = await getRuleEntries(requestCollectionId);
+      if (
+        destroyed ||
+        requestGeneration !== loadGeneration ||
+        requestCampaignId !== campaignId ||
+        requestCollectionId !== collectionId
+      ) {
+        return;
+      }
+
+      for (const entry of loaded) {
+        const scope = ruleScope(requestCampaignId, requestCollectionId, entry.id);
+        const current = draftCoordinator.get<RuleNoteDraftValue>(scope);
+        const startAcknowledgment = acknowledgmentsAtStart.get(scope);
+        if (
+          !current ||
+          (startAcknowledgment !== undefined &&
+            current.lastAcknowledgedAttemptId === startAcknowledgment)
+        ) {
+          draftCoordinator.open(scope, targetFor(entry.id), valueFrom(entry), 'authoritative-list');
+        }
+        rememberRuleEntry(draftCoordinator, scope, entry);
+      }
+      entries = loaded;
       error = null;
     } catch (e) {
-      error = String(e);
+      if (!destroyed && requestGeneration === loadGeneration) error = String(e);
     } finally {
-      loading = false;
+      if (!destroyed && requestGeneration === loadGeneration) loading = false;
     }
   }
 
   $effect(() => {
-    void collectionId;
-    load();
+    const requestCampaignId = campaignId;
+    const requestCollectionId = collectionId;
+    untrack(() => void load(requestCampaignId, requestCollectionId));
+  });
+
+  onDestroy(() => {
+    destroyed = true;
+    loadGeneration += 1;
   });
 
   let filtered = $derived(
-    entries.filter((e) => e.name.toLowerCase().includes(search.toLowerCase())),
+    presentedEntries.filter(({ entry }) => entry.name.toLowerCase().includes(search.toLowerCase())),
   );
 
   let grouped = $derived.by(() => {
-    const groups: Record<string, RuleEntry[]> = {};
-    for (const e of filtered) {
-      (groups[e.category] ??= []).push(e);
+    const groups: Record<string, PresentedRuleEntry[]> = {};
+    for (const row of filtered) {
+      (groups[row.entry.category] ??= []).push(row);
     }
     const orderedCats = [
       ...CATEGORY_ORDER,
@@ -75,24 +164,132 @@
       .filter((g) => g.entries.length > 0);
   });
 
+  function ensureDraft(entry: RuleEntry): DraftRecord<RuleNoteDraftValue> {
+    const scope = ruleScope(campaignId, collectionId, entry.id);
+    return (
+      draftCoordinator.get<RuleNoteDraftValue>(scope) ??
+      draftCoordinator.open(scope, targetFor(entry.id), valueFrom(entry), 'authoritative-list')
+    );
+  }
+
   function toggleExpand(entry: RuleEntry) {
     if (expandedId === entry.id) {
       expandedId = null;
       return;
     }
+    ensureDraft(entry);
     expandedId = entry.id;
-    if (!(entry.id in notesDraft)) {
-      notesDraft[entry.id] = entry.notes ?? '';
-    }
     redoOpenId = null;
   }
 
-  async function handleNotesBlur(entry: RuleEntry) {
-    const value = notesDraft[entry.id] ?? '';
-    if (value === (entry.notes ?? '')) return;
-    const saved = value.length > 0 ? value : null;
-    await updateRuleNotes(entry.id, saved);
-    entry.notes = saved;
+  function reviseNotes(entry: RuleEntry, notes: string): void {
+    const scope = ruleScope(campaignId, collectionId, entry.id);
+    ensureDraft(entry);
+    draftCoordinator.revise(scope, { notes });
+  }
+
+  async function saveDraft(entry: RuleEntry): Promise<void> {
+    const saveCampaignId = campaignId;
+    const saveCollectionId = collectionId;
+    const saveRuleId = entry.id;
+    const saveScope = ruleScope(saveCampaignId, saveCollectionId, saveRuleId);
+    ensureDraft(entry);
+    await draftCoordinator.requestSave<RuleNoteDraftValue>(saveScope, async (attempt) => {
+      try {
+        const saved = await updateRuleNotes(
+          saveRuleId,
+          attempt.notes === '' ? null : attempt.notes,
+        );
+        if (saved.id !== saveRuleId) {
+          throw new Error(`Rule-note save acknowledged the wrong target: ${saved.id}`);
+        }
+        rememberRuleEntry(draftCoordinator, saveScope, saved);
+        return { notes: saved.notes ?? '' };
+      } catch (saveError) {
+        if (isStructuredError(saveError) && saveError.code === 'NOT_FOUND') {
+          throw new Error(i18n.t('drafts.targetUnavailable'), { cause: saveError });
+        }
+        throw saveError;
+      }
+    });
+  }
+
+  function elementFor<T extends HTMLElement>(selector: string, ruleId: string): T | undefined {
+    return Array.from(panelElement?.querySelectorAll<T>(selector) ?? []).find(
+      (element) => element.dataset.ruleId === ruleId,
+    );
+  }
+
+  function shouldSaveFromBlur(entry: RuleEntry, event?: FocusEvent): boolean {
+    const editingScope = elementFor<HTMLElement>('[data-rule-id]', entry.id);
+    return shouldAutoSaveAfterBlur(editingScope, event?.relatedTarget ?? null, [
+      editingScope?.querySelector('.rule-save-status'),
+    ]);
+  }
+
+  async function handleNotesBlur(entry: RuleEntry, event?: FocusEvent): Promise<void> {
+    if (!shouldSaveFromBlur(entry, event)) return;
+    const draft = draftCoordinator.get<RuleNoteDraftValue>(
+      ruleScope(campaignId, collectionId, entry.id),
+    );
+    if (!draft || draft.error) return;
+    try {
+      await saveDraft(entry);
+    } catch (saveError) {
+      console.error('Failed to coordinate rule-note save:', saveError);
+    }
+  }
+
+  function focusStableRulesTab(): void {
+    panelElement
+      ?.closest('.coll')
+      ?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
+      ?.focus();
+  }
+
+  async function retrySave(entry: RuleEntry): Promise<void> {
+    const retryCampaignId = campaignId;
+    const retryCollectionId = collectionId;
+    const retryScope = ruleScope(retryCampaignId, retryCollectionId, entry.id);
+    const retryGeneration = loadGeneration;
+    await saveDraft(entry);
+    if (
+      destroyed ||
+      retryGeneration !== loadGeneration ||
+      retryCampaignId !== campaignId ||
+      retryCollectionId !== collectionId
+    ) {
+      return;
+    }
+    flushSync();
+    const latest = draftCoordinator.get<RuleNoteDraftValue>(retryScope);
+    if (latest && statusOf(latest) === 'failed') {
+      panelElement?.querySelector<HTMLButtonElement>('.rule-save-status .failure button')?.focus();
+      return;
+    }
+    const textarea = elementFor<HTMLTextAreaElement>('textarea[data-rule-notes]', entry.id);
+    if (textarea) textarea.focus();
+    else focusStableRulesTab();
+  }
+
+  async function discardDraft(entry: RuleEntry, unavailable: boolean): Promise<void> {
+    const scope = ruleScope(campaignId, collectionId, entry.id);
+    if (draftCoordinator.discard(scope) !== 'discarded') return;
+    await tick();
+    if (unavailable) {
+      focusStableRulesTab();
+      return;
+    }
+    elementFor<HTMLButtonElement>('button[data-rule-header]', entry.id)?.focus();
+  }
+
+  function isStructuredError(value: unknown): value is { code: string; message?: string } {
+    return (
+      typeof value === 'object' &&
+      value !== null &&
+      'code' in value &&
+      typeof value.code === 'string'
+    );
   }
 
   function openRedo(entry: RuleEntry) {
@@ -114,7 +311,7 @@
   }
 </script>
 
-<div class="rules-panel">
+<div class="rules-panel" bind:this={panelElement}>
   <div class="search-row">
     <input
       class="search-input"
@@ -129,7 +326,7 @@
     <p class="muted">{i18n.t('entityUi.loadingRules')}</p>
   {:else if error}
     <p class="error" role="alert">{i18n.t('entityUi.loadRulesFailed', { error })}</p>
-  {:else if entries.length === 0}
+  {:else if presentedEntries.length === 0}
     <p class="muted">{i18n.t('entityUi.noRules')}</p>
   {:else if grouped.length === 0}
     <p class="muted">{i18n.t('entityUi.noMatchingRules')}</p>
@@ -140,11 +337,25 @@
           {CATEGORY_LABEL[group.category] ? i18n.t(CATEGORY_LABEL[group.category]) : group.category}
         </h3>
         <ul class="entry-list">
-          {#each group.entries as entry (entry.id)}
-            <li class="entry-item">
+          {#each group.entries as row (`${scopePrefix}${row.entry.id}`)}
+            {@const entry = row.entry}
+            {@const draft = draftCoordinator.get<RuleNoteDraftValue>(
+              ruleScope(campaignId, collectionId, entry.id),
+            )}
+            {@const draftStatus = draft ? statusOf(draft) : 'saved'}
+            {@const unavailableStatusId = `rule-unavailable-${campaignId ?? 'none'}-${collectionId}-${entry.id}`}
+            {@const compactStatusId = `rule-save-${campaignId ?? 'none'}-${collectionId}-${entry.id}`}
+            <li class="entry-item" data-rule-id={entry.id}>
               <button
                 class="entry-name"
                 aria-expanded={expandedId === entry.id}
+                aria-describedby={expandedId !== entry.id && draftStatus !== 'saved'
+                  ? compactStatusId
+                  : row.unavailable
+                    ? unavailableStatusId
+                    : undefined}
+                data-rule-header={entry.id}
+                data-rule-id={entry.id}
                 onclick={() => toggleExpand(entry)}
               >
                 {entry.name}
@@ -152,6 +363,18 @@
                   <span class="chip-stale">{i18n.t('entityUi.stale')}</span>
                 {/if}
               </button>
+              {#if expandedId !== entry.id && draftStatus !== 'saved'}
+                <div id={compactStatusId} class="compact-rule-status">
+                  <SaveStatus status={draftStatus} />
+                </div>
+              {/if}
+              {#if row.unavailable}
+                <span id={unavailableStatusId} class="sr-only">
+                  {draftStatus === 'failed'
+                    ? i18n.t('drafts.couldNotSave')
+                    : i18n.t('drafts.unsavedChanges')}
+                </span>
+              {/if}
               {#if expandedId === entry.id}
                 <div class="entry-body">
                   <p class="body">{entry.body}</p>
@@ -173,12 +396,29 @@
                   <textarea
                     id="notes-{entry.id}"
                     aria-label={i18n.t('entityUi.tableNotes')}
-                    value={notesDraft[entry.id] ?? entry.notes ?? ''}
+                    data-rule-notes={entry.id}
+                    data-rule-id={entry.id}
+                    value={draft?.value.notes ?? entry.notes ?? ''}
                     oninput={(e) => {
-                      notesDraft[entry.id] = (e.target as HTMLTextAreaElement).value;
+                      reviseNotes(entry, (e.target as HTMLTextAreaElement).value);
                     }}
-                    onblur={() => handleNotesBlur(entry)}
+                    onblur={(event) => handleNotesBlur(entry, event)}
                   ></textarea>
+
+                  {#if draft}
+                    <div class="rule-save-status">
+                      <SaveStatus
+                        status={draftStatus}
+                        error={draft.error}
+                        retainedThisSession={draftStatus !== 'saved'}
+                        onRetry={() => retrySave(entry)}
+                        onDiscard={draftStatus === 'saved'
+                          ? undefined
+                          : () => discardDraft(entry, row.unavailable)}
+                        discardBlocked={draft.inFlight !== null}
+                      />
+                    </div>
+                  {/if}
 
                   {#if redoOpenId === entry.id}
                     <div class="redo-dialog">
@@ -254,6 +494,17 @@
   .entry-item {
     border-bottom: 1px solid var(--line);
   }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
   .entry-name {
     display: flex;
     align-items: center;
@@ -308,6 +559,23 @@
     padding: 6px 8px;
     resize: vertical;
     box-sizing: border-box;
+  }
+  .rule-save-status {
+    margin-top: var(--s-2);
+  }
+  .compact-rule-status {
+    padding: 0 var(--s-2) var(--s-2);
+  }
+  .compact-rule-status :global(.save-status) {
+    font-size: 0.75rem;
+  }
+  .compact-rule-status :global(.failure) {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  .compact-rule-status :global(.message) {
+    min-width: 0;
   }
   .redo-dialog {
     margin-top: 8px;

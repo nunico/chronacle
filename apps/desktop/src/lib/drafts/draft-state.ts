@@ -52,8 +52,8 @@ export function sessionScope(campaignId: string, sessionId: string): string {
   return `session:${campaignId}:${sessionId}`;
 }
 
-export function ruleScope(campaignId: string, collectionId: string, ruleId: string): string {
-  return `rule:${campaignId}:${collectionId}:${ruleId}`;
+export function ruleScope(campaignId: string | null, collectionId: string, ruleId: string): string {
+  return `rule:${campaignId ?? 'no-campaign'}:${collectionId}:${ruleId}`;
 }
 
 function invalidValue(reason: string): never {
