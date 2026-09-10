@@ -1345,6 +1345,7 @@ describe('EntityManager', () => {
       const createWrite = deferred<GraphNode>();
       const staleOmissionLoad = deferred<GraphNode[]>();
       const onViewGraph = vi.fn();
+      const onMissingLinkClick = vi.fn();
       const returned = mockNpc({
         id: 'npc-created-after-list-start',
         name: 'Captain Sable',
@@ -1380,6 +1381,7 @@ describe('EntityManager', () => {
           kind: 'npc',
           draftCoordinator: coordinator,
           onViewGraph,
+          onMissingLinkClick,
         },
       });
       expect(await screen.findByLabelText('Name', { exact: true })).toHaveValue(returned.name);
@@ -1409,6 +1411,7 @@ describe('EntityManager', () => {
       expect(
         screen.getByRole('button', { name: `Create article for ${returned.name}` }),
       ).toBeVisible();
+      expect(onMissingLinkClick).not.toHaveBeenCalled();
       expect(commands.createEntity).toHaveBeenCalledTimes(1);
       expect(commands.updateEntity).not.toHaveBeenCalled();
 
