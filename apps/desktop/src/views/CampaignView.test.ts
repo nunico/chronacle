@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
 import CampaignView from './CampaignView.svelte';
 import * as commands from '../lib/commands';
 import type { Campaign } from '../lib/commands';
@@ -308,6 +309,70 @@ describe('CampaignView', () => {
     await fireEvent.click(screen.getByText('Delete campaign and its notes'));
 
     await waitFor(() => expect(m.deleteCampaign).toHaveBeenCalledWith('camp-original', 'delete'));
+  });
+
+  it('moves focus to a remaining campaign after keyboard-confirmed deletion', async () => {
+    const user = userEvent.setup();
+    const remaining = camp('camp-other', 'Other Realm');
+    const props = {
+      activeCampaignId: 'camp-1',
+      campaigns: [camp('camp-1', 'Reach'), remaining],
+      setActiveCampaignId: vi.fn(),
+      onOpenUpload: vi.fn(),
+      refreshCampaigns: vi.fn<() => Promise<void>>(),
+    };
+    const rendered = renderView(props);
+    props.refreshCampaigns.mockImplementation(async () => {
+      await rendered.rerender({ ...props, activeCampaignId: null, campaigns: [remaining] });
+    });
+    m.deleteCampaign.mockResolvedValue(undefined);
+    await user.click(screen.getByRole('button', { name: /Manage campaigns/i }));
+    const reachRow = screen.getAllByText('Reach')[1]?.closest('.manage-row');
+    if (!(reachRow instanceof HTMLElement)) throw new Error('Expected the deleted campaign row');
+    const opener = within(reachRow).getByTitle('Delete');
+    opener.focus();
+    await user.keyboard('{Enter}');
+    const destructive = within(
+      await screen.findByRole('dialog', { name: /delete campaign/i }),
+    ).getByRole('button', { name: 'Delete campaign and its notes' });
+    destructive.focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(opener).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /Other Realm/ })).toHaveFocus();
+    expect(document.activeElement?.isConnected).toBe(true);
+  });
+
+  it('moves focus to Manage campaigns when keyboard deletion empties the list', async () => {
+    const user = userEvent.setup();
+    const props = {
+      activeCampaignId: 'camp-1',
+      campaigns: [camp('camp-1', 'Reach')],
+      setActiveCampaignId: vi.fn(),
+      onOpenUpload: vi.fn(),
+      refreshCampaigns: vi.fn<() => Promise<void>>(),
+    };
+    const rendered = renderView(props);
+    props.refreshCampaigns.mockImplementation(async () => {
+      await rendered.rerender({ ...props, activeCampaignId: null, campaigns: [] });
+    });
+    m.deleteCampaign.mockResolvedValue(undefined);
+    const manage = screen.getByRole('button', { name: /Manage campaigns/i });
+    await user.click(manage);
+    const reachRow = screen.getAllByText('Reach')[1]?.closest('.manage-row');
+    if (!(reachRow instanceof HTMLElement)) throw new Error('Expected the deleted campaign row');
+    const opener = within(reachRow).getByTitle('Delete');
+    opener.focus();
+    await user.keyboard('{Enter}');
+    const destructive = within(
+      await screen.findByRole('dialog', { name: /delete campaign/i }),
+    ).getByRole('button', { name: 'Delete campaign and its notes' });
+    destructive.focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(opener).not.toBeInTheDocument());
+    expect(manage).toHaveFocus();
+    expect(document.activeElement?.isConnected).toBe(true);
   });
 
   it('blocks campaign deletion while a matching draft save is active', async () => {

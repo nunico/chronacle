@@ -60,6 +60,14 @@ function session(campaignId: string, title: string): Session {
   };
 }
 
+function identifiedSession(id: string, title: string, sessionNumber: number): Session {
+  return {
+    ...session('camp-a', title),
+    id,
+    session_number: sessionNumber,
+  };
+}
+
 function renderLog(campaignId: string, coordinator = new DraftCoordinator()) {
   return render(SessionLogView, {
     props: { campaignId, draftCoordinator: coordinator },
@@ -91,6 +99,79 @@ describe('SessionLogView draft coordination', () => {
   afterEach(() => {
     i18n.setLocale('en');
     vi.useRealTimers();
+  });
+
+  it('moves focus to the next session after keyboard-confirmed deletion', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(commands.getSessions).mockResolvedValue([
+      identifiedSession('session-a', 'Ashes at Dawn', 1),
+      identifiedSession('session-b', 'Moonlit Road', 2),
+      identifiedSession('session-c', 'Winter Crown', 3),
+    ]);
+    vi.mocked(commands.deleteSession).mockResolvedValue(undefined);
+    renderLog('camp-a');
+
+    const ashes = await screen.findByRole('button', { name: /Ashes at Dawn/ });
+    ashes.focus();
+    await user.keyboard('{Enter}');
+    const ashesRow = ashes.closest('.session-row');
+    if (!(ashesRow instanceof HTMLElement)) throw new Error('Expected the first session row');
+    const opener = within(ashesRow).getByRole('button', { name: 'Delete' });
+    opener.focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(screen.queryByText('Ashes at Dawn')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /Moonlit Road/ })).toHaveFocus();
+    expect(opener).not.toBeInTheDocument();
+    expect(document.activeElement?.isConnected).toBe(true);
+  });
+
+  it('moves focus to the previous session when keyboard deletion removes the last row', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(commands.getSessions).mockResolvedValue([
+      identifiedSession('session-a', 'Ashes at Dawn', 1),
+      identifiedSession('session-b', 'Moonlit Road', 2),
+    ]);
+    vi.mocked(commands.deleteSession).mockResolvedValue(undefined);
+    renderLog('camp-a');
+
+    const moonlit = await screen.findByRole('button', { name: /Moonlit Road/ });
+    moonlit.focus();
+    await user.keyboard('{Enter}');
+    const moonlitRow = moonlit.closest('.session-row');
+    if (!(moonlitRow instanceof HTMLElement)) throw new Error('Expected the last session row');
+    const opener = within(moonlitRow).getByRole('button', { name: 'Delete' });
+    opener.focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(screen.queryByText('Moonlit Road')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /Ashes at Dawn/ })).toHaveFocus();
+    expect(document.activeElement?.isConnected).toBe(true);
+  });
+
+  it('moves focus to New session when keyboard deletion empties the list', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(commands.getSessions).mockResolvedValue([
+      identifiedSession('session-a', 'Ashes at Dawn', 1),
+    ]);
+    vi.mocked(commands.deleteSession).mockResolvedValue(undefined);
+    renderLog('camp-a');
+
+    const ashes = await screen.findByRole('button', { name: /Ashes at Dawn/ });
+    ashes.focus();
+    await user.keyboard('{Enter}');
+    const ashesRow = ashes.closest('.session-row');
+    if (!(ashesRow instanceof HTMLElement)) throw new Error('Expected the only session row');
+    const opener = within(ashesRow).getByRole('button', { name: 'Delete' });
+    opener.focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(screen.queryByText('Ashes at Dawn')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /New session/i })).toHaveFocus();
+    expect(document.activeElement?.isConnected).toBe(true);
   });
 
   it('retains a failed create in its campaign and coalesces keyboard Retry', async () => {
