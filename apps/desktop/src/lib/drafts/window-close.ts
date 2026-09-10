@@ -11,10 +11,14 @@ import {
 export interface CloseRequest {
   intent: number | null;
   source: 'window' | 'application';
+  opener: HTMLElement | null;
 }
 
 export interface WindowClosePort {
-  registerCloseRequests(handler: (request: CloseRequest) => void): Promise<() => void>;
+  registerCloseRequests(
+    handler: (request: CloseRequest) => void,
+    signal?: AbortSignal,
+  ): Promise<() => void>;
   requestExitIntent(): Promise<number>;
   confirmExit(intent: number, decision: AppExitDecision): Promise<void>;
   cancelExit(intent: number): Promise<boolean>;
@@ -22,11 +26,22 @@ export interface WindowClosePort {
 
 export function createTauriWindowClosePort(): WindowClosePort {
   return {
-    async registerCloseRequests(handler) {
-      let active = true;
+    async registerCloseRequests(handler, signal) {
+      let active = !signal?.aborted;
       const deliveredIntents = new Set<number>();
       let stopWindow: (() => void) | undefined;
       let stopApplication: (() => void) | undefined;
+      const teardown = (): void => {
+        active = false;
+        stopApplication?.();
+        stopApplication = undefined;
+        stopWindow?.();
+        stopWindow = undefined;
+      };
+      const ensureActive = (): void => {
+        if (!active) throw new Error('Close registration was cancelled.');
+      };
+      signal?.addEventListener('abort', teardown, { once: true });
       const deliver = (request: CloseRequest): void => {
         if (!active) return;
         if (request.intent !== null) {
@@ -36,27 +51,48 @@ export function createTauriWindowClosePort(): WindowClosePort {
         handler(request);
       };
       try {
-        stopWindow = await getCurrentWindow().onCloseRequested((event) => {
+        ensureActive();
+        const registeredWindowStop = await getCurrentWindow().onCloseRequested((event) => {
           event.preventDefault();
+          const opener =
+            document.activeElement instanceof HTMLElement ? document.activeElement : null;
           void requestAppExit()
-            .then((intent) => deliver({ intent, source: 'window' }))
-            .catch(() => deliver({ intent: null, source: 'window' }));
+            .then((intent) => deliver({ intent, source: 'window', opener }))
+            .catch(() => deliver({ intent: null, source: 'window', opener }));
         });
-        stopApplication = await listen<{ intent: number }>('app-exit-requested', (event) => {
-          deliver({ intent: event.payload.intent, source: 'application' });
-        });
+        if (!active) {
+          registeredWindowStop();
+          ensureActive();
+        }
+        stopWindow = registeredWindowStop;
+        const registeredApplicationStop = await listen<{ intent: number }>(
+          'app-exit-requested',
+          (event) => {
+            const opener =
+              document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            deliver({ intent: event.payload.intent, source: 'application', opener });
+          },
+        );
+        if (!active) {
+          registeredApplicationStop();
+          ensureActive();
+        }
+        stopApplication = registeredApplicationStop;
         const pendingIntent = await pendingAppExit();
-        if (pendingIntent !== null) deliver({ intent: pendingIntent, source: 'application' });
+        ensureActive();
+        if (pendingIntent !== null) {
+          const opener =
+            document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          deliver({ intent: pendingIntent, source: 'application', opener });
+        }
       } catch (error) {
-        active = false;
-        stopApplication?.();
-        stopWindow?.();
+        teardown();
+        signal?.removeEventListener('abort', teardown);
         throw error;
       }
       return () => {
-        active = false;
-        stopApplication?.();
-        stopWindow?.();
+        teardown();
+        signal?.removeEventListener('abort', teardown);
       };
     },
     async requestExitIntent() {
