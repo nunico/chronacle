@@ -101,6 +101,7 @@
     if (closeIntent === request.intent && (closeDialogOpen || closeConfirmationInFlight)) {
       return;
     }
+    draftCoordinator.beginCloseDecision();
     closeIntent = request.intent;
     closeOpener = request.opener;
     closeDialogInitialFailure = request.intent === null;
@@ -183,6 +184,7 @@
       await tick();
       if (closeOpener?.isConnected) closeOpener.focus();
       closeOpener = null;
+      draftCoordinator.endCloseDecision();
     }
     return true;
   }
@@ -203,6 +205,7 @@
     } else registerCloseProtection();
     return () => {
       shellDestroyed = true;
+      draftCoordinator.endCloseDecision();
       closeRegistrationAbort?.abort();
       closeUnlisten?.();
     };

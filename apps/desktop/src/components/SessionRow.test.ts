@@ -190,6 +190,48 @@ describe('SessionRow', () => {
     expect(onUpdate).toHaveBeenCalledWith(canonical);
   });
 
+  it('does not queue a newer revision when the close decision blurs the active field', async () => {
+    const firstSave = deferred<Session>();
+    vi.mocked(commands.updateSession).mockReturnValue(firstSave.promise);
+    const coordinator = new DraftCoordinator();
+    renderRow(coordinator);
+    const title = await expandRow();
+
+    await fireEvent.input(title, { target: { value: 'Earlier revision' } });
+    await fireEvent.blur(title);
+    await waitFor(() => expect(commands.updateSession).toHaveBeenCalledOnce());
+    await fireEvent.input(title, { target: { value: 'Newer retained revision' } });
+
+    coordinator.beginCloseDecision();
+    await fireEvent.blur(title, { relatedTarget: null });
+    firstSave.resolve({ ...mockSession(), title: 'Earlier revision' });
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes'));
+
+    expect(commands.updateSession).toHaveBeenCalledOnce();
+    expect(title).toHaveValue('Newer retained revision');
+    expect(coordinator.canDiscard(sessionScope('camp1', 'sess1'))).toBe(true);
+  });
+
+  it('resumes ordinary blur saving after the close decision is cancelled', async () => {
+    vi.mocked(commands.updateSession).mockResolvedValue({
+      ...mockSession(),
+      title: 'Saved after cancelling close',
+    });
+    const coordinator = new DraftCoordinator();
+    renderRow(coordinator);
+    const title = await expandRow();
+    await fireEvent.input(title, { target: { value: 'Saved after cancelling close' } });
+
+    coordinator.beginCloseDecision();
+    await fireEvent.blur(title, { relatedTarget: null });
+    expect(commands.updateSession).not.toHaveBeenCalled();
+
+    coordinator.endCloseDecision();
+    title.focus();
+    await fireEvent.blur(title, { relatedTarget: null });
+    await waitFor(() => expect(commands.updateSession).toHaveBeenCalledOnce());
+  });
+
   it('retains all edited fields after failure and retries the intended session with latest content', async () => {
     vi.mocked(commands.updateSession)
       .mockRejectedValueOnce({ code: 'DATABASE', message: 'Session write failed.' })

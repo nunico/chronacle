@@ -179,7 +179,12 @@
   }
 
   async function saveFromBlur(event?: FocusEvent) {
-    if (deletionPending || !shouldSaveFromBlur(event)) return;
+    if (
+      deletionPending ||
+      draftCoordinator.isCloseDecisionActive() ||
+      !shouldSaveFromBlur(event)
+    )
+      return;
     const current = draftCoordinator.get<SessionDraftValue>(scope);
     if (current?.error) return;
     await saveDraft();

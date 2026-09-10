@@ -867,6 +867,28 @@ describe('Shell native close protection', () => {
     expect(updateRuleNotes).not.toHaveBeenCalled();
   });
 
+  it('holds the shared close decision through repeated requests and releases it after cancel', async () => {
+    const port = new FakeWindowClosePort();
+    const coordinator = new DraftCoordinator();
+    coordinator.open('oracle:camp-1', null, '');
+    coordinator.revise('oracle:camp-1', 'Retain this question');
+    render(Shell, { props: { windowClosePort: port, draftCoordinator: coordinator } });
+    await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+    await waitFor(() => expect(port.registerCloseRequests).toHaveBeenCalledOnce());
+
+    port.requestClose();
+    port.requestClose();
+    expect(coordinator.isCloseDecisionActive()).toBe(true);
+
+    await fireEvent.keyDown(screen.getByRole('dialog', { name: 'Unsaved changes' }), {
+      key: 'Escape',
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Unsaved changes' })).toBeNull(),
+    );
+    expect(coordinator.isCloseDecisionActive()).toBe(false);
+  });
+
   it.each([
     ['stale', (port: FakeWindowClosePort) => port.cancelExit.mockResolvedValue(false)],
     [
