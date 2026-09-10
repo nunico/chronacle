@@ -248,6 +248,42 @@ describe('SessionLogView draft coordination', () => {
     consoleError.mockRestore();
   });
 
+  it('does not duplicate a session listed before its create acknowledgment', async () => {
+    const pendingCreate = deferred<Session>();
+    const createdForCampaignA: Session = {
+      ...session('camp-a', 'Listed before create acknowledgment'),
+      id: 'session-listed-before-create-ack',
+    };
+    let campaignARequests = 0;
+    vi.mocked(commands.getSessions).mockImplementation((campaignId) => {
+      if (campaignId === 'camp-a') {
+        campaignARequests += 1;
+        return Promise.resolve(campaignARequests === 1 ? [] : [createdForCampaignA]);
+      }
+      return Promise.resolve([session('camp-b', 'Campaign B session')]);
+    });
+    vi.mocked(commands.createSession).mockReturnValue(pendingCreate.promise);
+    const coordinator = new DraftCoordinator();
+    const rendered = renderLog('camp-a', coordinator);
+
+    await waitFor(() => expect(commands.getSessions).toHaveBeenCalledWith('camp-a'));
+    await fireEvent.click(screen.getByRole('button', { name: /New Session/i }));
+    await rendered.rerender({ campaignId: 'camp-b', draftCoordinator: coordinator } as never);
+    expect(await screen.findByText('Campaign B session')).toBeVisible();
+    await rendered.rerender({ campaignId: 'camp-a', draftCoordinator: coordinator } as never);
+    expect(await screen.findByText('Listed before create acknowledgment')).toBeVisible();
+
+    pendingCreate.resolve(createdForCampaignA);
+    await pendingCreate.promise;
+    await tick();
+
+    expect(screen.getAllByText('Listed before create acknowledgment')).toHaveLength(1);
+    expect(
+      coordinator.get<{ title: string }>(sessionScope('camp-a', createdForCampaignA.id))?.value
+        .title,
+    ).toBe('Listed before create acknowledgment');
+  });
+
   it('restores a retained session draft after view unmount and an older list reload', async () => {
     const coordinator = new DraftCoordinator();
     vi.mocked(commands.getSessions).mockResolvedValue([session('camp-a', 'Ashes at Dawn')]);
