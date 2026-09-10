@@ -55,8 +55,14 @@ describe('Tauri window close port', () => {
     applicationHandler?.({ payload: { intent: 23 } });
 
     expect(event.preventDefault).toHaveBeenCalledOnce();
-    expect(handler).toHaveBeenNthCalledWith(1, { intent: 17, source: 'window' });
-    expect(handler).toHaveBeenNthCalledWith(2, { intent: 23, source: 'application' });
+    expect(handler).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ intent: 17, source: 'window' }),
+    );
+    expect(handler).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ intent: 23, source: 'application' }),
+    );
     stop();
     expect(unlistenWindow).toHaveBeenCalledOnce();
     expect(unlistenApplication).toHaveBeenCalledOnce();
@@ -103,7 +109,9 @@ describe('Tauri window close port', () => {
     await registration;
 
     expect(handler).toHaveBeenCalledOnce();
-    expect(handler).toHaveBeenCalledWith({ intent: 31, source: 'application' });
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({ intent: 31, source: 'application' }),
+    );
   });
 
   it('reports request failure and ignores late request completion after teardown', async () => {
@@ -122,7 +130,9 @@ describe('Tauri window close port', () => {
 
     nativeHandler?.({ preventDefault: vi.fn() });
     await vi.waitFor(() =>
-      expect(handler).toHaveBeenCalledWith({ source: 'window', intent: null }),
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({ source: 'window', intent: null }),
+      ),
     );
 
     const late = deferred<number>();
@@ -132,7 +142,59 @@ describe('Tauri window close port', () => {
     late.resolve(99);
     await Promise.resolve();
 
-    expect(handler).not.toHaveBeenCalledWith({ source: 'window', intent: 99 });
+    expect(handler.mock.calls.some(([request]) => request.intent === 99)).toBe(false);
+  });
+
+  it('tears down immediately when aborted while pending-intent replay is unresolved', async () => {
+    const replay = deferred<number | null>();
+    const unlistenWindow = vi.fn();
+    const unlistenApplication = vi.fn();
+    commandApi.pendingAppExit.mockReturnValue(replay.promise);
+    windowApi.onCloseRequested.mockResolvedValue(unlistenWindow);
+    eventApi.listen.mockResolvedValue(unlistenApplication);
+    const handler = vi.fn();
+    const controller = new AbortController();
+
+    const registration = createTauriWindowClosePort().registerCloseRequests(
+      handler,
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(commandApi.pendingAppExit).toHaveBeenCalledOnce());
+    controller.abort();
+
+    expect(unlistenWindow).toHaveBeenCalledOnce();
+    expect(unlistenApplication).toHaveBeenCalledOnce();
+    replay.resolve(47);
+    await expect(registration).rejects.toThrow('Close registration was cancelled.');
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('captures the exact opener before waiting for the window intent', async () => {
+    const intent = deferred<number>();
+    commandApi.requestAppExit.mockReturnValue(intent.promise);
+    let nativeHandler: ((event: { preventDefault(): void }) => void) | undefined;
+    windowApi.onCloseRequested.mockImplementation(
+      async (handler: (event: { preventDefault(): void }) => void) => {
+        nativeHandler = handler;
+        return vi.fn();
+      },
+    );
+    eventApi.listen.mockResolvedValue(vi.fn());
+    const handler = vi.fn();
+    await createTauriWindowClosePort().registerCloseRequests(handler);
+    const opener = document.createElement('textarea');
+    const laterFocus = document.createElement('button');
+    document.body.append(opener, laterFocus);
+    opener.focus();
+
+    nativeHandler?.({ preventDefault: vi.fn() });
+    laterFocus.focus();
+    intent.resolve(59);
+    await vi.waitFor(() => expect(handler).toHaveBeenCalledOnce());
+
+    expect(handler).toHaveBeenCalledWith({ intent: 59, source: 'window', opener });
+    opener.remove();
+    laterFocus.remove();
   });
 });
 
