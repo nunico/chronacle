@@ -483,6 +483,107 @@ describe('EntityManager', () => {
       });
     });
 
+    it('keeps deletion bound to the captured campaign, kind, and entity', async () => {
+      const coordinator = new DraftCoordinator();
+      const deleted = deferred<undefined>();
+      vi.mocked(commands.getEntities).mockImplementation(async (campaignId, kind) => {
+        if (campaignId === 'camp1' && kind === 'npc') return [mira()];
+        if (campaignId === 'camp2' && kind === 'location') {
+          return [
+            mockNpc({
+              id: 'mira',
+              campaign_id: 'camp2',
+              kind: 'location',
+              name: 'Mira Location',
+            }),
+          ];
+        }
+        return [];
+      });
+      vi.mocked(commands.softDeleteEntity).mockReturnValue(deleted.promise);
+      const rendered = renderManager(coordinator);
+      await fireEvent.click(await screen.findByRole('button', { name: /delete mira/i }));
+
+      await rendered.rerender({
+        campaignId: 'camp2',
+        kind: 'location',
+        openId: null,
+        draftCoordinator: coordinator,
+      });
+      await fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Delete' })).getByRole('button', {
+          name: 'Delete',
+        }),
+      );
+
+      expect(commands.softDeleteEntity).toHaveBeenCalledWith('mira', 'npc');
+      deleted.resolve(undefined);
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete' })).toBeNull());
+      expect(screen.getByRole('button', { name: 'Mira Location' })).toBeInTheDocument();
+      expect(coordinator.get(entityScope('camp1', 'npc', 'mira'))).toBeUndefined();
+      expect(coordinator.get(entityScope('camp2', 'location', 'mira'))).toBeDefined();
+    });
+
+    it('keeps entity modal key chords from reaching Shell navigation', async () => {
+      const coordinator = new DraftCoordinator();
+      const shellKeyHandler = vi.fn();
+      window.addEventListener('keydown', shellKeyHandler);
+      renderManager(coordinator);
+      await fireEvent.click(await screen.findByRole('button', { name: /delete mira/i }));
+      const dialog = screen.getByRole('dialog', { name: 'Delete' });
+
+      await fireEvent.keyDown(dialog, { key: 'g' });
+      await fireEvent.keyDown(dialog, { key: 'l' });
+
+      expect(shellKeyHandler).not.toHaveBeenCalled();
+      expect(dialog).toBeInTheDocument();
+      window.removeEventListener('keydown', shellKeyHandler);
+    });
+
+    it('serializes save and deletion and removes only the deleted entity draft', async () => {
+      const coordinator = new DraftCoordinator();
+      const save = deferred<GraphNode>();
+      const deletion = deferred<undefined>();
+      coordinator.open(oracleScope('camp1'), null, '');
+      coordinator.revise(oracleScope('camp1'), 'Unsent Oracle question');
+      vi.mocked(commands.updateEntity).mockReturnValue(save.promise);
+      vi.mocked(commands.softDeleteEntity).mockReturnValue(deletion.promise);
+      renderManager(coordinator);
+      await fireEvent.click(await screen.findByRole('button', { name: 'Mira' }));
+      await fireEvent.input(screen.getByLabelText('Notes'), {
+        target: { value: 'Save before deleting' },
+      });
+      await fireEvent.submit(screen.getByRole('form'));
+
+      const rowDelete = screen.getByRole('button', { name: /delete mira/i });
+      expect(rowDelete).toBeDisabled();
+      expect(rowDelete).toHaveAccessibleDescription(
+        'Wait for saving to finish before discarding changes',
+      );
+      await fireEvent.click(rowDelete);
+      expect(screen.queryByRole('dialog', { name: 'Delete' })).not.toBeInTheDocument();
+
+      save.resolve(mira({ notes: 'Save before deleting' }));
+      await waitFor(() => expect(rowDelete).toBeEnabled());
+      await fireEvent.click(rowDelete);
+      const confirm = within(screen.getByRole('dialog', { name: 'Delete' })).getByRole('button', {
+        name: 'Delete',
+      });
+      await fireEvent.click(confirm);
+
+      expect(confirm).toBeDisabled();
+      expect(screen.getByLabelText('Notes')).toBeDisabled();
+      expect(screen.getByTestId('entity-form-submit')).toBeDisabled();
+      expect(commands.softDeleteEntity).toHaveBeenCalledTimes(1);
+      expect(commands.updateEntity).toHaveBeenCalledTimes(1);
+
+      deletion.resolve(undefined);
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Mira' })).toBeNull());
+      expect(coordinator.get(entityScope('camp1', 'npc', 'mira'))).toBeUndefined();
+      expect(coordinator.get(entityScope('camp1', 'npc', 'torvin'))).toBeDefined();
+      expect(coordinator.get<string>(oracleScope('camp1'))?.value).toBe('Unsent Oracle question');
+    });
+
     it('restores existing drafts after switching records and remounting the view', async () => {
       const coordinator = new DraftCoordinator();
       const first = renderManager(coordinator);

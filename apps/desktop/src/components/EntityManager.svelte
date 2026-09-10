@@ -56,6 +56,14 @@
     error: EntityError;
   }
 
+  interface EntityDeletionIntent {
+    readonly campaignId: string;
+    readonly kind: EntityKind;
+    readonly entityId: string;
+    readonly scope: string;
+    readonly name: string;
+  }
+
   interface Props {
     campaignId: string;
     kind: EntityKind;
@@ -108,7 +116,8 @@
   let showForm = $state(false);
   let formError = $state<ScopedEntityError | null>(null);
   let toast = $state<string | null>(null);
-  let deleteConfirm = $state<GraphNode | null>(null);
+  let deleteConfirm = $state<EntityDeletionIntent | null>(null);
+  let deletingScope = $state<string | null>(null);
   // SvelteMap is inherently reactive — no $state wrapper needed
   let entityMap = new SvelteMap<string, { id: string; kind: string }>();
   let sessions = $state<Session[]>([]);
@@ -152,6 +161,12 @@
     activeDraftScope?.startsWith(newDraftPrefix) === true &&
       resolvedActiveDraftScope === activeDraftScope &&
       (currentDraft?.inFlight !== null || activeCreatePromotionIssue !== undefined),
+  );
+  let activeDeletionPending = $derived(
+    deletingScope !== null && deletingScope === resolvedActiveDraftScope,
+  );
+  let anyModalOpen = $derived(
+    deleteConfirm !== null || blockedPendingCreate !== null || discardConfirm,
   );
 
   interface PresentationRow {
@@ -555,6 +570,7 @@
     const saveCampaignId = campaignId;
     const saveKind = kind;
     const saveScope = draftCoordinator.resolveScope(activeDraftScope);
+    if (deletingScope === saveScope) return;
     const saveDraft = draftCoordinator.get<EntityDraftValue>(saveScope);
     if (!saveDraft) return;
     const recordPrefix = `entity:${saveCampaignId}:${saveKind}:`;
@@ -641,7 +657,7 @@
   }
 
   async function retryActiveSave(event: MouseEvent): Promise<void> {
-    if (!currentDraft) return;
+    if (!currentDraft || activeDeletionPending) return;
     const shouldRestoreFocus = event.currentTarget === document.activeElement;
     if (shouldRestoreFocus) void focusStableEditorAction();
     await handleSave(inputFromDraft(currentDraft.value));
@@ -657,6 +673,7 @@
   function reviseActiveDraft(value: EntityDraftValue): void {
     if (!activeDraftScope) return;
     const scope = draftCoordinator.resolveScope(activeDraftScope);
+    if (deletingScope === scope) return;
     const previous = draftCoordinator.get<EntityDraftValue>(scope);
     const revised = draftCoordinator.revise(scope, value);
     if (revised !== previous && formError?.scope === scope) formError = null;
@@ -673,6 +690,7 @@
   }
 
   function requestCancel(): void {
+    if (activeDeletionPending) return;
     if (!activeDraftScope || !currentDraft || statusOf(currentDraft) === 'saved') {
       closeForm();
       return;
@@ -688,14 +706,44 @@
     closeForm();
   }
 
-  async function confirmDelete(node: GraphNode) {
+  function requestDelete(node: GraphNode): void {
+    const requestCampaignId = campaignId;
+    const requestKind = kind;
+    const scope = entityScope(requestCampaignId, requestKind, node.id);
+    if (draftCoordinator.get<EntityDraftValue>(scope)?.inFlight) return;
+    deleteConfirm = Object.freeze({
+      campaignId: requestCampaignId,
+      kind: requestKind,
+      entityId: node.id,
+      scope,
+      name: node.name,
+    });
+  }
+
+  function suppressNavigationWhileModal(event: KeyboardEvent): void {
+    if (anyModalOpen) event.stopPropagation();
+  }
+
+  async function confirmDelete(intent: EntityDeletionIntent) {
+    if (deletingScope !== null) return;
+    if (draftCoordinator.get<EntityDraftValue>(intent.scope)?.inFlight) return;
+    deletingScope = intent.scope;
     try {
-      await softDeleteEntity(node.id, kind);
-      entities = entities.filter((e) => e.id !== node.id);
+      await softDeleteEntity(intent.entityId, intent.kind);
+      const cleanup = draftCoordinator.removeAfterDelete(intent.scope);
+      if (cleanup !== 'removed') {
+        showToastMsg(i18n.t('entityUi.failedDeleteEntity'));
+        return;
+      }
+      if (campaignId === intent.campaignId && kind === intent.kind) {
+        entities = entities.filter((entity) => entity.id !== intent.entityId);
+        if (resolvedActiveDraftScope === intent.scope) closeForm();
+      }
     } catch (e) {
       showToastMsg((e as EntityError).message ?? i18n.t('entityUi.failedDeleteEntity'));
     } finally {
-      deleteConfirm = null;
+      if (deleteConfirm?.scope === intent.scope) deleteConfirm = null;
+      deletingScope = null;
     }
   }
 
@@ -784,6 +832,8 @@
   });
 </script>
 
+<svelte:document onkeydown={suppressNavigationWhileModal} />
+
 <div class="entity-manager">
   <div class="content">
     <!-- List panel -->
@@ -842,14 +892,25 @@
                 >
               {/if}
               {#if row.node}
+                {@const deleteScope = entityScope(campaignId, kind, row.node.id)}
+                {@const deleteBlocked = Boolean(
+                  draftCoordinator.get<EntityDraftValue>(deleteScope)?.inFlight,
+                )}
+                {@const deleteHelpId = `entity-delete-help-${campaignId}-${kind}-${row.node.id}`}
+                {#if deleteBlocked}
+                  <span id={deleteHelpId} class="visually-hidden">
+                    {i18n.t('drafts.waitForSavingBeforeDiscard')}
+                  </span>
+                {/if}
                 <Button
                   variant="ghost"
                   iconOnly
                   class="btn-icon delete"
                   ariaLabel={i18n.t('entityUi.deleteEntity', { name: row.name })}
-                  onclick={() => {
-                    deleteConfirm = row.node;
-                  }}>×</Button
+                  ariaDescribedby={deleteBlocked ? deleteHelpId : undefined}
+                  title={deleteBlocked ? i18n.t('drafts.waitForSavingBeforeDiscard') : undefined}
+                  disabled={deleteBlocked || deletingScope === deleteScope}
+                  onclick={() => requestDelete(row.node as GraphNode)}>×</Button
                 >
               {/if}
             </li>
@@ -898,33 +959,35 @@
             </div>
           </div>
         {/if}
-        <EntityForm
-          {kind}
-          node={presentedFormNode}
-          error={formError?.scope === resolvedActiveDraftScope ? formError.error : null}
-          editingScope={resolvedActiveDraftScope ?? ''}
-          initialName={pendingInitialName ?? undefined}
-          draftValue={currentDraft?.value}
-          onvaluechange={reviseActiveDraft}
-          existing={activeRecordId !== null}
-          submitDisabled={creating}
-          sessions={kind === 'event' ? sessions : []}
-          {entityMap}
-          onsave={handleSave}
-          oncancel={requestCancel}
-          {onOpenEntity}
-        />
-        {#if currentDraft}
-          <div class="draft-status">
-            <SaveStatus
-              status={statusOf(currentDraft)}
-              error={activeTargetUnavailable
-                ? i18n.t('drafts.targetUnavailable')
-                : currentDraft.error}
-              onRetry={retryActiveSave}
-            />
-          </div>
-        {/if}
+        <fieldset class="entity-controls" disabled={activeDeletionPending}>
+          <EntityForm
+            {kind}
+            node={presentedFormNode}
+            error={formError?.scope === resolvedActiveDraftScope ? formError.error : null}
+            editingScope={resolvedActiveDraftScope ?? ''}
+            initialName={pendingInitialName ?? undefined}
+            draftValue={currentDraft?.value}
+            onvaluechange={reviseActiveDraft}
+            existing={activeRecordId !== null}
+            submitDisabled={creating || activeDeletionPending}
+            sessions={kind === 'event' ? sessions : []}
+            {entityMap}
+            onsave={handleSave}
+            oncancel={requestCancel}
+            {onOpenEntity}
+          />
+          {#if currentDraft}
+            <div class="draft-status">
+              <SaveStatus
+                status={statusOf(currentDraft)}
+                error={activeTargetUnavailable
+                  ? i18n.t('drafts.targetUnavailable')
+                  : currentDraft.error}
+                onRetry={retryActiveSave}
+              />
+            </div>
+          {/if}
+        </fieldset>
         {#if activeCreatePromotionIssue}
           <div class="promotion-alert" role="alert">
             <div>
@@ -964,11 +1027,17 @@
       <p>{i18n.t('entityUi.removeEntity', { name: deleteConfirm?.name ?? '' })}</p>
     {/snippet}
     {#snippet deleteActions()}
-      <Button variant="danger" onclick={() => confirmDelete(deleteConfirm as GraphNode)}
+      <Button
+        variant="danger"
+        disabled={deletingScope !== null}
+        loading={deletingScope === deleteConfirm?.scope}
+        loadingText={i18n.t('common.delete')}
+        onclick={() => confirmDelete(deleteConfirm as EntityDeletionIntent)}
         >{i18n.t('common.delete')}</Button
       >
       <Button
         variant="ghost"
+        disabled={deletingScope !== null}
         onclick={() => {
           deleteConfirm = null;
         }}>{i18n.t('common.cancel')}</Button
@@ -979,7 +1048,7 @@
       body={deleteBody}
       actions={deleteActions}
       onclose={() => {
-        deleteConfirm = null;
+        if (deletingScope === null) deleteConfirm = null;
       }}
     />
   {/if}
@@ -1158,6 +1227,23 @@
     flex: 1;
     padding: 16px;
     overflow-y: auto;
+  }
+  .entity-controls {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
   .draft-status {
     margin-top: var(--s-3);
