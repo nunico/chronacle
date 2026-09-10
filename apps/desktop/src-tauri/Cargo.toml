@@ -60,6 +60,7 @@ mockall = "0.13"
 tempfile = "3"
 pretty_assertions = "1"
 lopdf = "0.38"
+tauri = { version = "2", features = ["test"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
