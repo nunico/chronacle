@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SessionLogView, * as sessionLogViewModule from './SessionLogView.svelte';
 import type { Session } from '../lib/commands';
 import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
-import { sessionScope } from '../lib/drafts/draft-state';
+import { oracleScope, sessionScope } from '../lib/drafts/draft-state';
 
 interface SessionLoadFenceContract {
   readonly trackedCount: number;
@@ -407,5 +407,75 @@ describe('SessionLogView draft coordination', () => {
       'Local notes that must remain available',
     );
     expect(screen.getByText('Unsaved changes', { exact: true })).toBeVisible();
+  });
+
+  it('retains a missing failed session through navigation for targeted Retry and Discard', async () => {
+    const backendDetail = 'Internal session row 17 vanished during UPDATE.';
+    const coordinator = new DraftCoordinator();
+    const missingScope = sessionScope('camp-a', 'session-a');
+    const unrelatedScope = oracleScope('camp-a');
+    coordinator.open(unrelatedScope, null, 'Unsent unrelated Oracle question');
+    vi.mocked(commands.getSessions)
+      .mockResolvedValueOnce([session('camp-a', 'Ashes at Dawn')])
+      .mockResolvedValueOnce([]);
+    vi.mocked(commands.updateSession).mockRejectedValue({
+      code: 'NOT_FOUND',
+      message: backendDetail,
+    });
+
+    const first = renderLog('camp-a', coordinator);
+    const header = await screen.findByRole('button', { name: /Ashes at Dawn/ });
+    await fireEvent.click(header);
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Ashes retained locally' },
+    });
+    await fireEvent.input(screen.getByLabelText('Date played'), {
+      target: { value: '2026-09-09' },
+    });
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Notes' }), {
+      target: { value: 'Exact notes retained after deletion.' },
+    });
+    await fireEvent.blur(screen.getByRole('textbox', { name: 'Notes' }));
+    const initialFailure = await screen.findByRole('alert');
+    expect(initialFailure).toHaveTextContent('This record is no longer available.');
+    expect(initialFailure).not.toHaveTextContent(backendDetail);
+    first.unmount();
+
+    renderLog('camp-a', coordinator);
+    const recoveryHeader = await screen.findByRole('button', { name: /Ashes retained locally/ });
+    const collapsedFailure = screen.getByRole('alert');
+    expect(collapsedFailure).toHaveTextContent('This record is no longer available.');
+    expect(collapsedFailure).not.toHaveTextContent(backendDetail);
+    await fireEvent.click(recoveryHeader);
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Ashes retained locally');
+    expect(screen.getByLabelText('Date played')).toHaveValue('2026-09-09');
+    expect(screen.getByRole('textbox', { name: 'Notes' })).toHaveValue(
+      'Exact notes retained after deletion.',
+    );
+    const recoveredFailure = screen.getByRole('alert');
+    expect(recoveredFailure).toHaveTextContent('This record is no longer available.');
+    expect(recoveredFailure).not.toHaveTextContent(backendDetail);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(commands.updateSession).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(commands.updateSession).mock.calls[1]).toEqual([
+      'session-a',
+      {
+        sessionNumber: 1,
+        title: 'Ashes retained locally',
+        datePlayed: '2026-09-09',
+        notes: 'Exact notes retained after deletion.',
+      },
+    ]);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retry' }));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /Ashes retained locally/ }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(coordinator.get(missingScope)).toBeUndefined();
+    expect(coordinator.get<string>(unrelatedScope)?.value).toBe('Unsent unrelated Oracle question');
   });
 });

@@ -58,6 +58,7 @@
     entityMap: Map<string, { id: string; kind: string }>;
     onUpdate: (session: Session) => void;
     onDelete: (id: string) => void;
+    onDiscardUnavailable?: (id: string) => void;
     campaignId?: string;
     draftCoordinator?: DraftCoordinator;
   }
@@ -67,6 +68,7 @@
     entityMap,
     onUpdate,
     onDelete,
+    onDiscardUnavailable,
     campaignId,
     draftCoordinator = new DraftCoordinator(),
   }: Props = $props();
@@ -179,11 +181,7 @@
   }
 
   async function saveFromBlur(event?: FocusEvent) {
-    if (
-      deletionPending ||
-      draftCoordinator.isCloseDecisionActive() ||
-      !shouldSaveFromBlur(event)
-    )
+    if (deletionPending || draftCoordinator.isCloseDecisionActive() || !shouldSaveFromBlur(event))
       return;
     const current = draftCoordinator.get<SessionDraftValue>(scope);
     if (current?.error) return;
@@ -207,7 +205,9 @@
 
   async function discardDraft() {
     if (deletionPending) return;
+    const releaseUnavailable = onDiscardUnavailable;
     if (draftCoordinator.discard(scope) !== 'discarded') return;
+    releaseUnavailable?.(session.id);
     await tick();
     headerButton?.focus();
   }
