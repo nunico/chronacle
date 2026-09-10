@@ -20,6 +20,8 @@ type SaveWriter<T extends DraftValue> = (value: DraftSnapshot<T>) => Promise<T>;
 type DiscardResult = 'discarded' | 'blocked-active-save' | 'missing';
 type DiscardAllResult = Exclude<DiscardResult, 'missing'>;
 type DeleteCleanupResult = 'removed' | 'blocked-active-save' | 'missing';
+type ReleaseResult = 'released' | 'retained-at-risk' | 'missing';
+type PrefixDeleteCleanupResult = number | 'blocked-active-save';
 
 export type CreatePromotionBlockReason =
   | 'missing-source'
@@ -194,6 +196,63 @@ export class DraftCoordinator {
     this.createPromotionIssues.delete(resolvedScope);
     this.removeRedirectsFor(resolvedScope);
     return 'removed';
+  }
+
+  release(scope: string): ReleaseResult {
+    if (this.redirects.has(scope)) return 'retained-at-risk';
+    const draft = this.drafts.get(scope);
+    if (!draft) return 'missing';
+    if (!this.isReleaseEligible(draft)) return 'retained-at-risk';
+
+    this.drafts.delete(scope);
+    this.authoritativeListScopes.delete(scope);
+    return 'released';
+  }
+
+  releasePrefix(prefix: string): number {
+    this.requirePrefix(prefix);
+    let released = 0;
+    for (const scope of [...this.drafts.keys()]) {
+      if (this.matchesAnyPrefix(scope, [prefix]) && this.release(scope) === 'released')
+        released += 1;
+    }
+    return released;
+  }
+
+  hasActiveWritesByPrefixes(prefixes: readonly string[]): boolean {
+    this.requirePrefixes(prefixes);
+    for (const draft of this.drafts.values()) {
+      if (draft.inFlight !== null && this.matchesAnyPrefix(draft.scope, prefixes)) return true;
+    }
+    return false;
+  }
+
+  removeAfterDeletePrefixes(prefixes: readonly string[]): PrefixDeleteCleanupResult {
+    this.requirePrefixes(prefixes);
+    if (this.hasActiveWritesByPrefixes(prefixes)) return 'blocked-active-save';
+
+    const matchingScopes = [...this.drafts.keys()].filter((scope) => {
+      return this.matchesAnyPrefix(scope, prefixes);
+    });
+    for (const scope of matchingScopes) this.cancelQueued(scope);
+    for (const scope of matchingScopes) {
+      this.drafts.delete(scope);
+      this.authoritativeListScopes.delete(scope);
+    }
+    for (const [source, destination] of this.redirects) {
+      if (this.matchesAnyPrefix(source, prefixes) || this.matchesAnyPrefix(destination, prefixes)) {
+        this.redirects.delete(source);
+      }
+    }
+    for (const [source, issue] of this.createPromotionIssues) {
+      if (
+        this.matchesAnyPrefix(source, prefixes) ||
+        this.matchesAnyPrefix(issue.destinationScope, prefixes)
+      ) {
+        this.createPromotionIssues.delete(source);
+      }
+    }
+    return matchingScopes.length;
   }
 
   hasActiveWrites(): boolean {
@@ -605,6 +664,30 @@ export class DraftCoordinator {
       draft.error === null &&
       !this.hasQueued(draft.scope)
     );
+  }
+
+  private isReleaseEligible(draft: DraftRecord<DraftValue>): boolean {
+    if (!this.isFullyClean(draft)) return false;
+    if (this.redirects.has(draft.scope) || this.hasRedirectTo(draft.scope)) return false;
+    for (const issue of this.createPromotionIssues.values()) {
+      if (issue.sourceScope === draft.scope || issue.destinationScope === draft.scope) return false;
+    }
+    return true;
+  }
+
+  private matchesAnyPrefix(scope: string, prefixes: readonly string[]): boolean {
+    return prefixes.some((prefix) => {
+      return scope === prefix || (prefix.endsWith(':') && scope.startsWith(prefix));
+    });
+  }
+
+  private requirePrefix(prefix: string): void {
+    if (prefix.length === 0) throw new Error('Draft scope prefix cannot be empty');
+  }
+
+  private requirePrefixes(prefixes: readonly string[]): void {
+    if (prefixes.length === 0) throw new Error('At least one draft scope prefix is required');
+    for (const prefix of prefixes) this.requirePrefix(prefix);
   }
 
   private needsSave<T extends DraftValue>(draft: DraftRecord<T>): boolean {
