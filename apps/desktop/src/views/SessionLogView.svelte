@@ -36,7 +36,7 @@
 </script>
 
 <script lang="ts">
-  import { onDestroy, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import {
     getSessions,
@@ -81,6 +81,7 @@
   let sessionRequest = 0;
   let entityRequest = 0;
   let activeProjectionPrefix: string | null = null;
+  let sessionLogElement = $state<HTMLDivElement>();
   const projectionLeases = new SvelteMap<string, () => void>();
   const sessionLoadFence = new SessionLoadFence();
 
@@ -284,18 +285,22 @@
     backendSessions = backendSessions.filter((session) => session.id !== id);
   }
 
-  function handleDiscardUnavailable(id: string) {
+  async function handleDiscardUnavailable(id: string) {
     releaseProjection(sessionScope(campaignId, id));
+    await tick();
+    sessionLogElement?.querySelector<HTMLButtonElement>('.new-session-button')?.focus();
   }
 </script>
 
-<div class="session-log">
+<div class="session-log" bind:this={sessionLogElement}>
   <div class="session-log-head">
     <div>
       <h1>{i18n.t('sessions.title')}</h1>
       <p class="sub">{i18n.t('sessions.subtitle')}</p>
     </div>
-    <Button onclick={handleNewSession}>+ {i18n.t('sessions.newSession')}</Button>
+    <Button class="new-session-button" onclick={handleNewSession}
+      >+ {i18n.t('sessions.newSession')}</Button
+    >
   </div>
   {#if loading}
     <p class="muted">{i18n.t('sessions.loading')}</p>
