@@ -48,6 +48,8 @@ const fr = {
     createdNeedsAttention: 'Créé, mais une intervention est nécessaire',
     finishCreatedEntity:
       'L’entité a été enregistrée, mais Chronacle n’a pas pu terminer son ouverture. Résolvez les modifications de l’élément répertorié, puis réessayez.',
+    finishCreatedSession:
+      'La session a été enregistrée, mais Chronacle n’a pas pu terminer son ouverture. Résolvez les modifications de la session répertoriée, puis réessayez.',
     createdEntityConflict:
       'Cet élément a de nouveau été enregistré pendant la création. Choisissez la version à conserver.',
     keepSavedRecord: 'Conserver l’élément enregistré',

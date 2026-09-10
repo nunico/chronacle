@@ -135,11 +135,18 @@
   let retainedCreate = $derived.by(
     () =>
       draftCoordinator.listByPrefix<SessionDraftValue>(newSessionPrefix).find((draft) => {
-        return statusOf(draft) !== 'saved';
+        return (
+          statusOf(draft) !== 'saved' ||
+          draftCoordinator.getCreatePromotionIssue(draft.scope) !== undefined
+        );
       }) ?? null,
   );
+  let createPromotionIssue = $derived(
+    retainedCreate ? draftCoordinator.getCreatePromotionIssue(retainedCreate.scope) : undefined,
+  );
   let showCreateRecovery = $derived(
-    retainedCreate?.error !== null || retainedCreate?.scope === retryingCreateScope,
+    createPromotionIssue === undefined &&
+      (retainedCreate?.error != null || retainedCreate?.scope === retryingCreateScope),
   );
   let unavailableSessionIds = $derived(
     new Set(
@@ -274,6 +281,7 @@
   async function saveNewSession(
     createDraft: DraftRecord<SessionDraftValue>,
     requestedCampaign: string,
+    focusOnSuccess = false,
   ): Promise<void> {
     const saveScope = createDraft.scope;
     let acknowledgedSession: Session | null = null;
@@ -297,9 +305,9 @@
       scope,
       `session:${created.id}`,
     );
+    retryingCreateScope = null;
     if (promotion.outcome !== 'promoted') return;
 
-    retryingCreateScope = null;
     if (!mounted || campaignId !== requestedCampaign) return;
     leaseProjection(scope);
     sessionLoadFence.acknowledge(requestedCampaign, scope);
@@ -309,6 +317,7 @@
       ),
       created,
     ];
+    if (focusOnSuccess) await focusSessionHeader(created.id);
   }
 
   async function handleNewSession(): Promise<void> {
@@ -334,12 +343,36 @@
     await saveNewSession(draft, requestedCampaign);
   }
 
-  async function retryNewSession(): Promise<void> {
+  async function focusSessionHeader(sessionId: string): Promise<void> {
+    await tick();
+    const index = sessions.findIndex((session) => session.id === sessionId);
+    if (index < 0) return;
+    sessionLogElement?.querySelectorAll<HTMLButtonElement>('.session-header').item(index).focus();
+  }
+
+  async function retryNewSession(event: MouseEvent): Promise<void> {
     const attempt = retainedCreate;
     if (!attempt || attempt.inFlight !== null || !attempt.scope.startsWith(newSessionPrefix))
       return;
+    const shouldRestoreFocus = event.currentTarget === document.activeElement;
+    const promotionIssue = draftCoordinator.getCreatePromotionIssue(attempt.scope);
+    if (promotionIssue) {
+      const result = draftCoordinator.retryCreatePromotion<SessionDraftValue>(attempt.scope);
+      if (result.outcome === 'promoted') {
+        if (shouldRestoreFocus) {
+          const createdId = promotionIssue.destinationScope.slice(sessionPrefix.length);
+          await focusSessionHeader(createdId);
+        }
+        return;
+      }
+      if (shouldRestoreFocus) {
+        await tick();
+        sessionLogElement?.querySelector<HTMLButtonElement>('.promotion-alert button')?.focus();
+      }
+      return;
+    }
     retryingCreateScope = attempt.scope;
-    await saveNewSession(attempt, campaignId);
+    await saveNewSession(attempt, campaignId, shouldRestoreFocus);
   }
 
   async function discardNewSession(): Promise<void> {
@@ -396,6 +429,17 @@
           onclick={discardNewSession}
           disabled={retainedCreate.inFlight !== null}>{i18n.t('drafts.discardChanges')}</Button
         >
+      </div>
+    </div>
+  {/if}
+  {#if retainedCreate && createPromotionIssue}
+    <div class="create-failure promotion-alert" role="alert">
+      <div class="create-failure-message">
+        <strong>{i18n.t('drafts.createdNeedsAttention')}</strong>
+        <span>{i18n.t('drafts.finishCreatedSession')}</span>
+      </div>
+      <div class="create-failure-actions">
+        <Button variant="secondary" onclick={retryNewSession}>{i18n.t('drafts.retry')}</Button>
       </div>
     </div>
   {/if}

@@ -45,6 +45,8 @@ export const sourceCatalog = {
     createdNeedsAttention: 'Created, but needs attention',
     finishCreatedEntity:
       "The entity was saved, but Chronacle couldn't finish opening it. Resolve changes for the listed record, then retry.",
+    finishCreatedSession:
+      "The session was saved, but Chronacle couldn't finish opening it. Resolve changes for the listed session, then retry.",
     createdEntityConflict:
       'This record was saved again while creation was finishing. Choose which version to keep.',
     keepSavedRecord: 'Keep saved record',
