@@ -13,6 +13,7 @@
   let { draftCoordinator, oncancel, ondestroy }: Props = $props();
   let closing = $state(false);
   let closeFailed = $state(false);
+  let cancelButton: HTMLButtonElement | undefined = $state();
   let retryButton: HTMLButtonElement | undefined = $state();
   let hasActiveWrites = $derived(draftCoordinator.hasActiveWrites());
   let hasAtRiskDrafts = $derived(draftCoordinator.atRiskCount() > 0);
@@ -29,7 +30,8 @@
       closing = false;
       closeFailed = true;
       await tick();
-      retryButton?.focus();
+      if (hasActiveWrites) cancelButton?.focus();
+      else retryButton?.focus();
     }
   }
 
@@ -46,11 +48,12 @@
     <p id="window-close-error" class="close-error" role="alert">
       {i18n.t('drafts.closeFailed')}
     </p>
-  {:else if hasActiveWrites}
+  {/if}
+  {#if hasActiveWrites}
     <p id="window-close-status" class="close-status" role="status" aria-live="polite">
       {i18n.t('drafts.waitForSavingBeforeClose')}
     </p>
-  {:else if safeToClose}
+  {:else if safeToClose && !closeFailed}
     <p id="window-close-status" class="close-status" role="status" aria-live="polite">
       {i18n.t('drafts.safeToClose')}
     </p>
@@ -59,6 +62,7 @@
 
 {#snippet closeActions()}
   <button
+    bind:this={cancelButton}
     type="button"
     class="dialog-button ghost"
     data-autofocus
@@ -72,8 +76,11 @@
       bind:this={retryButton}
       type="button"
       class="dialog-button danger"
-      disabled={closing}
-      aria-describedby="window-close-error"
+      disabled={hasActiveWrites || closing}
+      title={hasActiveWrites ? i18n.t('drafts.waitForSavingBeforeClose') : undefined}
+      aria-describedby={hasActiveWrites
+        ? 'window-close-error window-close-status'
+        : 'window-close-error'}
       onclick={closeWindow}
       onkeydown={handleCloseKey}>{i18n.t('drafts.retry')}</button
     >

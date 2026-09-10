@@ -7,14 +7,17 @@ import CloseDraftsDialog from './CloseDraftsDialog.svelte';
 interface Deferred<T> {
   readonly promise: Promise<T>;
   resolve(value: T): void;
+  reject(reason?: unknown): void;
 }
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function dirtyCoordinator(): DraftCoordinator {
@@ -160,6 +163,47 @@ describe('CloseDraftsDialog', () => {
     unmount();
     expect(document.activeElement).toBe(opener);
     opener.remove();
+  });
+
+  it('keeps retry unavailable and focuses Cancel when a save starts before exit fails', async () => {
+    const coordinator = dirtyCoordinator();
+    const nativeExit = deferred<undefined>();
+    const save = deferred<string>();
+    const ondestroy = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(() => nativeExit.promise)
+      .mockResolvedValueOnce(undefined);
+    renderDialog(coordinator, { ondestroy });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Discard and close' }));
+    coordinator.open('session:camp-a:s1', 'session:s1', 'Saved title');
+    coordinator.revise('session:camp-a:s1', 'Updated title');
+    const activeSave = coordinator.requestSave('session:camp-a:s1', () => save.promise);
+    nativeExit.reject(new Error('native exit rejected'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Chronacle couldn't close. Your drafts are still available. Try again or cancel.",
+    );
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    expect(retry).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Wait for saving to finish before discarding and closing.',
+    );
+    expect(cancel).toBeEnabled();
+    expect(document.activeElement).toBe(cancel);
+
+    await fireEvent.keyDown(retry, { key: 'Enter' });
+    expect(ondestroy).toHaveBeenCalledOnce();
+
+    save.resolve('Updated title');
+    await activeSave;
+    await waitFor(() => expect(retry).toBeEnabled());
+    expect(document.activeElement).toBe(cancel);
+
+    retry.focus();
+    await fireEvent.keyDown(retry, { key: 'Enter' });
+    await waitFor(() => expect(ondestroy).toHaveBeenCalledTimes(2));
   });
 
   it('blocks destructive close while a write is active and never starts another writer', async () => {
