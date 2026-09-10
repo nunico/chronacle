@@ -139,18 +139,20 @@
   });
 
   async function handleNewSession() {
+    const requestedCampaign = campaignId;
     const nextNumber =
       sessions.length === 0 ? 1 : Math.max(...sessions.map((s) => s.session_number)) + 1;
     const today = new Date().toISOString().slice(0, 10);
     try {
-      const created = await createSession(campaignId, {
+      const created = await createSession(requestedCampaign, {
         sessionNumber: nextNumber,
         title: i18n.t('sessions.defaultTitle', { number: nextNumber }),
         datePlayed: today,
         notes: '',
       });
+      if (!mounted || campaignId !== requestedCampaign) return;
       draftCoordinator.open(
-        sessionScope(campaignId, created.id),
+        sessionScope(requestedCampaign, created.id),
         `session:${created.id}`,
         sessionDraftValue(created),
         'authoritative-list',

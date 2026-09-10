@@ -84,6 +84,47 @@ describe('SessionLogView draft coordination', () => {
     expect(screen.getByText('Newest Campaign A session')).toBeVisible();
   });
 
+  it('does not integrate a delayed session creation into another campaign', async () => {
+    const pendingCreate = deferred<Session>();
+    const createdForCampaignA: Session = {
+      ...session('camp-a', 'Created for Campaign A'),
+      id: 'session-created-a',
+    };
+    let campaignARequests = 0;
+    vi.mocked(commands.getSessions).mockImplementation((campaignId) => {
+      if (campaignId === 'camp-a') {
+        campaignARequests += 1;
+        return Promise.resolve(campaignARequests === 1 ? [] : [createdForCampaignA]);
+      }
+      return Promise.resolve([session('camp-b', 'Campaign B session')]);
+    });
+    vi.mocked(commands.createSession).mockReturnValue(pendingCreate.promise);
+    const coordinator = new DraftCoordinator();
+    const rendered = renderLog('camp-a', coordinator);
+
+    await waitFor(() => expect(commands.getSessions).toHaveBeenCalledWith('camp-a'));
+    await fireEvent.click(screen.getByRole('button', { name: /New Session/i }));
+    expect(commands.createSession).toHaveBeenCalledWith('camp-a', expect.any(Object));
+
+    await rendered.rerender({ campaignId: 'camp-b', draftCoordinator: coordinator } as never);
+    expect(await screen.findByText('Campaign B session')).toBeVisible();
+
+    pendingCreate.resolve(createdForCampaignA);
+    await pendingCreate.promise;
+    await tick();
+
+    expect(screen.queryByText('Created for Campaign A')).not.toBeInTheDocument();
+    expect(coordinator.get(sessionScope('camp-b', createdForCampaignA.id))).toBeUndefined();
+    expect(coordinator.get(sessionScope('camp-a', createdForCampaignA.id))).toBeUndefined();
+
+    await rendered.rerender({ campaignId: 'camp-a', draftCoordinator: coordinator } as never);
+    expect(await screen.findByText('Created for Campaign A')).toBeVisible();
+    expect(
+      coordinator.get<{ title: string }>(sessionScope('camp-a', createdForCampaignA.id))?.value
+        .title,
+    ).toBe('Created for Campaign A');
+  });
+
   it('restores a retained session draft after view unmount and an older list reload', async () => {
     const coordinator = new DraftCoordinator();
     vi.mocked(commands.getSessions).mockResolvedValue([session('camp-a', 'Ashes at Dawn')]);
