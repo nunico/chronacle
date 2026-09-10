@@ -1,7 +1,7 @@
 # Draft and Save Reliability Design
 
 **Date:** 2026-09-07
-**Status:** Proposed for implementation
+**Status:** Implemented; corrective revision after adversarial review
 **Area:** `apps/desktop` editing lifecycle, Tauri IPC acknowledgments, native window close
 
 ## Outcome
@@ -37,6 +37,10 @@ Not included:
 - A generic workflow engine, event sourcing, new dependency, database table, or
   backend draft service.
 - Redesigning existing explicit entity Save into autosave.
+- Changing pull-request topology. The corrective work is designed as separable
+  commits and review slices, but splitting the already-published PR requires
+  remote branch/PR operations and remains a maintainer handoff unless explicitly
+  authorized.
 
 ## Investigation and Reproduction
 
@@ -195,6 +199,14 @@ intentional state-loading effect.
   invalid canonical content that retains draft content, identifies the target,
   and exposes Retry and relevant discard action. Invalid content attached to an
   inapplicable stale completion is ignored with that completion.
+- **Release:** removal of a fully clean, inactive draft snapshot after its
+  adapter no longer needs it. Release is not discard: it is permitted only when
+  the value equals its acknowledged baseline, no save is active or queued, no
+  failure or promotion issue exists, and no retained UI depends on the scope.
+- **Deletion intent:** an immutable capture of the complete destructive target
+  (campaign, kind or collection, record ID, and editing scope) made when a
+  confirmation opens. Confirmation never reconstructs a target from mutable
+  selection or navigation state.
 - **List reconciliation:** the one-time application of a current-campaign,
   current-kind backend list row to its coordinator scope when that list request
   completes through the still-live adapter instance that issued it. A rendered
@@ -283,6 +295,28 @@ scope. It refuses removal while the same scope has an active write. The session
 adapter owns the delete request and its temporary deleting state; the pure draft
 rules do not model UI confirmation or backend deletion.
 
+The same coordination applies to entities and campaigns. Entity deletion
+captures an immutable deletion intent before opening confirmation, disables
+global navigation shortcuts while any modal is active, and cannot start while
+that entity target has an active save. Success removes exactly the captured
+scope; failure preserves it. Campaign deletion is refused while any target lane
+for that campaign is active. When no write is active, confirmation identifies
+all dirty, failed, queued, and unsent campaign scopes and requires explicit
+campaign-wide discard before the backend delete. Success releases those scopes;
+failure leaves them intact. No deletion derives kind, campaign, or record from
+live selection after confirmation opens.
+
+The coordinator is app-scoped but not an archive. Adapters call `release(scope)`
+for clean, inactive scopes when rows leave the authoritative projection or an
+editor unmounts with no retained work. `releasePrefix(prefix)` applies the same
+eligibility rule after campaign or collection teardown. At-risk records,
+redirects, and promotion issues remain retained. Rule recovery presentation
+stores only the minimal rule identity and label needed to reopen the exact note
+draft; compiled bodies, references, objections, and other rule content remain
+authoritative adapter data and are not duplicated in an app-lifetime cache.
+This bounds clean-snapshot memory and private-text retention without timers,
+quotas, durable storage, or a second cache service.
+
 The coordinator deliberately does not decide whether a component instance is
 still alive. Each asynchronous editor adapter must reject settlement from an
 unmounted or superseded instance before calling `open`, revising presentation,
@@ -332,6 +366,8 @@ interface CreatePromotionIssue {
 }
 
 listByPrefix<T extends DraftValue>(prefix: string): readonly DraftRecord<T>[];
+release(scope: string): "released" | "retained-at-risk" | "missing";
+releasePrefix(prefix: string): number;
 removeAfterDelete(scope: string): "removed" | "blocked-active-save" | "missing";
 resolveScope(scope: string): string;
 tryRemapAfterCreate<T extends DraftValue>(
@@ -447,6 +483,8 @@ nor the old redirect.
   compiled body, category, page references, stale state, search, expansion, and
   objection text are not rule-note draft content. A returned `RuleEntry` is
   normalized through the same boundary before acknowledgment.
+  Recovery presentation retains only `{ ruleId, title, collectionId }` beside
+  the coordinator's note draft; it never caches a complete `RuleEntry`.
 - Every adapter that awaits backend data owns a component-instance liveness
   guard. Cleanup invalidates that instance before any late completion can
   reconcile the app-lifetime coordinator or publish presentation. A replacement
@@ -694,6 +732,27 @@ campaign or collection selects a different draft set while the shared
 39. Keyboard Discard of a session suppresses its focus-loss autosave, restores
     the complete saved baseline without IPC, and hands focus to that row's stable
     session header.
+40. A deletion confirmation captures the complete immutable target when opened.
+    Navigation shortcuts are suppressed while any modal is active, and later
+    selection changes cannot alter what confirmation deletes.
+41. Entity and campaign deletion cannot race an active target write. Successful
+    deletion removes only captured scopes; failure preserves every draft.
+42. New-session creation captures its campaign before IPC. Settlement may update
+    only that campaign's presentation; a campaign switch cannot register or show
+    the created session in the new campaign.
+43. Only clean, inactive, unreferenced scopes may be released. Dirty, queued,
+    saving, failed, unavailable, or promotion-conflicted drafts are never
+    evicted. Release contains no domain write and no user-visible discard.
+44. A close or application-exit request that finds at-risk work is synchronously
+    prevented before async UI work. macOS application Quit, Dock Quit, window
+    close, and equivalent normal termination paths share one decision state.
+45. Drafts remain intact until native exit authorization succeeds. A rejected
+    `confirm_app_exit` keeps the app open, preserves all work, shows an actionable
+    persistent failure, and permits Retry or Cancel; only successful process
+    termination makes a coordinator-wide discard observable.
+46. Production exit is initiated by the typed Rust `confirm_app_exit` command.
+    The frontend receives neither `core:window:allow-close` nor
+    `core:window:allow-destroy`; wildcard window permissions are absent.
 
 ## Draft and Save Lifecycle
 
@@ -1002,6 +1061,15 @@ draft unchanged, and restores focus to the Create control that invoked the
 request. Choosing either action is keyboard-operable; focus moves into the
 resulting retained or replacement form only after the explicit choice.
 
+Entity deletion captures `{ campaignId, kind, entityId, scope }` as one
+immutable target when confirmation opens. The confirm callback uses only that
+capture, never the current kind or selection. Shell navigation shortcuts are
+suppressed while any modal is open. Delete is unavailable while the exact
+entity target is saving; after backend success `removeAfterDelete(scope)`
+removes its retained draft so a late acknowledgment cannot resurrect the row
+and no unavailable draft can strand close protection. Failure preserves the
+captured draft and presentation.
+
 ### Sessions
 
 Title, date, and notes remain blur-save fields. The normalized draft is the
@@ -1061,8 +1129,12 @@ re-enables the fields and recovery actions.
 
 The existing New Session button continues to create a default backend session
 immediately; designing a separate new-session form is outside this draft-loss
-scope. A create failure should use existing/global error feedback, recorded as
-an unrelated consistency issue below.
+scope. Its click handler captures `campaignId` before IPC. Settlement may update
+presentation only when that campaign remains current and the issuing view is
+live. If the GM switched campaigns, the created record remains solely in its
+original campaign and appears on the next authoritative load there; it is never
+registered, selected, or rendered under the campaign that is current when the
+promise settles. Creation failure uses persistent local error feedback.
 
 ### Rule-entry table notes
 
@@ -1116,12 +1188,34 @@ never inserted into the backend list or wikilink registry. After explicit
 discard, a still-absent clean target is no longer synthesized and disappears
 from the presentation list.
 
+Campaign deletion applies the same lifecycle rule at a prefix boundary. If any
+campaign-owned lane is active, Delete is disabled and explains that saving must
+finish. Otherwise confirmation enumerates at-risk campaign scopes and makes
+campaign deletion explicit permission to discard only those scopes. The backend
+delete receives the campaign captured when confirmation opened. Success removes
+the captured scopes and releases remaining clean projections; failure preserves
+them all. No campaign switch can retarget that request, and no hidden campaign
+draft survives as an inaccessible close blocker after successful deletion.
+
 ### Normal close and restart policy
 
-`getCurrentWindow().onCloseRequested` is registered at Shell lifetime. With no
-at-risk draft, closing proceeds. With a nonempty Oracle draft or any dirty,
-saving, queued, or failed editor draft, the event is synchronously prevented and
-the shared modal opens:
+Normal termination has two adapters feeding one Rust `ExitAuthorization` state.
+`getCurrentWindow().onCloseRequested` handles window-manager close. On platforms
+where Tauri emits it, the Rust run callback handles `RunEvent::ExitRequested`.
+That public event is not emitted for macOS Cmd-Q or Dock Quit, so the design does
+not mislabel it as complete macOS coverage: a macOS
+`applicationShouldTerminate` adapter must return terminate-later, publish the
+same exit intent, and complete only after the shared authorization decision.
+Concurrent window/application requests coalesce into one intent/nonce and never
+double-exit. The frontend window adapter synchronously calls `preventDefault()`
+for at-risk work. Registration failure is fail-closed as already designed:
+editable UI is withheld behind localized Retry.
+
+With no at-risk draft, the frontend invokes `confirm_app_exit(intent, "keep")`;
+the Rust adapter validates the pending intent and permits exactly one native
+application exit. With a nonempty Oracle draft or any dirty,
+saving, queued, or failed editor draft, the request remains prevented and the
+shared modal opens:
 
 - Title: **Unsaved changes**
 - Primary safe action, initially focused: **Cancel**
@@ -1142,9 +1236,27 @@ prevented until the GM activates an enabled close action. This avoids both
 claiming to undo an in-progress write and auto-closing on an asynchronous
 result.
 
-With no active backend write, Discard and close clears all retained drafts and
-forces native window destruction. It does not call any save command. A save is
-never started as part of shutdown.
+With no active backend write, **Discard and close** begins a two-phase operation.
+It first captures the coordinator's at-risk snapshot and invokes the Rust
+`confirm_app_exit(intent, "discard")` command; it does not mutate drafts
+beforehand. The Rust command validates the pending intent and requests native
+application termination. Only successful termination permits process teardown
+to release memory. If authorization or native termination setup rejects, the app
+remains open, every draft is byte-for-byte intact, and the dialog shows a
+persistent localized failure with keyboard-operable Retry and Cancel. Retry
+uses the same decision against the still-pending intent; Cancel revokes it and
+restores the original opener. Neither path calls a writer or chat submission.
+This treats process teardown—not pre-emptive `discardAll()`—as the commit point
+for global discard.
+
+Because production close is initiated by a Rust command, the frontend needs
+neither `core:window:allow-close` nor `core:window:allow-destroy`; both grants and
+all wildcard window permissions are removed. The macOS adapter must use public
+APIs already available through approved dependencies and forward rather than
+replace Tauri's application delegate behavior. If an implementation spike shows
+that this cannot be done maintainably without a new crate, unsafe private API,
+or delegate replacement, the macOS portion is a concrete architecture blocker:
+stop for an ADR/dependency decision rather than ship an incomplete Quit claim.
 
 An OS kill, power loss, crash, or forced process termination cannot be
 intercepted; drafts are then lost. Durable storage is deliberately excluded to
@@ -1190,619 +1302,132 @@ and synthesized unavailable presentation rows without persisting them.
 
 ## Acceptance Criteria
 
-The executable source is
-`apps/desktop/tests/e2e/features/draft-save-reliability.feature`. Its observable
-contract is:
+The executable Gherkin files under
+`apps/desktop/tests/e2e/features/draft-save-reliability/` are the canonical
+observable contract. They are split by Oracle, entities, automatic saves, and
+native close; step definitions mirror those editor boundaries. This document
+does not embed the complete executable suite. The corrective scenarios below
+are written before implementation; Task 1 transfers them verbatim and replaces
+this block with links to the resulting feature files so there is one maintained
+copy.
 
 ```gherkin
-Feature: Preserve work while moving through a campaign
-  A GM can move among Oracle, notes, and reference material without losing work,
-  and can tell whether each edit is pending, saved, or needs attention.
-
-  Background:
-    Given draft reliability test data is available
-    And I have opened Chronacle in campaign "Campaign A"
-
-  Scenario: Return to an unsent question
-    Given I have entered an Oracle question without sending it
-    When I open the campaign notebook
-    And I return to Oracle
-    Then my question is still in the composer
-    And it has not been submitted
-
-  Scenario: Keep question drafts separate between campaigns
-    Given I have an unsent question in campaign A
-    When I switch to campaign B
-    Then campaign A's question is not shown in campaign B
-    When I enter a different unsent question in campaign B
-    And I return to campaign A
-    Then its unsent question is restored
-    And neither question has been submitted
-
-  Scenario: Retain an unsent question without a campaign
-    Given no campaign is available
-    And I enter an Oracle question without sending it
-    When I open Settings
-    And I return to Oracle
-    Then my no-campaign question is still in the composer
-    And it has not been submitted
-
-  Scenario: Return to an edited entity
-    Given I have changed the notes for entity "Mira" without saving
-    When I navigate to another view
-    And I reopen entity "Mira"
-    Then my entity edits are preserved
-    And the interface indicates that they are not yet saved
-
-  Scenario: Do not restore an old list row after a save acknowledgment
-    Given saving my changed entity "Mira" is held in progress
-    When I navigate away and return to NPCs
-    And the entity list completes with Mira's earlier saved content
-    And the held save completes with its canonical content
-    And I open entity "Mira Moonshadow" from that already-rendered list
-    Then the acknowledged canonical name and notes are shown in the row, preview, and editor
-    And the acknowledged entity is shown as saved
-    When a later entity list completes with newer canonical content
-    And I open entity "Mira Moonshadow"
-    Then the newer canonical content is shown
-
-  Scenario: Ignore an old entity list after its view has closed
-    Given the next NPC list load is held with Mira's earlier saved content
-    When I open NPCs and leave before that list completes
-    And I return to NPCs and save canonical changes to Mira
-    And the old NPC list completes after that save acknowledgment
-    Then the acknowledged canonical name and notes are shown in the row, preview, and editor
-    And the acknowledged entity is shown as saved
-
-  Scenario: Preserve a new entity draft
-    Given I have started creating an NPC
-    And I have entered its name and notes
-    When I navigate away and return to NPCs
-    Then my new entity draft is restored
-    And navigation has not created a saved entity
-
-  Scenario: Continue editing while an entity is being created
-    Given creation of revision 1 for a new NPC is in progress
-    When I enter revision 2 before creation completes
-    Then the Create action is unavailable
-    When creation completes and assigns the NPC an ID
-    Then revision 2 remains visible as unsaved
-    And the explicit action is now Save
-    When I save revision 2
-    Then revision 2 updates the NPC with the assigned ID
-    And only one NPC has been created
-
-  Scenario: Wait for active creation before replacing a new entity draft
-    Given creation of revision 1 for a new NPC is in progress
-    When I open entity "Mira"
-    And I request creation of the missing NPC link "Aldric"
-    Then Discard and create is unavailable while the original creation is saving
-    And Discard and create is explicitly described by the wait message
-    And Keep editing has focus
-    And only one NPC has been created
-    When creation completes and assigns the NPC an ID
-    Then Discard and create becomes available after creation settles
-    When I choose to discard the draft and create
-    Then the completed original NPC remains saved without a duplicate creation
-    And a new NPC draft is open with the name "Aldric"
-
-  Scenario: Finish creating after navigation remounts the entity editor
-    Given creation of revision 1 for a new NPC is in progress
-    When I navigate to Oracle
-    And I return to NPCs before creation completes
-    Then the new NPC draft is restored with Create unavailable
-    When creation completes and assigns the NPC an ID
-    And the entity list loaded before completion does not contain that ID
-    Then the acknowledged NPC remains visible and selected
-    And the interface indicates that it is saved
-    And the explicit action is now Save
-    And only one NPC has been created
-
-  Scenario: Finish creating when the saved record appears before acknowledgment
-    Given creation of revision 1 for a new NPC is in progress
-    When I enter revision 2 before creation completes
-    And the backend commits the new NPC but delays its acknowledgment
-    And I navigate to Oracle
-    And I return to NPCs before creation is acknowledged
-    Then the committed NPC appears in the entity list
-    When the delayed creation acknowledgment arrives
-    Then revision 2 remains visible as unsaved
-    And the explicit action is now Save
-    When I save revision 2
-    Then revision 2 updates the NPC with the assigned ID
-    And only one NPC has been created
-
-  Scenario: Recover when the listed destination has unsaved work
-    Given creation of revision 1 for a new NPC is in progress
-    And the backend commits the new NPC but delays its acknowledgment
-    And I navigate away and return to NPCs
-    And I make unsaved changes to the assigned NPC from the list
-    When the delayed creation acknowledgment arrives
-    Then the listed NPC changes remain unsaved
-    And the original new NPC draft remains available
-    And I see that the NPC was created but needs attention with Retry
-    And only one NPC has been created
-    When I explicitly discard the listed NPC changes
-    And I retry finishing the created NPC
-    Then the original new NPC draft is promoted to the assigned NPC
-    And no additional NPC is created
-    When I edit and save the promoted NPC
-    Then the later edit updates the NPC with the assigned ID
-    And only one NPC has been created
-
-  Scenario: Move focus safely after promotion Retry
-    Given a created NPC needs attention because its listed destination had unsaved work
-    And I have resolved the listed destination changes
-    And the promotion Retry action has focus
-    When I activate promotion Retry with the keyboard
-    Then the original new NPC draft is promoted to the assigned NPC
-    And focus moves to the promoted NPC editor
-
-  Scenario: Keep focus when promotion Retry remains blocked
-    Given a created NPC needs attention because its listed destination still has unsaved work
-    And the promotion Retry action has focus
-    When I activate promotion Retry with the keyboard
-    Then the promotion failure remains actionable
-    And focus remains on the promotion Retry action
-
-  Scenario: Preserve newer saved authority when Create acknowledges last
-    Given creation of revision 1 for a new NPC is in progress
-    When I enter revision 2 before creation completes
-    And the backend commits the new NPC but delays its acknowledgment
-    And I navigate away and return to NPCs
-    And I update the committed NPC from the entity list
-    And that destination Update is acknowledged as saved
-    When the delayed creation acknowledgment arrives
-    Then the destination Update remains visible as saved
-    And the destination Update remains persisted for the assigned NPC
-    And the original revision 2 draft remains available
-    And I see that the NPC was created but needs attention
-    And only one NPC has been created
-    When I activate Keep saved record with the keyboard
-    Then the original revision 2 draft is discarded without another backend write
-    And the destination Update remains visible as saved
-    And focus moves to the saved NPC's Save action
-
-  Scenario: Keep converged destination presentation when Create acknowledges last
-    Given creation of revision 1 for a new NPC is in progress
-    When the backend commits the new NPC but delays its acknowledgment
-    And I switch to campaign B and return to campaign A on NPCs
-    Then the committed NPC appears in the entity list
-    When I rename and save the assigned NPC destination
-    And the delayed creation acknowledgment arrives
-    Then the converged NPC row keeps the destination name and selection
-    And the converged NPC editor and preview keep the destination content
-    And the converged NPC is shown as saved
-    And the destination content remains persisted for the assigned NPC
-    And convergence leaves one created NPC without another backend write
-    When I switch from the converged NPC to Mira and back
-    Then the assigned NPC editor remains usable with the destination content
-
-  Scenario: Keep my draft after a newer destination is acknowledged
-    Given creation of revision 1 for a new NPC is in progress
-    When I enter revision 2 before creation completes
-    And revision 2 also renames the NPC
-    And the backend commits the new NPC but delays its acknowledgment
-    And I navigate away and return to NPCs
-    And I update the committed NPC from the entity list
-    And that destination Update is acknowledged as saved
-    When the delayed creation acknowledgment arrives
-    Then the renamed revision 2 draft remains available
-    And I see that the NPC was created but needs attention
-    When I activate Keep my draft with the keyboard
-    Then the kept revision 2 name, notes, and preview remain visible as unsaved
-    And the saved destination is unchanged without another backend write
-    And focus moves to the kept NPC's Save action
-    When I save the kept revision 2
-    Then the kept revision 2 updates the NPC with the assigned ID exactly once
-    And only one NPC has been created
-
-  Scenario: Keep a hidden new draft when creating from a link
-    Given I have a dirty new NPC draft
-    And I am viewing the existing NPC "Mira"
-    When I request creation of the missing NPC link "Aldric"
-    Then I am asked whether to keep or discard my new NPC draft
-    When I choose to keep editing
-    Then my original new NPC draft is reopened unchanged
-    And no NPC named "Aldric" has been created
-
-  Scenario: Cancel replacing a hidden new draft with the keyboard
-    Given I have a dirty new NPC draft
-    And I am viewing the existing NPC "Mira"
-    When I request creation of the missing NPC link "Aldric"
-    Then Keep editing has focus
-    When I press Escape
-    Then the replacement confirmation closes
-    And focus returns to the Create control that invoked it
-    And my original new NPC draft remains unchanged
-
-  Scenario: Replace a hidden new draft when creating from a link
-    Given I have a dirty new NPC draft
-    And I am viewing the existing NPC "Mira"
-    When I request creation of the missing NPC link "Aldric"
-    And I choose to discard the draft and create
-    Then only my original new NPC draft is discarded
-    And a new NPC draft is open with the name "Aldric"
-    And no NPC named "Aldric" has been created yet
-
-  Scenario: Keep entity drafts separate while switching records
-    Given I have changed the notes for entity "Mira" without saving
-    When I open entity "Torvin"
-    Then Mira's draft is not shown for Torvin
-    When I return to entity "Mira"
-    Then my entity edits are preserved
-    And Torvin's saved content is unchanged
-
-  Scenario: Reset frontend validation when switching entity records
-    Given I have cleared the required name for entity "Mira"
-    And I have tried to save entity "Mira"
-    Then Mira's name field indicates that it is required
-    When I open entity "Torvin"
-    Then Torvin's saved name is shown
-    And Mira's required-name message is not shown for Torvin
-    When I return to entity "Mira"
-    Then Mira's blank-name draft remains available as unsaved
-    And the frontend required-name message is cleared until I try to save again
-
-  Scenario: Show retained entity state while its form is closed
-    Given I have changed the notes for entity "Mira" without saving
-    When I open entity "Torvin"
-    Then Mira's row indicates unsaved changes
-    When I reopen entity "Mira" and start saving
-    And I open entity "Torvin" before the save completes
-    Then Mira's row indicates saving
-    When the save fails
-    Then Mira's row indicates that saving failed
-    And reopening Mira restores the failed draft and Retry action
-
-  Scenario: Reverting an entity to its saved baseline clears pending state
-    Given I have changed the notes for entity "Mira" without saving
-    When I restore Mira's notes to the saved value
-    Then the interface no longer indicates unsaved changes
-    And no save has been sent for Mira
-
-  Scenario: Recover from a failed save
-    Given I have unsaved changes to entity "Mira"
-    When saving the entity fails
-    Then my changes remain available
-    And I see an actionable save failure
-    When I retry and saving succeeds
-    Then the changes are saved to entity "Mira"
-    And the failure indication is cleared
-
-  Scenario: Move focus safely when inline Retry disappears
-    Given saving my changes to entity "Mira" has failed
-    And the inline Retry action has focus
-    When I retry and saving succeeds
-    Then the failure indication is cleared
-    And focus moves to Mira's stable editor control
-
-  Scenario: Keep focus on inline Retry when recovery still fails
-    Given saving my changes to entity "Mira" has failed
-    And the inline Retry action has focus
-    When I retry and saving fails again
-    Then the actionable failure remains
-    And focus remains on Mira's Retry action
-
-  Scenario: Treat backend validation as a recoverable save failure
-    Given I have frontend-valid unsaved changes to entity "Mira"
-    When the backend rejects the entity save as invalid
-    Then my changes remain available
-    And I see an actionable save failure
-    When I retry and saving succeeds
-    Then the same changes are saved to entity "Mira"
-    And the failure indication is cleared
-
-  Scenario: Keep a delayed backend validation failure with its entity
-    Given saving frontend-valid changes to entity "Mira" is in progress
-    When I open entity "Torvin" before the save completes
-    And the backend rejects Mira's save as invalid
-    Then Torvin's saved content remains visible without Mira's error
-    When I reopen entity "Mira"
-    Then Mira's changed content remains available
-    And Mira shows the save failure and Retry action
-
-  Scenario: Keep required-field validation local
-    Given I have cleared the required name for entity "Mira"
-    When I try to save the entity
-    Then the name field indicates that it is required
-    And Mira remains marked with unsaved changes
-    And no entity save has been sent
-
-  Scenario: Continue editing during a save
-    Given a save of an earlier session draft revision is in progress
-    When I make another edit to the session
-    And the earlier save completes
-    Then my newer session edit remains intact
-    And it is not incorrectly marked as saved
-
-  Scenario: Do not infer acknowledgment from coincidentally equal content
-    Given a save of session draft revision 1 is in progress
-    When I make session draft revision 2
-    And revision 1 is acknowledged with canonical content equal to revision 2
-    Then revision 2 remains visible as unsaved
-    When I save revision 2 and its acknowledgment completes
-    Then revision 2 is shown as saved
-
-  Scenario: Recover a session edit after saving fails
-    Given I have changed a session title
-    When the session save fails
-    Then the changed session title remains available
-    And the session shows an actionable save failure
-    When I retry the session save and it succeeds
-    Then the changed session title is shown as saved
-    And the session failure indication is cleared
-
-  Scenario: Recover a rule note after saving fails
-    Given I have changed the table notes for rule "Initiative"
-    When the rule-note save fails
-    Then the changed rule note remains available
-    And the rule note shows an actionable save failure
-    When I retry the rule-note save and it succeeds
-    Then the changed rule note is shown as saved
-    And the rule-note failure indication is cleared
-
-  Scenario: Keep an in-flight session draft separate between campaigns
-    Given a save of my changed session title is in progress
-    When I switch to campaign B
-    Then campaign A's session draft is not shown in campaign B
-    When I return to campaign A
-    Then the changed session title is preserved
-    And its save is still in progress
-
-  Scenario: Reverting a session edit to its saved baseline clears pending state
-    Given I have changed a session title without blurring it
-    When I restore the original session title
-    Then the session no longer indicates unsaved changes
-    And no session save has been sent
-
-  Scenario: Preserve a session draft when its target is unavailable
-    Given I have changed a session title
-    When saving reports that the session is no longer available
-    Then the changed session title remains available
-    And the session shows the localized unavailable-target recovery
-    And the raw session backend detail is not shown
-    When I retry the unavailable session save
-    Then Retry still targets the same session
-
-  Scenario: Do not let a session list requested before acknowledgment restore old content
-    Given a save of my changed session title is in progress
-    And the next Campaign A session list completes with the earlier saved title
-    When I navigate to Oracle before the save completes
-    And I return to Sessions before the held list completes
-    And the pending session save completes
-    And the held session list completes
-    Then the changed session title is preserved
-    And it is shown as saved
-    When a later session list loads newer canonical content
-    Then the newer canonical session title is shown
-
-  Scenario: Ignore a session list from an obsolete same-campaign view
-    Given the next Campaign A session list is held with obsolete content
-    When I open Sessions and leave before that list completes
-    And the backend session gains newer canonical content
-    And I return to Sessions
-    Then the newer canonical session title is shown
-    When the obsolete session list completes
-    Then the newer canonical session title is still shown
-
-  Scenario: Wait for a session save before deleting it
-    Given I have an unsent question in campaign A
-    And a save of an earlier session draft revision is in progress
-    Then Delete is unavailable for that session
-    And I am told to wait for the session save to finish
-    When the earlier save completes
-    And I activate Delete and explicitly confirm deletion
-    Then the session and only its retained draft are removed
-
-  Scenario: Prevent session writes while confirmed deletion is pending
-    Given I have an unsent question in campaign A
-    And a session save has failed while its title field is focused
-    When I confirm deleting the session and deletion remains in progress
-    Then the session fields and its Delete, Retry, and Discard actions are unavailable
-    When I attempt to retry while the session deletion is pending
-    Then no session save starts behind deletion
-    When the pending session deletion completes
-    Then the session and only its retained draft are removed
-
-  Scenario: Discard a session draft with the keyboard
-    Given I have an unsent question in campaign A
-    And I have changed a session title without blurring it
-    When I activate the session Discard action with the keyboard
-    Then the saved session title is restored
-    And focus moves to the stable session header
-    And the unsent Oracle question remains intact
-
-  Scenario: Retain a rule note while navigating and keep campaigns separate
-    Given a save of my changed rule note is in progress
-    When I navigate to Oracle before the rule-note save completes
-    And I return to the Initiative rule
-    Then the changed rule note is preserved and shown as saving
-    When I switch to campaign B
-    And I return to the Initiative rule
-    Then campaign A's changed rule note is not shown in campaign B
-    When I return to campaign A
-    And I return to the Initiative rule
-    Then the changed rule note is preserved and shown as saving
-
-  Scenario: Retain a focused rule note without saving it during navigation
-    Given I have entered "Unsaved note" in the focused Initiative table notes
-    When I navigate to Oracle while the rule note is still focused
-    Then no rule-note save has been sent
-    When I return to the Initiative rule
-    Then the exact rule note "Unsaved note" is restored
-    And the rule note is shown as unsaved
-
-  Scenario: Reverting a rule note to its saved baseline clears pending state
-    Given I have entered "Unsaved note" in the focused Initiative table notes
-    And the rule note is shown as unsaved
-    When I restore the saved Initiative table note
-    Then the rule note no longer indicates unsaved changes
-    And no rule-note save has been sent
-
-  Scenario: Keep retained rule-note saves separate between collections
-    Given a World Guide Initiative rule-note save is in progress
-    When I navigate to Oracle before the collection rule-note save completes
-    And I open Initiative in the Adventurer Guide
-    Then the World Guide rule-note draft is not shown in the Adventurer Guide
-    And the Adventurer Guide saved rule note is shown
-    When I return to Initiative in the World Guide
-    Then the World Guide rule-note draft is preserved and shown as saving
-
-  Scenario: Keep a rule draft separate from the explicit no-campaign context
-    Given no campaign is available
-    And I have entered "No-campaign rule note" in the focused Initiative table notes
-    When I create campaign "Campaign A"
-    And I open Initiative in the World Guide
-    Then the no-campaign rule-note draft is not shown in campaign A
-    And the saved Initiative table note is shown
-    When I delete campaign "Campaign A" and return to Initiative
-    Then the exact rule note "No-campaign rule note" is restored
-    And the rule note is shown as unsaved
-    And no rule-note save has been sent
-
-  Scenario: Continue editing a rule note during a save
-    Given a save of an earlier rule-note revision is in progress
-    When I make a newer edit to the rule note
-    And the earlier rule-note save completes
-    Then my newer rule-note edit remains intact
-    And the rule note is not incorrectly marked as saved
-
-  Scenario: Coalesce rapid rule-note saves without overlapping writes
-    Given rule-note saves are being held open
-    When I request rapid saves for three different rule notes
-    Then the rule-note save attempts do not overlap
-    When the pending rule-note saves are acknowledged
-    Then the newest rule note is preserved
-    And only the newest rule-note revision is shown as saved
-
-  Scenario: Keep an unavailable rule-note failure on its row and target
-    Given I have changed the table notes for rule "Initiative"
-    When saving reports that rule "Initiative" is no longer available
-    Then the changed rule note remains available
-    And the rule note shows an actionable unavailable-target failure
-    When I retry the unavailable rule-note save with the keyboard
-    Then Retry still targets rule "Initiative"
-    And focus remains on the rule-note Retry action
-
-  Scenario: Recover an unavailable rule note omitted by a later list
-    Given I have an unsent question in campaign A
-    And I have changed the table notes for rule "Initiative"
-    When saving reports that rule "Initiative" is no longer available
-    And I navigate away and reload the rule list
-    Then the omitted Initiative draft remains available as recovery-only
-    And the unavailable rule-note recovery is localized and actionable
-    And the raw rule backend detail is not shown
-    When I retry the omitted rule-note save with the keyboard
-    Then Retry uses the original Initiative target and content
-    When I discard the omitted rule-note draft with the keyboard
-    Then only the omitted Initiative draft is removed
-    And focus moves to the stable Rules tab
-    And the unsent Oracle question remains intact
-
-  Scenario: Preserve queued rule saves from each campaign sharing one target
-    Given a Campaign A Initiative rule-note save is in progress
-    When Campaign B requests its Initiative rule-note save
-    And Campaign A requests a newer Initiative rule-note save
-    Then Initiative rule-note writes do not overlap
-    When all three Initiative rule-note writes are acknowledged
-    Then each campaign's requested rule-note write was preserved in order
-    And the newest Campaign A rule note is persisted as saved
-
-  Scenario: Navigate while an automatic save is pending
-    Given a save of my changed session title is in progress
-    When I navigate to Oracle before the save completes
-    And the pending session save completes
-    And I return to Sessions
-    Then the changed session title is preserved
-    And it is shown as saved
-
-  Scenario: Retain a focused session edit when navigating to another view
-    Given I have changed a session title without blurring it
-    When I navigate to Oracle
-    Then no session save has been sent
-    When I return to Sessions
-    Then the changed session title is preserved
-    And it remains shown as unsaved
-
-  Scenario: Coalesce multiple rapid saves without overwriting newer content
-    Given session saves are being held open
-    When I request rapid saves for three different session titles
-    Then the session save attempts do not overlap
-    When the pending session saves are acknowledged
-    Then the newest session title is preserved
-    And only the newest revision is shown as saved
-
-  Scenario: Preserve a draft when its target is unavailable
-    Given I have unsaved changes to entity "Mira"
-    When saving reports that entity "Mira" is no longer available
-    Then my changes remain available
-    And I see that the target is unavailable
-    And no other entity is changed
-
-  Scenario: Reopen an unavailable entity draft after a list reload
-    Given saving my draft for entity "Mira" reports that the target is unavailable
-    When I navigate away and the entity list reloads without "Mira"
-    And I return to NPCs
-    Then an unavailable row for "Mira" indicates that saving failed
-    When I open the unavailable row
-    Then my changes remain available with Retry
-    And Retry still targets entity "Mira"
-
-  Scenario: Explicitly discard changes
-    Given I have an unsent question in campaign A
-    And I have unsaved changes to entity "Mira"
-    When I explicitly discard Mira's changes
-    Then Mira's saved version is restored
-    And the unsent Oracle question remains intact
-
-  Scenario: Wait for an active entity save before discarding
-    Given a save of an earlier entity "Mira" draft revision is in progress
-    When I make a newer edit to entity "Mira"
-    Then Discard changes is unavailable for Mira
-    And I am told to wait for saving to finish
-    When the earlier entity save completes
-    Then my newer entity edit remains visible as unsaved
-    And Discard changes is available for Mira
-    When I explicitly discard Mira's changes
-    Then the version acknowledged by the completed save is restored
-
-  Scenario: Retry a failed save with the keyboard
-    Given a session save has failed while its title field is focused
-    When I move to Retry and press Enter
-    Then the session save is retried
-    And focus returns to the session title
+Feature: Close Chronacle without losing retained work
 
   @native-close-contract
-  Scenario: Cancel or confirm normal window closing with retained drafts
-    Given an unsent Oracle question has focus
-    When a normal window close is requested
-    Then closing is paused by an unsaved-work dialog
-    And Cancel has focus
-    When I press Escape
-    Then the dialog closes
-    And focus returns to the Oracle composer
-    When I request window closing again
-    And I activate "Discard and close" with the keyboard
-    Then the retained draft is discarded and window closing proceeds
-    And no draft is submitted or saved during closing
+  Scenario Outline: Intercept every normal application termination path
+    Given I have an unsent Oracle question
+    When I request normal termination with <exit path>
+    Then termination is paused by the unsaved-work dialog
+    And my question remains in the composer
+    And it has not been submitted
+
+    Examples:
+      | exit path          |
+      | the window close   |
+      | application Quit   |
 
   @native-close-contract
-  Scenario: Wait for an active save before discarding and closing
+  Scenario: Preserve drafts when native destruction fails
+    Given I have an unsent Oracle question
+    And native destruction will fail
+    When I choose "Discard and close"
+    Then Chronacle remains open
+    And my question remains in the composer
+    And I see an actionable close failure
+    When native destruction becomes available
+    And I retry closing with the keyboard
+    Then the window closes
+    And no question was submitted
+
+  @native-close-contract
+  Scenario: Wait for an active save before closing
     Given a save of an earlier session draft revision is in progress
     And I have made a newer unsaved edit to the session
-    When a normal window close is requested
-    Then closing is paused by an unsaved-work dialog
+    When I request normal application termination
+    Then termination is paused
     And Discard and close is unavailable
-    And I am told to wait for saving to finish before closing
-    When the earlier session save completes
-    Then closing remains paused
-    And my newer session edit remains unsaved
+    When the earlier save completes
+    Then my newer session edit remains unsaved
     And Discard and close becomes available
-    When I activate "Discard and close" with the keyboard
-    Then window closing proceeds
-    And closing did not start another save
+
+Feature: Coordinate destructive actions with retained drafts
+
+  Scenario: Delete the entity captured by confirmation
+    Given NPC "Mira" and location "Mira" both exist
+    When I open deletion confirmation for NPC "Mira"
+    And I try to navigate to locations with the keyboard
+    And I confirm deletion
+    Then the NPC "Mira" is deleted
+    And the location "Mira" remains
+    And only the NPC draft is removed
+
+  Scenario: Wait for an entity save before deletion
+    Given a save for NPC "Mira" is in progress
+    When I try to delete NPC "Mira"
+    Then deletion is unavailable
+    And I am told to wait for saving to finish
+    When saving succeeds
+    And I delete NPC "Mira"
+    Then the entity and only its retained draft are removed
+
+  Scenario: Preserve campaign drafts when campaign deletion fails
+    Given campaign A contains retained unsaved and failed drafts
+    When I explicitly confirm deleting campaign A
+    And campaign deletion fails
+    Then campaign A's drafts remain available
+    And no campaign B draft changes
+
+Feature: Keep asynchronous work in its captured scope
+
+  Scenario: Finish creating a session after switching campaigns
+    Given creating a session for campaign A is in progress
+    When I switch to campaign B
+    And session creation succeeds
+    Then the new session is not shown in campaign B
+    When I return to campaign A
+    Then the new session is shown in campaign A
+
+  Scenario: Recover a missing session after a failed save
+    Given saving my changed session failed
+    And the next session list no longer contains its target
+    When I navigate away and return
+    Then my changed session remains available as unavailable
+    And Retry still targets the missing session
+    When I discard that session draft with the keyboard
+    Then only its recovery row disappears
+    And focus moves to a stable session control
+
+  Scenario: Reject a rule-note acknowledgment for another rule
+    Given I changed notes for rule "Initiative"
+    When saving returns an acknowledgment for rule "Surprise"
+    Then the Initiative note remains available
+    And Initiative shows an actionable save failure
+    And Surprise is unchanged
+
+  Scenario Outline: Retain drafts during keyboard navigation
+    Given I am editing <editor> without saving
+    When I navigate to Oracle with the keyboard
+    And I return with the keyboard
+    Then the exact <editor> draft is restored
+    And navigation did not start a save
+
+    Examples:
+      | editor         |
+      | an entity      |
+      | a session      |
+      | a rule note    |
 ```
+
+The established acceptance inventory remains: campaign-scoped Oracle retention
+without submission; existing/new entity retention and promotion; explicit
+discard; revision-aware serialized entity/session/rule saves; unavailable-target
+recovery; accessible status, retry and focus; and no implicit save during
+navigation or close. Pure state/component tests cover eligible clean-scope
+release and prove at-risk scopes are never evicted. Native tests cover the
+window/application exit boundary against an isolated temporary application-data
+directory. Rust command integration covers real rule-note result/error
+serialization; the frontend adapter test covers wrong-target rejection.
 
 ## Testing Strategy
 
@@ -1862,6 +1487,20 @@ Feature: Preserve work while moving through a campaign
   serialization across two campaign scopes for the same shared rule, stale
   completion, no unhandled rejection, missing-target Retry/Discard, and
   successful/repeated-failure focus handoff for the exact textarea.
+- Coordinator tests prove `release` removes clean inactive scopes, refuses every
+  at-risk state, cleans redirects only with their released target, and never
+  treats release as discard. Rule-panel tests inspect retained presentation and
+  prove complete rule bodies and references are not cached.
+- Entity/Campaign component tests use deferred writes and deletes to prove
+  immutable confirmation targets, modal shortcut suppression, active-write
+  exclusion, exact-scope cleanup, and preservation on delete failure.
+- Session integration tests cover a Create started in campaign A and settled
+  after switching to B, plus the complete failure → NOT_FOUND list omission →
+  navigation → recovery-only row → same-target Retry/Discard journey.
+- Rule-note coverage has two boundaries: a frontend adapter test rejects a
+  canonical acknowledgment carrying another rule ID, and a Rust/Tauri command
+  integration test invokes the real command adapter to assert the serialized
+  canonical record and typed NOT_FOUND error shape.
 - Executable Gherkin drives the real frontend through the established IPC mock.
   The mock gains deterministic deferred responses and an in-memory persisted
   record model, so assertions cover visible values and persistence outcomes, not
@@ -1874,18 +1513,17 @@ Feature: Preserve work while moving through a campaign
 - Rust service tests make rule-note update return the updated record—including
   the canonical `notes` value—and reject a missing ID; the Tauri command smoke
   test and frontend wrapper typecheck verify the return type reaches the adapter.
-- A Linux `tauri-driver` check exercises the actual native close-request event,
-  including an already-running save; mocked browser/component coverage does not
-  substitute for it.
+- A Linux `tauri-driver` check exercises window close, application Quit,
+  destroy rejection/retry, and an already-running save. It uses a temporary
+  application data/config/cache root and a fresh database; it never reads or
+  mutates developer state. The active-save test is executed, not skipped.
+  Mocked browser/component coverage does not substitute for it.
 - Final verification is `scripts/ci/local-pr.sh`, plus the focused native close
   check after a RocksDB Tauri build. Evidence and both independent reviews must
   refer to the same final `git rev-parse HEAD` plus dirty diff state.
 
 ## Unrelated Findings
 
-- New Session creation failures are console-only. The requested scope concerns
-  editing/save reliability; this should later adopt the global persistent error
-  pattern without changing the immediate-create interaction here.
 - Session entity-load failures are console-only, and campaign/collection/list
   loaders have inconsistent visible failure treatment.
 - Oracle chat-history loads and some CampaignView subscription loads lack stale
