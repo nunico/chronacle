@@ -1,10 +1,21 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import SessionLogView from './SessionLogView.svelte';
+import SessionLogView, * as sessionLogViewModule from './SessionLogView.svelte';
 import type { Session } from '../lib/commands';
 import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
 import { sessionScope } from '../lib/drafts/draft-state';
+
+interface SessionLoadFenceContract {
+  readonly trackedCount: number;
+  begin(request: number, campaignId: string): void;
+  acknowledge(campaignId: string, scope: string): void;
+  settle(request: number, campaignId: string): Set<string>;
+}
+
+const { SessionLoadFence } = sessionLogViewModule as unknown as {
+  SessionLoadFence: new () => SessionLoadFenceContract;
+};
 
 vi.mock('../lib/commands', () => ({
   getSessions: vi.fn(),
@@ -45,6 +56,21 @@ function renderLog(campaignId: string, coordinator = new DraftCoordinator()) {
     props: { campaignId, draftCoordinator: coordinator },
   } as never);
 }
+
+describe('SessionLoadFence', () => {
+  it('tracks create acknowledgments only for the active list request', () => {
+    const fence = new SessionLoadFence();
+
+    fence.acknowledge('camp-a', 'session:camp-a:without-load');
+    expect(fence.trackedCount).toBe(0);
+
+    fence.begin(1, 'camp-a');
+    fence.acknowledge('camp-a', 'session:camp-a:during-load');
+    expect(fence.trackedCount).toBe(1);
+    expect(fence.settle(1, 'camp-a')).toEqual(new Set(['session:camp-a:during-load']));
+    expect(fence.trackedCount).toBe(0);
+  });
+});
 
 describe('SessionLogView draft coordination', () => {
   beforeEach(() => {
