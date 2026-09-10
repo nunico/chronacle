@@ -49,6 +49,45 @@ describe('modalBehavior', () => {
     action.destroy();
   });
 
+  it('allows delegated component keys but blocks window shortcuts', () => {
+    const componentKeydown = vi.fn();
+    const windowKeydown = vi.fn();
+    document.body.addEventListener('keydown', componentKeydown);
+    window.addEventListener('keydown', windowKeydown);
+    const action = modalBehavior(dialog, { onClose: vi.fn() });
+
+    try {
+      (dialog.querySelector('#last') as HTMLElement).dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+
+      expect(componentKeydown).toHaveBeenCalledOnce();
+      expect(windowKeydown).not.toHaveBeenCalled();
+    } finally {
+      action.destroy();
+      document.body.removeEventListener('keydown', componentKeydown);
+      window.removeEventListener('keydown', windowKeydown);
+    }
+  });
+
+  it('lets only the innermost modal handle Escape', () => {
+    const outerClose = vi.fn();
+    const innerClose = vi.fn();
+    const inner = document.createElement('div');
+    const innerButton = document.createElement('button');
+    inner.appendChild(innerButton);
+    dialog.appendChild(inner);
+    const outerAction = modalBehavior(dialog, { onClose: outerClose });
+    const innerAction = modalBehavior(inner, { onClose: innerClose });
+
+    innerButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect(innerClose).toHaveBeenCalledOnce();
+    expect(outerClose).not.toHaveBeenCalled();
+    innerAction.destroy();
+    outerAction.destroy();
+  });
+
   it('wraps Tab from the last focusable to the first', () => {
     const action = modalBehavior(dialog, { onClose: vi.fn() });
     (dialog.querySelector('#last') as HTMLElement).focus();
