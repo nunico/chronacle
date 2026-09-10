@@ -82,10 +82,16 @@
   let popoverEl = $state<HTMLDivElement | undefined>(undefined);
   let atBottom = $state(true);
   let hasSources = $state(true);
+  let openedComposerScope: string | null = null;
 
   $effect(() => {
     const nextScope = oracleScope(activeCampaignId);
+    if (openedComposerScope && openedComposerScope !== nextScope) {
+      const previousScope = openedComposerScope;
+      untrack(() => draftCoordinator.release(previousScope));
+    }
     composerDraft = untrack(() => draftCoordinator.open(nextScope, null, ''));
+    openedComposerScope = nextScope;
   });
 
   type ExtractionStatus = 'running' | 'done' | 'empty' | 'cancelled' | 'error';
@@ -208,6 +214,7 @@
   onDestroy(() => {
     if (unlistenListener) unlistenListener();
     if (unlistenExtract) unlistenExtract();
+    if (openedComposerScope) draftCoordinator.release(openedComposerScope);
   });
 
   async function sendMessage(text?: string) {

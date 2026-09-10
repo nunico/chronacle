@@ -304,6 +304,19 @@ describe('SessionLogView draft coordination', () => {
     expect(screen.getByText('Unsaved changes', { exact: true })).toBeVisible();
   });
 
+  it('releases clean session projections when the view unmounts', async () => {
+    const coordinator = new DraftCoordinator();
+    const scope = sessionScope('camp-a', 'session-a');
+    vi.mocked(commands.getSessions).mockResolvedValue([session('camp-a', 'Ashes at Dawn')]);
+    const rendered = renderLog('camp-a', coordinator);
+
+    await screen.findByText('Ashes at Dawn');
+    expect(coordinator.get(scope)).toBeDefined();
+    rendered.unmount();
+
+    expect(coordinator.get(scope)).toBeUndefined();
+  });
+
   it('does not let an obsolete unmounted same-campaign instance reconcile shared draft state', async () => {
     const obsolete = deferred<Session[]>();
     vi.mocked(commands.getSessions)
