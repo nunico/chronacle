@@ -114,6 +114,7 @@ describe('SessionLogView draft coordination', () => {
     expect(failure).toHaveTextContent('Session create failed.');
     expect(screen.getByRole('button', { name: 'Retry' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Discard changes' })).toBeVisible();
+    expect(coordinator.atRiskCount()).toBe(1);
     expect(vi.mocked(commands.createSession).mock.calls[0]).toEqual([
       'camp-a',
       {
@@ -146,6 +147,8 @@ describe('SessionLogView draft coordination', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /Session 2/ })).toBeVisible());
     expect(screen.getAllByRole('button', { name: /Session 2/ })).toHaveLength(1);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(coordinator.listByPrefix('session-new:camp-a:')).toHaveLength(0);
+    expect(coordinator.atRiskCount()).toBe(0);
   });
 
   it('localizes and discards only a failed create with keyboard focus recovery', async () => {
@@ -174,6 +177,7 @@ describe('SessionLogView draft coordination', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(commands.createSession).toHaveBeenCalledOnce();
     expect(coordinator.get<string>(unrelatedScope)?.value).toBe('Unabhängige Oracle-Frage');
+    expect(coordinator.listByPrefix('session-new:camp-a:')).toHaveLength(0);
     expect(screen.getByRole('button', { name: /Neue Sitzung/i })).toHaveFocus();
   });
 

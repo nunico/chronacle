@@ -223,8 +223,9 @@ export class DraftCoordinator {
     if (!this.canDiscard(resolvedScope)) return 'blocked-active-save';
 
     this.cancelQueued(resolvedScope);
-    if (resolvedScope.startsWith('entity-new:')) this.drafts.delete(resolvedScope);
-    else this.drafts.set(resolvedScope, discardDraft(draft));
+    if (resolvedScope.startsWith('entity-new:') || resolvedScope.startsWith('session-new:')) {
+      this.drafts.delete(resolvedScope);
+    } else this.drafts.set(resolvedScope, discardDraft(draft));
     this.createPromotionIssues.delete(scope);
     this.createPromotionIssues.delete(resolvedScope);
     this.removeRedirectsFor(resolvedScope);

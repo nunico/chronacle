@@ -1,4 +1,11 @@
 <script module lang="ts">
+  let fallbackDraftId = 0;
+
+  function allocateNewDraftId(): string {
+    fallbackDraftId += 1;
+    return globalThis.crypto?.randomUUID?.() ?? `draft-${fallbackDraftId}`;
+  }
+
   interface ActiveSessionLoad {
     request: number;
     campaignId: string;
@@ -54,7 +61,12 @@
   import Button from '../components/ui/Button.svelte';
   import { i18n } from '../lib/locale.svelte';
   import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
-  import { sessionScope, statusOf } from '../lib/drafts/draft-state';
+  import {
+    newSessionScope,
+    sessionScope,
+    statusOf,
+    type DraftRecord,
+  } from '../lib/drafts/draft-state';
 
   interface Props {
     campaignId: string;
@@ -82,8 +94,16 @@
   let entityRequest = 0;
   let activeProjectionPrefix: string | null = null;
   let sessionLogElement = $state<HTMLDivElement>();
+  let retryingCreateScope = $state<string | null>(null);
   const projectionLeases = new SvelteMap<string, () => void>();
   const sessionLoadFence = new SessionLoadFence();
+
+  const EMPTY_SESSION_CREATE: SessionDraftValue = Object.freeze({
+    sessionNumber: 0,
+    title: '',
+    datePlayed: '',
+    notes: '',
+  });
 
   function leaseProjection(scope: string): void {
     if (!projectionLeases.has(scope)) {
@@ -111,6 +131,16 @@
   });
 
   let sessionPrefix = $derived(`session:${campaignId}:`);
+  let newSessionPrefix = $derived(`session-new:${campaignId}:`);
+  let retainedCreate = $derived.by(
+    () =>
+      draftCoordinator.listByPrefix<SessionDraftValue>(newSessionPrefix).find((draft) => {
+        return statusOf(draft) !== 'saved';
+      }) ?? null,
+  );
+  let showCreateRecovery = $derived(
+    retainedCreate?.error !== null || retainedCreate?.scope === retryingCreateScope,
+  );
   let unavailableSessionIds = $derived(
     new Set(
       draftCoordinator
@@ -241,37 +271,84 @@
     );
   });
 
-  async function handleNewSession() {
+  async function saveNewSession(
+    createDraft: DraftRecord<SessionDraftValue>,
+    requestedCampaign: string,
+  ): Promise<void> {
+    const saveScope = createDraft.scope;
+    let acknowledgedSession: Session | null = null;
+
+    await draftCoordinator.requestSave<SessionDraftValue>(saveScope, async (value) => {
+      const created = await createSession(requestedCampaign, value);
+      if (created.campaign_id !== requestedCampaign) {
+        throw new Error(`Session creation acknowledged the wrong campaign: ${created.campaign_id}`);
+      }
+      acknowledgedSession = created;
+      return sessionDraftValue(created);
+    });
+
+    const settled = draftCoordinator.get<SessionDraftValue>(saveScope);
+    if (settled?.error || !acknowledgedSession) return;
+
+    const created = acknowledgedSession as Session;
+    const scope = sessionScope(requestedCampaign, created.id);
+    const promotion = draftCoordinator.tryRemapAfterCreate<SessionDraftValue>(
+      saveScope,
+      scope,
+      `session:${created.id}`,
+    );
+    if (promotion.outcome !== 'promoted') return;
+
+    retryingCreateScope = null;
+    if (!mounted || campaignId !== requestedCampaign) return;
+    leaseProjection(scope);
+    sessionLoadFence.acknowledge(requestedCampaign, scope);
+    backendSessions = [
+      ...backendSessions.filter(
+        (session) => session.campaign_id === requestedCampaign && session.id !== created.id,
+      ),
+      created,
+    ];
+  }
+
+  async function handleNewSession(): Promise<void> {
     const requestedCampaign = campaignId;
+    if (
+      draftCoordinator.listByPrefix<SessionDraftValue>(`session-new:${requestedCampaign}:`).length >
+      0
+    ) {
+      return;
+    }
     const nextNumber =
       sessions.length === 0 ? 1 : Math.max(...sessions.map((s) => s.session_number)) + 1;
     const today = new Date().toISOString().slice(0, 10);
-    try {
-      const created = await createSession(requestedCampaign, {
-        sessionNumber: nextNumber,
-        title: i18n.t('sessions.defaultTitle', { number: nextNumber }),
-        datePlayed: today,
-        notes: '',
-      });
-      if (!mounted || campaignId !== requestedCampaign) return;
-      const scope = sessionScope(requestedCampaign, created.id);
-      draftCoordinator.open(
-        scope,
-        `session:${created.id}`,
-        sessionDraftValue(created),
-        'authoritative-list',
-      );
-      leaseProjection(scope);
-      sessionLoadFence.acknowledge(requestedCampaign, scope);
-      backendSessions = [
-        ...backendSessions.filter(
-          (session) => session.campaign_id === requestedCampaign && session.id !== created.id,
-        ),
-        created,
-      ];
-    } catch (e) {
-      console.error('Failed to create session:', e);
-    }
+    const input: SessionDraftValue = {
+      sessionNumber: nextNumber,
+      title: i18n.t('sessions.defaultTitle', { number: nextNumber }),
+      datePlayed: today,
+      notes: '',
+    };
+    const scope = newSessionScope(requestedCampaign, allocateNewDraftId());
+    draftCoordinator.open(scope, scope, EMPTY_SESSION_CREATE);
+    const draft = draftCoordinator.revise(scope, input);
+    await saveNewSession(draft, requestedCampaign);
+  }
+
+  async function retryNewSession(): Promise<void> {
+    const attempt = retainedCreate;
+    if (!attempt || attempt.inFlight !== null || !attempt.scope.startsWith(newSessionPrefix))
+      return;
+    retryingCreateScope = attempt.scope;
+    await saveNewSession(attempt, campaignId);
+  }
+
+  async function discardNewSession(): Promise<void> {
+    const attempt = retainedCreate;
+    if (!attempt || attempt.inFlight !== null) return;
+    if (draftCoordinator.discard(attempt.scope) !== 'discarded') return;
+    retryingCreateScope = null;
+    await tick();
+    sessionLogElement?.querySelector<HTMLButtonElement>('.new-session-button')?.focus();
   }
 
   function handleUpdate(updated: Session) {
@@ -298,10 +375,30 @@
       <h1>{i18n.t('sessions.title')}</h1>
       <p class="sub">{i18n.t('sessions.subtitle')}</p>
     </div>
-    <Button class="new-session-button" onclick={handleNewSession}
+    <Button class="new-session-button" onclick={handleNewSession} disabled={retainedCreate !== null}
       >+ {i18n.t('sessions.newSession')}</Button
     >
   </div>
+  {#if retainedCreate && showCreateRecovery}
+    <div class="create-failure" role="alert" aria-busy={retainedCreate.inFlight !== null}>
+      <div class="create-failure-message">
+        <strong>{i18n.t('sessions.createFailed')}</strong>
+        {#if retainedCreate.error}<span>{retainedCreate.error}</span>{/if}
+      </div>
+      <div class="create-failure-actions">
+        <Button
+          variant="secondary"
+          onclick={retryNewSession}
+          disabled={retainedCreate.inFlight !== null}>{i18n.t('drafts.retry')}</Button
+        >
+        <Button
+          variant="ghost"
+          onclick={discardNewSession}
+          disabled={retainedCreate.inFlight !== null}>{i18n.t('drafts.discardChanges')}</Button
+        >
+      </div>
+    </div>
+  {/if}
   {#if loading}
     <p class="muted">{i18n.t('sessions.loading')}</p>
   {:else if sessions.length === 0}
@@ -355,6 +452,38 @@
     color: var(--fg-3);
     font-size: 14px;
     margin: 0;
+  }
+
+  .create-failure {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--s-3);
+    padding: var(--s-3);
+    border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+    border-radius: var(--r-md);
+    background: var(--danger-bg);
+    color: var(--danger);
+    font: 500 0.8125rem/1.4 var(--font-sans);
+  }
+
+  .create-failure-message {
+    display: flex;
+    min-width: min(100%, 18rem);
+    flex: 1;
+    flex-direction: column;
+    gap: var(--s-1);
+  }
+
+  .create-failure-message span {
+    color: var(--fg-2);
+    overflow-wrap: anywhere;
+  }
+
+  .create-failure-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s-2);
   }
 
   .empty {

@@ -52,6 +52,10 @@ export function sessionScope(campaignId: string, sessionId: string): string {
   return `session:${campaignId}:${sessionId}`;
 }
 
+export function newSessionScope(campaignId: string, clientDraftId: string): string {
+  return `session-new:${campaignId}:${clientDraftId}`;
+}
+
 export function ruleScope(campaignId: string | null, collectionId: string, ruleId: string): string {
   return `rule:${campaignId ?? 'no-campaign'}:${collectionId}:${ruleId}`;
 }

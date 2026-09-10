@@ -344,6 +344,7 @@ const de = {
     title: 'Sitzungen',
     subtitle: 'Deine Kampagnenzeitleiste',
     newSession: 'Neue Sitzung',
+    createFailed: 'Sitzung konnte nicht erstellt werden.',
     loading: 'Wird geladen…',
     empty: 'Noch keine Sitzungen. Starte oben eine.',
     defaultTitle: 'Sitzung {number}',

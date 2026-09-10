@@ -323,6 +323,7 @@ export const sourceCatalog = {
     title: 'Sessions',
     subtitle: 'Your campaign timeline',
     newSession: 'New session',
+    createFailed: "Couldn't create session.",
     loading: 'Loading…',
     empty: 'No sessions yet. Start one above.',
     defaultTitle: 'Session {number}',

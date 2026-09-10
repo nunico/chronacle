@@ -329,6 +329,7 @@ const es = {
     title: 'Sesiones',
     subtitle: 'La cronología de tu campaña',
     newSession: 'Nueva sesión',
+    createFailed: 'No se pudo crear la sesión.',
     loading: 'Cargando…',
     empty: 'Aún no hay sesiones. Inicia una arriba.',
     defaultTitle: 'Sesión {number}',

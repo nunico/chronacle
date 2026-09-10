@@ -7,6 +7,7 @@ import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
 import {
   entityScope,
   newEntityScope,
+  newSessionScope,
   oracleScope,
   ruleScope,
   sessionScope,
@@ -390,6 +391,26 @@ describe('CampaignView', () => {
     for (const scope of campaignScopes) expect(coordinator.get(scope)).toBeUndefined();
     for (const scope of unrelatedScopes) expect(coordinator.get(scope)).toBeDefined();
     expect(rememberedRuleRecovery(coordinator, ruleDraft)).toBeUndefined();
+  });
+
+  it('purges only failed new-session attempts for the deleted campaign', async () => {
+    const coordinator = new DraftCoordinator();
+    const deletedAttempt = newSessionScope('camp-1', 'attempt-one');
+    const unrelatedAttempt = newSessionScope('camp-2', 'attempt-two');
+    const input = { sessionNumber: 2, title: 'Session 2', datePlayed: '2026-09-14', notes: '' };
+    for (const scope of [deletedAttempt, unrelatedAttempt]) {
+      coordinator.open(scope, scope, { sessionNumber: 0, title: '', datePlayed: '', notes: '' });
+      coordinator.revise(scope, input);
+      await coordinator.requestSave(scope, () => Promise.reject(new Error('create failed')));
+    }
+    m.deleteCampaign.mockResolvedValueOnce(undefined);
+
+    const dialog = await openDeleteDialog(coordinator);
+    await fireEvent.click(within(dialog).getByText('Delete campaign and its notes'));
+    await waitFor(() => expect(m.deleteCampaign).toHaveBeenCalledWith('camp-1', 'delete'));
+
+    expect(coordinator.get(deletedAttempt)).toBeUndefined();
+    expect(coordinator.get(unrelatedAttempt)?.error).toBe('create failed');
   });
 
   it('fails closed when a matching save starts before post-delete cleanup', async () => {
