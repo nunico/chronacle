@@ -1,5 +1,22 @@
 import { invoke } from '@tauri-apps/api/core';
 
+export type AppExitDecision = 'keep' | 'discard';
+
+/** Establish or join the current normal-exit decision. */
+export async function requestAppExit(): Promise<number> {
+  return invoke<number>('request_app_exit');
+}
+
+/** Authorize one native application exit for the current decision. */
+export async function confirmAppExit(intent: number, decision: AppExitDecision): Promise<void> {
+  return invoke('confirm_app_exit', { intent, decision });
+}
+
+/** Revoke a close decision without changing any retained draft. */
+export async function cancelAppExit(intent: number): Promise<boolean> {
+  return invoke<boolean>('cancel_app_exit', { intent });
+}
+
 /**
  * Retrieve all stored settings as a key-value map.
  */
