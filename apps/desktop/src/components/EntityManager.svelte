@@ -118,6 +118,7 @@
   let toast = $state<string | null>(null);
   let deleteConfirm = $state<EntityDeletionIntent | null>(null);
   let deletingScope = $state<string | null>(null);
+  let deleteProgress = $state<HTMLButtonElement>();
   // SvelteMap is inherently reactive — no $state wrapper needed
   let entityMap = new SvelteMap<string, { id: string; kind: string }>();
   let sessions = $state<Session[]>([]);
@@ -728,6 +729,8 @@
     if (deletingScope !== null) return;
     if (draftCoordinator.get<EntityDraftValue>(intent.scope)?.inFlight) return;
     deletingScope = intent.scope;
+    await tick();
+    deleteProgress?.focus();
     try {
       await softDeleteEntity(intent.entityId, intent.kind);
       const cleanup = draftCoordinator.removeAfterDelete(intent.scope);
@@ -1025,6 +1028,14 @@
   {#if deleteConfirm}
     {#snippet deleteBody()}
       <p>{i18n.t('entityUi.removeEntity', { name: deleteConfirm?.name ?? '' })}</p>
+      {#if deletingScope === deleteConfirm?.scope}
+        <button
+          type="button"
+          class="delete-progress"
+          aria-disabled="true"
+          bind:this={deleteProgress}>{i18n.t('status.processing')}</button
+        >
+      {/if}
     {/snippet}
     {#snippet deleteActions()}
       <Button
@@ -1286,6 +1297,19 @@
   .dialog-button:disabled {
     cursor: not-allowed;
     opacity: 0.55;
+  }
+  .delete-progress {
+    margin-top: var(--s-3);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--fg-2);
+    font: inherit;
+    cursor: progress;
+  }
+  .delete-progress:focus-visible {
+    outline: 2px solid var(--arcane-300);
+    outline-offset: 3px;
   }
   .notes-preview {
     background: var(--bg-panel-2);
