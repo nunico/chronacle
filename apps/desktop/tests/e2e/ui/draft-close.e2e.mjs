@@ -27,6 +27,45 @@ async function requestNativeClose(driver) {
   await invoke(driver, 'plugin:window|close', { label: 'main' });
 }
 
+async function nativeWindowIsGone(driver) {
+  const sessionId = await driver.getSession().then((session) => session.getId());
+  try {
+    // Query the W3C endpoint directly so a destroyed WebView cannot turn the
+    // observation itself into Selenium's otherwise information-free
+    // WebDriverError.
+    const response = await fetch(
+      `http://127.0.0.1:4444/session/${encodeURIComponent(sessionId)}/window/handles`,
+    );
+    const payload = await response.json();
+    if (response.ok) return Array.isArray(payload.value) && payload.value.length === 0;
+    return (
+      payload.value?.error === 'no such window' || payload.value?.error === 'invalid session id'
+    );
+  } catch {
+    // A transport failure alone does not prove that the requested window was
+    // destroyed. Keep polling until the protocol supplies an affirmative state.
+    return false;
+  }
+}
+
+async function activateDiscardAndObserveDestroy(driver, discard) {
+  let activationError;
+  try {
+    await discard.sendKeys(Key.ENTER);
+  } catch (error) {
+    activationError = error;
+  }
+
+  try {
+    await pollUntil(() => nativeWindowIsGone(driver), { timeoutMs: 10000, intervalMs: 100 });
+  } catch (observationError) {
+    // Preserve the interaction failure when destruction was not independently
+    // observed; arbitrary WebDriver errors must never become passing evidence.
+    if (activationError) throw activationError;
+    throw observationError;
+  }
+}
+
 describe('Draft retention — native window close', function () {
   this.timeout(180000);
 
@@ -102,18 +141,7 @@ describe('Draft retention — native window close', function () {
       [],
       'requesting close again must not submit the Oracle draft',
     );
-    await discard.sendKeys(Key.ENTER);
-
-    await pollUntil(
-      async () => {
-        try {
-          return (await driver.getAllWindowHandles()).length === 0;
-        } catch {
-          return true;
-        }
-      },
-      { timeoutMs: 10000, intervalMs: 100 },
-    );
+    await activateDiscardAndObserveDestroy(driver, discard);
   });
 
   it.skip('active-save native close requires deterministic deferred real-backend write control; covered by component and Shell tests', () => {
