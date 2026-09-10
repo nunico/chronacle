@@ -272,6 +272,8 @@ const es = {
       'Si esta campaña tiene su propia colección de notas y entidades, elige qué hacer con ella.',
     deleteCampaignSavingBlocked:
       'Espera a que termine el guardado de la campaña antes de eliminarla.',
+    deleteCampaignCleanupBlocked:
+      'Chronacle eliminó la campaña, pero no pudo liberar de forma segura sus borradores conservados. Espera a que termine el guardado y vuelve a intentar la limpieza.',
     deleteCampaignDrafts: 'Al eliminar esta campaña se descartarán {count} borradores conservados.',
     deleteCampaignNotes: 'Eliminar campaña y sus notas',
     keepNotes: 'Conservar notas como colección normal',

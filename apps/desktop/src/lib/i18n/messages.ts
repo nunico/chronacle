@@ -269,6 +269,8 @@ export const sourceCatalog = {
     deleteCampaignHint:
       'If this campaign has its own collection of notes and entities, choose what happens to it.',
     deleteCampaignSavingBlocked: 'Wait for campaign saves to finish before deleting.',
+    deleteCampaignCleanupBlocked:
+      'Chronacle deleted the campaign but could not safely release its retained drafts. Wait for saving to finish, then retry cleanup.',
     deleteCampaignDrafts: 'Deleting this campaign will discard {count} retained draft(s).',
     deleteCampaignNotes: 'Delete campaign and its notes',
     keepNotes: 'Keep notes as a regular collection',

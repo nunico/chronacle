@@ -8,8 +8,7 @@ export interface ModalBehaviorOptions {
   onClose: () => void;
 }
 
-const FOCUSABLE =
-  'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 function focusables(node: HTMLElement): HTMLElement[] {
   return Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
@@ -27,8 +26,10 @@ export function modalBehavior(node: HTMLElement, options: ModalBehaviorOptions) 
   (initial ?? node).focus();
 
   function handleKeydown(e: KeyboardEvent) {
+    // A modal owns keyboard interaction while it is open. In particular, do not
+    // let application-level navigation shortcuts run behind the dialog.
+    e.stopPropagation();
     if (e.key === 'Escape') {
-      e.stopPropagation();
       opts.onClose();
       return;
     }
