@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 pub mod commands;
+#[cfg(any(test, feature = "rocksdb"))]
 mod exit_guard;
 #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
 mod macos_exit;

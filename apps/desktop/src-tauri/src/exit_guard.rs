@@ -10,12 +10,12 @@ pub(crate) struct ExitRequestPayload {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "rocksdb"), allow(dead_code))]
 pub(crate) enum ExitRequestDecision {
     Authorized,
     Prevent { intent: u64 },
 }
 
+#[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct NativeExitRequest {
     intent: u64,
@@ -23,6 +23,7 @@ pub(crate) struct NativeExitRequest {
     authorized: bool,
 }
 
+#[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
 impl NativeExitRequest {
     pub(crate) fn intent(self) -> u64 {
         self.intent
@@ -42,9 +43,13 @@ pub(crate) enum ExitResolution {
     Stale,
     Cancelled,
     TauriExit,
-    NativeReply { terminate: bool },
+    #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
+    NativeReply {
+        terminate: bool,
+    },
 }
 
+#[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NativeReplyState {
     Deferred,
@@ -56,7 +61,9 @@ struct AuthorizationState {
     next_intent: u64,
     pending_intent: Option<u64>,
     authorized: bool,
+    #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
     native_reply: Option<NativeReplyState>,
+    #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
     native_created_intent: bool,
 }
 
@@ -77,7 +84,10 @@ impl ExitAuthorization {
             .expect("exit intent sequence exhausted");
         let intent = state.next_intent;
         state.pending_intent = Some(intent);
-        state.native_created_intent = false;
+        #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
+        {
+            state.native_created_intent = false;
+        }
         intent
     }
 
@@ -86,14 +96,16 @@ impl ExitAuthorization {
         state.pending_intent
     }
 
-    #[cfg_attr(not(feature = "rocksdb"), allow(dead_code))]
     pub(crate) fn intercept_exit(&self) -> ExitRequestDecision {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if state.authorized {
             state.authorized = false;
             state.pending_intent = None;
-            state.native_reply = None;
-            state.native_created_intent = false;
+            #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
+            {
+                state.native_reply = None;
+                state.native_created_intent = false;
+            }
             return ExitRequestDecision::Authorized;
         }
         let intent = if let Some(intent) = state.pending_intent {
@@ -110,6 +122,7 @@ impl ExitAuthorization {
         ExitRequestDecision::Prevent { intent }
     }
 
+    #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
     pub(crate) fn intercept_native_exit(&self) -> NativeExitRequest {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if state.authorized {
@@ -150,24 +163,31 @@ impl ExitAuthorization {
         if state.pending_intent != Some(intent) || state.authorized {
             return ExitResolution::Stale;
         }
-        match state.native_reply {
-            Some(NativeReplyState::Deferred) => {
-                state.native_reply = Some(NativeReplyState::Scheduled { terminate });
-                ExitResolution::NativeReply { terminate }
-            }
-            Some(NativeReplyState::Scheduled { .. }) => ExitResolution::Stale,
-            None if terminate => {
-                state.authorized = true;
-                ExitResolution::TauriExit
-            }
-            None => {
-                state.pending_intent = None;
+        #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
+        if let Some(native_reply) = state.native_reply {
+            return match native_reply {
+                NativeReplyState::Deferred => {
+                    state.native_reply = Some(NativeReplyState::Scheduled { terminate });
+                    ExitResolution::NativeReply { terminate }
+                }
+                NativeReplyState::Scheduled { .. } => ExitResolution::Stale,
+            };
+        }
+
+        if terminate {
+            state.authorized = true;
+            ExitResolution::TauriExit
+        } else {
+            state.pending_intent = None;
+            #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
+            {
                 state.native_created_intent = false;
-                ExitResolution::Cancelled
             }
+            ExitResolution::Cancelled
         }
     }
 
+    #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
     pub(crate) fn rollback_native_resolution(&self, intent: u64, terminate: bool) -> bool {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if state.pending_intent != Some(intent)
@@ -179,6 +199,7 @@ impl ExitAuthorization {
         true
     }
 
+    #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
     pub(crate) fn complete_native_reply(&self, intent: u64, terminate: bool) -> bool {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if state.pending_intent != Some(intent)
@@ -192,6 +213,7 @@ impl ExitAuthorization {
         true
     }
 
+    #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
     pub(crate) fn rollback_native_request(&self, intent: u64) -> bool {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if state.pending_intent != Some(intent)
@@ -300,6 +322,17 @@ mod tests {
                 "wildcard permission: {permission}"
             );
         }
+    }
+
+    #[test]
+    fn exit_modules_follow_the_persistent_runtime_boundary() {
+        let library = include_str!("lib.rs");
+        assert!(library.contains("#[cfg(any(test, feature = \"rocksdb\"))]\nmod exit_guard;"));
+
+        let commands = include_str!("commands/mod.rs");
+        assert!(commands.contains(
+            "#[cfg(feature = \"rocksdb\")]\npub mod exit_commands;\n#[cfg(feature = \"rocksdb\")]\npub(crate) use exit_commands::*;"
+        ));
     }
 
     #[test]

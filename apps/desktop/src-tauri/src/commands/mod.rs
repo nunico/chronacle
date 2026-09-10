@@ -43,5 +43,7 @@ pub use codex_commands::*;
 pub mod vault_commands;
 pub use vault_commands::*;
 
+#[cfg(feature = "rocksdb")]
 pub mod exit_commands;
+#[cfg(feature = "rocksdb")]
 pub(crate) use exit_commands::*;
