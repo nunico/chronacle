@@ -1,12 +1,19 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SessionLogView, * as sessionLogViewModule from './SessionLogView.svelte';
 import type { Session } from '../lib/commands';
 import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
-import { oracleScope, sessionScope } from '../lib/drafts/draft-state';
+import { oracleScope, sessionScope, type DraftValue } from '../lib/drafts/draft-state';
 import { i18n } from '../lib/locale.svelte';
+
+interface SessionCreateValue extends Readonly<Record<string, DraftValue>> {
+  readonly sessionNumber: number;
+  readonly title: string;
+  readonly datePlayed: string;
+  readonly notes: string;
+}
 
 interface SessionLoadFenceContract {
   readonly trackedCount: number;
@@ -144,11 +151,13 @@ describe('SessionLogView draft coordination', () => {
     );
 
     retryCreate.resolve(created);
-    await waitFor(() => expect(screen.getByRole('button', { name: /Session 2/ })).toBeVisible());
+    const createdHeader = await screen.findByRole('button', { name: /Session 2/ });
+    expect(createdHeader).toBeVisible();
     expect(screen.getAllByRole('button', { name: /Session 2/ })).toHaveLength(1);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(coordinator.listByPrefix('session-new:camp-a:')).toHaveLength(0);
     expect(coordinator.atRiskCount()).toBe(0);
+    expect(createdHeader).toHaveFocus();
   });
 
   it('localizes and discards only a failed create with keyboard focus recovery', async () => {
@@ -179,6 +188,86 @@ describe('SessionLogView draft coordination', () => {
     expect(coordinator.get<string>(unrelatedScope)?.value).toBe('Unabhängige Oracle-Frage');
     expect(coordinator.listByPrefix('session-new:camp-a:')).toHaveLength(0);
     expect(screen.getByRole('button', { name: /Neue Sitzung/i })).toHaveFocus();
+  });
+
+  it('exposes and locally retries a blocked create promotion without creating twice', async () => {
+    vi.setSystemTime(new Date('2026-09-14T12:00:00Z'));
+    const createWrite = deferred<Session>();
+    const coordinator = new DraftCoordinator();
+    const existing = session('camp-a', 'Ashes at Dawn');
+    const created: Session = {
+      ...session('camp-a', 'Session 2'),
+      id: 'created-session-a',
+      session_number: 2,
+      date_played: '2026-09-14',
+      notes: '',
+    };
+    let listed = [existing];
+    vi.mocked(commands.getSessions).mockImplementation(() => Promise.resolve(listed));
+    vi.mocked(commands.createSession).mockReturnValue(createWrite.promise);
+    const user = userEvent.setup();
+
+    const first = renderLog('camp-a', coordinator);
+    await screen.findByText('Ashes at Dawn');
+    await user.click(screen.getByRole('button', { name: /New session/i }));
+    await waitFor(() => expect(commands.createSession).toHaveBeenCalledOnce());
+    const sourceScope = coordinator.listByPrefix('session-new:camp-a:')[0]?.scope;
+    if (!sourceScope) throw new Error('Expected a stable pre-backend session scope');
+
+    listed = [existing, created];
+    first.unmount();
+    renderLog('camp-a', coordinator);
+    const destinationHeader = await screen.findByRole('button', { name: /Session 2/ });
+    await user.click(destinationHeader);
+    const title = screen.getByRole('textbox', { name: 'Name' });
+    await user.clear(title);
+    await user.type(title, 'Listed destination edit');
+    expect(screen.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+    createWrite.resolve(created);
+
+    const promotionFailure = await screen.findByRole('alert');
+    expect(promotionFailure).toHaveTextContent('Created, but needs attention');
+    expect(promotionFailure).toHaveTextContent(
+      "The session was saved, but Chronacle couldn't finish opening it.",
+    );
+    expect(screen.getByRole('button', { name: /New session/i })).toBeDisabled();
+    expect(commands.createSession).toHaveBeenCalledOnce();
+    const destinationScope = sessionScope('camp-a', created.id);
+    expect(coordinator.get<SessionCreateValue>(sourceScope)?.value).toMatchObject({
+      title: 'Session 2',
+      notes: '',
+    });
+    expect(coordinator.get<SessionCreateValue>(destinationScope)?.value.title).toBe(
+      'Listed destination edit',
+    );
+    expect(coordinator.getCreatePromotionIssue(sourceScope)).toMatchObject({
+      sourceScope,
+      destinationScope,
+      destinationTarget: `session:${created.id}`,
+      reason: 'destination-at-risk',
+    });
+    expect(coordinator.atRiskCount()).toBe(2);
+
+    const blockedRetry = within(promotionFailure).getByRole('button', { name: 'Retry' });
+    blockedRetry.focus();
+    await user.keyboard('{Enter}');
+    expect(blockedRetry).toHaveFocus();
+    expect(commands.createSession).toHaveBeenCalledOnce();
+    expect(coordinator.resolveScope(sourceScope)).toBe(sourceScope);
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Listed destination edit');
+
+    await user.click(screen.getByRole('button', { name: 'Discard changes' }));
+    const retry = within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' });
+    retry.focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(commands.createSession).toHaveBeenCalledOnce();
+    expect(coordinator.resolveScope(sourceScope)).toBe(destinationScope);
+    expect(coordinator.listByPrefix('session-new:camp-a:')).toHaveLength(0);
+    const promotedHeader = screen.getByRole('button', { name: /Session 2/ });
+    expect(promotedHeader).toHaveFocus();
   });
 
   it('uses the newest request generation across an A to B to A campaign switch', async () => {
