@@ -159,11 +159,11 @@
           leaseProjection(scope);
         }
       }
-      for (const previous of entries) {
-        if (loaded.some(({ id }) => id === previous.id)) continue;
-        const scope = ruleScope(requestCampaignId, requestCollectionId, previous.id);
-        const draft = draftCoordinator.get<RuleNoteDraftValue>(scope);
-        if (draft && statusOf(draft) === 'saved') releaseProjection(scope);
+      const loadedScopes = new Set(
+        loaded.map(({ id }) => ruleScope(requestCampaignId, requestCollectionId, id)),
+      );
+      for (const scope of [...projectionLeases.keys()]) {
+        if (scope.startsWith(requestPrefix) && !loadedScopes.has(scope)) releaseProjection(scope);
       }
       entries = loaded;
       error = null;
@@ -260,29 +260,37 @@
     const saveRuleId = entry.id;
     const saveScope = ruleScope(saveCampaignId, saveCollectionId, saveRuleId);
     ensureDraft(entry);
-    await draftCoordinator.requestSave<RuleNoteDraftValue>(saveScope, async (attempt) => {
-      try {
-        const saved = await updateRuleNotes(
-          saveRuleId,
-          attempt.notes === '' ? null : attempt.notes,
-        );
-        if (saved.id !== saveRuleId) {
-          throw new Error(`Rule-note save acknowledged the wrong target: ${saved.id}`);
+    const releaseOperationLease = draftCoordinator.acquireLease(saveScope);
+    try {
+      await draftCoordinator.requestSave<RuleNoteDraftValue>(saveScope, async (attempt) => {
+        try {
+          const saved = await updateRuleNotes(
+            saveRuleId,
+            attempt.notes === '' ? null : attempt.notes,
+          );
+          if (saved.id !== saveRuleId) {
+            throw new Error(`Rule-note save acknowledged the wrong target: ${saved.id}`);
+          }
+          return { notes: saved.notes ?? '' };
+        } catch (saveError) {
+          if (isStructuredError(saveError) && saveError.code === 'NOT_FOUND') {
+            throw new Error(i18n.t('drafts.targetUnavailable'), { cause: saveError });
+          }
+          throw saveError;
         }
-        return { notes: saved.notes ?? '' };
-      } catch (saveError) {
-        if (isStructuredError(saveError) && saveError.code === 'NOT_FOUND') {
-          throw new Error(i18n.t('drafts.targetUnavailable'), { cause: saveError });
+      });
+      const savedDraft = draftCoordinator.get<RuleNoteDraftValue>(saveScope);
+      if (!savedDraft || statusOf(savedDraft) === 'saved') {
+        forgetRuleRecovery(draftCoordinator, saveScope);
+        if (
+          savedDraft &&
+          (destroyed || saveCampaignId !== campaignId || saveCollectionId !== collectionId)
+        ) {
+          draftCoordinator.release(saveScope);
         }
-        throw saveError;
       }
-    });
-    const savedDraft = draftCoordinator.get<RuleNoteDraftValue>(saveScope);
-    if (savedDraft && statusOf(savedDraft) === 'saved') {
-      forgetRuleRecovery(draftCoordinator, saveScope);
-      if (destroyed || saveCampaignId !== campaignId || saveCollectionId !== collectionId) {
-        draftCoordinator.release(saveScope);
-      }
+    } finally {
+      releaseOperationLease();
     }
   }
 

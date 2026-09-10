@@ -262,6 +262,56 @@ describe('RulesPanel', () => {
     expect(coordinator.get(ruleScope('camp-b', 'c-2', 'r1'))).toBeDefined();
   });
 
+  it('reconciles preexisting clean omissions on the first load and retains at-risk ones', async () => {
+    const coordinator = new DraftCoordinator();
+    const cleanScope = ruleScope('camp-a', 'c-1', 'clean');
+    const dirtyScope = ruleScope('camp-a', 'c-1', 'dirty');
+    coordinator.open(
+      cleanScope,
+      'rule:clean',
+      { notes: 'Saved clean note.' },
+      'authoritative-list',
+    );
+    coordinator.open(
+      dirtyScope,
+      'rule:dirty',
+      { notes: 'Saved dirty note.' },
+      'authoritative-list',
+    );
+    coordinator.revise(dirtyScope, { notes: 'Retained local note.' });
+    m.getRuleEntries.mockResolvedValue([]);
+
+    renderPanel(coordinator);
+
+    await waitFor(() => expect(coordinator.get(cleanScope)).toBeUndefined());
+    expect(coordinator.get<{ notes: string }>(dirtyScope)?.value.notes).toBe(
+      'Retained local note.',
+    );
+    const retained = coordinator.get(dirtyScope);
+    if (!retained) throw new Error('Expected the at-risk omitted rule draft to remain retained');
+    expect(statusOf(retained)).toBe('pending');
+  });
+
+  it('forgets recovery metadata after an unmounted save succeeds', async () => {
+    const coordinator = new DraftCoordinator();
+    const save = deferred<RuleEntry>();
+    const scope = ruleScope('camp-a', 'c-1', 'r1');
+    m.getRuleEntries.mockResolvedValue([rule('r1', 'Initiative', 'mechanic')]);
+    m.updateRuleNotes.mockReturnValue(save.promise as never);
+    const rendered = renderPanel(coordinator);
+    const notes = await openNotes();
+    await fireEvent.input(notes, { target: { value: 'Transient local ruling.' } });
+    await fireEvent.blur(notes);
+    await waitFor(() => expect(m.updateRuleNotes).toHaveBeenCalledOnce());
+    expect(rememberedRuleRecovery(coordinator, scope)).toBeDefined();
+
+    rendered.unmount();
+    save.resolve({ ...rule('r1', 'Initiative', 'mechanic'), notes: 'Transient local ruling.' });
+
+    await waitFor(() => expect(coordinator.get(scope)).toBeUndefined());
+    expect(rememberedRuleRecovery(coordinator, scope)).toBeUndefined();
+  });
+
   it('keeps a newer note pending when an older acknowledgment equals it', async () => {
     const first = deferred<RuleEntry>();
     const second = deferred<RuleEntry>();
