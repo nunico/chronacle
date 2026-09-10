@@ -321,3 +321,29 @@ Feature: Preserve entity drafts while moving through a campaign
     And Discard changes is available for Mira
     When I explicitly discard Mira's changes
     Then the version acknowledged by the completed save is restored
+
+  Scenario: Delete the entity captured by confirmation
+    Given NPC "Mira" and location "Mira" both exist
+    When I open deletion confirmation for NPC "Mira"
+    And I try to navigate to locations with the keyboard
+    And I confirm the captured entity deletion
+    Then the NPC "Mira" is deleted
+    And the location "Mira" remains
+    And only the NPC draft is removed
+
+  Scenario: Wait for an entity save before deletion
+    Given a save for NPC "Mira" is in progress
+    When I try to delete NPC "Mira"
+    Then entity deletion is unavailable
+    And I am told to wait for entity saving to finish
+    When the entity save succeeds
+    And I delete NPC "Mira"
+    Then the entity and only its retained draft are removed
+
+  Scenario: Retain an entity draft during keyboard navigation
+    Given I have changed the notes for entity "Mira" without saving
+    When I navigate to Oracle with the slash shortcut
+    And I return to NPCs with the g chord
+    Then my entity edits are preserved
+    And the interface indicates that they are not yet saved
+    And no entity save has been sent

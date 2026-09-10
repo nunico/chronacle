@@ -110,3 +110,15 @@ Feature: Save rule-note drafts reliably while moving through a campaign
     When all three Initiative rule-note writes are acknowledged
     Then each campaign's requested rule-note write was preserved in order
     And the newest Campaign A rule note is persisted as saved
+
+  Scenario: Ignore navigation shortcuts while editing, then save before keyboard rule navigation
+    Given I have entered "Unsaved note" in the focused Initiative table notes
+    When I press the Oracle g chord in the focused rule-note field
+    Then I remain in the Initiative rule and the typed keys remain unsaved
+    And no rule-note save has been sent
+    When I move focus to the Initiative redo control
+    Then the ordinary rule-note blur is saved
+    When I navigate to Oracle with the g chord
+    And I return to the Initiative rule with the keyboard
+    Then the exact keyboard-edited rule note is restored
+    And the rule note is shown as saved

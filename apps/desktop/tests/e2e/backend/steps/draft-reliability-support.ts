@@ -215,6 +215,31 @@ export async function observations(
   );
 }
 
+export async function hasEntity(page: Page, id: string, kind: string): Promise<boolean> {
+  return page.evaluate(
+    ({ recordId, entityKind }) =>
+      (window as unknown as DraftWindow).__draftReliability.hasEntity(recordId, entityKind),
+    { recordId: id, entityKind: kind },
+  );
+}
+
+export async function hasCampaign(page: Page, id: string): Promise<boolean> {
+  return page.evaluate((campaignId) => {
+    return (window as unknown as DraftWindow).__draftReliability.hasCampaign(campaignId);
+  }, id);
+}
+
+export async function requestApplicationExit(page: Page, intent = 41): Promise<void> {
+  await page.evaluate((exitIntent) => {
+    (window as unknown as DraftWindow).__draftReliability.requestApplicationExit(exitIntent);
+  }, intent);
+}
+
+export async function pressChord(page: Page, secondKey: string): Promise<void> {
+  await page.keyboard.press('g');
+  await page.keyboard.press(secondKey);
+}
+
 export async function submissions(page: Page): Promise<Array<Record<string, unknown>>> {
   return page.evaluate(() => (window as unknown as DraftWindow).__draftReliability.submissions());
 }

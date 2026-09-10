@@ -23,6 +23,71 @@ const FOCUSED_RULE_DRAFT = 'Unsaved note';
 const NO_CAMPAIGN_RULE_DRAFT = 'No-campaign rule note';
 const WORLD_GUIDE_RULE_DRAFT = 'World Guide retained initiative ruling.';
 const RAPID_RULE_NOTES = ['First rapid ruling.', 'Second rapid ruling.', 'Newest rapid ruling.'];
+const KEYBOARD_EDITED_RULE_DRAFT = `${FOCUSED_RULE_DRAFT}go`;
+
+When('I return to the Initiative rule with the keyboard', async ({ page }) => {
+  const campaign = page.getByRole('button', { name: 'Campaign & sources' });
+  await campaign.focus();
+  await campaign.press('Enter');
+  const collection = page.locator('.coll').filter({
+    has: page.getByText('World Guide', { exact: true }),
+  });
+  const rulesTab = collection.getByRole('tab', { name: 'Rules' });
+  if (!(await rulesTab.isVisible())) {
+    const header = collection.locator('.coll-head');
+    await header.focus();
+    await header.press('Enter');
+  }
+  if ((await rulesTab.getAttribute('aria-selected')) !== 'true') {
+    await rulesTab.focus();
+    await rulesTab.press('Enter');
+  }
+  const initiative = collection.getByRole('button', { name: 'Initiative', exact: true });
+  if (!(await collection.getByRole('textbox', { name: 'Table notes' }).isVisible())) {
+    await initiative.focus();
+    await initiative.press('Enter');
+  }
+  await expect(collection.getByRole('textbox', { name: 'Table notes' })).toBeVisible();
+});
+
+When('I press the Oracle g chord in the focused rule-note field', async ({ page }) => {
+  await expect(page.getByRole('textbox', { name: 'Table notes' })).toBeFocused();
+  await page.keyboard.press('g');
+  await page.keyboard.press('o');
+});
+
+Then('I remain in the Initiative rule and the typed keys remain unsaved', async ({ page }) => {
+  await expect(page.getByRole('textbox', { name: 'Table notes' })).toHaveValue(
+    KEYBOARD_EDITED_RULE_DRAFT,
+  );
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+});
+
+When('I move focus to the Initiative redo control', async ({ page }) => {
+  await page.getByRole('button', { name: /Redo with objections/ }).focus();
+});
+
+Then('the ordinary rule-note blur is saved', async ({ page }) => {
+  await expect
+    .poll(async () => {
+      const rule = await persisted<{ notes: string }>(page, 'update_rule_notes', 'initiative');
+      return rule?.notes;
+    })
+    .toBe(KEYBOARD_EDITED_RULE_DRAFT);
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+});
+
+Then('the rule note is shown as saved', async ({ page }) => {
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  const rule = await persisted<{ notes: string }>(page, 'update_rule_notes', 'initiative');
+  expect(rule?.notes).toBe(KEYBOARD_EDITED_RULE_DRAFT);
+});
+
+Then('the exact keyboard-edited rule note is restored', async ({ page }) => {
+  await expect(page.getByRole('textbox', { name: 'Table notes' })).toHaveValue(
+    KEYBOARD_EDITED_RULE_DRAFT,
+  );
+});
 
 async function openRule(page: Page, name: string): Promise<Locator> {
   return openRuleInCollection(page, 'World Guide', name);

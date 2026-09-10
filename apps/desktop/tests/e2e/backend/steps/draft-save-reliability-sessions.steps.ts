@@ -4,16 +4,19 @@ import {
   CAMPAIGN_A_QUESTION,
   SESSION_REVISION_TWO_TITLE,
   activeWrites,
+  commitPending,
   composer,
   dispatchBlurWithoutMovingFocus,
   hold,
   holdNextSessionList,
   maxConcurrentWrites,
   observations,
+  openCampaign,
   openRailView,
   pendingSessionLists,
   pendingWrites,
   persisted,
+  pressChord,
   rejectNext,
   removeSession,
   resolveNext,
@@ -30,6 +33,10 @@ const NEWER_SESSION_TITLE = 'Newer unsaved session revision';
 const SESSION_REVISION_ONE_TITLE = 'Session draft revision one';
 const LATER_SESSION_TITLE = 'Later authoritative session title';
 const RAPID_TITLES = ['First rapid title', 'Second rapid title', 'Newest rapid title'];
+const CREATED_SESSION_TITLE = 'Session 2';
+const MISSING_SESSION_TITLE = 'Ashes retained after deletion';
+const MISSING_SESSION_NOTES = 'Exact notes retained after deletion.';
+const KEYBOARD_EDITED_SESSION_TITLE = `${CHANGED_SESSION_TITLE}go`;
 
 async function openSession(page: Page): Promise<{ title: Locator }> {
   await openRailView(page, 'Sessions');
@@ -445,4 +452,205 @@ Then('the session save is retried', async ({ page }) => {
 
 Then('focus returns to the session title', async ({ page }) => {
   await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toBeFocused();
+});
+
+Given('creating a new session for campaign A is in progress', async ({ page }) => {
+  await openRailView(page, 'Sessions');
+  await hold(page, 'create_session');
+  await page.getByRole('button', { name: /New session/i }).click();
+  await expect.poll(() => activeWrites(page, 'create_session')).toBe(1);
+  const writes = await observations(page, 'create_session');
+  expect(writes).toHaveLength(1);
+  expect(writes[0].campaignId).toBe('camp-a');
+});
+
+When('I switch to campaign B before session creation completes', async ({ page }) => {
+  await openCampaign(page, 'Campaign B');
+  await openRailView(page, 'Sessions');
+  await expect(page.getByRole('button', { name: /Lanterns in Rain/ })).toBeVisible();
+});
+
+When('the delayed session creation succeeds', async ({ page }) => {
+  await resolveNext(page, 'create_session');
+  await expect.poll(() => activeWrites(page, 'create_session')).toBe(0);
+});
+
+Then('the created session is not shown in campaign B', async ({ page }) => {
+  await expect(page.getByRole('button', { name: new RegExp(CREATED_SESSION_TITLE) })).toHaveCount(
+    0,
+  );
+});
+
+When('I return to campaign A sessions', async ({ page }) => {
+  await openCampaign(page, 'Campaign A');
+  await openRailView(page, 'Sessions');
+});
+
+Then('the created session is shown once in campaign A', async ({ page }) => {
+  await expect(page.getByRole('button', { name: new RegExp(CREATED_SESSION_TITLE) })).toHaveCount(
+    1,
+  );
+});
+
+Then('the created session belongs to campaign A', async ({ page }) => {
+  const created = await persisted<{ campaign_id: string; title: string }>(
+    page,
+    'update_session',
+    'created-session-3',
+  );
+  expect(created).toMatchObject({ campaign_id: 'camp-a', title: CREATED_SESSION_TITLE });
+});
+
+When('I return to campaign A while its older session list is held', async ({ page }) => {
+  await holdNextSessionList(page, 'camp-a');
+  await openCampaign(page, 'Campaign A');
+  await openRailView(page, 'Sessions');
+  await expect.poll(() => pendingSessionLists(page)).toBe(1);
+});
+
+When(
+  'the older Campaign A session list completes without the created session',
+  async ({ page }) => {
+    await resolveNextSessionList(page);
+    await expect.poll(() => pendingSessionLists(page)).toBe(0);
+  },
+);
+
+When('the backend commits the session without acknowledging creation', async ({ page }) => {
+  await commitPending(page, 'create_session');
+});
+
+When('the delayed session creation acknowledgment arrives', async ({ page }) => {
+  await resolveNext(page, 'create_session');
+  await expect.poll(() => activeWrites(page, 'create_session')).toBe(0);
+});
+
+Then('the created session is still shown once in campaign A', async ({ page }) => {
+  await expect(page.getByRole('button', { name: new RegExp(CREATED_SESSION_TITLE) })).toHaveCount(
+    1,
+  );
+});
+
+Given('saving a changed session failed before its target was deleted', async ({ page }) => {
+  const { title } = await openSession(page);
+  await title.fill(MISSING_SESSION_TITLE);
+  await page.getByRole('textbox', { name: 'Notes' }).evaluate((notes, value) => {
+    const field = notes as HTMLTextAreaElement;
+    field.value = value;
+    field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+  }, MISSING_SESSION_NOTES);
+  await rejectNext(page, 'update_session', { code: 'DATABASE', message: 'Session write failed.' });
+  await title.blur();
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+});
+
+Given('that session target is now deleted', async ({ page }) => {
+  await removeSession(page, 'session-a');
+});
+
+When('I retry the failed session and it reports unavailable', async ({ page }) => {
+  await page.getByRole('button', { name: 'Retry' }).click();
+  await expect(page.getByText('This record is no longer available.')).toBeVisible();
+});
+
+When('I navigate away and return to Sessions', async ({ page }) => {
+  await openRailView(page, 'Oracle');
+  await openRailView(page, 'Sessions');
+});
+
+Then('the changed session remains available as unavailable', async ({ page }) => {
+  const recovery = page.getByRole('button', { name: new RegExp(MISSING_SESSION_TITLE) });
+  await expect(recovery).toBeVisible();
+  await recovery.click();
+  await expect(page.getByText('This record is no longer available.')).toBeVisible();
+});
+
+Then('its exact title and notes are retained', async ({ page }) => {
+  await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(
+    MISSING_SESSION_TITLE,
+  );
+  await expect(page.getByRole('textbox', { name: 'Notes' })).toHaveValue(MISSING_SESSION_NOTES);
+});
+
+When('I retry the omitted session with the keyboard', async ({ page }) => {
+  const retry = page.getByRole('button', { name: 'Retry' });
+  await retry.focus();
+  await retry.press('Enter');
+});
+
+Then('Retry still targets the omitted session', async ({ page }) => {
+  await expect
+    .poll(() => observations(page, 'update_session').then((writes) => writes.length))
+    .toBe(3);
+  const writes = await observations(page, 'update_session');
+  expect(writes.every((write) => write.id === 'session-a')).toBe(true);
+});
+
+Then('the unavailable failure remains actionable', async ({ page }) => {
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await expect(page.getByText('This record is no longer available.')).toBeVisible();
+});
+
+When('I discard the omitted session with the keyboard', async ({ page }) => {
+  const discard = page.getByRole('button', { name: 'Discard changes' });
+  await discard.focus();
+  await discard.press('Enter');
+});
+
+Then('only the omitted session recovery row disappears', async ({ page }) => {
+  await expect(page.getByRole('button', { name: new RegExp(MISSING_SESSION_TITLE) })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole('button', { name: /New session/i })).toBeVisible();
+});
+
+Then('focus moves to the stable session control', async ({ page }) => {
+  await expect(page.getByRole('button', { name: /New session/i })).toBeFocused();
+});
+
+When('I navigate to Oracle with the g chord', async ({ page }) => {
+  await pressChord(page, 'o');
+  await expect(composer(page)).toBeVisible();
+});
+
+When('I return to Sessions with the g chord', async ({ page }) => {
+  await page.getByRole('button', { name: 'Oracle', exact: true }).focus();
+  await pressChord(page, 's');
+  await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
+});
+
+When('I press the Oracle g chord in the focused session field', async ({ page }) => {
+  await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toBeFocused();
+  await pressChord(page, 'o');
+});
+
+Then('I remain in the session editor and the typed keys remain unsaved', async ({ page }) => {
+  await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(
+    KEYBOARD_EDITED_SESSION_TITLE,
+  );
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+});
+
+When('I move focus to the session notes field', async ({ page }) => {
+  await page.getByRole('textbox', { name: 'Notes' }).focus();
+});
+
+Then('the ordinary session blur is saved', async ({ page }) => {
+  await expect
+    .poll(async () => {
+      const session = await persisted<{ title: string }>(page, 'update_session', 'session-a');
+      return session?.title;
+    })
+    .toBe(KEYBOARD_EDITED_SESSION_TITLE);
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Delete' }).focus();
+});
+
+Then('the exact keyboard-edited session title is restored', async ({ page }) => {
+  const title = page.getByRole('textbox', { name: 'Name', exact: true });
+  if ((await title.count()) === 0) {
+    await page.getByRole('button', { name: new RegExp(KEYBOARD_EDITED_SESSION_TITLE) }).click();
+  }
+  await expect(title).toHaveValue(KEYBOARD_EDITED_SESSION_TITLE);
 });
