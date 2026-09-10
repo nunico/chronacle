@@ -931,6 +931,17 @@ When('I navigate to Oracle', async ({ page }) => {
   await openRailView(page, 'Oracle');
 });
 
+When('I hold the next NPC list before the assigned ID exists', async ({ page }) => {
+  expect(await persisted(page, 'create_entity', 'created-3')).toBeUndefined();
+  await holdNextEntityListWithout(page, 'camp-a', 'npc', 'created-3');
+});
+
+When('I return to NPCs while that older list waits', async ({ page }) => {
+  await openRailView(page, 'NPCs');
+  await expect.poll(() => pendingEntityLists(page)).toBe(1);
+  expect(await activeWrites(page, 'create_entity')).toBe(1);
+});
+
 When('I return to NPCs before creation completes', async ({ page }) => {
   await openRailView(page, 'NPCs');
   expect(await activeWrites(page, 'create_entity')).toBe(1);
@@ -972,6 +983,29 @@ Then('the acknowledged NPC remains visible and selected', async ({ page }) => {
   await expect(form.getByRole('textbox', { name: 'Notes', exact: true })).toHaveValue(
     CREATE_REVISION_ONE_NOTES,
   );
+});
+
+Then('the retained NPC is not offered backend-only row actions', async ({ page }) => {
+  const row = entityRow(page, CREATE_REVISION_ONE_NAME);
+  await expect(row.getByTitle('View relationships')).toHaveCount(0);
+  await expect(row.getByRole('button', { name: `Delete ${CREATE_REVISION_ONE_NAME}` })).toHaveCount(
+    0,
+  );
+});
+
+Then("the created NPC remains persisted in campaign A's NPC records", async ({ page }) => {
+  const created = await persisted<{
+    campaign_id: string;
+    kind: string;
+    name: string;
+    notes: string;
+  }>(page, 'create_entity', 'created-3');
+  expect(created).toMatchObject({
+    campaign_id: 'camp-a',
+    kind: 'npc',
+    name: CREATE_REVISION_ONE_NAME,
+    notes: CREATE_REVISION_ONE_NOTES,
+  });
 });
 
 Then('the interface indicates that it is saved', async ({ page }) => {
