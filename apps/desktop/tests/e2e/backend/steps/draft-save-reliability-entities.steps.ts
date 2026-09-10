@@ -7,6 +7,7 @@ import {
   activeWrites,
   commitPending,
   composer,
+  hasEntity,
   hold,
   holdNextEntityList,
   observations,
@@ -15,6 +16,7 @@ import {
   pendingEntityLists,
   pendingWrites,
   persisted,
+  pressChord,
   rejectNext,
   rejectPending,
   removeEntity,
@@ -1384,6 +1386,136 @@ Then('Mira remains marked with unsaved changes', async ({ page }) => {
 
 Then('no entity save has been sent', async ({ page }) => {
   expect(await observations(page, 'update_entity')).toHaveLength(0);
+});
+
+Given('NPC {string} and location {string} both exist', async ({ page }, npc, location) => {
+  expect(npc).toBe('Mira');
+  expect(location).toBe('Mira');
+  expect(await hasEntity(page, 'mira', 'npc')).toBe(true);
+  expect(await hasEntity(page, 'mira', 'location')).toBe(true);
+
+  await openRailView(page, 'Locations');
+  await page.getByRole('button', { name: 'Mira', exact: true }).click();
+  await page
+    .getByRole('form', { name: 'Entity form' })
+    .getByRole('textbox', { name: 'Notes', exact: true })
+    .fill('Location Mira draft that must remain.');
+
+  const form = await openEntity(page, 'Mira');
+  await form
+    .getByRole('textbox', { name: 'Notes', exact: true })
+    .fill('NPC Mira draft selected for deletion.');
+});
+
+When('I open deletion confirmation for NPC {string}', async ({ page }, name: string) => {
+  await entityRow(page, name)
+    .getByRole('button', { name: new RegExp(`delete ${name}`, 'i') })
+    .click();
+  await expect(page.getByRole('dialog', { name: 'Delete' })).toBeVisible();
+});
+
+When('I try to navigate to locations with the keyboard', async ({ page }) => {
+  await page.keyboard.press('g');
+  await page.keyboard.press('l');
+  await expect(page.getByRole('dialog', { name: 'Delete' })).toBeVisible();
+  await expect(entityRow(page, 'Mira')).toBeVisible();
+});
+
+When('I confirm the captured entity deletion', async ({ page }) => {
+  await page
+    .getByRole('dialog', { name: 'Delete' })
+    .getByRole('button', { name: 'Delete', exact: true })
+    .click();
+});
+
+Then('the NPC {string} is deleted', async ({ page }, name: string) => {
+  expect(name).toBe('Mira');
+  await expect.poll(() => hasEntity(page, 'mira', 'npc')).toBe(false);
+  await expect(entityRow(page, name)).toHaveCount(0);
+});
+
+Then('the location {string} remains', async ({ page }, name: string) => {
+  expect(name).toBe('Mira');
+  expect(await hasEntity(page, 'mira', 'location')).toBe(true);
+  await openRailView(page, 'Locations');
+  await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+});
+
+Then('only the NPC draft is removed', async ({ page }) => {
+  await page.getByRole('button', { name: 'Mira', exact: true }).click();
+  await expect(
+    page
+      .getByRole('form', { name: 'Entity form' })
+      .getByRole('textbox', { name: 'Notes', exact: true }),
+  ).toHaveValue('Location Mira draft that must remain.');
+  const deletes = await observations(page, 'soft_delete_entity');
+  expect(deletes).toEqual([{ id: 'mira', kind: 'npc' }]);
+});
+
+Given('a save for NPC {string} is in progress', async ({ page }, name: string) => {
+  const form = await openEntity(page, name);
+  await form.getByRole('textbox', { name: 'Notes', exact: true }).fill(MIRA_DRAFT_NOTES);
+  await hold(page, 'update_entity');
+  await form.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.poll(() => activeWrites(page, 'update_entity')).toBe(1);
+});
+
+When('I try to delete NPC {string}', async ({ page }, name: string) => {
+  const deleteButton = entityRow(page, name).getByRole('button', {
+    name: new RegExp(`delete ${name}`, 'i'),
+  });
+  await deleteButton.evaluate((button: HTMLButtonElement) => button.click());
+});
+
+Then('entity deletion is unavailable', async ({ page }) => {
+  await expect(
+    entityRow(page, 'Mira').getByRole('button', { name: /delete mira/i }),
+  ).toBeDisabled();
+  await expect(page.getByRole('dialog', { name: 'Delete' })).toHaveCount(0);
+});
+
+Then('I am told to wait for entity saving to finish', async ({ page }) => {
+  await expect(
+    entityRow(page, 'Mira').getByRole('button', { name: /delete mira/i }),
+  ).toHaveAccessibleDescription(/wait for saving to finish/i);
+});
+
+When('the entity save succeeds', async ({ page }) => {
+  await resolveNext(page, 'update_entity');
+  await expect.poll(() => activeWrites(page, 'update_entity')).toBe(0);
+});
+
+When('I delete NPC {string}', async ({ page }, name: string) => {
+  await entityRow(page, name)
+    .getByRole('button', { name: new RegExp(`delete ${name}`, 'i') })
+    .click();
+  await page
+    .getByRole('dialog', { name: 'Delete' })
+    .getByRole('button', { name: 'Delete', exact: true })
+    .click();
+});
+
+Then('the entity and only its retained draft are removed', async ({ page }) => {
+  await expect.poll(() => hasEntity(page, 'mira', 'npc')).toBe(false);
+  await expect(entityRow(page, 'Mira')).toHaveCount(0);
+  expect(await hasEntity(page, 'mira', 'location')).toBe(true);
+});
+
+When('I navigate to Oracle with the slash shortcut', async ({ page }) => {
+  const save = page.getByRole('form', { name: 'Entity form' }).getByRole('button', {
+    name: 'Save',
+    exact: true,
+  });
+  await save.focus();
+  await page.keyboard.press('/');
+  await expect(composer(page)).toBeVisible();
+});
+
+When('I return to NPCs with the g chord', async ({ page }) => {
+  await page.getByRole('button', { name: 'Oracle', exact: true }).focus();
+  await pressChord(page, 'n');
+  await expect(entityRow(page, 'Mira')).toBeVisible();
+  await page.getByRole('button', { name: 'Mira', exact: true }).click();
 });
 
 When('saving reports that entity {string} is no longer available', async ({ page }, name) => {

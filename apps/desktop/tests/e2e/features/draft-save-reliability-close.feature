@@ -35,3 +35,11 @@ Feature: Protect retained drafts during normal window closing
     When I activate "Discard and close" with the keyboard
     Then window closing proceeds
     And closing did not start another save
+
+  Scenario: Opening a close decision does not start another automatic save
+    Given a save of an earlier session draft revision is in progress
+    And I make a newer focused edit before the close decision
+    When an application close decision opens in the browser contract
+    Then closing is paused by the browser unsaved-work dialog
+    And only the earlier session save has started
+    And the newer session edit remains unsaved

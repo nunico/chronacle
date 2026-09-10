@@ -2,10 +2,13 @@ import type { Page } from '@playwright/test';
 
 export type DraftWriteCommand =
   | 'create_entity'
+  | 'create_session'
   | 'update_entity'
   | 'update_session'
   | 'update_rule_notes'
-  | 'delete_session';
+  | 'delete_session'
+  | 'soft_delete_entity'
+  | 'delete_campaign';
 
 export interface DraftReliabilityControls {
   hold(command: DraftWriteCommand): void;
@@ -29,6 +32,9 @@ export interface DraftReliabilityControls {
   persisted(command: string, id: string): unknown;
   pendingWrites(command: string): number;
   observations(command: string): Array<Record<string, unknown>>;
+  hasEntity(id: string, kind: string): boolean;
+  hasCampaign(id: string): boolean;
+  requestApplicationExit(intent: number): void;
   seedMode(): DraftReliabilitySeedMode;
   submissions(): Array<Record<string, unknown>>;
 }
@@ -169,6 +175,31 @@ export async function installIpcMock(
                 codex_stale: false,
                 codex_compiled_at: null,
               },
+              {
+                id: 'mira',
+                kind: 'location',
+                campaign_id: 'camp-a',
+                name: 'Mira',
+                aliases: [],
+                summary: "A place sharing the archivist's name.",
+                notes: 'Location Mira saved notes.',
+                created_at: null,
+                updated_at: null,
+                date_start: null,
+                date_end: null,
+                is_ongoing: null,
+                sequence_index: null,
+                era: null,
+                duration_label: null,
+                session_id: null,
+                player_name: null,
+                character_class: null,
+                character_level: null,
+                status: null,
+                codex_article: null,
+                codex_stale: false,
+                codex_compiled_at: null,
+              },
             ];
             const sessions = [
               {
@@ -239,7 +270,9 @@ export async function installIpcMock(
 
             function applyWrite(command: string, args: Record<string, unknown>): unknown {
               if (command === 'update_entity') {
-                const entity = entities.find((candidate) => candidate.id === args.id);
+                const entity = entities.find(
+                  (candidate) => candidate.id === args.id && candidate.kind === args.kind,
+                );
                 if (!entity) throw { code: 'NOT_FOUND', message: 'Entity no longer available.' };
                 const input = (args.input ?? {}) as Record<string, unknown>;
                 Object.assign(entity, {
@@ -287,11 +320,31 @@ export async function installIpcMock(
                 sessions.splice(index, 1);
                 return null;
               }
+              if (command === 'soft_delete_entity') {
+                const index = entities.findIndex(
+                  (entity) => entity.id === args.id && entity.kind === args.kind,
+                );
+                if (index < 0) {
+                  throw { code: 'NOT_FOUND', message: 'Entity no longer available.' };
+                }
+                entities.splice(index, 1);
+                return null;
+              }
+              if (command === 'delete_campaign') {
+                const index = campaigns.findIndex((campaign) => campaign.id === args.id);
+                if (index < 0) {
+                  throw { code: 'NOT_FOUND', message: 'Campaign no longer available.' };
+                }
+                campaigns.splice(index, 1);
+                return null;
+              }
               if (command === 'create_entity') {
                 const input = (args.input ?? {}) as Record<string, unknown>;
                 const created = {
                   ...copy(entities[0]),
-                  id: `created-${entities.length + 1}`,
+                  id: `created-${
+                    entities.filter((entity) => entity.kind === args.kind).length + 1
+                  }`,
                   kind: args.kind as string,
                   campaign_id: args.campaignId as string,
                   name: String(input.name ?? ''),
@@ -300,6 +353,21 @@ export async function installIpcMock(
                   notes: input.notes ?? null,
                 };
                 entities.push(created);
+                return copy(created);
+              }
+              if (command === 'create_session') {
+                const input = (args.input ?? {}) as Record<string, unknown>;
+                const created = {
+                  id: `created-session-${sessions.length + 1}`,
+                  campaign_id: args.campaignId as string,
+                  session_number: input.sessionNumber as number,
+                  title: String(input.title ?? ''),
+                  date_played: String(input.datePlayed ?? ''),
+                  notes: String(input.notes ?? ''),
+                  created_at: null,
+                  updated_at: null,
+                };
+                sessions.push(created);
                 return copy(created);
               }
               return null;
@@ -488,7 +556,7 @@ export async function installIpcMock(
               },
               persisted(command: string, id: string) {
                 if (command === 'update_entity' || command === 'create_entity') {
-                  return copy(entities.find((entity) => entity.id === id));
+                  return copy(entities.find((entity) => entity.id === id && entity.kind === 'npc'));
                 }
                 if (command === 'update_session') {
                   return copy(sessions.find((session) => session.id === id));
@@ -503,6 +571,24 @@ export async function installIpcMock(
               },
               observations(command: string) {
                 return copy(observed.get(command) ?? []);
+              },
+              hasEntity(id: string, kind: string) {
+                return entities.some((entity) => entity.id === id && entity.kind === kind);
+              },
+              hasCampaign(id: string) {
+                return campaigns.some((campaign) => campaign.id === id);
+              },
+              requestApplicationExit(intent: number) {
+                for (const call of window.__ipcCalls) {
+                  if (
+                    call.cmd !== 'plugin:event|listen' ||
+                    call.args?.event !== 'app-exit-requested'
+                  ) {
+                    continue;
+                  }
+                  const callback = callbacks.get(call.args.handler as number);
+                  callback?.({ event: 'app-exit-requested', payload: { intent } });
+                }
               },
               seedMode() {
                 return seedMode;
@@ -535,9 +621,14 @@ export async function installIpcMock(
       if (reliability) {
         // @ts-expect-error -- test-only deterministic draft/save controls
         window.__draftReliability = reliability.controls;
+        // Match the native runtime boundary for reliability scenarios so the
+        // Shell registers its real close port against this deterministic IPC.
+        // @ts-expect-error -- Tauri exposes this runtime marker globally.
+        window.isTauri = true;
       }
       // @ts-expect-error -- injected by Tauri at runtime
       window.__TAURI_INTERNALS__ = {
+        metadata: { currentWindow: { label: 'main' } },
         transformCallback: (cb: unknown, _once?: boolean) => {
           const id = ++_cbId;
           callbacks.set(id, cb as (event: unknown) => void);
@@ -585,6 +676,14 @@ export async function installIpcMock(
           }
           if (reliability) {
             switch (cmd) {
+              case 'pending_app_exit':
+                return Promise.resolve(null);
+              case 'request_app_exit':
+                return Promise.resolve(1);
+              case 'cancel_app_exit':
+                return Promise.resolve(true);
+              case 'confirm_app_exit':
+                return Promise.resolve(null);
               case 'get_campaigns':
                 return Promise.resolve(reliability.copy(reliability.campaigns));
               case 'get_entity_counts': {
@@ -638,18 +737,14 @@ export async function installIpcMock(
                 reliability.campaigns.push(created);
                 return Promise.resolve(reliability.copy(created));
               }
-              case 'delete_campaign': {
-                const index = reliability.campaigns.findIndex(
-                  (campaign) => campaign.id === args?.id,
-                );
-                if (index >= 0) reliability.campaigns.splice(index, 1);
-                return Promise.resolve(null);
-              }
+              case 'create_session':
               case 'update_entity':
               case 'update_session':
               case 'update_rule_notes':
               case 'create_entity':
               case 'delete_session':
+              case 'soft_delete_entity':
+              case 'delete_campaign':
                 return reliability.invokeWrite(cmd, args ?? {});
               case 'chat_send':
                 reliability.chatSubmissions.push(reliability.copy(args ?? {}));

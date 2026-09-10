@@ -130,3 +130,57 @@ Feature: Save session drafts reliably while moving through a campaign
     When I move to Retry and press Enter
     Then the session save is retried
     And focus returns to the session title
+
+  Scenario: Finish creating a session after switching campaigns
+    Given creating a new session for campaign A is in progress
+    When I switch to campaign B before session creation completes
+    And the delayed session creation succeeds
+    Then the created session is not shown in campaign B
+    When I return to campaign A sessions
+    Then the created session is shown once in campaign A
+    And the created session belongs to campaign A
+
+  Scenario: Keep a created session when an older Campaign A list completes last
+    Given creating a new session for campaign A is in progress
+    When I switch to campaign B before session creation completes
+    And I return to campaign A while its older session list is held
+    And the delayed session creation succeeds
+    And the older Campaign A session list completes without the created session
+    Then the created session is shown once in campaign A
+    And the created session belongs to campaign A
+
+  Scenario: Do not duplicate a session listed before its create acknowledgment
+    Given creating a new session for campaign A is in progress
+    When I switch to campaign B before session creation completes
+    And the backend commits the session without acknowledging creation
+    And I return to campaign A sessions
+    Then the created session is shown once in campaign A
+    When the delayed session creation acknowledgment arrives
+    Then the created session is still shown once in campaign A
+    And the created session belongs to campaign A
+
+  Scenario: Recover and discard a session omitted after a failed save
+    Given saving a changed session failed before its target was deleted
+    And that session target is now deleted
+    When I retry the failed session and it reports unavailable
+    And I navigate away and return to Sessions
+    Then the changed session remains available as unavailable
+    And its exact title and notes are retained
+    When I retry the omitted session with the keyboard
+    Then Retry still targets the omitted session
+    And the unavailable failure remains actionable
+    When I discard the omitted session with the keyboard
+    Then only the omitted session recovery row disappears
+    And focus moves to the stable session control
+
+  Scenario: Ignore navigation shortcuts while editing, then save before keyboard navigation
+    Given I have changed a session title without blurring it
+    When I press the Oracle g chord in the focused session field
+    Then I remain in the session editor and the typed keys remain unsaved
+    And no session save has been sent
+    When I move focus to the session notes field
+    Then the ordinary session blur is saved
+    When I navigate to Oracle with the g chord
+    And I return to Sessions with the g chord
+    Then the exact keyboard-edited session title is restored
+    And it is shown as saved
