@@ -1,5 +1,12 @@
 import '@testing-library/jest-dom/vitest';
 
+// jsdom reports a background document by default. Component tests model an
+// active application window unless a window-deactivation scenario overrides it.
+Object.defineProperty(document, 'hasFocus', {
+  configurable: true,
+  value: () => true,
+});
+
 interface TauriInternals {
   invoke: (command: string, payload?: Record<string, unknown>) => Promise<unknown>;
   transformCallback: (_callback: unknown, _once?: boolean) => number;

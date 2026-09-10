@@ -62,7 +62,6 @@ async function openNotes(name = 'Initiative') {
 describe('RulesPanel', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     i18n.setLocale('en');
     m.getRuleEntries.mockResolvedValue([]);
     m.updateRuleNotes.mockResolvedValue(undefined as never);
