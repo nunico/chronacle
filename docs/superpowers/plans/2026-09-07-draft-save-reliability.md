@@ -1608,13 +1608,13 @@ No two owners edit the same file concurrently.
 
   ```bash
   pnpm -C apps/desktop exec prettier --check \
-    ../website/src/content/manual/en/notes-and-sessions/*.md \
-    ../website/src/content/manual/en/codex/articles-and-notes.md \
-    ../website/src/content/manual/de/notizen-und-sitzungen/*.md \
-    ../website/src/content/manual/de/kodex/artikel-und-notizen.md \
-    ../website/src/lib/content/registry.test.ts \
-    ../../docs/superpowers/specs/2026-09-07-draft-save-reliability-design.md \
-    ../../docs/superpowers/plans/2026-09-07-draft-save-reliability.md
+    '../website/src/content/manual/en/notes-and-sessions/*.md' \
+    '../website/src/content/manual/en/codex/articles-and-notes.md' \
+    '../website/src/content/manual/de/notizen-und-sitzungen/*.md' \
+    '../website/src/content/manual/de/kodex/artikel-und-notizen.md' \
+    '../website/src/lib/content/registry.test.ts' \
+    '../../docs/superpowers/specs/2026-09-07-draft-save-reliability-design.md' \
+    '../../docs/superpowers/plans/2026-09-07-draft-save-reliability.md'
   ```
 
   Expected: pass; format with Prettier if required, then re-check.
