@@ -272,6 +272,10 @@ const de = {
     deleteCampaignQuestion: '„{name}“ löschen?',
     deleteCampaignHint:
       'Wenn diese Kampagne eine eigene Sammlung mit Notizen und Entitäten hat, wähle aus, was damit geschehen soll.',
+    deleteCampaignSavingBlocked:
+      'Warte, bis die Kampagneninhalte gespeichert wurden, bevor du sie löschst.',
+    deleteCampaignDrafts:
+      'Beim Löschen dieser Kampagne werden {count} zwischengespeicherte Entwürfe verworfen.',
     deleteCampaignNotes: 'Kampagne und ihre Notizen löschen',
     keepNotes: 'Notizen als reguläre Sammlung behalten',
     systemDash: '—',

@@ -3,6 +3,15 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/sve
 import CampaignView from './CampaignView.svelte';
 import * as commands from '../lib/commands';
 import type { Campaign } from '../lib/commands';
+import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
+import {
+  entityScope,
+  newEntityScope,
+  oracleScope,
+  ruleScope,
+  sessionScope,
+} from '../lib/drafts/draft-state';
+import { rememberedRuleRecovery, rememberRuleRecovery } from '../lib/drafts/rule-note-presentation';
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -24,6 +33,16 @@ vi.mock('../lib/commands', () => ({
 }));
 
 const m = vi.mocked(commands);
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function col(id: string, name: string) {
   return { id, name, description: null };
@@ -51,6 +70,7 @@ function renderView(
     setActiveCampaignId: (id: string | null) => void;
     onOpenUpload: (collectionId: string) => void;
     refreshCampaigns: () => Promise<void>;
+    draftCoordinator: DraftCoordinator;
   }> = {},
 ) {
   return render(CampaignView, {
@@ -197,7 +217,7 @@ describe('CampaignView', () => {
     });
   });
 
-  async function openDeleteDialog() {
+  async function openDeleteDialog(draftCoordinator = new DraftCoordinator()) {
     render(CampaignView, {
       props: {
         activeCampaignId: 'camp-1',
@@ -205,6 +225,7 @@ describe('CampaignView', () => {
         setActiveCampaignId: vi.fn(),
         onOpenUpload: vi.fn(),
         refreshCampaigns: vi.fn(),
+        draftCoordinator,
       },
     });
     await fireEvent.click(screen.getByText(/Manage campaigns/));
@@ -252,11 +273,91 @@ describe('CampaignView', () => {
     expect(m.deleteCampaign).not.toHaveBeenCalled();
   });
 
+  it('blocks campaign deletion while a matching draft save is active', async () => {
+    const coordinator = new DraftCoordinator();
+    const save = deferred<{ notes: string }>();
+    const scope = entityScope('camp-1', 'npc', 'mira');
+    coordinator.open(scope, 'entity:npc:mira', { notes: 'Saved' });
+    coordinator.revise(scope, { notes: 'Saving' });
+    const saving = coordinator.requestSave(scope, () => save.promise);
+
+    const dialog = await openDeleteDialog(coordinator);
+    expect(within(dialog).getByText(/wait for campaign saves to finish/i)).toBeVisible();
+    expect(within(dialog).getByText('Delete campaign and its notes')).toBeDisabled();
+    expect(within(dialog).getByText('Keep notes as a regular collection')).toBeDisabled();
+    expect(m.deleteCampaign).not.toHaveBeenCalled();
+
+    save.resolve({ notes: 'Saving' });
+    await saving;
+    await waitFor(() =>
+      expect(within(dialog).getByText('Delete campaign and its notes')).toBeEnabled(),
+    );
+  });
+
+  it('discloses retained draft disposal and preserves every scope when deletion fails', async () => {
+    const coordinator = new DraftCoordinator();
+    const campaignDraft = entityScope('camp-1', 'npc', 'mira');
+    const unrelatedDraft = entityScope('camp-2', 'npc', 'mira');
+    coordinator.open(campaignDraft, 'entity:npc:mira', { notes: 'Saved' });
+    coordinator.revise(campaignDraft, { notes: 'Retained campaign work' });
+    coordinator.open(unrelatedDraft, 'entity:npc:mira', { notes: 'Other saved' });
+    coordinator.revise(unrelatedDraft, { notes: 'Other campaign work' });
+    m.deleteCampaign.mockRejectedValueOnce(new Error('database unavailable'));
+
+    const dialog = await openDeleteDialog(coordinator);
+    expect(within(dialog).getByText(/discard 1 retained draft/i)).toBeVisible();
+    await fireEvent.click(within(dialog).getByText('Delete campaign and its notes'));
+
+    await screen.findByText(/database unavailable/i);
+    expect(coordinator.get(campaignDraft)?.value).toEqual({ notes: 'Retained campaign work' });
+    expect(coordinator.get(unrelatedDraft)?.value).toEqual({ notes: 'Other campaign work' });
+  });
+
+  it('purges only the captured campaign drafts and rule recovery after successful deletion', async () => {
+    const coordinator = new DraftCoordinator();
+    const campaignScopes = [
+      oracleScope('camp-1'),
+      entityScope('camp-1', 'npc', 'mira'),
+      newEntityScope('camp-1', 'npc', 'client-one'),
+      sessionScope('camp-1', 'session-one'),
+      ruleScope('camp-1', 'rules', 'initiative'),
+    ];
+    const unrelatedScopes = [
+      oracleScope(null),
+      entityScope('camp-10', 'npc', 'mira'),
+      ruleScope('camp-2', 'rules', 'initiative'),
+    ];
+    for (const scope of [...campaignScopes, ...unrelatedScopes]) {
+      coordinator.open(scope, scope.startsWith('oracle:') ? null : `target:${scope}`, {
+        notes: 'Saved',
+      });
+      coordinator.revise(scope, { notes: `Retained ${scope}` });
+    }
+    const ruleDraft = ruleScope('camp-1', 'rules', 'initiative');
+    rememberRuleRecovery(coordinator, ruleDraft, {
+      ruleId: 'initiative',
+      title: 'Initiative',
+      collectionId: 'rules',
+    });
+    m.deleteCampaign.mockResolvedValueOnce(undefined);
+
+    const dialog = await openDeleteDialog(coordinator);
+    await fireEvent.click(within(dialog).getByText('Delete campaign and its notes'));
+    await waitFor(() => expect(m.deleteCampaign).toHaveBeenCalledWith('camp-1', 'delete'));
+
+    for (const scope of campaignScopes) expect(coordinator.get(scope)).toBeUndefined();
+    for (const scope of unrelatedScopes) expect(coordinator.get(scope)).toBeDefined();
+    expect(rememberedRuleRecovery(coordinator, ruleDraft)).toBeUndefined();
+  });
+
   it('shows a stale badge and compile button per collection', async () => {
     m.getCollections.mockResolvedValue([col('c-1', 'World Guide')]);
     m.getCampaignCollections.mockResolvedValue([col('c-1', 'World Guide')]);
     m.getCodexStatus.mockResolvedValue({
-      stale_entities: 12, total_entities: 40, rules_stale: 0, rule_entries: 0,
+      stale_entities: 12,
+      total_entities: 40,
+      rules_stale: 0,
+      rule_entries: 0,
     });
     renderView();
     await waitFor(() => expect(screen.getByText('12 stale')).toBeTruthy());
@@ -267,7 +368,10 @@ describe('CampaignView', () => {
     m.getCollections.mockResolvedValue([col('c-1', 'World Guide')]);
     m.getCampaignCollections.mockResolvedValue([col('c-1', 'World Guide')]);
     m.getCodexStatus.mockResolvedValue({
-      stale_entities: 1, total_entities: 1, rules_stale: 0, rule_entries: 0,
+      stale_entities: 1,
+      total_entities: 1,
+      rules_stale: 0,
+      rule_entries: 0,
     });
     m.compileCollection.mockResolvedValue({
       articles_compiled: 1,
