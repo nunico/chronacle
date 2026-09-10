@@ -51,7 +51,7 @@
   import CloseDraftsDialog from '../components/CloseDraftsDialog.svelte';
   import {
     createTauriWindowClosePort,
-    type WindowCloseEvent,
+    type CloseRequest,
     type WindowClosePort,
   } from '../lib/drafts/window-close';
 
@@ -89,14 +89,29 @@
   let closeRegistrationStatus = $state<CloseRegistrationStatus>('idle');
   let closeRegistrationHasFailed = $state(false);
   let closeRegistrationRetryButton = $state<HTMLButtonElement | null>(null);
+  let closeIntent = $state<number | null>(null);
+  let closeConfirmationInFlight = false;
   let shellDestroyed = false;
   let closeUnlisten: (() => void) | null = null;
 
-  function handleNativeClose(event: WindowCloseEvent): void {
-    if (!closeDialogOpen && draftCoordinator.atRiskCount() === 0) return;
-
-    event.preventDefault();
-    if (!closeDialogOpen) {
+  function handleCloseRequest(request: CloseRequest): void {
+    if (closeIntent === request.intent && (closeDialogOpen || closeConfirmationInFlight)) {
+      return;
+    }
+    closeIntent = request.intent;
+    if (draftCoordinator.atRiskCount() === 0) {
+      closeConfirmationInFlight = true;
+      void currentClosePort()
+        .confirmExit(request.intent, 'keep')
+        .catch(() => {
+          flushSync(() => {
+            closeDialogOpen = true;
+          });
+        })
+        .finally(() => {
+          closeConfirmationInFlight = false;
+        });
+    } else if (!closeDialogOpen) {
       flushSync(() => {
         closeDialogOpen = true;
       });
@@ -105,7 +120,7 @@
 
   async function completeCloseRegistration(): Promise<void> {
     try {
-      const registeredUnlisten = await currentClosePort().onCloseRequested(handleNativeClose);
+      const registeredUnlisten = await currentClosePort().registerCloseRequests(handleCloseRequest);
       if (shellDestroyed) {
         registeredUnlisten();
         return;
@@ -134,6 +149,21 @@
     }
     closeRegistrationStatus = 'registering';
     void completeCloseRegistration();
+  }
+
+  async function cancelClose(): Promise<void> {
+    const intent = closeIntent;
+    if (intent !== null) await currentClosePort().cancelExit(intent);
+    if (closeIntent === intent) {
+      closeIntent = null;
+      closeDialogOpen = false;
+    }
+  }
+
+  async function confirmClose(): Promise<void> {
+    if (closeIntent === null) throw new Error('No active close request.');
+    const decision = draftCoordinator.atRiskCount() > 0 ? 'discard' : 'keep';
+    await currentClosePort().confirmExit(closeIntent, decision);
   }
 
   onMount(() => {
@@ -796,11 +826,7 @@
     <Toast />
 
     {#if closeDialogOpen}
-      <CloseDraftsDialog
-        {draftCoordinator}
-        oncancel={() => (closeDialogOpen = false)}
-        ondestroy={() => currentClosePort().destroy()}
-      />
+      <CloseDraftsDialog {draftCoordinator} oncancel={cancelClose} ondestroy={confirmClose} />
     {/if}
 
     {#if createChooser}
