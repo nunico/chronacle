@@ -233,6 +233,24 @@ describe('SessionRow', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
   });
 
+  it('still autosaves a concrete within-row blur during an active navigation transition', async () => {
+    vi.mocked(commands.updateSession).mockResolvedValue({
+      ...mockSession(),
+      title: 'Ordinary concrete blur',
+    });
+    const coordinator = new DraftCoordinator();
+    renderRow(coordinator);
+    const title = await expandRow();
+    const date = screen.getByLabelText('Date played');
+    await fireEvent.input(title, { target: { value: 'Ordinary concrete blur' } });
+
+    const endNavigation = coordinator.beginNavigationTransition();
+    await fireEvent.blur(title, { relatedTarget: date });
+    endNavigation();
+
+    await waitFor(() => expect(commands.updateSession).toHaveBeenCalledOnce());
+  });
+
   it('resumes ordinary blur saving after the close decision is cancelled', async () => {
     vi.mocked(commands.updateSession).mockResolvedValue({
       ...mockSession(),

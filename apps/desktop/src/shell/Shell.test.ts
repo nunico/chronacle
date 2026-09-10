@@ -376,7 +376,21 @@ describe('Shell keyboard shortcuts', () => {
     expect(await screen.findByRole('button', { name: /New NPC/i })).toBeTruthy();
   });
 
-  it('marks keyboard view navigation before a focused session is unmounted', async () => {
+  it('coordinates keyboard view navigation before rendering its destination', async () => {
+    const coordinator = new DraftCoordinator();
+    const beginNavigation = vi.spyOn(coordinator, 'beginNavigationTransition');
+    render(Shell, { props: { draftCoordinator: coordinator } });
+    await screen.findByRole('button', { name: /NPCs/i });
+    beginNavigation.mockClear();
+
+    await fireEvent.keyDown(document.body, { key: 'g' });
+    await fireEvent.keyDown(document.body, { key: 's' });
+
+    expect(await screen.findByRole('heading', { name: 'Sessions' })).toBeVisible();
+    expect(beginNavigation).toHaveBeenCalledOnce();
+  });
+
+  it('ignores a g chord targeted at a focused session field without autosaving', async () => {
     const session = {
       id: 'session-1',
       campaign_id: 'camp-1',
@@ -390,30 +404,43 @@ describe('Shell keyboard shortcuts', () => {
     getSessions.mockResolvedValue([session]);
     updateSession.mockResolvedValue({ ...session, title: 'Keyboard draft' });
     const coordinator = new DraftCoordinator();
-    const beginNavigation = vi.spyOn(coordinator, 'beginNavigationTransition');
     render(Shell, { props: { draftCoordinator: coordinator } });
     await screen.findByRole('button', { name: /NPCs/i });
 
-    await fireEvent.keyDown(window, { key: 'g' });
-    await fireEvent.keyDown(window, { key: 's' });
+    await fireEvent.keyDown(document.body, { key: 'g' });
+    await fireEvent.keyDown(document.body, { key: 's' });
     const sessionHeader = await screen.findByRole('button', { name: /Saved session title/i });
     await fireEvent.click(sessionHeader);
     const title = await screen.findByRole('textbox', { name: 'Name' });
     await fireEvent.input(title, { target: { value: 'Keyboard draft' } });
     title.focus();
 
-    await fireEvent.keyDown(window, { key: 'g' });
-    await fireEvent.keyDown(window, { key: 'o' });
-    await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+    await fireEvent.keyDown(title, { key: 'g' });
+    await fireEvent.keyDown(title, { key: 'o' });
 
-    expect(beginNavigation).toHaveBeenCalled();
+    expect(title).toBeInTheDocument();
+    expect(title).toHaveValue('Keyboard draft');
+    expect(screen.queryByPlaceholderText('Ask a rule, a name, a place…')).not.toBeInTheDocument();
     expect(updateSession).not.toHaveBeenCalled();
-
-    await fireEvent.keyDown(window, { key: 'g' });
-    await fireEvent.keyDown(window, { key: 's' });
-    await fireEvent.click(await screen.findByRole('button', { name: /Keyboard draft/i }));
-    expect(await screen.findByRole('textbox', { name: 'Name' })).toHaveValue('Keyboard draft');
     expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+  });
+
+  it('coordinates campaign selection initiated inside CampaignView', async () => {
+    getCampaigns.mockResolvedValue([
+      { id: 'camp-1', name: 'Campaign A', system: 'D&D 5e' },
+      { id: 'camp-2', name: 'Campaign B', system: 'D&D 5e' },
+    ]);
+    const coordinator = new DraftCoordinator();
+    const beginNavigation = vi.spyOn(coordinator, 'beginNavigationTransition');
+    render(Shell, { props: { draftCoordinator: coordinator } });
+    await screen.findByRole('button', { name: /NPCs/i });
+    await fireEvent.click(screen.getByRole('button', { name: /Campaign & sources/i }));
+    await fireEvent.click(await screen.findByRole('button', { name: /Manage campaigns/i }));
+    beginNavigation.mockClear();
+
+    await fireEvent.click(screen.getByRole('button', { name: /Campaign B/ }));
+
+    expect(beginNavigation).toHaveBeenCalledOnce();
   });
 
   it('c opens the create form inside an entity manager', async () => {
