@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import Icon from '../components/Icon.svelte';
   import {
@@ -67,6 +67,7 @@
   let editingId = $state<string | null>(null);
   let editName = $state('');
   let editSystem = $state('');
+  let campaignViewElement = $state<HTMLDivElement>();
 
   let active = $derived(campaigns.find((c) => c.id === activeCampaignId) ?? null);
   let activeTab = $state<'library' | 'entities'>('library');
@@ -293,6 +294,8 @@
   async function confirmDelete(mode: OnOwnedCollection) {
     if (!deleteTarget || campaignDeleteBlocked || campaignDeleteInProgress) return;
     const target = deleteTarget;
+    const nextCampaignId =
+      campaigns.find((campaign) => campaign.id !== target.campaignId)?.id ?? null;
     campaignDeleteInProgress = true;
     campaignDeleteError = null;
     try {
@@ -310,6 +313,12 @@
       campaignDeleteBackendComplete = false;
       if (activeCampaignId === target.campaignId) setActiveCampaignId(null);
       await refreshCampaigns();
+      await tick();
+      const remaining = Array.from(
+        campaignViewElement?.querySelectorAll<HTMLButtonElement>('.m-pick') ?? [],
+      ).find((candidate) => candidate.dataset.campaignId === nextCampaignId);
+      const manage = campaignViewElement?.querySelector<HTMLButtonElement>('.manage-head');
+      (remaining ?? manage)?.focus();
     } catch (e) {
       campaignDeleteError = String(e);
     } finally {
@@ -323,7 +332,7 @@
   );
 </script>
 
-<div class="scroll" inert={deleteTarget ? true : undefined}>
+<div class="scroll" inert={deleteTarget ? true : undefined} bind:this={campaignViewElement}>
   <div class="cv">
     {#if error}
       <div class="error">{error}</div>
@@ -415,7 +424,11 @@
                     >{i18n.t('common.cancel')}</button
                   >
                 {:else}
-                  <button class="m-pick" onclick={() => setActiveCampaignId(c.id)}>
+                  <button
+                    class="m-pick"
+                    data-campaign-id={c.id}
+                    onclick={() => setActiveCampaignId(c.id)}
+                  >
                     <span class="m-nm">{c.name}</span>
                     {#if c.system}<span class="m-sys">{c.system}</span>{/if}
                   </button>

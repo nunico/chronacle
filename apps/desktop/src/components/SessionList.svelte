@@ -8,7 +8,7 @@
     sessions: Session[];
     entityMap: Map<string, { id: string; kind: string }>;
     onUpdate: (session: Session) => void;
-    onDelete: (id: string) => void;
+    onDelete: (id: string) => void | Promise<void>;
     onDiscardUnavailable?: (id: string) => void | Promise<void>;
     unavailableSessionIds?: ReadonlySet<string>;
     draftCoordinator?: DraftCoordinator;

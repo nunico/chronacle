@@ -811,21 +811,37 @@
     pendingSourceFindingId = null;
   }
 
-  function requestCancel(): void {
+  async function focusEntityListTarget(recordId: string | null): Promise<void> {
+    await tick();
+    if (!managerElement?.isConnected) return;
+    const row = Array.from(managerElement.querySelectorAll<HTMLButtonElement>('.entity-name')).find(
+      (candidate) => candidate.dataset.entityId === recordId,
+    );
+    const fallback = managerElement.querySelector<HTMLButtonElement>('[data-testid="entity-new"]');
+    (row ?? fallback)?.focus();
+  }
+
+  async function closeFormAndFocusList(): Promise<void> {
+    const recordId = activeRecordId;
+    closeForm();
+    await focusEntityListTarget(recordId);
+  }
+
+  async function requestCancel(): Promise<void> {
     if (activeDeletionPending) return;
     if (!activeDraftScope || !currentDraft || statusOf(currentDraft) === 'saved') {
-      closeForm();
+      await closeFormAndFocusList();
       return;
     }
     discardConfirm = true;
   }
 
-  function discardActiveDraft(): void {
+  async function discardActiveDraft(): Promise<void> {
     if (!activeDraftScope) return;
     const scope = activeDraftScope;
     if (draftCoordinator.discard(scope) !== 'discarded') return;
     discardConfirm = false;
-    closeForm();
+    await closeFormAndFocusList();
   }
 
   function requestDelete(node: GraphNode): void {
@@ -1024,6 +1040,7 @@
               <button
                 type="button"
                 class="entity-name"
+                data-entity-id={row.recordId ?? undefined}
                 aria-describedby={[
                   status ? statusId : undefined,
                   showUnavailable ? unavailableId : undefined,
