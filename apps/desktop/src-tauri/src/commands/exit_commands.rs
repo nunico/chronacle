@@ -22,7 +22,7 @@ pub(crate) fn pending_app_exit(authorization: State<'_, ExitAuthorization>) -> O
 
 #[tauri::command]
 pub(crate) fn cancel_app_exit(
-    app: AppHandle,
+    _app: AppHandle,
     intent: u64,
     authorization: State<'_, ExitAuthorization>,
 ) -> Result<bool, String> {
@@ -30,8 +30,9 @@ pub(crate) fn cancel_app_exit(
         ExitResolution::Stale => Ok(false),
         ExitResolution::Cancelled => Ok(true),
         ExitResolution::TauriExit => Err("Invalid close cancellation state.".to_string()),
+        #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
         ExitResolution::NativeReply { terminate } => {
-            schedule_native_reply(&app, &authorization, intent, terminate)?;
+            schedule_native_reply(&_app, &authorization, intent, terminate)?;
             Ok(true)
         }
     }
@@ -52,12 +53,14 @@ pub(crate) fn confirm_app_exit(
             app.exit(0);
             Ok(())
         }
+        #[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
         ExitResolution::NativeReply { terminate } => {
             schedule_native_reply(&app, &authorization, intent, terminate)
         }
     }
 }
 
+#[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
 fn schedule_native_reply(
     app: &AppHandle,
     authorization: &ExitAuthorization,
@@ -72,7 +75,7 @@ fn schedule_native_reply(
         });
     }
 
-    #[cfg(not(all(target_os = "macos", feature = "rocksdb")))]
+    #[cfg(all(test, not(all(target_os = "macos", feature = "rocksdb"))))]
     {
         authorization.rollback_native_resolution(intent, terminate);
         let _ = app;
