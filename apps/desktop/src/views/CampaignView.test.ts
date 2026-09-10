@@ -267,10 +267,46 @@ describe('CampaignView', () => {
   });
 
   it('escape closes the dialog without deleting', async () => {
-    await openDeleteDialog();
-    await fireEvent.keyDown(window, { key: 'Escape' });
+    const dialog = await openDeleteDialog();
+    await fireEvent.keyDown(dialog, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(m.deleteCampaign).not.toHaveBeenCalled();
+  });
+
+  it('focuses safe cancellation, traps modal keys, and restores the delete opener', async () => {
+    renderView();
+    await fireEvent.click(screen.getByText(/Manage campaigns/));
+    const row = screen.getAllByText('Reach')[1]?.closest('.manage-row');
+    if (!(row instanceof HTMLElement)) throw new Error('Expected the managed campaign row');
+    const opener = within(row).getByTitle('Delete');
+    opener.focus();
+    await fireEvent.click(opener);
+    const dialog = await screen.findByRole('dialog', { name: /delete campaign/i });
+
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    const escapedKey = vi.fn();
+    window.addEventListener('keydown', escapedKey);
+    await fireEvent.keyDown(dialog, { key: 'g' });
+    expect(escapedKey).not.toHaveBeenCalled();
+    window.removeEventListener('keydown', escapedKey);
+
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(opener).toHaveFocus();
+  });
+
+  it('deletes using immutable scalar identity captured when confirmation opens', async () => {
+    const target = camp('camp-original', 'Original name');
+    renderView({ activeCampaignId: 'camp-original', campaigns: [target] });
+    await fireEvent.click(screen.getByText(/Manage campaigns/));
+    const row = screen.getAllByText('Original name')[1]?.closest('.manage-row');
+    if (!(row instanceof HTMLElement)) throw new Error('Expected the managed campaign row');
+    await fireEvent.click(within(row).getByTitle('Delete'));
+
+    target.id = 'camp-mutated';
+    target.name = 'Mutated name';
+    await fireEvent.click(screen.getByText('Delete campaign and its notes'));
+
+    await waitFor(() => expect(m.deleteCampaign).toHaveBeenCalledWith('camp-original', 'delete'));
   });
 
   it('blocks campaign deletion while a matching draft save is active', async () => {
@@ -283,14 +319,20 @@ describe('CampaignView', () => {
 
     const dialog = await openDeleteDialog(coordinator);
     expect(within(dialog).getByText(/wait for campaign saves to finish/i)).toBeVisible();
-    expect(within(dialog).getByText('Delete campaign and its notes')).toBeDisabled();
-    expect(within(dialog).getByText('Keep notes as a regular collection')).toBeDisabled();
+    expect(
+      within(dialog).getByRole('button', { name: 'Delete campaign and its notes' }),
+    ).toBeDisabled();
+    expect(
+      within(dialog).getByRole('button', { name: 'Keep notes as a regular collection' }),
+    ).toBeDisabled();
     expect(m.deleteCampaign).not.toHaveBeenCalled();
 
     save.resolve({ notes: 'Saving' });
     await saving;
     await waitFor(() =>
-      expect(within(dialog).getByText('Delete campaign and its notes')).toBeEnabled(),
+      expect(
+        within(dialog).getByRole('button', { name: 'Delete campaign and its notes' }),
+      ).toBeEnabled(),
     );
   });
 
@@ -348,6 +390,39 @@ describe('CampaignView', () => {
     for (const scope of campaignScopes) expect(coordinator.get(scope)).toBeUndefined();
     for (const scope of unrelatedScopes) expect(coordinator.get(scope)).toBeDefined();
     expect(rememberedRuleRecovery(coordinator, ruleDraft)).toBeUndefined();
+  });
+
+  it('fails closed when a matching save starts before post-delete cleanup', async () => {
+    const coordinator = new DraftCoordinator();
+    const deletion = deferred<undefined>();
+    const save = deferred<{ notes: string }>();
+    const scope = entityScope('camp-1', 'npc', 'mira');
+    coordinator.open(scope, 'entity:npc:mira', { notes: 'Saved' });
+    m.deleteCampaign.mockReturnValueOnce(deletion.promise);
+    const dialog = await openDeleteDialog(coordinator);
+    await fireEvent.click(within(dialog).getByText('Delete campaign and its notes'));
+    coordinator.revise(scope, { notes: 'Late saving revision' });
+    const saving = coordinator.requestSave(scope, () => save.promise);
+
+    deletion.resolve(undefined);
+    await screen.findByText(/could not safely release its retained drafts/i);
+    const retainedDialog = screen.getByRole('dialog', { name: /delete campaign/i });
+    expect(retainedDialog).toBeVisible();
+    expect(coordinator.get(scope)).toBeDefined();
+
+    await fireEvent.click(within(retainedDialog).getByRole('button', { name: 'Cancel' }));
+    await fireEvent.keyDown(retainedDialog, { key: 'Escape' });
+    expect(screen.getByRole('dialog', { name: /delete campaign/i })).toBeVisible();
+
+    save.resolve({ notes: 'Late saving revision' });
+    await saving;
+
+    await fireEvent.click(
+      within(retainedDialog).getByRole('button', { name: 'Delete campaign and its notes' }),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(m.deleteCampaign).toHaveBeenCalledTimes(1);
+    expect(coordinator.get(scope)).toBeUndefined();
   });
 
   it('shows a stale badge and compile button per collection', async () => {

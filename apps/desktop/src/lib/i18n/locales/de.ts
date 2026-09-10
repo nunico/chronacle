@@ -274,6 +274,8 @@ const de = {
       'Wenn diese Kampagne eine eigene Sammlung mit Notizen und Entitäten hat, wähle aus, was damit geschehen soll.',
     deleteCampaignSavingBlocked:
       'Warte, bis die Kampagneninhalte gespeichert wurden, bevor du sie löschst.',
+    deleteCampaignCleanupBlocked:
+      'Chronacle hat die Kampagne gelöscht, konnte die zwischengespeicherten Entwürfe aber nicht sicher freigeben. Warte, bis das Speichern abgeschlossen ist, und versuche die Bereinigung erneut.',
     deleteCampaignDrafts:
       'Beim Löschen dieser Kampagne werden {count} zwischengespeicherte Entwürfe verworfen.',
     deleteCampaignNotes: 'Kampagne und ihre Notizen löschen',

@@ -275,6 +275,8 @@ const fr = {
       'Si cette campagne possède sa propre collection de notes et d’entités, choisissez ce qui lui arrive.',
     deleteCampaignSavingBlocked:
       'Attendez la fin de l’enregistrement de la campagne avant de la supprimer.',
+    deleteCampaignCleanupBlocked:
+      'Chronacle a supprimé la campagne, mais n’a pas pu libérer ses brouillons conservés en toute sécurité. Attendez la fin de l’enregistrement, puis réessayez le nettoyage.',
     deleteCampaignDrafts:
       'La suppression de cette campagne abandonnera {count} brouillon(s) conservé(s).',
     deleteCampaignNotes: 'Supprimer la campagne et ses notes',

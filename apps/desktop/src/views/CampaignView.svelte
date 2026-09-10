@@ -25,6 +25,8 @@
   import { collectionIcon } from './collection-icons';
   import EntityManager from '../components/EntityManager.svelte';
   import RulesPanel from '../components/RulesPanel.svelte';
+  import Button from '../components/ui/Button.svelte';
+  import Dialog from '../components/ui/Dialog.svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import { i18n } from '../lib/locale.svelte';
   import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
@@ -230,17 +232,21 @@
   }
 
   interface CampaignDeletionIntent {
-    readonly campaign: Campaign;
+    readonly campaignId: string;
+    readonly campaignName: string;
     readonly prefixes: readonly string[];
     readonly rulePrefix: string;
   }
 
   let deleteTarget = $state<CampaignDeletionIntent | null>(null);
   let campaignDeleteInProgress = $state(false);
+  let campaignDeleteBackendComplete = $state(false);
+  let campaignDeleteError = $state<string | null>(null);
 
   function deletionIntent(campaign: Campaign): CampaignDeletionIntent {
     return Object.freeze({
-      campaign,
+      campaignId: campaign.id,
+      campaignName: campaign.name,
       prefixes: Object.freeze([
         `oracle:${campaign.id}`,
         `entity:${campaign.id}:`,
@@ -272,21 +278,39 @@
 
   function removeCampaign(c: Campaign) {
     deleteTarget = deletionIntent(c);
+    campaignDeleteBackendComplete = false;
+    campaignDeleteError = null;
+  }
+
+  function closeCampaignDelete() {
+    if (campaignDeleteInProgress || campaignDeleteBackendComplete) return;
+    deleteTarget = null;
+    campaignDeleteBackendComplete = false;
+    campaignDeleteError = null;
   }
 
   async function confirmDelete(mode: OnOwnedCollection) {
     if (!deleteTarget || campaignDeleteBlocked || campaignDeleteInProgress) return;
     const target = deleteTarget;
     campaignDeleteInProgress = true;
+    campaignDeleteError = null;
     try {
-      await deleteCampaign(target.campaign.id, mode);
-      draftCoordinator.removeAfterDeletePrefixes(target.prefixes);
+      if (!campaignDeleteBackendComplete) {
+        await deleteCampaign(target.campaignId, mode);
+        campaignDeleteBackendComplete = true;
+      }
+      const cleanupResult = draftCoordinator.removeAfterDeletePrefixes(target.prefixes);
+      if (cleanupResult === 'blocked-active-save') {
+        campaignDeleteError = i18n.t('campaign.deleteCampaignCleanupBlocked');
+        return;
+      }
       forgetRuleRecoveryPrefix(draftCoordinator, target.rulePrefix);
       deleteTarget = null;
-      if (activeCampaignId === target.campaign.id) setActiveCampaignId(null);
+      campaignDeleteBackendComplete = false;
+      if (activeCampaignId === target.campaignId) setActiveCampaignId(null);
       await refreshCampaigns();
     } catch (e) {
-      error = String(e);
+      campaignDeleteError = String(e);
     } finally {
       campaignDeleteInProgress = false;
     }
@@ -298,13 +322,7 @@
   );
 </script>
 
-<svelte:window
-  onkeydown={(e) => {
-    if (e.key === 'Escape' && deleteTarget && !campaignDeleteInProgress) deleteTarget = null;
-  }}
-/>
-
-<div class="scroll">
+<div class="scroll" inert={deleteTarget ? true : undefined}>
   <div class="cv">
     {#if error}
       <div class="error">{error}</div>
@@ -601,54 +619,64 @@
       <p class="muted">{i18n.t('campaign.selectCampaign')}</p>
     {/if}
   </div>
-
-  {#if deleteTarget}
-    <div
-      class="modal-overlay"
-      role="presentation"
-      onclick={(e) => {
-        if (e.target === e.currentTarget && !campaignDeleteInProgress) deleteTarget = null;
-      }}
-    >
-      <div class="modal" role="dialog" aria-label={i18n.t('campaign.deleteCampaign')} tabindex="-1">
-        <h3>{i18n.t('campaign.deleteCampaignQuestion', { name: deleteTarget.campaign.name })}</h3>
-        <p>
-          {i18n.t('campaign.deleteCampaignHint')}
-        </p>
-        {#if campaignDeleteBlocked}
-          <p class="delete-draft-warning" role="status">
-            {i18n.t('campaign.deleteCampaignSavingBlocked')}
-          </p>
-        {:else if campaignDraftCount > 0}
-          <p class="delete-draft-warning">
-            {i18n.t('campaign.deleteCampaignDrafts', { count: campaignDraftCount })}
-          </p>
-        {/if}
-        <div class="modal-actions">
-          <button
-            class="m-btn danger"
-            disabled={campaignDeleteBlocked || campaignDeleteInProgress}
-            onclick={() => confirmDelete('delete')}
-          >
-            {i18n.t('campaign.deleteCampaignNotes')}
-          </button>
-          <button
-            class="m-btn"
-            disabled={campaignDeleteBlocked || campaignDeleteInProgress}
-            onclick={() => confirmDelete('convert_to_regular')}
-          >
-            {i18n.t('campaign.keepNotes')}
-          </button>
-          <button
-            class="m-btn"
-            disabled={campaignDeleteInProgress}
-            onclick={() => (deleteTarget = null)}>{i18n.t('common.cancel')}</button
-          >
-        </div>
-      </div>
-    </div>
-  {/if}
 </div>
+
+{#snippet campaignDeleteBody()}
+  {#if deleteTarget}
+    <p class="delete-question">
+      {i18n.t('campaign.deleteCampaignQuestion', { name: deleteTarget.campaignName })}
+    </p>
+    <p>{i18n.t('campaign.deleteCampaignHint')}</p>
+    {#if campaignDeleteError}
+      <p class="delete-error" role="alert">{campaignDeleteError}</p>
+    {/if}
+    {#if campaignDeleteBlocked}
+      <p class="delete-draft-warning" role="status">
+        {i18n.t('campaign.deleteCampaignSavingBlocked')}
+      </p>
+    {:else if campaignDraftCount > 0}
+      <p class="delete-draft-warning">
+        {i18n.t('campaign.deleteCampaignDrafts', { count: campaignDraftCount })}
+      </p>
+    {/if}
+  {/if}
+{/snippet}
+
+{#snippet campaignDeleteActions()}
+  <Button
+    variant="danger"
+    disabled={campaignDeleteBlocked}
+    loading={campaignDeleteInProgress}
+    onclick={() => confirmDelete('delete')}
+  >
+    {i18n.t('campaign.deleteCampaignNotes')}
+  </Button>
+  <Button
+    variant="secondary"
+    disabled={campaignDeleteBlocked}
+    loading={campaignDeleteInProgress}
+    onclick={() => confirmDelete('convert_to_regular')}
+  >
+    {i18n.t('campaign.keepNotes')}
+  </Button>
+  <Button
+    variant="ghost"
+    disabled={campaignDeleteInProgress || campaignDeleteBackendComplete}
+    initialFocus
+    onclick={closeCampaignDelete}
+  >
+    {i18n.t('common.cancel')}
+  </Button>
+{/snippet}
+
+{#if deleteTarget}
+  <Dialog
+    title={i18n.t('campaign.deleteCampaign')}
+    body={campaignDeleteBody}
+    actions={campaignDeleteActions}
+    onclose={closeCampaignDelete}
+  />
+{/if}
 
 <style>
   .scroll {
@@ -1076,25 +1104,11 @@
     color: var(--fg-1);
     border-bottom-color: var(--violet-300);
   }
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: grid;
-    place-items: center;
-    z-index: 50;
+  .delete-question {
+    color: var(--fg-1);
+    font-weight: 700;
   }
-  .modal {
-    background: var(--bg-raised, #1d1a17);
-    border: 1px solid var(--border, #3a352f);
-    border-radius: 8px;
-    padding: 1.25rem;
-    max-width: 26rem;
-  }
-  .modal-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-top: 1rem;
+  .delete-error {
+    color: var(--danger);
   }
 </style>
