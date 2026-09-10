@@ -99,6 +99,21 @@ Feature: Preserve entity drafts while moving through a campaign
     And the explicit action is now Save
     And only one NPC has been created
 
+  Scenario: Keep a promoted creation omitted by an older entity list
+    Given creation of revision 1 for a new NPC is in progress
+    When I navigate to Oracle
+    And I hold the next NPC list before the assigned ID exists
+    And I return to NPCs while that older list waits
+    Then the new NPC draft is restored with Create unavailable
+    When creation completes and assigns the NPC an ID
+    And the pre-acknowledgment entity list completes
+    Then the acknowledged NPC remains visible and selected
+    And the interface indicates that it is saved
+    And the explicit action is now Save
+    And the retained NPC is not offered backend-only row actions
+    And the created NPC remains persisted in campaign A's NPC records
+    And only one NPC has been created
+
   Scenario: Finish creating when the saved record appears before acknowledgment
     Given creation of revision 1 for a new NPC is in progress
     When I enter revision 2 before creation completes

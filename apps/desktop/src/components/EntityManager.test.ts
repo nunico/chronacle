@@ -959,6 +959,8 @@ describe('EntityManager', () => {
       expect(screen.getByLabelText('Notes')).toHaveValue(acknowledged.notes);
       expect(screen.getByRole('status')).toHaveTextContent('Saved');
 
+      const scope = entityScope('camp1', 'npc', 'mira');
+      const releaseIndependentLease = coordinator.acquireLease(scope);
       omitMiraFromLaterLists = true;
       await manager.rerender({
         campaignId: 'camp1',
@@ -975,7 +977,9 @@ describe('EntityManager', () => {
       await waitFor(() =>
         expect(screen.queryByRole('button', { name: acknowledged.name })).not.toBeInTheDocument(),
       );
-      expect(coordinator.get(entityScope('camp1', 'npc', 'mira'))).toBeUndefined();
+      expect(coordinator.get(scope)).toBeDefined();
+      releaseIndependentLease();
+      expect(coordinator.get(scope)).toBeUndefined();
       expect(commands.updateEntity).toHaveBeenCalledTimes(1);
     });
 
@@ -1334,6 +1338,82 @@ describe('EntityManager', () => {
       );
       expect(commands.createEntity).toHaveBeenCalledTimes(1);
       await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saved'));
+    });
+
+    it('leases an absent-at-start promoted Create without treating it as a backend row', async () => {
+      const coordinator = new DraftCoordinator();
+      const createWrite = deferred<GraphNode>();
+      const staleOmissionLoad = deferred<GraphNode[]>();
+      const onViewGraph = vi.fn();
+      const returned = mockNpc({
+        id: 'npc-created-after-list-start',
+        name: 'Captain Sable',
+        notes: 'Knows [[Captain Sable]].',
+      });
+      let holdNpcLists = false;
+      let npcListRequests = 0;
+      vi.mocked(commands.getEntities).mockImplementation((campaignId, entityKind) => {
+        if (campaignId !== 'camp1' || entityKind !== 'npc') return Promise.resolve([]);
+        npcListRequests += 1;
+        if (holdNpcLists) return staleOmissionLoad.promise;
+        return Promise.resolve([mira(), torvin()]);
+      });
+      vi.mocked(commands.createEntity).mockReturnValue(createWrite.promise);
+
+      const managerA = renderManager(coordinator);
+      await fireEvent.click(await screen.findByRole('button', { name: 'New NPC' }));
+      await fireEvent.input(screen.getByLabelText('Name', { exact: true }), {
+        target: { value: returned.name },
+      });
+      await fireEvent.input(screen.getByLabelText('Notes'), {
+        target: { value: returned.notes },
+      });
+      await fireEvent.submit(screen.getByRole('form'));
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saving…'));
+
+      managerA.unmount();
+      const requestsBeforeManagerB = npcListRequests;
+      holdNpcLists = true;
+      const managerB = render(EntityManager, {
+        props: {
+          campaignId: 'camp1',
+          kind: 'npc',
+          draftCoordinator: coordinator,
+          onViewGraph,
+        },
+      });
+      expect(await screen.findByLabelText('Name', { exact: true })).toHaveValue(returned.name);
+      await waitFor(() => expect(npcListRequests).toBeGreaterThan(requestsBeforeManagerB));
+
+      createWrite.resolve(returned);
+      await waitFor(() => {
+        expect(screen.getByTestId('entity-form-submit')).toHaveTextContent('Save');
+        expect(screen.getByRole('status')).toHaveTextContent('Saved');
+      });
+      const destinationScope = entityScope('camp1', 'npc', returned.id);
+      expect(coordinator.get(destinationScope)).toMatchObject({
+        baseline: expect.objectContaining({ name: returned.name, notes: returned.notes }),
+        value: expect.objectContaining({ name: returned.name, notes: returned.notes }),
+      });
+
+      holdNpcLists = false;
+      staleOmissionLoad.resolve([]);
+      const retainedRow = await screen.findByRole('button', { name: returned.name });
+      const row = retainedRow.closest('li');
+      if (!row) throw new Error('Expected a presentation row for the promoted Create');
+      expect(row).toHaveClass('selected');
+      expect(within(row).queryByTitle('View relationships')).not.toBeInTheDocument();
+      expect(
+        within(row).queryByRole('button', { name: `Delete ${returned.name}` }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: `Create article for ${returned.name}` }),
+      ).toBeVisible();
+      expect(commands.createEntity).toHaveBeenCalledTimes(1);
+      expect(commands.updateEntity).not.toHaveBeenCalled();
+
+      managerB.unmount();
+      await waitFor(() => expect(coordinator.get(destinationScope)).toBeUndefined());
     });
 
     it('settles and releases an unmounted Create without a replacement manager', async () => {
