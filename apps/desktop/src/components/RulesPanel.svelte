@@ -210,7 +210,11 @@
   function reviseNotes(entry: RuleEntry, notes: string): void {
     const scope = ruleScope(campaignId, collectionId, entry.id);
     ensureDraft(entry);
-    draftCoordinator.revise(scope, { notes });
+    const revised = draftCoordinator.revise(scope, { notes });
+    if (statusOf(revised) === 'saved') {
+      forgetRuleRecovery(draftCoordinator, scope);
+      return;
+    }
     rememberRuleRecovery(draftCoordinator, scope, {
       ruleId: entry.id,
       title: entry.name,

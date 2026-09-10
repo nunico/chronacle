@@ -227,6 +227,9 @@ describe('RulesPanel', () => {
       title: 'Initiative',
       collectionId: 'c-1',
     });
+
+    await fireEvent.input(notes, { target: { value: '' } });
+    expect(rememberedRuleRecovery(coordinator, ruleScope('camp-a', 'c-1', 'r1'))).toBeUndefined();
   });
 
   it('releases clean rule projections when the panel unmounts', async () => {
