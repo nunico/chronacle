@@ -344,25 +344,38 @@
 
   async function loadEntities(requestCampaignId = campaignId, requestKind = kind) {
     const requestScope = `${requestCampaignId}:${requestKind}`;
+    const requestPrefix = `entity:${requestCampaignId}:${requestKind}:`;
+    const acknowledgmentsAtStart = new Map(
+      draftCoordinator
+        .listByPrefix<EntityDraftValue>(requestPrefix)
+        .map((draft) => [draft.scope, draft.lastAcknowledgedAttemptId] as const),
+    );
     loading = true;
     try {
       const loaded = await getEntities(requestCampaignId, requestKind);
       if (!mounted || `${campaignId}:${kind}` !== requestScope) return;
       for (const node of loaded) {
-        draftCoordinator.open(
-          entityScope(requestCampaignId, requestKind, node.id),
-          `entity:${requestKind}:${node.id}`,
-          draftFromNode(node),
-          'authoritative-list',
-        );
-        leaseProjection(entityScope(requestCampaignId, requestKind, node.id));
+        const scope = entityScope(requestCampaignId, requestKind, node.id);
+        const current = draftCoordinator.get<EntityDraftValue>(scope);
+        const startAcknowledgment = acknowledgmentsAtStart.get(scope);
+        if (
+          !current ||
+          (startAcknowledgment !== undefined &&
+            current.lastAcknowledgedAttemptId === startAcknowledgment)
+        ) {
+          draftCoordinator.open(
+            scope,
+            `entity:${requestKind}:${node.id}`,
+            draftFromNode(node),
+            'authoritative-list',
+          );
+        }
+        leaseProjection(scope);
       }
       const loadedScopes = new Set(
         loaded.map((node) => entityScope(requestCampaignId, requestKind, node.id)),
       );
-      for (const draft of draftCoordinator.listByPrefix<EntityDraftValue>(
-        `entity:${requestCampaignId}:${requestKind}:`,
-      )) {
+      for (const draft of draftCoordinator.listByPrefix<EntityDraftValue>(requestPrefix)) {
         if (!loadedScopes.has(draft.scope) && statusOf(draft) === 'saved') {
           releaseProjection(draft.scope);
         }
