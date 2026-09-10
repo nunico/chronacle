@@ -605,6 +605,7 @@ pub async fn run() {
             commands::vault_sync_now,
             commands::list_vault_conflicts,
             commands::request_app_exit,
+            commands::pending_app_exit,
             commands::cancel_app_exit,
             commands::confirm_app_exit,
         ])

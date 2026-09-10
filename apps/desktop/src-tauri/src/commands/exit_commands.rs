@@ -16,6 +16,11 @@ pub(crate) fn request_app_exit(authorization: State<'_, ExitAuthorization>) -> u
 }
 
 #[tauri::command]
+pub(crate) fn pending_app_exit(authorization: State<'_, ExitAuthorization>) -> Option<u64> {
+    authorization.pending()
+}
+
+#[tauri::command]
 pub(crate) fn cancel_app_exit(intent: u64, authorization: State<'_, ExitAuthorization>) -> bool {
     authorization.revoke(intent)
 }

@@ -43,6 +43,11 @@ impl ExitAuthorization {
         intent
     }
 
+    pub(crate) fn pending(&self) -> Option<u64> {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.pending_intent
+    }
+
     pub(crate) fn revoke(&self, intent: u64) -> bool {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if state.pending_intent != Some(intent) || state.authorized {
@@ -97,6 +102,7 @@ mod tests {
 
         assert_eq!(first, second);
         assert_ne!(first, 0);
+        assert_eq!(authorization.pending(), Some(first));
     }
 
     #[test]
@@ -124,6 +130,7 @@ mod tests {
         assert!(!authorization.revoke(intent + 1));
         assert_eq!(authorization.request(), intent);
         assert!(authorization.revoke(intent));
+        assert_eq!(authorization.pending(), None);
         assert!(!authorization.authorize(intent));
         assert!(authorization.request() > intent);
     }
