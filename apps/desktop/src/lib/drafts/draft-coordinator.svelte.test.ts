@@ -508,6 +508,161 @@ describe('DraftCoordinator draft discovery', () => {
   });
 });
 
+describe('DraftCoordinator bounded retention', () => {
+  it('releases only a clean scope when its adapter no longer references it', () => {
+    const coordinator = new DraftCoordinator();
+    const cleanScope = entityScope('camp-a', 'npc', 'clean');
+    const dirtyScope = entityScope('camp-a', 'npc', 'dirty');
+    const unrelatedScope = entityScope('camp-b', 'npc', 'clean');
+    coordinator.open(cleanScope, 'entity:npc:clean', { notes: 'saved' });
+    coordinator.open(dirtyScope, 'entity:npc:dirty', { notes: 'saved' });
+    coordinator.revise(dirtyScope, { notes: 'keep me' });
+    coordinator.open(unrelatedScope, 'entity:npc:clean', { notes: 'elsewhere' });
+
+    expect(coordinator.release(dirtyScope)).toBe('retained-at-risk');
+    expect(coordinator.release(cleanScope)).toBe('released');
+    expect(coordinator.release(cleanScope)).toBe('missing');
+    expect(coordinator.get(cleanScope)).toBeUndefined();
+    expect(coordinator.get(dirtyScope)?.value).toEqual({ notes: 'keep me' });
+    expect(coordinator.get(unrelatedScope)?.value).toEqual({ notes: 'elsewhere' });
+  });
+
+  it('never releases saving, queued, failed, redirected, or conflicted scopes', async () => {
+    const coordinator = new DraftCoordinator();
+    const writer = new ControlledWriter<{ notes: string }>();
+    const queuedWriter = new ControlledWriter<{ notes: string }>();
+    const savingScope = 'rule:camp-a:book:shared';
+    const queuedScope = 'rule:camp-b:book:shared';
+    coordinator.open(savingScope, 'rule:shared', { notes: 'A saved' });
+    coordinator.open(queuedScope, 'rule:shared', { notes: 'B saved' });
+    coordinator.revise(savingScope, { notes: 'A saving' });
+    coordinator.revise(queuedScope, { notes: 'B queued' });
+    const saving = coordinator.requestSave(savingScope, writer.write);
+    const queued = coordinator.requestSave(queuedScope, queuedWriter.write);
+
+    expect(coordinator.release(savingScope)).toBe('retained-at-risk');
+    expect(coordinator.release(queuedScope)).toBe('retained-at-risk');
+
+    required(writer.attempts[0], 'the active write').completion.resolve({ notes: 'A saving' });
+    await saving;
+    required(queuedWriter.attempts[0], 'the queued write').completion.reject(new Error('offline'));
+    await queued;
+    expect(coordinator.release(queuedScope)).toBe('retained-at-risk');
+
+    const clientScope = newEntityScope('camp-a', 'npc', 'client');
+    const destinationScope = entityScope('camp-a', 'npc', 'saved-id');
+    const createWriter = new ControlledWriter<{ name: string; notes: string }>();
+    coordinator.open(clientScope, clientScope, { name: '', notes: '' });
+    coordinator.revise(clientScope, { name: 'Sable', notes: '' });
+    const create = coordinator.requestSave(clientScope, createWriter.write);
+    required(createWriter.attempts[0], 'the create write').completion.resolve({
+      name: 'Sable',
+      notes: '',
+    });
+    await create;
+    coordinator.remapAfterCreate(clientScope, destinationScope, 'entity:npc:saved-id');
+
+    expect(coordinator.release(destinationScope)).toBe('retained-at-risk');
+    expect(coordinator.resolveScope(clientScope)).toBe(destinationScope);
+    expect(coordinator.get(destinationScope)).toBeDefined();
+  });
+
+  it('releases only eligible clean records under the exact prefix', () => {
+    const coordinator = new DraftCoordinator();
+    const clean = entityScope('camp-a', 'npc', 'clean');
+    const dirty = entityScope('camp-a', 'npc', 'dirty');
+    const anotherKind = entityScope('camp-a', 'location', 'clean');
+    const anotherCampaign = entityScope('camp-b', 'npc', 'clean');
+    coordinator.open(clean, 'entity:npc:clean', { notes: 'saved' });
+    coordinator.open(dirty, 'entity:npc:dirty', { notes: 'saved' });
+    coordinator.revise(dirty, { notes: 'draft' });
+    coordinator.open(anotherKind, 'entity:location:clean', { notes: 'location' });
+    coordinator.open(anotherCampaign, 'entity:npc:clean', { notes: 'elsewhere' });
+
+    expect(coordinator.releasePrefix('entity:camp-a:npc:')).toBe(1);
+    expect(coordinator.get(clean)).toBeUndefined();
+    expect(coordinator.get(dirty)).toBeDefined();
+    expect(coordinator.get(anotherKind)).toBeDefined();
+    expect(coordinator.get(anotherCampaign)).toBeDefined();
+  });
+
+  it('retains a clean source while its create promotion has an unresolved issue', async () => {
+    const coordinator = new DraftCoordinator();
+    const writer = new ControlledWriter<{ name: string; notes: string }>();
+    const sourceScope = newEntityScope('camp-a', 'npc', 'client');
+    const destinationScope = entityScope('camp-a', 'npc', 'saved-id');
+    coordinator.open(sourceScope, sourceScope, { name: '', notes: '' });
+    coordinator.revise(sourceScope, { name: 'Sable', notes: '' });
+    const create = coordinator.requestSave(sourceScope, writer.write);
+    required(writer.attempts[0], 'the create write').completion.resolve({
+      name: 'Sable',
+      notes: '',
+    });
+    await create;
+    coordinator.open(destinationScope, 'entity:npc:different-target', {
+      name: 'Sable',
+      notes: 'different authority',
+    });
+
+    expect(
+      coordinator.tryRemapAfterCreate(sourceScope, destinationScope, 'entity:npc:saved-id'),
+    ).toEqual({ outcome: 'blocked', reason: 'destination-target-mismatch' });
+    expect(coordinator.release(sourceScope)).toBe('retained-at-risk');
+    expect(coordinator.get(sourceScope)).toBeDefined();
+  });
+
+  it('purges only confirmed campaign prefixes and all associated metadata', async () => {
+    const coordinator = new DraftCoordinator();
+    const campaignAScope = entityScope('camp-a', 'npc', 'saved-id');
+    const campaignANewScope = newEntityScope('camp-a', 'npc', 'client');
+    const campaignB = entityScope('camp-b', 'npc', 'saved-id');
+    const lookalikeCampaign = 'oracle:camp-ab';
+    const createWriter = new ControlledWriter<{ name: string; notes: string }>();
+    coordinator.open(campaignANewScope, campaignANewScope, { name: '', notes: '' });
+    coordinator.revise(campaignANewScope, { name: 'Sable', notes: '' });
+    const create = coordinator.requestSave(campaignANewScope, createWriter.write);
+    required(createWriter.attempts[0], 'the create write').completion.resolve({
+      name: 'Sable',
+      notes: '',
+    });
+    await create;
+    coordinator.remapAfterCreate(campaignANewScope, campaignAScope, 'entity:npc:saved-id');
+    coordinator.open(campaignB, 'entity:npc:saved-id', { name: 'Elsewhere', notes: '' });
+    coordinator.open(lookalikeCampaign, null, 'Keep this campaign');
+
+    expect(
+      coordinator.removeAfterDeletePrefixes([
+        'oracle:camp-a',
+        'entity:camp-a:',
+        'entity-new:camp-a:',
+        'session:camp-a:',
+        'rule:camp-a:',
+      ]),
+    ).toBe(1);
+    expect(coordinator.get(campaignAScope)).toBeUndefined();
+    expect(coordinator.resolveScope(campaignANewScope)).toBe(campaignANewScope);
+    expect(coordinator.getCreatePromotionIssue(campaignANewScope)).toBeUndefined();
+    expect(coordinator.get(campaignB)).toBeDefined();
+    expect(coordinator.get(lookalikeCampaign)?.value).toBe('Keep this campaign');
+  });
+
+  it('refuses a campaign purge while a matching scope is actively saving', async () => {
+    const coordinator = new DraftCoordinator();
+    const writer = new ControlledWriter<{ notes: string }>();
+    const scope = entityScope('camp-a', 'npc', 'mira');
+    coordinator.open(scope, 'entity:npc:mira', { notes: 'saved' });
+    coordinator.revise(scope, { notes: 'saving' });
+    const save = coordinator.requestSave(scope, writer.write);
+
+    expect(coordinator.hasActiveWritesByPrefixes(['entity:camp-a:'])).toBe(true);
+    expect(coordinator.removeAfterDeletePrefixes(['entity:camp-a:'])).toBe('blocked-active-save');
+    expect(coordinator.get(scope)?.value).toEqual({ notes: 'saving' });
+
+    required(writer.attempts[0], 'the active write').completion.resolve({ notes: 'saving' });
+    await save;
+  });
+});
+
 describe('DraftCoordinator create acknowledgment remapping', () => {
   it('reactively resolves a remapped client scope without retargeting stale mutations', async () => {
     const coordinator = new DraftCoordinator();
