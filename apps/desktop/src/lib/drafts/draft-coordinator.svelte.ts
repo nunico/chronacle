@@ -89,8 +89,8 @@ export class DraftCoordinator {
   private readonly redirects = new SvelteMap<string, string>();
   private readonly createPromotionIssues = new SvelteMap<string, CreatePromotionIssue>();
   private readonly authoritativeListScopes = new SvelteSet<string>();
-  private readonly leaseCounts = new Map<string, number>();
-  private readonly deferredReleases = new Set<string>();
+  private readonly leaseCounts = new SvelteMap<string, number>();
+  private readonly deferredReleases = new SvelteSet<string>();
   private nextAttemptId = 1;
 
   open<T extends DraftValue>(
