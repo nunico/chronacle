@@ -308,7 +308,12 @@
   }
 
   async function handleNotesBlur(entry: RuleEntry, event?: FocusEvent): Promise<void> {
-    if (draftCoordinator.isCloseDecisionActive() || !shouldSaveFromBlur(entry, event)) return;
+    if (
+      draftCoordinator.isCloseDecisionActive() ||
+      draftCoordinator.isNavigationTransitionActive() ||
+      !shouldSaveFromBlur(entry, event)
+    )
+      return;
     const draft = draftCoordinator.get<RuleNoteDraftValue>(
       ruleScope(campaignId, collectionId, entry.id),
     );

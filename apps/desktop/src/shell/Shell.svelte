@@ -225,8 +225,10 @@
   function openEntity(id: string, kind: EntityKind) {
     const cat = KIND_TO_CATEGORY[kind];
     if (!cat) return;
-    pendingOpen = { id, kind };
-    view = { kind: 'notebook', category: cat };
+    coordinateNavigation(() => {
+      pendingOpen = { id, kind };
+      view = { kind: 'notebook', category: cat };
+    });
   }
 
   function openCreateKindChooser(name: string, sourceFindingId?: string) {
@@ -234,9 +236,11 @@
   }
 
   function createFromWikilink(name: string, kind: EntityKind, sourceFindingId?: string) {
-    pendingCreate = { kind, name, sourceFindingId };
-    view = { kind: 'notebook', category: KIND_TO_CATEGORY[kind] };
-    createChooser = null;
+    coordinateNavigation(() => {
+      pendingCreate = { kind, name, sourceFindingId };
+      view = { kind: 'notebook', category: KIND_TO_CATEGORY[kind] };
+      createChooser = null;
+    });
   }
 
   function entityKindLabel(kind: EntityKind): string {
@@ -251,6 +255,23 @@
   let switcherOpen = $state(false);
   let railCounts = $state<Partial<Record<NoteCategoryId, number>>>({});
   let maintenanceCount = $state(0);
+
+  function coordinateNavigation(change: () => void): void {
+    const endNavigation = draftCoordinator.beginNavigationTransition();
+    try {
+      flushSync(change);
+    } catch (error) {
+      endNavigation();
+      throw error;
+    }
+    void tick().then(endNavigation, endNavigation);
+  }
+
+  function navigateTo(nextView: View): void {
+    coordinateNavigation(() => {
+      view = nextView;
+    });
+  }
 
   async function refreshMaintenanceCount() {
     try {
@@ -308,8 +329,8 @@
   }
 
   function navTo(target: NavTarget) {
-    if (target === 'oracle' || target === 'settings' || target === 'timeline') view = target;
-    else view = { kind: 'notebook', category: target.category };
+    if (target === 'oracle' || target === 'settings' || target === 'timeline') navigateTo(target);
+    else navigateTo({ kind: 'notebook', category: target.category });
   }
 
   function handleWindowKey(e: KeyboardEvent) {
@@ -358,7 +379,7 @@
         break;
       case '/':
         e.preventDefault();
-        view = 'oracle';
+        navigateTo('oracle');
         chatFocusNonce++;
         break;
       case 'c':
@@ -489,6 +510,12 @@
     } catch {
       /* persistence is best-effort */
     }
+  }
+
+  function navigateToCampaign(id: string): void {
+    coordinateNavigation(() => {
+      setActiveCampaignId(id);
+    });
   }
 
   async function refreshCampaigns() {
@@ -684,7 +711,7 @@
       {activeCampaign}
       counts={railCounts}
       {maintenanceCount}
-      setView={(v) => (view = v)}
+      setView={navigateTo}
       onOpenSwitcher={() => (switcherOpen = true)}
       onOpenUpload={() => openFilePicker()}
     />
@@ -693,8 +720,8 @@
       <CampaignSwitcher
         {campaigns}
         {activeCampaignId}
-        onSelect={setActiveCampaignId}
-        onManage={() => (view = 'campaign')}
+        onSelect={navigateToCampaign}
+        onManage={() => navigateTo('campaign')}
         onClose={() => (switcherOpen = false)}
       />
     {/if}

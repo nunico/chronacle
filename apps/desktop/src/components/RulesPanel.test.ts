@@ -496,6 +496,27 @@ describe('RulesPanel', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
   });
 
+  it('retains a focused note when navigation unmounts it without a related target', async () => {
+    const coordinator = new DraftCoordinator();
+    m.getRuleEntries.mockResolvedValue([
+      { ...rule('r1', 'Initiative', 'mechanic'), notes: 'Saved rule note.' },
+    ]);
+    const first = renderPanel(coordinator);
+    const notes = await openNotes();
+    await fireEvent.input(notes, { target: { value: 'Retained by navigation transition.' } });
+
+    const endNavigation = coordinator.beginNavigationTransition();
+    await fireEvent.blur(notes, { relatedTarget: null });
+    first.unmount();
+    endNavigation();
+
+    expect(m.updateRuleNotes).not.toHaveBeenCalled();
+
+    renderPanel(coordinator);
+    expect(await openNotes()).toHaveValue('Retained by navigation transition.');
+    expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+  });
+
   it('clears pending without IPC when a null-backed note returns to its saved baseline', async () => {
     m.getRuleEntries.mockResolvedValue([rule('r1', 'Initiative', 'mechanic')]);
     renderPanel();

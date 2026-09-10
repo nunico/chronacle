@@ -93,6 +93,7 @@ export class DraftCoordinator {
   private readonly deferredReleases = new SvelteSet<string>();
   private nextAttemptId = 1;
   private closeDecisionActive = false;
+  private navigationTransitionCount = 0;
 
   beginCloseDecision(): void {
     this.closeDecisionActive = true;
@@ -104,6 +105,20 @@ export class DraftCoordinator {
 
   isCloseDecisionActive(): boolean {
     return this.closeDecisionActive;
+  }
+
+  beginNavigationTransition(): () => void {
+    this.navigationTransitionCount += 1;
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      this.navigationTransitionCount = Math.max(0, this.navigationTransitionCount - 1);
+    };
+  }
+
+  isNavigationTransitionActive(): boolean {
+    return this.navigationTransitionCount > 0;
   }
 
   open<T extends DraftValue>(

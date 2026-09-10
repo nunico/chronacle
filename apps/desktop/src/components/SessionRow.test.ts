@@ -212,6 +212,27 @@ describe('SessionRow', () => {
     expect(coordinator.canDiscard(sessionScope('camp1', 'sess1'))).toBe(true);
   });
 
+  it('retains a focused edit when navigation unmounts it without a related target', async () => {
+    const coordinator = new DraftCoordinator();
+    const rendered = renderRow(coordinator);
+    const title = await expandRow();
+    await fireEvent.input(title, { target: { value: 'Retained across navigation' } });
+
+    const endNavigation = coordinator.beginNavigationTransition();
+    await fireEvent.blur(title, { relatedTarget: null });
+    rendered.unmount();
+    endNavigation();
+
+    expect(commands.updateSession).not.toHaveBeenCalled();
+    const retained = coordinator.get(sessionScope('camp1', 'sess1'));
+    if (!retained) throw new Error('Expected the session draft to remain available');
+    expect(statusOf(retained)).toBe('pending');
+
+    renderRow(coordinator);
+    expect(await expandRow('Retained across navigation')).toHaveValue('Retained across navigation');
+    expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+  });
+
   it('resumes ordinary blur saving after the close decision is cancelled', async () => {
     vi.mocked(commands.updateSession).mockResolvedValue({
       ...mockSession(),

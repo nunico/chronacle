@@ -1997,6 +1997,27 @@ describe('DraftCoordinator save lanes', () => {
       'saved',
     );
   });
+
+  it('tracks navigation transitions independently from close decisions', () => {
+    const coordinator = new DraftCoordinator();
+
+    expect(coordinator.isNavigationTransitionActive()).toBe(false);
+    expect(coordinator.isCloseDecisionActive()).toBe(false);
+
+    const endFirst = coordinator.beginNavigationTransition();
+    const endSecond = coordinator.beginNavigationTransition();
+    expect(coordinator.isNavigationTransitionActive()).toBe(true);
+    expect(coordinator.isCloseDecisionActive()).toBe(false);
+
+    endFirst();
+    expect(coordinator.isNavigationTransitionActive()).toBe(true);
+
+    endSecond();
+    expect(coordinator.isNavigationTransitionActive()).toBe(false);
+
+    endSecond();
+    expect(coordinator.isNavigationTransitionActive()).toBe(false);
+  });
 });
 
 describe('DraftCoordinator discard and close risk', () => {

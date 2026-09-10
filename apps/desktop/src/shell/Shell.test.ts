@@ -61,6 +61,7 @@ vi.mock('../lib/commands', () => ({
   getMruCollectionId: vi.fn().mockReturnValue(null),
   setMruCollectionId: vi.fn(),
   getEntities: (...a: unknown[]) => getEntities(...a),
+  getSessionEntities: vi.fn().mockResolvedValue([]),
   createEntity: (...a: unknown[]) => createEntity(...a),
   updateEntity: (...a: unknown[]) => updateEntity(...a),
   deleteEntity: vi.fn(),
@@ -336,6 +337,7 @@ describe('Shell keyboard shortcuts', () => {
     getCampaigns.mockResolvedValue([{ id: 'camp-1', name: 'Test Campaign', system: 'D&D 5e' }]);
     getCollections.mockResolvedValue([{ id: 'col-1', name: 'Core Books' }]);
     getChatHistory.mockResolvedValue([]);
+    onEmbeddingModelMismatch.mockImplementation(async () => () => {});
     getEmbeddingModelMismatch.mockResolvedValue({ active_model: 'mock', stale: [] });
     getEntityCounts.mockResolvedValue({
       npc: 0,
@@ -372,6 +374,46 @@ describe('Shell keyboard shortcuts', () => {
     await fireEvent.keyDown(document.body, { key: 'n' });
 
     expect(await screen.findByRole('button', { name: /New NPC/i })).toBeTruthy();
+  });
+
+  it('marks keyboard view navigation before a focused session is unmounted', async () => {
+    const session = {
+      id: 'session-1',
+      campaign_id: 'camp-1',
+      session_number: 1,
+      title: 'Saved session title',
+      date_played: null,
+      notes: null,
+      created_at: null,
+      updated_at: null,
+    };
+    getSessions.mockResolvedValue([session]);
+    updateSession.mockResolvedValue({ ...session, title: 'Keyboard draft' });
+    const coordinator = new DraftCoordinator();
+    const beginNavigation = vi.spyOn(coordinator, 'beginNavigationTransition');
+    render(Shell, { props: { draftCoordinator: coordinator } });
+    await screen.findByRole('button', { name: /NPCs/i });
+
+    await fireEvent.keyDown(window, { key: 'g' });
+    await fireEvent.keyDown(window, { key: 's' });
+    const sessionHeader = await screen.findByRole('button', { name: /Saved session title/i });
+    await fireEvent.click(sessionHeader);
+    const title = await screen.findByRole('textbox', { name: 'Name' });
+    await fireEvent.input(title, { target: { value: 'Keyboard draft' } });
+    title.focus();
+
+    await fireEvent.keyDown(window, { key: 'g' });
+    await fireEvent.keyDown(window, { key: 'o' });
+    await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+
+    expect(beginNavigation).toHaveBeenCalled();
+    expect(updateSession).not.toHaveBeenCalled();
+
+    await fireEvent.keyDown(window, { key: 'g' });
+    await fireEvent.keyDown(window, { key: 's' });
+    await fireEvent.click(await screen.findByRole('button', { name: /Keyboard draft/i }));
+    expect(await screen.findByRole('textbox', { name: 'Name' })).toHaveValue('Keyboard draft');
+    expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
   });
 
   it('c opens the create form inside an entity manager', async () => {
