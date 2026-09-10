@@ -101,19 +101,19 @@ class FakeWindowClosePort implements WindowClosePort {
     };
   });
 
-  requestClose() {
+  requestClose(opener: HTMLElement | null = null) {
     const event = { preventDefault: vi.fn() };
     event.preventDefault();
-    for (const handler of this.handlers) handler({ intent: 17, source: 'window' });
+    for (const handler of this.handlers) handler({ intent: 17, source: 'window', opener });
     return event;
   }
 
-  requestApplicationExit() {
-    for (const handler of this.handlers) handler({ intent: 29, source: 'application' });
+  requestApplicationExit(opener: HTMLElement | null = null) {
+    for (const handler of this.handlers) handler({ intent: 29, source: 'application', opener });
   }
 
-  requestFailure() {
-    for (const handler of this.handlers) handler({ intent: null, source: 'window' });
+  requestFailure(opener: HTMLElement | null = null) {
+    for (const handler of this.handlers) handler({ intent: null, source: 'window', opener });
   }
 }
 
@@ -583,6 +583,33 @@ describe('Shell native close protection', () => {
     expect(port.confirmExit).toHaveBeenLastCalledWith(17, 'keep');
   });
 
+  it('restores the close-time opener after delayed clean confirmation failure', async () => {
+    const port = new FakeWindowClosePort();
+    let rejectConfirmation!: (reason: unknown) => void;
+    port.confirmExit.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectConfirmation = reject;
+        }),
+    );
+    render(Shell, {
+      props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() },
+    });
+    const opener = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+    const laterFocus = screen.getByRole('button', { name: /^Oracle$/ });
+    opener.focus();
+    await waitFor(() => expect(port.registerCloseRequests).toHaveBeenCalledOnce());
+
+    port.requestClose(opener);
+    laterFocus.focus();
+    rejectConfirmation(new Error('native exit rejected'));
+    const dialog = await screen.findByRole('dialog', { name: 'Unsaved changes' });
+    await fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+
+    expect(document.activeElement).toBe(opener);
+  });
+
   it('recovers when establishing the window exit intent fails', async () => {
     const port = new FakeWindowClosePort();
     render(Shell, {
@@ -708,10 +735,12 @@ describe('Shell native close protection', () => {
   it('unlistens if asynchronous registration finishes after Shell is destroyed', async () => {
     let resolveRegistration!: (unlisten: () => void) => void;
     const unlisten = vi.fn();
+    let registrationSignal: AbortSignal | undefined;
     const port: WindowClosePort = {
       registerCloseRequests: vi.fn(
-        () =>
+        (_handler, signal) =>
           new Promise<() => void>((resolve) => {
+            registrationSignal = signal;
             resolveRegistration = resolve;
           }),
       ),
@@ -725,6 +754,7 @@ describe('Shell native close protection', () => {
     expect(port.registerCloseRequests).toHaveBeenCalledOnce();
 
     rendered.unmount();
+    expect(registrationSignal?.aborted).toBe(true);
     resolveRegistration(unlisten);
 
     await waitFor(() => expect(unlisten).toHaveBeenCalledOnce());

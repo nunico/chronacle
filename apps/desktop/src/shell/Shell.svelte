@@ -91,15 +91,18 @@
   let closeRegistrationRetryButton = $state<HTMLButtonElement | null>(null);
   let closeIntent = $state<number | null>(null);
   let closeDialogInitialFailure = $state(false);
+  let closeOpener: HTMLElement | null = null;
   let closeConfirmationInFlight = false;
   let shellDestroyed = false;
   let closeUnlisten: (() => void) | null = null;
+  let closeRegistrationAbort: AbortController | null = null;
 
   function handleCloseRequest(request: CloseRequest): void {
     if (closeIntent === request.intent && (closeDialogOpen || closeConfirmationInFlight)) {
       return;
     }
     closeIntent = request.intent;
+    closeOpener = request.opener;
     closeDialogInitialFailure = request.intent === null;
     if (request.intent === null) {
       flushSync(() => {
@@ -127,9 +130,12 @@
     }
   }
 
-  async function completeCloseRegistration(): Promise<void> {
+  async function completeCloseRegistration(controller: AbortController): Promise<void> {
     try {
-      const registeredUnlisten = await currentClosePort().registerCloseRequests(handleCloseRequest);
+      const registeredUnlisten = await currentClosePort().registerCloseRequests(
+        handleCloseRequest,
+        controller.signal,
+      );
       if (shellDestroyed) {
         registeredUnlisten();
         return;
@@ -157,7 +163,8 @@
       return;
     }
     closeRegistrationStatus = 'registering';
-    void completeCloseRegistration();
+    closeRegistrationAbort = new AbortController();
+    void completeCloseRegistration(closeRegistrationAbort);
   }
 
   async function cancelClose(): Promise<boolean> {
@@ -173,6 +180,9 @@
       closeIntent = null;
       closeDialogOpen = false;
       closeDialogInitialFailure = false;
+      await tick();
+      if (closeOpener?.isConnected) closeOpener.focus();
+      closeOpener = null;
     }
     return true;
   }
@@ -193,6 +203,7 @@
     } else registerCloseProtection();
     return () => {
       shellDestroyed = true;
+      closeRegistrationAbort?.abort();
       closeUnlisten?.();
     };
   });
