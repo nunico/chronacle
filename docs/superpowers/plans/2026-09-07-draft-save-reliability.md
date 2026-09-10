@@ -245,9 +245,12 @@ implementation fixes → rerun and re-review.
 - Modify focused acceptance modules from Slice A only when behavior requires
   additional observable assertions; never weaken the contract.
 
-- [ ] Make the active-save native journey executable; remove `it.skip`. Add
-      window close, application Quit, exit-authorization failure/retry, and concurrent
-      request journeys. Use deterministic test-only IPC controls, not sleeps.
+- [ ] Make both Linux native journeys executable with no `it.skip`: an Oracle
+      close decision and an active-session-save close, each initiated through a
+      real window-manager Alt+F4 request. Keep portable application-Quit
+      authorization, failure/Retry, and concurrent-request coverage at the
+      frontend component, state-machine, Rust unit, and static adapter layers.
+      Use deterministic test-only IPC controls, not sleeps.
 - [ ] Start the native app with an isolated temporary application data/config/
       cache root and fresh RocksDB path. Assert teardown removes the temporary
       directory; never read or mutate the developer profile or assume empty
@@ -263,9 +266,11 @@ implementation fixes → rerun and re-review.
     tests/e2e/ui/draft-close.e2e.mjs
   ```
 
-  Expected: all journeys pass; no intentional pending/skip remains. If the
-  environment cannot provide Tauri driver/WebKit, record the exact limitation
-  and do not claim native completion.
+  Expected: both Linux Alt+F4 journeys pass with no intentional pending/skip. If
+  the environment cannot provide Tauri driver/WebKit, record the exact
+  limitation and do not claim native completion. This command does not exercise
+  application Quit or the macOS AppKit delegate at runtime; record those path
+  and platform limitations explicitly.
 
 - [ ] Replace the corrective Gherkin block in the design with direct links to
       the six executable feature files. The feature files become the only
@@ -1679,8 +1684,11 @@ reviewer → implementer fixes → test engineer/reviewers again.
 
   Expected: Backend quality, Frontend quality, and Acceptance all pass.
 
-- [ ] Rerun the native close command from Task 5 against this same final working
-      tree state. Report any platform/tool limitation exactly.
+- [ ] Rerun the two-journey Linux Alt+F4 native close command from Task 5 against
+      this same final working tree state. Report that application-Quit
+      failure/Retry remains covered below native UI and that macOS AppKit runtime
+      verification remains unavailable in the Linux environment, alongside any
+      additional platform/tool limitation.
 - [ ] Confirm no lockfile, secret, generated output, license, or brand asset is
       in `git diff --name-only`. Confirm the deliberate capability diff removes
       both unused main-window close and destroy permissions and retains neither
