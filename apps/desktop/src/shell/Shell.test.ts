@@ -5,7 +5,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { clearToasts } from '../lib/toast.svelte';
 import { i18n } from '../lib/locale.svelte';
 import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
-import type { WindowClosePort } from '../lib/drafts/window-close';
+import type { CloseRequest, WindowClosePort } from '../lib/drafts/window-close';
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn(),
@@ -88,23 +88,27 @@ async function openPicker() {
 }
 
 class FakeWindowClosePort implements WindowClosePort {
-  private handlers = new Set<(event: { preventDefault(): void }) => void>();
+  private handlers = new Set<(request: CloseRequest) => void>();
   readonly unlisten = vi.fn();
-  readonly destroy = vi.fn().mockResolvedValue(undefined);
-  readonly onCloseRequested = vi.fn(
-    async (handler: (event: { preventDefault(): void }) => void) => {
-      this.handlers.add(handler);
-      return () => {
-        this.handlers.delete(handler);
-        this.unlisten();
-      };
-    },
-  );
+  readonly confirmExit = vi.fn().mockResolvedValue(undefined);
+  readonly cancelExit = vi.fn().mockResolvedValue(undefined);
+  readonly registerCloseRequests = vi.fn(async (handler: (request: CloseRequest) => void) => {
+    this.handlers.add(handler);
+    return () => {
+      this.handlers.delete(handler);
+      this.unlisten();
+    };
+  });
 
   requestClose() {
     const event = { preventDefault: vi.fn() };
-    for (const handler of this.handlers) handler(event);
+    event.preventDefault();
+    for (const handler of this.handlers) handler({ intent: 17, source: 'window' });
     return event;
+  }
+
+  requestApplicationExit() {
+    for (const handler of this.handlers) handler({ intent: 29, source: 'application' });
   }
 }
 
@@ -504,33 +508,68 @@ describe('Shell native close protection', () => {
     getEntities.mockResolvedValue([]);
   });
 
-  it('registers once, leaves a clean native close unprevented, and unlistens on teardown', async () => {
+  it('registers once, synchronously prevents window close, then authorizes clean exit', async () => {
     const port = new FakeWindowClosePort();
     const coordinator = new DraftCoordinator();
     const rendered = render(Shell, {
       props: { windowClosePort: port, draftCoordinator: coordinator },
     });
-    await waitFor(() => expect(port.onCloseRequested).toHaveBeenCalledOnce());
+    await waitFor(() => expect(port.registerCloseRequests).toHaveBeenCalledOnce());
 
     const event = port.requestClose();
 
-    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(event.preventDefault).toHaveBeenCalledOnce();
     expect(screen.queryByRole('dialog', { name: 'Unsaved changes' })).toBeNull();
-    expect(port.destroy).not.toHaveBeenCalled();
+    expect(port.confirmExit).toHaveBeenCalledWith(17, 'keep');
     rendered.unmount();
     expect(port.unlisten).toHaveBeenCalledOnce();
+  });
+
+  it('routes a clean application exit through the same explicit authorization', async () => {
+    const port = new FakeWindowClosePort();
+    render(Shell, {
+      props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() },
+    });
+    await waitFor(() => expect(port.registerCloseRequests).toHaveBeenCalledOnce());
+
+    port.requestApplicationExit();
+
+    await waitFor(() => expect(port.confirmExit).toHaveBeenCalledWith(29, 'keep'));
+    expect(screen.queryByRole('dialog', { name: 'Unsaved changes' })).toBeNull();
+  });
+
+  it('coalesces repeated native requests for the same clean exit intent', async () => {
+    const port = new FakeWindowClosePort();
+    let resolveConfirmation!: () => void;
+    port.confirmExit.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveConfirmation = resolve;
+        }),
+    );
+    render(Shell, {
+      props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() },
+    });
+    await waitFor(() => expect(port.registerCloseRequests).toHaveBeenCalledOnce());
+
+    port.requestClose();
+    port.requestClose();
+
+    expect(port.confirmExit).toHaveBeenCalledOnce();
+    resolveConfirmation();
   });
 
   it('does not expose an editor until native close protection is registered', async () => {
     let resolveRegistration!: (unlisten: () => void) => void;
     const port: WindowClosePort = {
-      onCloseRequested: vi.fn(
+      registerCloseRequests: vi.fn(
         () =>
           new Promise<() => void>((resolve) => {
             resolveRegistration = resolve;
           }),
       ),
-      destroy: vi.fn().mockResolvedValue(undefined),
+      confirmExit: vi.fn().mockResolvedValue(undefined),
+      cancelExit: vi.fn().mockResolvedValue(undefined),
     };
 
     render(Shell, { props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() } });
@@ -571,8 +610,9 @@ describe('Shell native close protection', () => {
       i18n.setLocale(locale);
       const coordinator = new DraftCoordinator();
       const port: WindowClosePort = {
-        onCloseRequested: vi.fn().mockRejectedValue(new Error('native listener unavailable')),
-        destroy: vi.fn().mockResolvedValue(undefined),
+        registerCloseRequests: vi.fn().mockRejectedValue(new Error('native listener unavailable')),
+        confirmExit: vi.fn().mockResolvedValue(undefined),
+        cancelExit: vi.fn().mockResolvedValue(undefined),
       };
 
       render(Shell, { props: { windowClosePort: port, draftCoordinator: coordinator } });
@@ -592,14 +632,15 @@ describe('Shell native close protection', () => {
     let resolveRetry!: (unlisten: () => void) => void;
     const retryUnlisten = vi.fn();
     const port: WindowClosePort = {
-      onCloseRequested: vi.fn(() => {
+      registerCloseRequests: vi.fn(() => {
         attempts += 1;
         if (attempts === 1) return Promise.reject(new Error('native listener unavailable'));
         return new Promise<() => void>((resolve) => {
           resolveRetry = resolve;
         });
       }),
-      destroy: vi.fn().mockResolvedValue(undefined),
+      confirmExit: vi.fn().mockResolvedValue(undefined),
+      cancelExit: vi.fn().mockResolvedValue(undefined),
     };
     const rendered = render(Shell, {
       props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() },
@@ -609,7 +650,7 @@ describe('Shell native close protection', () => {
     await fireEvent.click(retry);
     await fireEvent.click(retry);
 
-    expect(port.onCloseRequested).toHaveBeenCalledTimes(2);
+    expect(port.registerCloseRequests).toHaveBeenCalledTimes(2);
     expect(retry).toBeDisabled();
     expect(screen.queryByPlaceholderText('Ask a rule, a name, a place…')).toBeNull();
 
@@ -626,18 +667,19 @@ describe('Shell native close protection', () => {
     let resolveRegistration!: (unlisten: () => void) => void;
     const unlisten = vi.fn();
     const port: WindowClosePort = {
-      onCloseRequested: vi.fn(
+      registerCloseRequests: vi.fn(
         () =>
           new Promise<() => void>((resolve) => {
             resolveRegistration = resolve;
           }),
       ),
-      destroy: vi.fn().mockResolvedValue(undefined),
+      confirmExit: vi.fn().mockResolvedValue(undefined),
+      cancelExit: vi.fn().mockResolvedValue(undefined),
     };
     const rendered = render(Shell, {
       props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() },
     });
-    expect(port.onCloseRequested).toHaveBeenCalledOnce();
+    expect(port.registerCloseRequests).toHaveBeenCalledOnce();
 
     rendered.unmount();
     resolveRegistration(unlisten);
@@ -698,7 +740,7 @@ describe('Shell native close protection', () => {
     render(Shell, { props: { windowClosePort: port, draftCoordinator: coordinator } });
     const composer = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
     composer.focus();
-    await waitFor(() => expect(port.onCloseRequested).toHaveBeenCalledOnce());
+    await waitFor(() => expect(port.registerCloseRequests).toHaveBeenCalledOnce());
 
     const first = port.requestClose();
     const duplicate = port.requestClose();
@@ -706,7 +748,7 @@ describe('Shell native close protection', () => {
     expect(first.preventDefault).toHaveBeenCalledOnce();
     expect(duplicate.preventDefault).toHaveBeenCalledOnce();
     expect(screen.getAllByRole('dialog', { name: 'Unsaved changes' })).toHaveLength(1);
-    expect(port.onCloseRequested).toHaveBeenCalledOnce();
+    expect(port.registerCloseRequests).toHaveBeenCalledOnce();
     await fireEvent.keyDown(screen.getByRole('dialog', { name: 'Unsaved changes' }), {
       key: 'Escape',
     });
@@ -717,7 +759,7 @@ describe('Shell native close protection', () => {
     expect(coordinator.atRiskCount()).toBe(1);
   });
 
-  it('cancels back to the exact opener and only explicit discard destroys without saving', async () => {
+  it('cancels back to the exact opener and only explicit discard authorizes exit', async () => {
     const port = new FakeWindowClosePort();
     const coordinator = new DraftCoordinator();
     coordinator.open('oracle:camp-1', null, '');
@@ -725,7 +767,7 @@ describe('Shell native close protection', () => {
     render(Shell, { props: { windowClosePort: port, draftCoordinator: coordinator } });
     const composer = await screen.findByPlaceholderText('Ask a rule, a name, a place…');
     composer.focus();
-    await waitFor(() => expect(port.onCloseRequested).toHaveBeenCalledOnce());
+    await waitFor(() => expect(port.registerCloseRequests).toHaveBeenCalledOnce());
 
     port.requestClose();
     await fireEvent.keyDown(screen.getByRole('dialog', { name: 'Unsaved changes' }), {
@@ -736,14 +778,15 @@ describe('Shell native close protection', () => {
     );
     expect(document.activeElement).toBe(composer);
     expect(coordinator.atRiskCount()).toBe(1);
+    expect(port.cancelExit).toHaveBeenCalledWith(17);
 
     port.requestClose();
     const discard = screen.getByRole('button', { name: 'Discard and close' });
     discard.focus();
     await fireEvent.keyDown(discard, { key: 'Enter' });
 
-    await waitFor(() => expect(port.destroy).toHaveBeenCalledOnce());
-    expect(coordinator.atRiskCount()).toBe(0);
+    await waitFor(() => expect(port.confirmExit).toHaveBeenCalledWith(17, 'discard'));
+    expect(coordinator.atRiskCount()).toBe(1);
     expect(chatSend).not.toHaveBeenCalled();
     expect(createEntity).not.toHaveBeenCalled();
     expect(updateEntity).not.toHaveBeenCalled();
