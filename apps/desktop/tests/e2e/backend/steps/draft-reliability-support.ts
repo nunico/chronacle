@@ -101,6 +101,24 @@ export async function holdNextEntityList(
   );
 }
 
+export async function holdNextEntityListWithout(
+  page: Page,
+  campaignId: string,
+  kind: string,
+  omittedId: string,
+): Promise<void> {
+  await page.evaluate(
+    ({ heldCampaignId, heldKind, recordId }) => {
+      (window as unknown as DraftWindow).__draftReliability.holdNextEntityList(
+        heldCampaignId,
+        heldKind,
+        recordId,
+      );
+    },
+    { heldCampaignId: campaignId, heldKind: kind, recordId: omittedId },
+  );
+}
+
 export async function resolveNextEntityList(page: Page): Promise<void> {
   await page.evaluate(() => {
     (window as unknown as DraftWindow).__draftReliability.resolveNextEntityList();

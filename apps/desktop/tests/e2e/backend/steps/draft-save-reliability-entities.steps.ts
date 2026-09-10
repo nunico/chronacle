@@ -10,6 +10,7 @@ import {
   hasEntity,
   hold,
   holdNextEntityList,
+  holdNextEntityListWithout,
   observations,
   openCampaign,
   openRailView,
@@ -143,6 +144,11 @@ Then('the interface indicates that they are not yet saved', async ({ page }) => 
 Given("the next NPC list load is held with Mira's earlier saved content", async ({ page }) => {
   await openRailView(page, 'Campaign & sources');
   await holdNextEntityList(page, 'camp-a', 'npc');
+});
+
+Given("the next NPC list load is held without Mira's earlier row", async ({ page }) => {
+  await openRailView(page, 'Campaign & sources');
+  await holdNextEntityListWithout(page, 'camp-a', 'npc', 'mira');
 });
 
 When('I open NPCs and leave before that list completes', async ({ page }) => {

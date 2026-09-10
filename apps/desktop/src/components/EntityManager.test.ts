@@ -895,6 +895,90 @@ describe('EntityManager', () => {
       expect(commands.updateEntity).toHaveBeenCalledTimes(1);
     });
 
+    it('keeps an acknowledged entity omitted by an older list but accepts a later omission', async () => {
+      const coordinator = new DraftCoordinator();
+      const updateWrite = deferred<GraphNode>();
+      const staleOmissionLoad = deferred<GraphNode[]>();
+      const acknowledged = mira({
+        name: 'Mira Moonshadow',
+        notes: 'Canonical acknowledged content',
+      });
+      let npcListRequests = 0;
+      let holdNpcLists = false;
+      let omitMiraFromLaterLists = false;
+      vi.mocked(commands.getEntities).mockImplementation((campaignId, entityKind) => {
+        if (campaignId !== 'camp1' || entityKind !== 'npc') return Promise.resolve([]);
+        npcListRequests += 1;
+        if (holdNpcLists) return staleOmissionLoad.promise;
+        return Promise.resolve(omitMiraFromLaterLists ? [torvin()] : [mira(), torvin()]);
+      });
+      vi.mocked(commands.updateEntity).mockReturnValue(updateWrite.promise);
+
+      const manager = renderManager(coordinator);
+      await fireEvent.click(await screen.findByRole('button', { name: 'Mira' }));
+      await fireEvent.input(screen.getByLabelText('Name', { exact: true }), {
+        target: { value: acknowledged.name },
+      });
+      await fireEvent.input(screen.getByLabelText('Notes'), {
+        target: { value: acknowledged.notes },
+      });
+      await fireEvent.submit(screen.getByRole('form'));
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saving…'));
+
+      const requestCountBeforeReload = npcListRequests;
+      holdNpcLists = true;
+      await manager.rerender({
+        campaignId: 'camp1',
+        kind: 'location',
+        openId: null,
+        draftCoordinator: coordinator,
+      });
+      await manager.rerender({
+        campaignId: 'camp1',
+        kind: 'npc',
+        openId: null,
+        draftCoordinator: coordinator,
+      });
+      await waitFor(() => expect(npcListRequests).toBeGreaterThan(requestCountBeforeReload));
+
+      updateWrite.resolve(acknowledged);
+      await waitFor(() =>
+        expect(coordinator.get(entityScope('camp1', 'npc', 'mira'))).toMatchObject({
+          baseline: expect.objectContaining({ name: acknowledged.name, notes: acknowledged.notes }),
+          value: expect.objectContaining({ name: acknowledged.name, notes: acknowledged.notes }),
+        }),
+      );
+
+      holdNpcLists = false;
+      staleOmissionLoad.resolve([]);
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: acknowledged.name })).toBeVisible(),
+      );
+      await fireEvent.click(screen.getByRole('button', { name: acknowledged.name }));
+      expect(screen.getByLabelText('Name', { exact: true })).toHaveValue(acknowledged.name);
+      expect(screen.getByLabelText('Notes')).toHaveValue(acknowledged.notes);
+      expect(screen.getByRole('status')).toHaveTextContent('Saved');
+
+      omitMiraFromLaterLists = true;
+      await manager.rerender({
+        campaignId: 'camp1',
+        kind: 'location',
+        openId: null,
+        draftCoordinator: coordinator,
+      });
+      await manager.rerender({
+        campaignId: 'camp1',
+        kind: 'npc',
+        openId: null,
+        draftCoordinator: coordinator,
+      });
+      await waitFor(() =>
+        expect(screen.queryByRole('button', { name: acknowledged.name })).not.toBeInTheDocument(),
+      );
+      expect(coordinator.get(entityScope('camp1', 'npc', 'mira'))).toBeUndefined();
+      expect(commands.updateEntity).toHaveBeenCalledTimes(1);
+    });
+
     it('ignores a stale list response from an unmounted manager after a newer save acknowledgment', async () => {
       const coordinator = new DraftCoordinator();
       const staleManagerLoad = deferred<GraphNode[]>();
