@@ -90,6 +90,7 @@
   let closeRegistrationHasFailed = $state(false);
   let closeRegistrationRetryButton = $state<HTMLButtonElement | null>(null);
   let closeIntent = $state<number | null>(null);
+  let closeDialogInitialFailure = $state(false);
   let closeConfirmationInFlight = false;
   let shellDestroyed = false;
   let closeUnlisten: (() => void) | null = null;
@@ -99,12 +100,20 @@
       return;
     }
     closeIntent = request.intent;
+    closeDialogInitialFailure = request.intent === null;
+    if (request.intent === null) {
+      flushSync(() => {
+        closeDialogOpen = true;
+      });
+      return;
+    }
     if (draftCoordinator.atRiskCount() === 0) {
       closeConfirmationInFlight = true;
       void currentClosePort()
         .confirmExit(request.intent, 'keep')
         .catch(() => {
           flushSync(() => {
+            closeDialogInitialFailure = true;
             closeDialogOpen = true;
           });
         })
@@ -151,19 +160,31 @@
     void completeCloseRegistration();
   }
 
-  async function cancelClose(): Promise<void> {
+  async function cancelClose(): Promise<boolean> {
     const intent = closeIntent;
-    if (intent !== null) await currentClosePort().cancelExit(intent);
+    let revoked = true;
+    try {
+      if (intent !== null) revoked = await currentClosePort().cancelExit(intent);
+    } catch {
+      revoked = false;
+    }
+    if (!revoked) return false;
     if (closeIntent === intent) {
       closeIntent = null;
       closeDialogOpen = false;
+      closeDialogInitialFailure = false;
     }
+    return true;
   }
 
   async function confirmClose(): Promise<void> {
-    if (closeIntent === null) throw new Error('No active close request.');
+    let intent = closeIntent;
+    if (intent === null) {
+      intent = await currentClosePort().requestExitIntent();
+      closeIntent = intent;
+    }
     const decision = draftCoordinator.atRiskCount() > 0 ? 'discard' : 'keep';
-    await currentClosePort().confirmExit(closeIntent, decision);
+    await currentClosePort().confirmExit(intent, decision);
   }
 
   onMount(() => {
@@ -826,7 +847,12 @@
     <Toast />
 
     {#if closeDialogOpen}
-      <CloseDraftsDialog {draftCoordinator} oncancel={cancelClose} ondestroy={confirmClose} />
+      <CloseDraftsDialog
+        {draftCoordinator}
+        oncancel={cancelClose}
+        ondestroy={confirmClose}
+        initialFailure={closeDialogInitialFailure}
+      />
     {/if}
 
     {#if createChooser}

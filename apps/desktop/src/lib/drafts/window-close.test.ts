@@ -6,6 +6,7 @@ const windowApi = vi.hoisted(() => ({
 const eventApi = vi.hoisted(() => ({ listen: vi.fn() }));
 const commandApi = vi.hoisted(() => ({
   requestAppExit: vi.fn(),
+  pendingAppExit: vi.fn(),
   confirmAppExit: vi.fn(),
   cancelAppExit: vi.fn(),
 }));
@@ -22,8 +23,9 @@ describe('Tauri window close port', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     commandApi.requestAppExit.mockResolvedValue(17);
+    commandApi.pendingAppExit.mockResolvedValue(null);
     commandApi.confirmAppExit.mockResolvedValue(undefined);
-    commandApi.cancelAppExit.mockResolvedValue(undefined);
+    commandApi.cancelAppExit.mockResolvedValue(true);
   });
 
   it('atomically registers window and application exit handlers', async () => {
@@ -75,9 +77,74 @@ describe('Tauri window close port', () => {
     const port = createTauriWindowClosePort();
 
     await port.confirmExit(17, 'discard');
-    await port.cancelExit(17);
+    await expect(port.cancelExit(17)).resolves.toBe(true);
 
     expect(commandApi.confirmAppExit).toHaveBeenCalledWith(17, 'discard');
     expect(commandApi.cancelAppExit).toHaveBeenCalledWith(17);
   });
+
+  it('replays an application exit emitted before registration completes exactly once', async () => {
+    const pending = deferred<number | null>();
+    commandApi.pendingAppExit.mockReturnValue(pending.promise);
+    windowApi.onCloseRequested.mockResolvedValue(vi.fn());
+    let applicationHandler: ((event: { payload: { intent: number } }) => void) | undefined;
+    eventApi.listen.mockImplementation(
+      async (_name: string, handler: (event: { payload: { intent: number } }) => void) => {
+        applicationHandler = handler;
+        return vi.fn();
+      },
+    );
+    const handler = vi.fn();
+    const registration = createTauriWindowClosePort().registerCloseRequests(handler);
+    await vi.waitFor(() => expect(commandApi.pendingAppExit).toHaveBeenCalledOnce());
+
+    applicationHandler?.({ payload: { intent: 31 } });
+    pending.resolve(31);
+    await registration;
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith({ intent: 31, source: 'application' });
+  });
+
+  it('reports request failure and ignores late request completion after teardown', async () => {
+    let nativeHandler: ((event: { preventDefault(): void }) => void) | undefined;
+    windowApi.onCloseRequested.mockImplementation(
+      async (handler: (event: { preventDefault(): void }) => void) => {
+        nativeHandler = handler;
+        return vi.fn();
+      },
+    );
+    eventApi.listen.mockResolvedValue(vi.fn());
+    const handler = vi.fn();
+    const port = createTauriWindowClosePort();
+    const stop = await port.registerCloseRequests(handler);
+    commandApi.requestAppExit.mockRejectedValueOnce(new Error('IPC unavailable'));
+
+    nativeHandler?.({ preventDefault: vi.fn() });
+    await vi.waitFor(() =>
+      expect(handler).toHaveBeenCalledWith({ source: 'window', intent: null }),
+    );
+
+    const late = deferred<number>();
+    commandApi.requestAppExit.mockReturnValueOnce(late.promise);
+    nativeHandler?.({ preventDefault: vi.fn() });
+    stop();
+    late.resolve(99);
+    await Promise.resolve();
+
+    expect(handler).not.toHaveBeenCalledWith({ source: 'window', intent: 99 });
+  });
 });
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}

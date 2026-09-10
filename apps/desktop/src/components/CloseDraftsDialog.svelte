@@ -6,32 +6,46 @@
 
   interface Props {
     draftCoordinator: DraftCoordinator;
-    oncancel: () => void;
+    oncancel: () => unknown;
     ondestroy: () => Promise<void> | void;
+    initialFailure?: boolean;
   }
 
-  let { draftCoordinator, oncancel, ondestroy }: Props = $props();
+  let { draftCoordinator, oncancel, ondestroy, initialFailure = false }: Props = $props();
   let closing = $state(false);
-  let closeFailed = $state(false);
+  let operationFailed = $state(false);
   let cancelButton: HTMLButtonElement | undefined = $state();
   let retryButton: HTMLButtonElement | undefined = $state();
   let hasActiveWrites = $derived(draftCoordinator.hasActiveWrites());
   let hasAtRiskDrafts = $derived(draftCoordinator.atRiskCount() > 0);
   let safeToClose = $derived(!hasActiveWrites && !hasAtRiskDrafts);
+  let closeFailed = $derived(initialFailure || operationFailed);
 
   async function closeWindow(): Promise<void> {
     if (closing || hasActiveWrites) return;
 
     closing = true;
-    closeFailed = false;
+    operationFailed = false;
     try {
       await ondestroy();
     } catch {
       closing = false;
-      closeFailed = true;
+      operationFailed = true;
       await tick();
       if (hasActiveWrites) cancelButton?.focus();
       else retryButton?.focus();
+    }
+  }
+
+  async function cancelClose(): Promise<void> {
+    if (closing) return;
+    try {
+      const cancelled = await oncancel();
+      if (cancelled === false) throw new Error('Close request could not be cancelled.');
+    } catch {
+      operationFailed = true;
+      await tick();
+      retryButton?.focus();
     }
   }
 
@@ -65,9 +79,9 @@
     bind:this={cancelButton}
     type="button"
     class="dialog-button ghost"
-    data-autofocus
+    data-autofocus={closeFailed ? undefined : true}
     disabled={closing}
-    onclick={oncancel}
+    onclick={cancelClose}
   >
     {i18n.t('common.cancel')}
   </button>
@@ -75,6 +89,7 @@
     <button
       bind:this={retryButton}
       type="button"
+      data-autofocus
       class="dialog-button danger"
       disabled={hasActiveWrites || closing}
       title={hasActiveWrites ? i18n.t('drafts.waitForSavingBeforeClose') : undefined}
@@ -109,7 +124,7 @@
   title={i18n.t('drafts.unsavedChanges')}
   body={closeBody}
   actions={closeActions}
-  onclose={oncancel}
+  onclose={cancelClose}
 />
 
 <style>
