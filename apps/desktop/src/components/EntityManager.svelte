@@ -342,6 +342,42 @@
     };
   }
 
+  function presentationNodeFromDraft(
+    requestCampaignId: string,
+    requestKind: EntityKind,
+    recordId: string,
+    value: DraftSnapshot<EntityDraftValue>,
+  ): GraphNode {
+    return nodeWithDraftValue(
+      {
+        id: recordId,
+        kind: requestKind,
+        campaign_id: requestCampaignId,
+        name: '',
+        aliases: [],
+        summary: null,
+        notes: null,
+        created_at: null,
+        updated_at: null,
+        date_start: null,
+        date_end: null,
+        is_ongoing: null,
+        sequence_index: null,
+        era: null,
+        duration_label: null,
+        session_id: null,
+        player_name: null,
+        character_class: null,
+        character_level: null,
+        status: null,
+        codex_article: null,
+        codex_stale: null,
+        codex_compiled_at: null,
+      },
+      value,
+    );
+  }
+
   async function loadEntities(requestCampaignId = campaignId, requestKind = kind) {
     const requestScope = `${requestCampaignId}:${requestKind}`;
     const requestPrefix = `entity:${requestCampaignId}:${requestKind}:`;
@@ -375,12 +411,25 @@
       const loadedScopes = new Set(
         loaded.map((node) => entityScope(requestCampaignId, requestKind, node.id)),
       );
+      const preservedSavedEntities: GraphNode[] = [];
       for (const draft of draftCoordinator.listByPrefix<EntityDraftValue>(requestPrefix)) {
-        if (!loadedScopes.has(draft.scope) && statusOf(draft) === 'saved') {
+        const startAcknowledgment = acknowledgmentsAtStart.get(draft.scope);
+        if (loadedScopes.has(draft.scope) || statusOf(draft) !== 'saved') continue;
+        if (
+          startAcknowledgment !== undefined &&
+          draft.lastAcknowledgedAttemptId === startAcknowledgment
+        ) {
           releaseProjection(draft.scope);
+          continue;
         }
+        const recordId = draft.scope.slice(requestPrefix.length);
+        const currentNode = entities.find((node) => node.id === recordId);
+        preservedSavedEntities.push(
+          currentNode ??
+            presentationNodeFromDraft(requestCampaignId, requestKind, recordId, draft.value),
+        );
       }
-      entities = loaded;
+      entities = [...loaded, ...preservedSavedEntities];
     } catch (e) {
       if (!mounted || `${campaignId}:${kind}` !== requestScope) return;
       showToastMsg((e as EntityError).message ?? i18n.t('entityUi.failedLoadEntities'));
