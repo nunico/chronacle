@@ -140,6 +140,7 @@
   let activeExistingProjectionPrefix: string | null = null;
   let activeNewProjectionPrefix: string | null = null;
   const projectionLeases = new SvelteMap<string, () => void>();
+  const presentationOnlyNodes = new SvelteMap<string, GraphNode>();
 
   function leaseProjection(scope: string): void {
     if (!projectionLeases.has(scope)) {
@@ -173,8 +174,12 @@
       ? draftCoordinator.get<EntityDraftValue>(resolvedActiveDraftScope)
       : undefined,
   );
-  let presentedFormNode = $derived(
-    formNode && currentDraft ? nodeWithDraftValue(formNode, currentDraft.value) : formNode,
+  let presentedFormNode = $derived.by(() => {
+    const base = formNode ?? (currentDraft ? presentationOnlyNodes.get(currentDraft.scope) : null);
+    return base && currentDraft ? nodeWithDraftValue(base, currentDraft.value) : base;
+  });
+  let activeRecordBackendBacked = $derived(
+    activeRecordId !== null && entities.some((node) => node.id === activeRecordId),
   );
   let activeCreatePromotionIssue = $derived(
     activeDraftScope ? draftCoordinator.getCreatePromotionIssue(activeDraftScope) : undefined,
@@ -201,6 +206,7 @@
     key: string;
     name: string;
     node: GraphNode | null;
+    presentationNode: GraphNode | null;
     draft: DraftRecord<EntityDraftValue> | null;
     recordId: string | null;
     unavailable: boolean;
@@ -217,6 +223,7 @@
         key: `entity:${node.id}`,
         name: presentedNode.name.trim() || draft?.baseline.name.trim() || node.name,
         node: presentedNode,
+        presentationNode: presentedNode,
         draft,
         recordId: node.id,
         unavailable: false,
@@ -230,14 +237,16 @@
       const provisional =
         activeDraftScope?.startsWith(newDraftPrefix) === true &&
         resolvedActiveDraftScope === draft.scope;
-      if (!provisional && statusOf(draft) === 'saved') continue;
+      const presentationNode = presentationOnlyNodes.get(draft.scope) ?? null;
+      if (!provisional && statusOf(draft) === 'saved' && !presentationNode) continue;
       rows.push({
         key: `${provisional ? 'provisional' : 'unavailable'}:${draft.scope}`,
         name: draft.value.name.trim() || draft.baseline.name.trim(),
         node: null,
+        presentationNode,
         draft,
         recordId,
-        unavailable: !provisional,
+        unavailable: !provisional && !presentationNode,
       });
     }
 
@@ -252,6 +261,7 @@
           draft.value.name.trim() ||
           i18n.t('entityUi.newEntity', { kind: i18n.t(KIND_LABEL[kind]) }),
         node: null,
+        presentationNode: null,
         draft,
         recordId: null,
         unavailable: false,
@@ -392,6 +402,7 @@
       if (!mounted || `${campaignId}:${kind}` !== requestScope) return;
       for (const node of loaded) {
         const scope = entityScope(requestCampaignId, requestKind, node.id);
+        presentationOnlyNodes.delete(scope);
         const current = draftCoordinator.get<EntityDraftValue>(scope);
         const startAcknowledgment = acknowledgmentsAtStart.get(scope);
         if (
@@ -411,7 +422,6 @@
       const loadedScopes = new Set(
         loaded.map((node) => entityScope(requestCampaignId, requestKind, node.id)),
       );
-      const preservedSavedEntities: GraphNode[] = [];
       for (const draft of draftCoordinator.listByPrefix<EntityDraftValue>(requestPrefix)) {
         const startAcknowledgment = acknowledgmentsAtStart.get(draft.scope);
         if (loadedScopes.has(draft.scope) || statusOf(draft) !== 'saved') continue;
@@ -419,17 +429,20 @@
           startAcknowledgment !== undefined &&
           draft.lastAcknowledgedAttemptId === startAcknowledgment
         ) {
+          presentationOnlyNodes.delete(draft.scope);
           releaseProjection(draft.scope);
           continue;
         }
         const recordId = draft.scope.slice(requestPrefix.length);
         const currentNode = entities.find((node) => node.id === recordId);
-        preservedSavedEntities.push(
+        presentationOnlyNodes.set(
+          draft.scope,
           currentNode ??
             presentationNodeFromDraft(requestCampaignId, requestKind, recordId, draft.value),
         );
+        leaseProjection(draft.scope);
       }
-      entities = [...loaded, ...preservedSavedEntities];
+      entities = loaded;
     } catch (e) {
       if (!mounted || `${campaignId}:${kind}` !== requestScope) return;
       showToastMsg((e as EntityError).message ?? i18n.t('entityUi.failedLoadEntities'));
@@ -587,14 +600,14 @@
       return;
     }
 
-    formNode = null;
+    formNode = row.presentationNode;
     pendingInitialName = null;
     pendingSourceFindingId = null;
     activeDraftScope = row.draft.scope;
     activeRecordId = row.recordId;
     activeTargetUnavailable = row.unavailable;
     showForm = true;
-    buildEntityMap();
+    if (!row.presentationNode) buildEntityMap();
     if (kind === 'event') loadSessions();
   }
 
@@ -1072,7 +1085,7 @@
             <WikiText text={presentedFormNode.notes} entities={entityMap} {onMissingLinkClick} />
           </div>
         {/if}
-        {#if presentedFormNode}
+        {#if presentedFormNode && activeRecordBackendBacked}
           <div class="codex-section">
             <div class="codex-header">
               <h3>{i18n.t('entityUi.codexArticle')}</h3>
