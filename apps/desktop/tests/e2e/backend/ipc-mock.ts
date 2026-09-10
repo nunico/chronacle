@@ -26,6 +26,7 @@ export interface DraftReliabilityControls {
   resolveNextSessionList(): void;
   pendingSessionLists(): number;
   setSessionCanonical(id: string, changes: Record<string, unknown>): void;
+  acknowledgeNextRuleAs(id: string): void;
   resolveNext(command: string, canonicalInput?: Record<string, unknown>): void;
   activeWrites(command: string): number;
   maxConcurrentWrites(command: string): number;
@@ -541,6 +542,18 @@ export async function installIpcMock(
                 const session = sessions.find((candidate) => candidate.id === id);
                 if (!session) throw new Error(`No session ${id} to update.`);
                 Object.assign(session, copy(changes));
+              },
+              acknowledgeNextRuleAs(id: string) {
+                const writes = pending.get('update_rule_notes') ?? [];
+                const next = writes.shift();
+                if (!next) throw new Error('No pending rule-note write to acknowledge.');
+                const rule = rules.find((candidate) => candidate.id === id);
+                if (!rule) throw new Error(`No rule ${id} to acknowledge.`);
+                active.set(
+                  'update_rule_notes',
+                  Math.max(0, (active.get('update_rule_notes') ?? 1) - 1),
+                );
+                next.resolve(copy(rule));
               },
               resolveNext(command: string, canonicalInput?: Record<string, unknown>) {
                 const writes = pending.get(command) ?? [];

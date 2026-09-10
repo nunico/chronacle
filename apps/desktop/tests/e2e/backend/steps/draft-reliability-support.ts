@@ -141,6 +141,12 @@ export async function setSessionCanonical(
   );
 }
 
+export async function acknowledgeNextRuleAs(page: Page, id: string): Promise<void> {
+  await page.evaluate((ruleId) => {
+    (window as unknown as DraftWindow).__draftReliability.acknowledgeNextRuleAs(ruleId);
+  }, id);
+}
+
 export async function pendingEntityLists(page: Page): Promise<number> {
   return page.evaluate(() =>
     (window as unknown as DraftWindow).__draftReliability.pendingEntityLists(),

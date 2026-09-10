@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { Given, Then, When } from './fixtures';
 import {
+  acknowledgeNextRuleAs,
   activeWrites,
   hold,
   maxConcurrentWrites,
@@ -24,6 +25,7 @@ const NO_CAMPAIGN_RULE_DRAFT = 'No-campaign rule note';
 const WORLD_GUIDE_RULE_DRAFT = 'World Guide retained initiative ruling.';
 const RAPID_RULE_NOTES = ['First rapid ruling.', 'Second rapid ruling.', 'Newest rapid ruling.'];
 const KEYBOARD_EDITED_RULE_DRAFT = `${FOCUSED_RULE_DRAFT}go`;
+const ADVENTURER_INITIATIVE_SAVED_NOTE = 'Adventurer initiative saved note.';
 
 When('I return to the Initiative rule with the keyboard', async ({ page }) => {
   const campaign = page.getByRole('button', { name: 'Campaign & sources' });
@@ -331,6 +333,65 @@ Then('my newer rule-note edit remains intact', async ({ page }) => {
 Then('the rule note is not incorrectly marked as saved', async ({ page }) => {
   await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
   await expect(page.getByText('Saved', { exact: true })).toHaveCount(0);
+});
+
+Given('saving my changed Initiative note is in progress', async ({ page }) => {
+  const notes = await openRule(page, 'Initiative');
+  await hold(page, 'update_rule_notes');
+  await notes.fill(RULE_DRAFT);
+  await notes.blur();
+  await expect.poll(() => activeWrites(page, 'update_rule_notes')).toBe(1);
+});
+
+When('that save is acknowledged as the Adventurer Guide Initiative rule', async ({ page }) => {
+  await acknowledgeNextRuleAs(page, 'adventurer-initiative');
+  await expect.poll(() => activeWrites(page, 'update_rule_notes')).toBe(0);
+});
+
+Then('my changed Initiative note remains available and needs attention', async ({ page }) => {
+  await expect(page.getByRole('textbox', { name: 'Table notes' })).toHaveValue(RULE_DRAFT);
+  await expect(page.getByRole('alert')).toContainText(/couldn't save/i);
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toHaveCount(0);
+});
+
+Then('neither rule is overwritten by the wrong acknowledgment', async ({ page }) => {
+  const initiative = await persisted<{ notes: string }>(page, 'update_rule_notes', 'initiative');
+  const adventurerInitiative = await persisted<{ notes: string }>(
+    page,
+    'update_rule_notes',
+    'adventurer-initiative',
+  );
+  expect(initiative?.notes).toBe('Initiative saved note.');
+  expect(adventurerInitiative?.notes).toBe(ADVENTURER_INITIATIVE_SAVED_NOTE);
+  const writes = await observations(page, 'update_rule_notes');
+  expect(writes).toEqual([{ id: 'initiative', notes: RULE_DRAFT }]);
+});
+
+When('I retry the Initiative note and its acknowledgment succeeds', async ({ page }) => {
+  await page.getByRole('button', { name: 'Retry' }).click();
+  await expect.poll(() => pendingWrites(page, 'update_rule_notes')).toBe(1);
+  await resolveNext(page, 'update_rule_notes');
+  await expect.poll(() => activeWrites(page, 'update_rule_notes')).toBe(0);
+});
+
+Then('the changed Initiative note is saved to Initiative only', async ({ page }) => {
+  const initiative = await persisted<{ notes: string }>(page, 'update_rule_notes', 'initiative');
+  const adventurerInitiative = await persisted<{ notes: string }>(
+    page,
+    'update_rule_notes',
+    'adventurer-initiative',
+  );
+  expect(initiative?.notes).toBe(RULE_DRAFT);
+  expect(adventurerInitiative?.notes).toBe(ADVENTURER_INITIATIVE_SAVED_NOTE);
+  const writes = await observations(page, 'update_rule_notes');
+  expect(writes).toEqual([
+    { id: 'initiative', notes: RULE_DRAFT },
+    { id: 'initiative', notes: RULE_DRAFT },
+  ]);
+  await expect(page.getByRole('textbox', { name: 'Table notes' })).toHaveValue(RULE_DRAFT);
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
 Given('rule-note saves are being held open', async ({ page }) => {
