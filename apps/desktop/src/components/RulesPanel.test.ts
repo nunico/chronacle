@@ -479,6 +479,23 @@ describe('RulesPanel', () => {
     }
   });
 
+  it('does not autosave when the close decision moves focus without a related target', async () => {
+    const coordinator = new DraftCoordinator();
+    m.getRuleEntries.mockResolvedValue([
+      { ...rule('r1', 'Initiative', 'mechanic'), notes: 'Saved rule note.' },
+    ]);
+    renderPanel(coordinator);
+    const notes = await openNotes();
+    await fireEvent.input(notes, { target: { value: 'Retained for close decision.' } });
+
+    coordinator.beginCloseDecision();
+    await fireEvent.blur(notes, { relatedTarget: null });
+
+    expect(m.updateRuleNotes).not.toHaveBeenCalled();
+    expect(notes).toHaveValue('Retained for close decision.');
+    expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+  });
+
   it('clears pending without IPC when a null-backed note returns to its saved baseline', async () => {
     m.getRuleEntries.mockResolvedValue([rule('r1', 'Initiative', 'mechanic')]);
     renderPanel();

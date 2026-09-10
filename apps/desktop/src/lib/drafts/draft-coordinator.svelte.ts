@@ -92,6 +92,19 @@ export class DraftCoordinator {
   private readonly leaseCounts = new SvelteMap<string, number>();
   private readonly deferredReleases = new SvelteSet<string>();
   private nextAttemptId = 1;
+  private closeDecisionActive = false;
+
+  beginCloseDecision(): void {
+    this.closeDecisionActive = true;
+  }
+
+  endCloseDecision(): void {
+    this.closeDecisionActive = false;
+  }
+
+  isCloseDecisionActive(): boolean {
+    return this.closeDecisionActive;
+  }
 
   open<T extends DraftValue>(
     scope: string,
