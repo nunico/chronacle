@@ -125,6 +125,52 @@ describe('SessionLogView draft coordination', () => {
     ).toBe('Created for Campaign A');
   });
 
+  it('keeps a created session when an older same-campaign list completes later', async () => {
+    const pendingCreate = deferred<Session>();
+    const staleCampaignAList = deferred<Session[]>();
+    const createdForCampaignA: Session = {
+      ...session('camp-a', 'Created after reload started'),
+      id: 'session-created-during-reload',
+    };
+    let campaignARequests = 0;
+    vi.mocked(commands.getSessions).mockImplementation((campaignId) => {
+      if (campaignId === 'camp-a') {
+        campaignARequests += 1;
+        return campaignARequests === 1 ? Promise.resolve([]) : staleCampaignAList.promise;
+      }
+      return Promise.resolve([session('camp-b', 'Campaign B session')]);
+    });
+    vi.mocked(commands.createSession).mockReturnValue(pendingCreate.promise);
+    const coordinator = new DraftCoordinator();
+    const rendered = renderLog('camp-a', coordinator);
+
+    await waitFor(() => expect(commands.getSessions).toHaveBeenCalledWith('camp-a'));
+    await fireEvent.click(screen.getByRole('button', { name: /New Session/i }));
+    await rendered.rerender({ campaignId: 'camp-b', draftCoordinator: coordinator } as never);
+    expect(await screen.findByText('Campaign B session')).toBeVisible();
+
+    await rendered.rerender({ campaignId: 'camp-a', draftCoordinator: coordinator } as never);
+    await waitFor(() => expect(commands.getSessions).toHaveBeenCalledTimes(3));
+
+    pendingCreate.resolve(createdForCampaignA);
+    await waitFor(() =>
+      expect(
+        coordinator.get<{ title: string }>(sessionScope('camp-a', createdForCampaignA.id))?.value
+          .title,
+      ).toBe('Created after reload started'),
+    );
+
+    staleCampaignAList.resolve([]);
+    await staleCampaignAList.promise;
+    await tick();
+
+    expect(screen.getByText('Created after reload started')).toBeVisible();
+    expect(
+      coordinator.get<{ title: string }>(sessionScope('camp-a', createdForCampaignA.id))?.value
+        .title,
+    ).toBe('Created after reload started');
+  });
+
   it('restores a retained session draft after view unmount and an older list reload', async () => {
     const coordinator = new DraftCoordinator();
     vi.mocked(commands.getSessions).mockResolvedValue([session('camp-a', 'Ashes at Dawn')]);
