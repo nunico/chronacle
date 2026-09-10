@@ -46,6 +46,8 @@ const es = {
     createdNeedsAttention: 'Creado, pero requiere atención',
     finishCreatedEntity:
       'La entidad se guardó, pero Chronacle no pudo terminar de abrirla. Resuelve los cambios del registro mostrado y vuelve a intentarlo.',
+    finishCreatedSession:
+      'La sesión se guardó, pero Chronacle no pudo terminar de abrirla. Resuelve los cambios de la sesión mostrada y vuelve a intentarlo.',
     createdEntityConflict:
       'Este registro se volvió a guardar mientras terminaba la creación. Elige qué versión conservar.',
     keepSavedRecord: 'Conservar el registro guardado',

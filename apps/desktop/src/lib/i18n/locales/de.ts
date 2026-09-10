@@ -48,6 +48,8 @@ const de = {
     createdNeedsAttention: 'Erstellt, aber Eingriff erforderlich',
     finishCreatedEntity:
       'Die Entität wurde gespeichert, aber Chronacle konnte sie nicht vollständig öffnen. Kläre die Änderungen am aufgelisteten Eintrag und versuche es erneut.',
+    finishCreatedSession:
+      'Die Sitzung wurde gespeichert, aber Chronacle konnte sie nicht vollständig öffnen. Kläre die Änderungen an der aufgelisteten Sitzung und versuche es erneut.',
     createdEntityConflict:
       'Dieser Eintrag wurde erneut gespeichert, während die Erstellung abgeschlossen wurde. Wähle aus, welche Version beibehalten werden soll.',
     keepSavedRecord: 'Gespeicherten Eintrag behalten',
