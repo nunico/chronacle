@@ -585,6 +585,27 @@ describe('EntityManager', () => {
       expect(coordinator.get<string>(oracleScope('camp1'))?.value).toBe('Unsent Oracle question');
     });
 
+    it('keeps keyboard focus contained while confirmed deletion is pending', async () => {
+      const coordinator = new DraftCoordinator();
+      const deletion = deferred<undefined>();
+      vi.mocked(commands.softDeleteEntity).mockReturnValue(deletion.promise);
+      renderManager(coordinator);
+      await fireEvent.click(await screen.findByRole('button', { name: /delete mira/i }));
+      const dialog = screen.getByRole('dialog', { name: 'Delete' });
+      await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+      const pendingStatus = await within(dialog).findByRole('button', { name: 'Processing…' });
+      expect(pendingStatus).toHaveAttribute('aria-disabled', 'true');
+      expect(pendingStatus).toHaveFocus();
+      await fireEvent.keyDown(pendingStatus, { key: 'Tab' });
+      expect(pendingStatus).toHaveFocus();
+      await fireEvent.keyDown(pendingStatus, { key: 'Escape' });
+      expect(dialog).toBeInTheDocument();
+
+      deletion.resolve(undefined);
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete' })).toBeNull());
+    });
+
     it('restores existing drafts after switching records and remounting the view', async () => {
       const coordinator = new DraftCoordinator();
       const first = renderManager(coordinator);
