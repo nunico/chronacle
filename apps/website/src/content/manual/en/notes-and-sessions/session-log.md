@@ -16,6 +16,9 @@ headings:
   - id: watch-the-save-status
     text: Watch the save status
     level: 2
+  - id: recover-a-new-session
+    text: Recover a new session
+    level: 2
   - id: example
     text: Example
     level: 2
@@ -40,6 +43,12 @@ Sessions are shown by session number, lowest first. Their text is stored with th
 <h2 id="watch-the-save-status">Watch the save status</h2>
 
 Moving focus to another control in the same session requests an automatic save. Moving directly to another session or view retains the edit as **Unsaved changes** without treating navigation as a save. **Saving…**, **Saved**, and **Couldn't save** show the rest of its progress. If saving fails, your text remains in that session and **Retry** repeats the save to the same record. You can continue editing while a save is running; an earlier completion does not mark newer text as saved. See [Keep drafts and recover saves](/en/manual/notes-and-sessions/saving-and-recovery) for navigation and close behavior.
+
+<h2 id="recover-a-new-session">Recover a new session</h2>
+
+If **New session** cannot create the session, the failed attempt stays with the campaign where you started it. **Retry** uses the same intended session number, title, date, and notes. Repeated activation cannot start overlapping creation or create a duplicate session. **Discard changes** abandons only that failed attempt.
+
+If the session was created but Chronacle shows **Created, but needs attention**, the listed saved session already has changes that must be settled first. Save or discard those conflicting changes, then choose **Retry** in the alert. That Retry finishes connecting the retained attempt to the session that was already created; it does not create another session.
 
 <h2 id="example">Example</h2>
 
