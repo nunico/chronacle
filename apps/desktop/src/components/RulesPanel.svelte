@@ -13,7 +13,11 @@
     type DraftRecord,
     type DraftValue,
   } from '../lib/drafts/draft-state';
-  import { rememberedRuleEntry, rememberRuleEntry } from '../lib/drafts/rule-note-presentation';
+  import {
+    forgetRuleRecovery,
+    rememberedRuleRecovery,
+    rememberRuleRecovery,
+  } from '../lib/drafts/rule-note-presentation';
 
   interface RuleNoteDraftValue extends Readonly<Record<string, DraftValue>> {
     readonly notes: string;
@@ -86,9 +90,20 @@
       if (statusOf(draft) === 'saved') continue;
       const ruleId = draft.target?.startsWith('rule:') ? draft.target.slice('rule:'.length) : '';
       if (!ruleId || listedIds.has(ruleId)) continue;
-      const remembered = rememberedRuleEntry(draftCoordinator, draft.scope);
+      const remembered = rememberedRuleRecovery(draftCoordinator, draft.scope);
       if (!remembered) continue;
-      rows.push({ entry: remembered, unavailable: true });
+      rows.push({
+        entry: {
+          id: remembered.ruleId,
+          name: remembered.title,
+          category: 'entry',
+          body: '',
+          notes: draft.value.notes === '' ? null : draft.value.notes,
+          page_refs: [],
+          stale: false,
+        },
+        unavailable: true,
+      });
     }
     return rows;
   });
@@ -124,7 +139,12 @@
         ) {
           draftCoordinator.open(scope, targetFor(entry.id), valueFrom(entry), 'authoritative-list');
         }
-        rememberRuleEntry(draftCoordinator, scope, entry);
+      }
+      for (const previous of entries) {
+        if (loaded.some(({ id }) => id === previous.id)) continue;
+        const scope = ruleScope(requestCampaignId, requestCollectionId, previous.id);
+        if (draftCoordinator.release(scope) === 'released')
+          forgetRuleRecovery(draftCoordinator, scope);
       }
       entries = loaded;
       error = null;
@@ -144,6 +164,11 @@
   onDestroy(() => {
     destroyed = true;
     loadGeneration += 1;
+    for (const draft of draftCoordinator.listByPrefix<RuleNoteDraftValue>(scopePrefix)) {
+      if (draftCoordinator.release(draft.scope) === 'released') {
+        forgetRuleRecovery(draftCoordinator, draft.scope);
+      }
+    }
   });
 
   let filtered = $derived(
@@ -186,6 +211,11 @@
     const scope = ruleScope(campaignId, collectionId, entry.id);
     ensureDraft(entry);
     draftCoordinator.revise(scope, { notes });
+    rememberRuleRecovery(draftCoordinator, scope, {
+      ruleId: entry.id,
+      title: entry.name,
+      collectionId,
+    });
   }
 
   async function saveDraft(entry: RuleEntry): Promise<void> {
@@ -203,7 +233,6 @@
         if (saved.id !== saveRuleId) {
           throw new Error(`Rule-note save acknowledged the wrong target: ${saved.id}`);
         }
-        rememberRuleEntry(draftCoordinator, saveScope, saved);
         return { notes: saved.notes ?? '' };
       } catch (saveError) {
         if (isStructuredError(saveError) && saveError.code === 'NOT_FOUND') {
@@ -212,6 +241,13 @@
         throw saveError;
       }
     });
+    const savedDraft = draftCoordinator.get<RuleNoteDraftValue>(saveScope);
+    if (savedDraft && statusOf(savedDraft) === 'saved') {
+      forgetRuleRecovery(draftCoordinator, saveScope);
+      if (destroyed || saveCampaignId !== campaignId || saveCollectionId !== collectionId) {
+        draftCoordinator.release(saveScope);
+      }
+    }
   }
 
   function elementFor<T extends HTMLElement>(selector: string, ruleId: string): T | undefined {
@@ -275,6 +311,8 @@
   async function discardDraft(entry: RuleEntry, unavailable: boolean): Promise<void> {
     const scope = ruleScope(campaignId, collectionId, entry.id);
     if (draftCoordinator.discard(scope) !== 'discarded') return;
+    forgetRuleRecovery(draftCoordinator, scope);
+    if (unavailable) draftCoordinator.release(scope);
     await tick();
     if (unavailable) {
       focusStableRulesTab();
