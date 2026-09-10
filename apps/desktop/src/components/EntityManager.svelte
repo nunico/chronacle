@@ -624,77 +624,82 @@
     let acknowledgedNode: GraphNode | null = null;
     let adapterError: EntityError | null = null;
     if (formError?.scope === saveScope) formError = null;
+    const releaseOperationLease = draftCoordinator.acquireLease(saveScope);
 
-    await draftCoordinator.requestSave<EntityDraftValue>(saveScope, async (value) => {
-      try {
+    try {
+      await draftCoordinator.requestSave<EntityDraftValue>(saveScope, async (value) => {
+        try {
+          if (recordId) {
+            const updated = await updateEntity(recordId, saveKind, inputFromDraft(value));
+            if (updated.id !== recordId) {
+              throw new Error(`Entity save acknowledged the wrong target: ${updated.id}`);
+            }
+            acknowledgedNode = updated;
+          } else {
+            acknowledgedNode = await createEntity(saveCampaignId, saveKind, inputFromDraft(value));
+          }
+          return draftFromNode(acknowledgedNode);
+        } catch (error) {
+          adapterError = error as EntityError;
+          throw error;
+        }
+      });
+
+      const savedDraft = draftCoordinator.get<EntityDraftValue>(saveScope);
+      if (savedDraft?.error) {
+        const error: EntityError = adapterError ?? {
+          code: 'DATABASE',
+          message: savedDraft.error,
+        };
+        if (error.code === 'VALIDATION') formError = { scope: saveScope, error };
+        if (error.code === 'NOT_FOUND') {
+          if (resolvedActiveDraftScope === saveScope) activeTargetUnavailable = true;
+          await loadEntities();
+        }
+        return;
+      }
+
+      if (acknowledgedNode) {
+        const canonical = acknowledgedNode as GraphNode;
+        const stillInContext = mounted && campaignId === saveCampaignId && kind === saveKind;
         if (recordId) {
-          const updated = await updateEntity(recordId, saveKind, inputFromDraft(value));
-          if (updated.id !== recordId) {
-            throw new Error(`Entity save acknowledged the wrong target: ${updated.id}`);
-          }
-          acknowledgedNode = updated;
-        } else {
-          acknowledgedNode = await createEntity(saveCampaignId, saveKind, inputFromDraft(value));
-        }
-        return draftFromNode(acknowledgedNode);
-      } catch (error) {
-        adapterError = error as EntityError;
-        throw error;
-      }
-    });
-
-    const savedDraft = draftCoordinator.get<EntityDraftValue>(saveScope);
-    if (savedDraft?.error) {
-      const error: EntityError = adapterError ?? {
-        code: 'DATABASE',
-        message: savedDraft.error,
-      };
-      if (error.code === 'VALIDATION') formError = { scope: saveScope, error };
-      if (error.code === 'NOT_FOUND') {
-        if (resolvedActiveDraftScope === saveScope) activeTargetUnavailable = true;
-        await loadEntities();
-      }
-      return;
-    }
-
-    if (acknowledgedNode) {
-      const canonical = acknowledgedNode as GraphNode;
-      const stillInContext = mounted && campaignId === saveCampaignId && kind === saveKind;
-      if (recordId) {
-        if (stillInContext) {
-          entities = [canonical, ...entities.filter((entity) => entity.id !== canonical.id)];
-          if (resolvedActiveDraftScope === saveScope) {
-            formNode = canonical;
-            activeTargetUnavailable = false;
-          }
-        }
-      } else {
-        if (sourceFindingId) {
-          onPendingCreateSaved?.(sourceFindingId);
-        }
-        const mappedScope = entityScope(saveCampaignId, saveKind, canonical.id);
-        const promotion = draftCoordinator.tryRemapAfterCreate<EntityDraftValue>(
-          saveScope,
-          mappedScope,
-          `entity:${saveKind}:${canonical.id}`,
-        );
-        if (stillInContext) {
-          if (promotion.outcome === 'promoted') {
-            const base = entities.find((entity) => entity.id === canonical.id) ?? canonical;
-            const promotedNode = nodeWithDraftValue(base, promotion.draft.value);
-            entities = [promotedNode, ...entities.filter((entity) => entity.id !== canonical.id)];
-            if (activeDraftScope === saveScope) {
-              finishCreatePromotion(saveScope, mappedScope, promotion, promotedNode);
-            } else if (resolvedActiveDraftScope === mappedScope) {
-              activeRecordId = canonical.id;
-              formNode = promotedNode;
+          if (stillInContext) {
+            entities = [canonical, ...entities.filter((entity) => entity.id !== canonical.id)];
+            if (resolvedActiveDraftScope === saveScope) {
+              formNode = canonical;
               activeTargetUnavailable = false;
             }
-          } else if (!entities.some((entity) => entity.id === canonical.id)) {
-            entities = [canonical, ...entities];
+          }
+        } else {
+          if (sourceFindingId) {
+            onPendingCreateSaved?.(sourceFindingId);
+          }
+          const mappedScope = entityScope(saveCampaignId, saveKind, canonical.id);
+          const promotion = draftCoordinator.tryRemapAfterCreate<EntityDraftValue>(
+            saveScope,
+            mappedScope,
+            `entity:${saveKind}:${canonical.id}`,
+          );
+          if (stillInContext) {
+            if (promotion.outcome === 'promoted') {
+              const base = entities.find((entity) => entity.id === canonical.id) ?? canonical;
+              const promotedNode = nodeWithDraftValue(base, promotion.draft.value);
+              entities = [promotedNode, ...entities.filter((entity) => entity.id !== canonical.id)];
+              if (activeDraftScope === saveScope) {
+                finishCreatePromotion(saveScope, mappedScope, promotion, promotedNode);
+              } else if (resolvedActiveDraftScope === mappedScope) {
+                activeRecordId = canonical.id;
+                formNode = promotedNode;
+                activeTargetUnavailable = false;
+              }
+            } else if (!entities.some((entity) => entity.id === canonical.id)) {
+              entities = [canonical, ...entities];
+            }
           }
         }
       }
+    } finally {
+      releaseOperationLease();
     }
   }
 

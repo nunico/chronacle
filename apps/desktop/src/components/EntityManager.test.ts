@@ -1181,6 +1181,32 @@ describe('EntityManager', () => {
       await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saved'));
     });
 
+    it('settles and releases an unmounted Create without a replacement manager', async () => {
+      const coordinator = new DraftCoordinator();
+      const createWrite = deferred<GraphNode>();
+      vi.mocked(commands.createEntity).mockReturnValue(createWrite.promise);
+
+      const rendered = renderManager(coordinator);
+      await fireEvent.click(await screen.findByRole('button', { name: 'New NPC' }));
+      await fireEvent.input(screen.getByLabelText('Name', { exact: true }), {
+        target: { value: 'Captain Sable' },
+      });
+      await fireEvent.submit(screen.getByRole('form'));
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saving…'));
+      const source = coordinator.listByPrefix('entity-new:camp1:npc:')[0];
+      if (!source) throw new Error('Expected the in-flight Create draft');
+
+      rendered.unmount();
+      createWrite.resolve(mockNpc({ id: 'sable-unmounted', name: 'Captain Sable' }));
+
+      await waitFor(() => {
+        expect(coordinator.get(source.scope)).toBeUndefined();
+        expect(coordinator.get(entityScope('camp1', 'npc', 'sable-unmounted'))).toBeUndefined();
+      });
+      expect(coordinator.getCreatePromotionIssue(source.scope)).toBeUndefined();
+      expect(coordinator.resolveScope(source.scope)).toBe(source.scope);
+    });
+
     it('promotes a remounted Create when its committed record was reconciled before acknowledgment', async () => {
       const coordinator = new DraftCoordinator();
       const createWrite = deferred<GraphNode>();
