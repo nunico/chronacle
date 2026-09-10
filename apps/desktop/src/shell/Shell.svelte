@@ -427,12 +427,14 @@
       stored = null;
     }
     if (stored && campaigns.some((c) => c.id === stored)) {
-      activeCampaignId = stored;
+      navigateToCampaign(stored);
     } else if (campaigns.length > 0) {
-      setActiveCampaignId(campaigns[0].id);
+      navigateToCampaign(campaigns[0].id);
     } else {
-      activeCampaignId = null;
-      view = 'campaign';
+      coordinateNavigation(() => {
+        applyActiveCampaignId(null);
+        view = 'campaign';
+      });
     }
     // Initial mismatch check covers reloads after the startup event already
     // fired. The $effect listener below catches the live event from `setup`.
@@ -500,7 +502,7 @@
     mismatch ? mismatch.stale.reduce((acc, s) => acc + s.source_count, 0) : 0,
   );
 
-  function setActiveCampaignId(id: string | null) {
+  function applyActiveCampaignId(id: string | null) {
     activeCampaignId = id;
     // Same defensive guard as the read in onMount: `localStorage` can be
     // undefined in some test environments.
@@ -512,26 +514,29 @@
     }
   }
 
-  function navigateToCampaign(id: string): void {
+  function navigateToCampaign(id: string | null): void {
     coordinateNavigation(() => {
-      setActiveCampaignId(id);
+      applyActiveCampaignId(id);
     });
   }
 
   async function refreshCampaigns() {
-    campaigns = await getCampaigns();
-    if (activeCampaignId && !campaigns.some((c) => c.id === activeCampaignId)) {
-      // Active campaign was deleted — fall back to the first remaining one
-      // (or null if there are none, which forces the user to the campaign view).
-      if (campaigns.length > 0) {
-        setActiveCampaignId(campaigns[0].id);
-      } else {
-        setActiveCampaignId(null);
-        view = 'campaign';
+    const refreshedCampaigns = await getCampaigns();
+    coordinateNavigation(() => {
+      campaigns = refreshedCampaigns;
+      if (activeCampaignId && !refreshedCampaigns.some((c) => c.id === activeCampaignId)) {
+        // Active campaign was deleted — fall back to the first remaining one
+        // (or null if there are none, which forces the user to the campaign view).
+        if (refreshedCampaigns.length > 0) {
+          applyActiveCampaignId(refreshedCampaigns[0].id);
+        } else {
+          applyActiveCampaignId(null);
+          view = 'campaign';
+        }
+      } else if (!activeCampaignId && refreshedCampaigns.length > 0) {
+        applyActiveCampaignId(refreshedCampaigns[0].id);
       }
-    } else if (!activeCampaignId && campaigns.length > 0) {
-      setActiveCampaignId(campaigns[0].id);
-    }
+    });
   }
 
   let activeCampaign = $derived(campaigns.find((c) => c.id === activeCampaignId) ?? null);
@@ -818,7 +823,7 @@
           {activeCampaignId}
           {draftCoordinator}
           {campaigns}
-          {setActiveCampaignId}
+          setActiveCampaignId={navigateToCampaign}
           onOpenUpload={(colId) => openFilePicker(colId)}
           {refreshCampaigns}
         />

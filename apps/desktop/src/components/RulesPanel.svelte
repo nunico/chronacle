@@ -310,7 +310,7 @@
   async function handleNotesBlur(entry: RuleEntry, event?: FocusEvent): Promise<void> {
     if (
       draftCoordinator.isCloseDecisionActive() ||
-      draftCoordinator.isNavigationTransitionActive() ||
+      (draftCoordinator.isNavigationTransitionActive() && event?.relatedTarget === null) ||
       !shouldSaveFromBlur(entry, event)
     )
       return;

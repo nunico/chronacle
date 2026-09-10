@@ -517,6 +517,23 @@ describe('RulesPanel', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
   });
 
+  it('still autosaves a concrete within-rule blur during an active navigation transition', async () => {
+    const saved = { ...rule('r1', 'Initiative', 'mechanic'), notes: 'Ordinary concrete blur.' };
+    m.getRuleEntries.mockResolvedValue([rule('r1', 'Initiative', 'mechanic')]);
+    m.updateRuleNotes.mockResolvedValue(saved as never);
+    const coordinator = new DraftCoordinator();
+    renderPanel(coordinator);
+    const notes = await openNotes();
+    const sameRuleHeader = screen.getByRole('button', { name: 'Initiative' });
+    await fireEvent.input(notes, { target: { value: 'Ordinary concrete blur.' } });
+
+    const endNavigation = coordinator.beginNavigationTransition();
+    await fireEvent.blur(notes, { relatedTarget: sameRuleHeader });
+    endNavigation();
+
+    await waitFor(() => expect(m.updateRuleNotes).toHaveBeenCalledOnce());
+  });
+
   it('clears pending without IPC when a null-backed note returns to its saved baseline', async () => {
     m.getRuleEntries.mockResolvedValue([rule('r1', 'Initiative', 'mechanic')]);
     renderPanel();

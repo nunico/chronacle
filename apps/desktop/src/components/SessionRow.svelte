@@ -184,7 +184,7 @@
     if (
       deletionPending ||
       draftCoordinator.isCloseDecisionActive() ||
-      draftCoordinator.isNavigationTransitionActive() ||
+      (draftCoordinator.isNavigationTransitionActive() && event?.relatedTarget === null) ||
       !shouldSaveFromBlur(event)
     )
       return;
