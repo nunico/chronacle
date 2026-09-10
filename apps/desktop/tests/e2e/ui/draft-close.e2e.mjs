@@ -5,26 +5,22 @@
 // native window.
 import assert from 'node:assert/strict';
 import { By, Key, until } from 'selenium-webdriver';
-import {
-  buildDriver,
-  invoke,
-  navigateToApp,
-  pollUntil,
-  startTauriDriver,
-  waitForWebviewReady,
-} from './driver.mjs';
+import { createNativeTestSession, invoke, navigateToApp, pollUntil } from './driver.mjs';
 
 const ORACLE_BUTTON = By.xpath('//button[normalize-space(.)="Oracle"]');
 const ORACLE_COMPOSER = By.xpath('//textarea[contains(@placeholder, "Ask a rule")]');
 const CLOSE_DIALOG = By.xpath('//*[@role="dialog" and .//*[normalize-space(.)="Unsaved changes"]]');
 const CANCEL = By.xpath('//button[normalize-space(.)="Cancel"]');
 const DISCARD_AND_CLOSE = By.xpath('//button[normalize-space(.)="Discard and close"]');
+const SESSIONS_BUTTON = By.xpath('//button[normalize-space(.)="Sessions"]');
+const WAIT_FOR_SAVE = By.xpath(
+  '//*[normalize-space(.)="Wait for saving to finish before discarding and closing."]',
+);
 
 async function requestNativeClose(driver) {
-  // This is the same Tauri window command used by getCurrentWindow().close().
-  // Unlike destroy, it emits WINDOW_CLOSE_REQUESTED and can be prevented by the
-  // frontend close guard.
-  await invoke(driver, 'plugin:window|close', { label: 'main' });
+  // The W3C close command crosses tauri-driver into the native window. The
+  // application must prevent it while a draft decision is outstanding.
+  await driver.close();
 }
 
 async function nativeWindowIsGone(driver) {
@@ -66,32 +62,56 @@ async function activateDiscardAndObserveDestroy(driver, discard) {
   }
 }
 
+async function holdSessionUpdates(driver) {
+  await driver.executeScript(`
+    const internals = window.__TAURI_INTERNALS__;
+    const originalInvoke = internals.invoke.bind(internals);
+    const held = [];
+    window.__CHRONACLE_NATIVE_E2E__ = {
+      updateCalls: [],
+      held,
+      releaseNext() {
+        const pending = held.shift();
+        if (!pending) throw new Error('No held update_session request');
+        originalInvoke('update_session', pending.args, pending.options)
+          .then(pending.resolve, pending.reject);
+      },
+    };
+    internals.invoke = (command, args, options) => {
+      if (command !== 'update_session') return originalInvoke(command, args, options);
+      window.__CHRONACLE_NATIVE_E2E__.updateCalls.push(structuredClone(args));
+      return new Promise((resolve, reject) => held.push({ args, options, resolve, reject }));
+    };
+  `);
+}
+
+async function heldSessionUpdateCount(driver) {
+  return driver.executeScript('return window.__CHRONACLE_NATIVE_E2E__?.updateCalls.length ?? 0;');
+}
+
+async function releaseHeldSessionUpdate(driver) {
+  await driver.executeScript('window.__CHRONACLE_NATIVE_E2E__.releaseNext();');
+}
+
 describe('Draft retention — native window close', function () {
   this.timeout(180000);
 
-  let tauriDriver;
+  let nativeSession;
   let driver;
 
-  before(async () => {
-    tauriDriver = startTauriDriver();
-    driver = await buildDriver();
-    await waitForWebviewReady(driver);
-
+  beforeEach(async () => {
+    nativeSession = await createNativeTestSession();
+    driver = nativeSession.driver;
     // Bypass the first-run local-model download gate. Oracle draft retention is
     // frontend-only and does not contact the configured embedding provider.
     await invoke(driver, 'update_setting', { key: 'embedding_backend', value: 'openai' });
     await navigateToApp(driver);
   });
 
-  after(async () => {
-    if (driver) {
-      try {
-        await driver.quit();
-      } catch {
-        // The tested explicit destroy may already have ended the WebDriver window.
-      }
-    }
-    if (tauriDriver) tauriDriver.kill();
+  afterEach(async () => {
+    await nativeSession?.close();
+    nativeSession = undefined;
+    driver = undefined;
   });
 
   it('cancels or explicitly discards a focused Oracle draft without submitting it', async () => {
@@ -144,11 +164,77 @@ describe('Draft retention — native window close', function () {
     await activateDiscardAndObserveDestroy(driver, discard);
   });
 
-  it.skip('active-save native close requires deterministic deferred real-backend write control; covered by component and Shell tests', () => {
-    // The current native harness has no supported way to hold an update_session
-    // command after the frontend starts it. Adding a production-only test hook
-    // would weaken this test, so the deterministic active-write transition stays
-    // in CloseDraftsDialog.test.ts and Shell.test.ts until the native harness has
-    // an external controllable backend adapter.
+  it('retains a newer session edit while an earlier native save settles', async () => {
+    const campaign = await invoke(driver, 'create_campaign', {
+      name: 'Native Close Campaign',
+      system: '5e',
+    });
+    const savedSession = await invoke(driver, 'create_session', {
+      campaignId: campaign.id,
+      input: {
+        sessionNumber: 1,
+        title: 'The saved title',
+        datePlayed: '2026-09-10',
+        notes: '',
+      },
+    });
+    await navigateToApp(driver);
+
+    await driver.wait(until.elementLocated(SESSIONS_BUTTON), 10000);
+    await driver.findElement(SESSIONS_BUTTON).click();
+    const sessionHeader = await driver.wait(
+      until.elementLocated(By.xpath('//button[contains(@class, "session-header")]')),
+      10000,
+    );
+    await sessionHeader.click();
+    const title = await driver.wait(
+      until.elementLocated(
+        By.xpath('//div[contains(@class, "session-body")]//input[@type="text"]'),
+      ),
+      10000,
+    );
+
+    await holdSessionUpdates(driver);
+    await title.clear();
+    await title.sendKeys('The saving title');
+    const date = await driver.findElement(
+      By.xpath('//div[contains(@class, "session-body")]//input[@type="date"]'),
+    );
+    await date.click();
+    await pollUntil(async () => (await heldSessionUpdateCount(driver)) === 1, {
+      timeoutMs: 10000,
+      intervalMs: 100,
+    });
+
+    await title.click();
+    await title.clear();
+    await title.sendKeys('The newer unsaved title');
+    await requestNativeClose(driver);
+
+    const dialog = await driver.wait(until.elementLocated(CLOSE_DIALOG), 10000);
+    assert.equal(await dialog.isDisplayed(), true, 'active save must prevent native close');
+    const discardWhileSaving = await driver.findElement(DISCARD_AND_CLOSE);
+    assert.equal(await discardWhileSaving.isEnabled(), false);
+    assert.equal(await driver.findElement(WAIT_FOR_SAVE).isDisplayed(), true);
+    assert.equal(await title.getAttribute('value'), 'The newer unsaved title');
+    assert.equal(await heldSessionUpdateCount(driver), 1, 'close must not request another save');
+
+    await releaseHeldSessionUpdate(driver);
+    await driver.wait(async () => (await discardWhileSaving.isEnabled()) === true, 10000);
+    assert.equal(
+      await title.getAttribute('value'),
+      'The newer unsaved title',
+      'the older acknowledgment must not overwrite the newer edit',
+    );
+    assert.equal(
+      await driver.findElement(By.xpath('//*[normalize-space(.)="Unsaved changes"]')).isDisplayed(),
+      true,
+      'the newer revision must remain visibly unsaved',
+    );
+    assert.equal(await heldSessionUpdateCount(driver), 1, 'settlement must not start another save');
+    const persisted = await invoke(driver, 'get_session', { id: savedSession.id });
+    assert.equal(persisted.title, 'The saving title');
+
+    await activateDiscardAndObserveDestroy(driver, discardWhileSaving);
   });
 });
