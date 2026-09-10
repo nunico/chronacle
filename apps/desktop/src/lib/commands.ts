@@ -7,6 +7,11 @@ export async function requestAppExit(): Promise<number> {
   return invoke<number>('request_app_exit');
 }
 
+/** Read a native exit intent that may have been emitted during listener setup. */
+export async function pendingAppExit(): Promise<number | null> {
+  return invoke<number | null>('pending_app_exit');
+}
+
 /** Authorize one native application exit for the current decision. */
 export async function confirmAppExit(intent: number, decision: AppExitDecision): Promise<void> {
   return invoke('confirm_app_exit', { intent, decision });
