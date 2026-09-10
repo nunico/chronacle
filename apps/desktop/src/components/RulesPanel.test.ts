@@ -589,6 +589,41 @@ describe('RulesPanel', () => {
     },
   );
 
+  it('rejects a wrong-rule acknowledgment and retries the original rule and content', async () => {
+    const coordinator = new DraftCoordinator();
+    const initiative = { ...rule('r1', 'Initiative', 'mechanic'), notes: 'Initiative saved.' };
+    const surprise = { ...rule('r2', 'Surprise', 'mechanic'), notes: 'Surprise saved.' };
+    m.getRuleEntries.mockResolvedValue([initiative, surprise]);
+    m.updateRuleNotes
+      .mockResolvedValueOnce({ ...surprise, notes: 'Wrong canonical content.' } as never)
+      .mockResolvedValueOnce({ ...initiative, notes: 'Retained Initiative ruling.' } as never);
+    renderPanel(coordinator);
+    const notes = await openNotes();
+    await fireEvent.input(notes, { target: { value: 'Retained Initiative ruling.' } });
+    await fireEvent.blur(notes);
+
+    const failure = await screen.findByRole('alert');
+    expect(failure).toHaveTextContent("Couldn't save");
+    expect(notes).toHaveValue('Retained Initiative ruling.');
+    const initiativeDraft = coordinator.get(ruleScope('camp-a', 'c-1', 'r1'));
+    if (!initiativeDraft) throw new Error('Expected the Initiative draft to remain open');
+    expect(statusOf(initiativeDraft)).toBe('failed');
+    expect(coordinator.get<{ notes: string }>(ruleScope('camp-a', 'c-1', 'r2'))?.value.notes).toBe(
+      'Surprise saved.',
+    );
+
+    await fireEvent.click(within(failure).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saved'));
+    expect(m.updateRuleNotes.mock.calls).toEqual([
+      ['r1', 'Retained Initiative ruling.'],
+      ['r1', 'Retained Initiative ruling.'],
+    ]);
+    expect(notes).toHaveValue('Retained Initiative ruling.');
+    expect(coordinator.get<{ notes: string }>(ruleScope('camp-a', 'c-1', 'r2'))?.value.notes).toBe(
+      'Surprise saved.',
+    );
+  });
+
   it('keeps a missing failed rule recoverable and discards only that retained draft', async () => {
     const coordinator = new DraftCoordinator();
     const initiativeScope = ruleScope('camp-a', 'c-1', 'r1');
