@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 pub mod commands;
+mod exit_guard;
 #[cfg(test)]
 mod runtime_downloads;
 pub mod services;
@@ -10,6 +11,10 @@ use chronacle_providers::embedding::EmbeddingProvider;
 use chronacle_providers::llm_provider::{
     AnthropicProvider, LlmProvider, OllamaProvider, OpenAIProvider,
 };
+#[cfg(feature = "rocksdb")]
+use exit_guard::{ExitAuthorization, ExitRequestDecision, ExitRequestPayload};
+#[cfg(feature = "rocksdb")]
+use tauri::{Emitter, Manager};
 
 /// Shared application state managed by Tauri.
 ///
@@ -410,6 +415,7 @@ pub async fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(state.clone())
+        .manage(ExitAuthorization::default())
         .setup(move |app| {
             // ADR-003: warn if any indexed sources were embedded with a different
             // model than the active embedding provider. Mock provider is treated
@@ -598,9 +604,25 @@ pub async fn run() {
             commands::set_vault_path,
             commands::vault_sync_now,
             commands::list_vault_conflicts,
+            commands::request_app_exit,
+            commands::cancel_app_exit,
+            commands::confirm_app_exit,
         ])
-        .run(tauri::generate_context!())
-        .expect("Error while running Tauri application");
+        .build(tauri::generate_context!())
+        .expect("Error while building Tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                let authorization = app_handle.state::<ExitAuthorization>();
+                if let ExitRequestDecision::Prevent { intent } = authorization.intercept_exit() {
+                    api.prevent_exit();
+                    let _ = app_handle.emit_to(
+                        "main",
+                        "app-exit-requested",
+                        ExitRequestPayload { intent },
+                    );
+                }
+            }
+        });
 }
 
 /// Read all settings from the database into a flat map (empty on error).

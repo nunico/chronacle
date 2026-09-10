@@ -9,8 +9,8 @@ const manifestUrl = new URL('../../../src-tauri/capabilities/default.json', impo
 const manifest = JSON.parse(readFileSync(manifestUrl, 'utf8')) as CapabilityManifest;
 
 for (const permission of ['core:window:allow-close', 'core:window:allow-destroy']) {
-  test(`grants the exact native draft-close permission ${permission}`, () => {
-    expect(manifest.permissions).toContain(permission);
+  test(`does not grant frontend native-exit permission ${permission}`, () => {
+    expect(manifest.permissions).not.toContain(permission);
   });
 }
 

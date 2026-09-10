@@ -42,3 +42,6 @@ pub use codex_commands::*;
 
 pub mod vault_commands;
 pub use vault_commands::*;
+
+pub mod exit_commands;
+pub(crate) use exit_commands::*;
