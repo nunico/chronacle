@@ -1,11 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { tick } from 'svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SessionLogView, * as sessionLogViewModule from './SessionLogView.svelte';
 import type { Session } from '../lib/commands';
 import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
 import { oracleScope, sessionScope } from '../lib/drafts/draft-state';
+import { i18n } from '../lib/locale.svelte';
 
 interface SessionLoadFenceContract {
   readonly trackedCount: number;
@@ -78,6 +79,102 @@ describe('SessionLogView draft coordination', () => {
     vi.resetAllMocks();
     vi.mocked(commands.getEntities).mockResolvedValue([]);
     vi.mocked(commands.getSessionEntities).mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    i18n.setLocale('en');
+    vi.useRealTimers();
+  });
+
+  it('retains a failed create in its campaign and coalesces keyboard Retry', async () => {
+    vi.setSystemTime(new Date('2026-09-14T12:00:00Z'));
+    const retryCreate = deferred<Session>();
+    const coordinator = new DraftCoordinator();
+    const created = {
+      ...session('camp-a', 'Session 2'),
+      id: 'created-session-a',
+      session_number: 2,
+      date_played: '2026-09-14',
+      notes: '',
+    };
+    vi.mocked(commands.getSessions).mockImplementation((campaignId) =>
+      Promise.resolve([session(campaignId, campaignId === 'camp-a' ? 'Ashes at Dawn' : 'Rain')]),
+    );
+    vi.mocked(commands.createSession)
+      .mockRejectedValueOnce({ code: 'DATABASE', message: 'Session create failed.' })
+      .mockReturnValueOnce(retryCreate.promise);
+    const user = userEvent.setup();
+
+    const first = renderLog('camp-a', coordinator);
+    await screen.findByText('Ashes at Dawn');
+    await user.click(screen.getByRole('button', { name: /New session/i }));
+
+    const failure = await screen.findByRole('alert');
+    expect(failure).toHaveTextContent("Couldn't create session.");
+    expect(failure).toHaveTextContent('Session create failed.');
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Discard changes' })).toBeVisible();
+    expect(vi.mocked(commands.createSession).mock.calls[0]).toEqual([
+      'camp-a',
+      {
+        sessionNumber: 2,
+        title: 'Session 2',
+        datePlayed: '2026-09-14',
+        notes: '',
+      },
+    ]);
+    first.unmount();
+
+    const campaignB = renderLog('camp-b', coordinator);
+    await screen.findByText('Rain');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    campaignB.unmount();
+
+    renderLog('camp-a', coordinator);
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't create session.");
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    retry.focus();
+    await user.keyboard('{Enter}{Enter}');
+
+    expect(commands.createSession).toHaveBeenCalledTimes(2);
+    expect(retry).toBeDisabled();
+    expect(vi.mocked(commands.createSession).mock.calls[1]).toEqual(
+      vi.mocked(commands.createSession).mock.calls[0],
+    );
+
+    retryCreate.resolve(created);
+    await waitFor(() => expect(screen.getByRole('button', { name: /Session 2/ })).toBeVisible());
+    expect(screen.getAllByRole('button', { name: /Session 2/ })).toHaveLength(1);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('localizes and discards only a failed create with keyboard focus recovery', async () => {
+    i18n.setLocale('de');
+    const coordinator = new DraftCoordinator();
+    const unrelatedScope = oracleScope('camp-a');
+    coordinator.open(unrelatedScope, null, 'Unabhängige Oracle-Frage');
+    vi.mocked(commands.getSessions).mockResolvedValue([session('camp-a', 'Ashes at Dawn')]);
+    vi.mocked(commands.createSession).mockRejectedValue({
+      code: 'DATABASE',
+      message: 'Sitzung konnte nicht gespeichert werden.',
+    });
+    const user = userEvent.setup();
+
+    renderLog('camp-a', coordinator);
+    await screen.findByText('Ashes at Dawn');
+    await user.click(screen.getByRole('button', { name: /Neue Sitzung/i }));
+
+    const failure = await screen.findByRole('alert');
+    expect(failure).toHaveTextContent('Sitzung konnte nicht erstellt werden.');
+    const discard = screen.getByRole('button', { name: 'Änderungen verwerfen' });
+    expect(screen.getByRole('button', { name: 'Erneut versuchen' })).toBeVisible();
+    discard.focus();
+    await user.keyboard('{Enter}');
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(commands.createSession).toHaveBeenCalledOnce();
+    expect(coordinator.get<string>(unrelatedScope)?.value).toBe('Unabhängige Oracle-Frage');
+    expect(screen.getByRole('button', { name: /Neue Sitzung/i })).toHaveFocus();
   });
 
   it('uses the newest request generation across an A to B to A campaign switch', async () => {

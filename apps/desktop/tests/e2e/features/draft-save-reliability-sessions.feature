@@ -159,6 +159,17 @@ Feature: Save session drafts reliably while moving through a campaign
     Then the created session is still shown once in campaign A
     And the created session belongs to campaign A
 
+  Scenario: Recover a failed new-session creation in its original campaign
+    Given creating a default new session for campaign A fails
+    Then the session view keeps an actionable creation failure
+    When I switch to campaign B and return to campaign A sessions
+    Then the failed creation is restored only in campaign A
+    When I retry the failed creation twice with the keyboard while it is pending
+    Then only one retry uses the original Campaign A session details
+    When the retried session creation succeeds
+    Then the session is created once in campaign A
+    And the creation failure is cleared
+
   Scenario: Recover and discard a session omitted after a failed save
     Given saving a changed session failed before its target was deleted
     And an unrelated session draft is retained
