@@ -70,6 +70,14 @@ Feature: Save rule-note drafts reliably while moving through a campaign
     Then my newer rule-note edit remains intact
     And the rule note is not incorrectly marked as saved
 
+  Scenario: Reject an acknowledgment for another rule
+    Given saving my changed Initiative note is in progress
+    When that save is acknowledged as the Adventurer Guide Initiative rule
+    Then my changed Initiative note remains available and needs attention
+    And neither rule is overwritten by the wrong acknowledgment
+    When I retry the Initiative note and its acknowledgment succeeds
+    Then the changed Initiative note is saved to Initiative only
+
   Scenario: Coalesce rapid rule-note saves without overlapping writes
     Given rule-note saves are being held open
     When I request rapid saves for three different rule notes

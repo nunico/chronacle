@@ -37,6 +37,7 @@ const CREATED_SESSION_TITLE = 'Session 2';
 const MISSING_SESSION_TITLE = 'Ashes retained after deletion';
 const MISSING_SESSION_NOTES = 'Exact notes retained after deletion.';
 const KEYBOARD_EDITED_SESSION_TITLE = `${CHANGED_SESSION_TITLE}go`;
+const UNRELATED_SESSION_DRAFT_TITLE = 'Lanterns retained separately';
 
 async function openSession(page: Page): Promise<{ title: Locator }> {
   await openRailView(page, 'Sessions');
@@ -548,6 +549,27 @@ Given('that session target is now deleted', async ({ page }) => {
   await removeSession(page, 'session-a');
 });
 
+Given('an unrelated session draft is retained', async ({ page }) => {
+  await openCampaign(page, 'Campaign B');
+  await openRailView(page, 'Sessions');
+  await page.getByRole('button', { name: /Lanterns in Rain/ }).click();
+  const title = page.getByRole('textbox', { name: 'Name', exact: true });
+  await title.fill(UNRELATED_SESSION_DRAFT_TITLE);
+  await rejectNext(page, 'update_session', {
+    code: 'DATABASE',
+    message: 'Unrelated session write failed.',
+  });
+  await title.blur();
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+
+  await openCampaign(page, 'Campaign A');
+  await openRailView(page, 'Sessions');
+  await page.getByRole('button', { name: new RegExp(MISSING_SESSION_TITLE) }).click();
+  await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(
+    MISSING_SESSION_TITLE,
+  );
+});
+
 When('I retry the failed session and it reports unavailable', async ({ page }) => {
   await page.getByRole('button', { name: 'Retry' }).click();
   await expect(page.getByText('This record is no longer available.')).toBeVisible();
@@ -580,10 +602,20 @@ When('I retry the omitted session with the keyboard', async ({ page }) => {
 
 Then('Retry still targets the omitted session', async ({ page }) => {
   await expect
-    .poll(() => observations(page, 'update_session').then((writes) => writes.length))
+    .poll(() =>
+      observations(page, 'update_session').then(
+        (writes) => writes.filter((write) => write.id === 'session-a').length,
+      ),
+    )
     .toBe(3);
   const writes = await observations(page, 'update_session');
-  expect(writes.every((write) => write.id === 'session-a')).toBe(true);
+  const omittedSessionWrites = writes.filter((write) => write.id === 'session-a');
+  expect(omittedSessionWrites).toHaveLength(3);
+  const retriedInput = omittedSessionWrites.at(-1)?.input as Record<string, unknown> | undefined;
+  expect(retriedInput).toMatchObject({
+    title: MISSING_SESSION_TITLE,
+    notes: MISSING_SESSION_NOTES,
+  });
 });
 
 Then('the unavailable failure remains actionable', async ({ page }) => {
@@ -606,6 +638,18 @@ Then('only the omitted session recovery row disappears', async ({ page }) => {
 
 Then('focus moves to the stable session control', async ({ page }) => {
   await expect(page.getByRole('button', { name: /New session/i })).toBeFocused();
+});
+
+Then('the unrelated session draft remains intact', async ({ page }) => {
+  await openCampaign(page, 'Campaign B');
+  await openRailView(page, 'Sessions');
+  const recovery = page.getByRole('button', { name: new RegExp(UNRELATED_SESSION_DRAFT_TITLE) });
+  await expect(recovery).toBeVisible();
+  await recovery.click();
+  await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(
+    UNRELATED_SESSION_DRAFT_TITLE,
+  );
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
 });
 
 When('I navigate to Oracle with the g chord', async ({ page }) => {

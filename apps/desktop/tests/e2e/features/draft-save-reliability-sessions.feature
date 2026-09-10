@@ -161,6 +161,7 @@ Feature: Save session drafts reliably while moving through a campaign
 
   Scenario: Recover and discard a session omitted after a failed save
     Given saving a changed session failed before its target was deleted
+    And an unrelated session draft is retained
     And that session target is now deleted
     When I retry the failed session and it reports unavailable
     And I navigate away and return to Sessions
@@ -172,6 +173,7 @@ Feature: Save session drafts reliably while moving through a campaign
     When I discard the omitted session with the keyboard
     Then only the omitted session recovery row disappears
     And focus moves to the stable session control
+    And the unrelated session draft remains intact
 
   Scenario: Ignore navigation shortcuts while editing, then save before keyboard navigation
     Given I have changed a session title without blurring it
