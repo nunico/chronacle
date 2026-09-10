@@ -24,6 +24,8 @@ headings:
     level: 2
 ---
 
+<!-- German proofreading requested -->
+
 Kampagnennotizen werden als Entitäten in acht Notizbüchern gespeichert: Spielercharaktere, NSCs, Orte, Fraktionen, Kreaturen, Gegenstände, Ereignisse und Verschiedenes.
 
 <h2 id="notiz-erstellen">Notiz erstellen</h2>

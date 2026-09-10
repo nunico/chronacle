@@ -24,6 +24,8 @@ headings:
     level: 2
 ---
 
+<!-- German proofreading requested -->
+
 Behandle einen **Kodexartikel** als erzeugten Nachschlagetext und **Notizen** oder **Tischnotizen** als deine dauerhaften Aufzeichnungen.
 
 <h2 id="grenze-verstehen">Grenze verstehen</h2>

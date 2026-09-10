@@ -301,7 +301,7 @@ describe('manual content registry', () => {
     );
   });
 
-  it('counts remaining German proofreading markers and omits overview filler', () => {
+  it('keeps every German article marked for proofreading and omits overview filler', () => {
     const germanSources = import.meta.glob<string>('/src/content/manual/de/**/*.md', {
       eager: true,
       query: '?raw',
@@ -315,7 +315,7 @@ describe('manual content registry', () => {
       Object.values(germanSources).filter((source) =>
         source.includes('<!-- German proofreading requested -->'),
       ),
-    ).toHaveLength(33);
+    ).toHaveLength(38);
     expect(englishOverview).not.toContain('A small detail');
     expect(englishOverview).not.toContain(
       'Each article keeps the important steps close to the relevant explanation.',

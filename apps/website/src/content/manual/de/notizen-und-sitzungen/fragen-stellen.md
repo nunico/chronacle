@@ -24,6 +24,8 @@ headings:
     level: 2
 ---
 
+<!-- German proofreading requested -->
+
 Wähle eine Kampagne, prüfe ihre Quellenabonnements und stelle dem Orakel dann eine konkrete Frage.
 
 <h2 id="schritt-fuer-schritt-fragen">Schritt für Schritt fragen</h2>

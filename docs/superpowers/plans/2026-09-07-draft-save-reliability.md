@@ -59,16 +59,23 @@ user grants that authority.
 
 **Files:**
 
-- Split `apps/desktop/tests/e2e/features/draft-save-reliability.feature` into
-  `apps/desktop/tests/e2e/features/draft-save-reliability/{oracle,entities,autosave,close}.feature`.
-- Split `apps/desktop/tests/e2e/backend/steps/draft-save-reliability.steps.ts`
-  into matching focused modules plus a shared fixture/control module.
+- Split the draft/save contract into six flat sources:
+  `apps/desktop/tests/e2e/features/draft-save-reliability-oracle.feature`,
+  `apps/desktop/tests/e2e/features/draft-save-reliability-entities.feature`,
+  `apps/desktop/tests/e2e/features/draft-save-reliability-sessions.feature`,
+  `apps/desktop/tests/e2e/features/draft-save-reliability-rules.feature`,
+  `apps/desktop/tests/e2e/features/draft-save-reliability-campaigns.feature`, and
+  `apps/desktop/tests/e2e/features/draft-save-reliability-close.feature`.
+- Split the former combined step definitions into six matching flat modules plus
+  `draft-save-reliability-common.steps.ts` under
+  `apps/desktop/tests/e2e/backend/steps/`.
 - Modify `apps/desktop/tests/e2e/backend/ipc-mock.ts` only for deterministic
   delete, create, wrong-target, and exit controls.
 
-- [ ] Copy the corrective Gherkin from the design verbatim before production
-      changes. Preserve every established scenario while moving it; do not
-      weaken assertions or duplicate step registration.
+- [ ] Define the corrective Gherkin in the six executable feature sources before
+      production changes. Preserve every established scenario while moving it;
+      do not weaken assertions or duplicate step registration. Keep scenario
+      bodies out of the design after the executable sources exist.
 - [ ] Add scenarios for session failure followed by NOT_FOUND list omission,
       navigation, same-target Retry and targeted Discard; keyboard navigation
       with unsaved entity/session/rule drafts; immutable entity deletion target;
@@ -78,7 +85,7 @@ user grants that authority.
       argument forwarding:
 
   ```bash
-  pnpm -C apps/desktop e2e:backend --grep "Preserve work|Close Chronacle|Coordinate destructive|Keep asynchronous"
+  pnpm -C apps/desktop e2e:backend --grep "Preserve work while moving through a campaign|Preserve entity drafts while moving through a campaign|Save session drafts reliably while moving through a campaign|Save rule-note drafts reliably while moving through a campaign|Coordinate campaign deletion with retained drafts|Protect retained drafts during normal window closing"
   ```
 
   Expected red: new scenarios fail for the reported behavior, while generation
@@ -195,10 +202,10 @@ user grants that authority.
       exit, and no double termination. Assert the macOS native adapter receives
       menu/Dock `applicationShouldTerminate`, returns terminate-later, and feeds
       the same `ExitAuthorization` state.
-- [ ] Write failing dialog tests where `destroy()` rejects. Assert drafts remain
+- [ ] Write failing dialog tests where `confirm_app_exit` rejects. Assert drafts remain
       byte-for-byte intact, persistent localized failure appears, Retry is
       keyboard-operable, Cancel restores exact focus, and no writer/chat command
-      runs. `discardAll()` must not run before native destruction succeeds.
+      runs. The coordinator must remain intact until process teardown.
 - [ ] Implement a narrow Tauri exit handshake: native adapters publish one
       intent/nonce, frontend Cancel revokes it, and the typed
       `confirm_app_exit` command validates it before allowing one native exit.
@@ -236,7 +243,7 @@ implementation fixes → rerun and re-review.
   additional observable assertions; never weaken the contract.
 
 - [ ] Make the active-save native journey executable; remove `it.skip`. Add
-      window close, application Quit, destroy-failure/retry, and concurrent
+      window close, application Quit, exit-authorization failure/retry, and concurrent
       request journeys. Use deterministic test-only IPC controls, not sleeps.
 - [ ] Start the native app with an isolated temporary application data/config/
       cache root and fresh RocksDB path. Assert teardown removes the temporary
@@ -258,7 +265,7 @@ implementation fixes → rerun and re-review.
   and do not claim native completion.
 
 - [ ] Replace the corrective Gherkin block in the design with direct links to
-      the four executable feature files. The feature files become the only
+      the six executable feature files. The feature files become the only
       maintained scenario bodies; the spec keeps only the scenario inventory and
       lifecycle rationale.
 - [ ] Run focused tests, complete desktop/website checks, then
@@ -273,8 +280,19 @@ implementation fixes → rerun and re-review.
 
 **Acceptance/test-engineer-owned:**
 
-- `apps/desktop/tests/e2e/features/draft-save-reliability.feature`
-- `apps/desktop/tests/e2e/backend/steps/draft-save-reliability.steps.ts`
+- `apps/desktop/tests/e2e/features/draft-save-reliability-oracle.feature`
+- `apps/desktop/tests/e2e/features/draft-save-reliability-entities.feature`
+- `apps/desktop/tests/e2e/features/draft-save-reliability-sessions.feature`
+- `apps/desktop/tests/e2e/features/draft-save-reliability-rules.feature`
+- `apps/desktop/tests/e2e/features/draft-save-reliability-campaigns.feature`
+- `apps/desktop/tests/e2e/features/draft-save-reliability-close.feature`
+- `apps/desktop/tests/e2e/backend/steps/draft-save-reliability-common.steps.ts`
+- `apps/desktop/tests/e2e/backend/steps/draft-save-reliability-oracle.steps.ts`
+- `apps/desktop/tests/e2e/backend/steps/draft-save-reliability-entities.steps.ts`
+- `apps/desktop/tests/e2e/backend/steps/draft-save-reliability-sessions.steps.ts`
+- `apps/desktop/tests/e2e/backend/steps/draft-save-reliability-rules.steps.ts`
+- `apps/desktop/tests/e2e/backend/steps/draft-save-reliability-campaigns.steps.ts`
+- `apps/desktop/tests/e2e/backend/steps/draft-save-reliability-close.steps.ts`
 - `apps/desktop/tests/e2e/backend/ipc-mock.ts`
 - `apps/desktop/tests/e2e/ui/draft-close.e2e.mjs`
 - Create `apps/desktop/src/views/SessionLogView.test.ts` for Slice 3 campaign/load
@@ -352,8 +370,8 @@ implementation fixes → rerun and re-review.
 
 **Owner:** Test engineer. Do not edit production files.
 
-- [ ] Confirm that `draft-save-reliability.feature` contains the scenarios in
-      the design verbatim: Oracle view/campaign/no-campaign retention; existing/new
+- [ ] Confirm that the six linked `draft-save-reliability-*.feature` files contain
+      the observable contract: Oracle view/campaign/no-campaign retention; existing/new
       entity retention; record isolation; baseline reversion; entity/session/rule
       failure and retry; edit-during-save; navigation-during-save; rapid saves;
       create-r1/edit-r2 promotion without duplicate Create; navigation away and
@@ -411,7 +429,7 @@ implementation fixes → rerun and re-review.
       setup and proves the first frontend command cannot race ahead of the seed.
       This is test infrastructure, not product draft policy.
 
-- [ ] Implement `draft-save-reliability.steps.ts` with role/label locators and
+- [ ] Implement the linked flat draft-save reliability step modules with role/label locators and
       deferred controls. Keep `@native-close-contract` excluded from mocked browser
       execution and bind it in Task 5's tauri-driver check.
 - [ ] Run the red contract:
@@ -1217,9 +1235,10 @@ implementation fixes → rerun and re-review.
 focused tests and production; independent test engineer and reviewers afterward.
 No two owners edit the same file concurrently.
 
-- [ ] Test engineer maintains the Slice 3 Gherkin in the executable
-      `draft-save-reliability.feature`, keeps the design's acceptance block
-      byte-identical to that source, and implements only its step/harness files.
+- [ ] Test engineer maintains the Slice 3 Gherkin in the executable flat session
+      and rule feature files linked by the design, and implements only their
+      step/harness files. The executable files are the single source for scenario
+      bodies.
       Cover session baseline reversion, campaign isolation, failure/Retry,
       edit-during-save, pending navigation, rapid requests, unavailable targets,
       rule tab/remount retention, campaign/collection isolation, and rule races.
@@ -1475,22 +1494,25 @@ No two owners edit the same file concurrently.
 
   ```ts
   export interface WindowClosePort {
-    onCloseRequested(
-      handler: (event: { preventDefault(): void }) => void,
+    registerCloseRequests(
+      handler: (request: CloseRequest) => void,
+      signal?: AbortSignal,
     ): Promise<() => void>;
-    destroy(): Promise<void>;
+    requestExitIntent(): Promise<number>;
+    confirmExit(intent: number, decision: AppExitDecision): Promise<void>;
+    cancelExit(intent: number): Promise<boolean>;
   }
   ```
 
   Assert clean close is not prevented; dirty/saving/failed Oracle/entity/session/
   rule states are prevented; Cancel initially has focus; Tab is trapped; Escape
   cancels and restores composer focus. With no active write, Discard and close
-  requests the typed Rust exit command without clearing drafts first. With any active backend write, it is disabled with
-  a polite localized reason, `discardAll` reports `blocked-active-save`, and destroy
-  is not called. After settlement, keep the original close prevented: enable
+  requests the typed Rust exit command without clearing drafts first. With any
+  active backend write, it is disabled with a polite localized reason, and
+  `confirmExit` is not called. After settlement, keep the original close prevented: enable
   Discard and close if a newer/failed draft remains, or replace it with an enabled
   Close action if all risk is clean. Keep focus on Cancel until the user moves it;
-  only an explicit enabled close action calls destroy. Assert no writer/chat
+  only an explicit enabled close action calls `confirmExit`. Assert no writer/chat
   function is invoked by the close flow.
 
   Before adding production locale entries, assert localized rendering in English,
@@ -1507,9 +1529,11 @@ No two owners edit the same file concurrently.
     src/components/CloseDraftsDialog.test.ts src/shell/Shell.test.ts
   ```
 
-- [ ] Implement the Tauri adapter with `getCurrentWindow().onCloseRequested` and
-      forced `destroy()`. Register once for Shell lifetime and always unlisten on
-      teardown, including the listener-promise-after-destroy race.
+- [ ] Implement the Tauri adapter with `getCurrentWindow().onCloseRequested`, the
+      application-exit event, and the typed request/confirm/cancel commands. It
+      must not call the window close or destroy APIs directly. Register once for
+      Shell lifetime and always unlisten on teardown, including a listener promise
+      that settles after teardown.
 - [ ] Add the close-dialog-only `drafts.discardAndClose`,
       `drafts.waitForSavingBeforeClose`, and `drafts.safeToClose` keys to the
       English source plus German/French/Spanish catalogs. Reuse the existing
@@ -1530,8 +1554,8 @@ No two owners edit the same file concurrently.
       close again, keyboard-activate Discard and close, and assert no chat/save IPC
       happened during closing. In a second journey, hold an already-started session
       save, make a newer edit without requesting another save, and request native
-      close. Assert Discard and close is disabled with its reason and destroy has not
-      occurred; settle the first save, assert the newer revision remains unsaved and
+      close. Assert Discard and close is disabled with its reason and process exit has
+      not occurred; settle the first save, assert the newer revision remains unsaved and
       the destructive action becomes available, then activate it and confirm close
       without an extra save.
 - [ ] Build and run only this native check:
@@ -1573,7 +1597,7 @@ No two owners edit the same file concurrently.
       checks:
 
   ```bash
-  pnpm -C apps/website test:run src/lib/content/registry.test.ts
+  pnpm -C apps/website exec vitest run src/lib/content/registry.test.ts
   pnpm -C apps/website typecheck
   pnpm -C apps/website lint
   pnpm -C apps/website build
@@ -1617,7 +1641,7 @@ reviewer → implementer fixes → test engineer/reviewers again.
     src/views/SessionLogView.test.ts src/components/SessionRow.test.ts \
     src/components/RulesPanel.test.ts src/shell/Shell.test.ts
   cargo test -p chronacle-extraction update_rule_notes -- --nocapture
-  pnpm -C apps/desktop e2e:backend --grep "Preserve work"
+  pnpm -C apps/desktop e2e:backend --grep "Preserve work while moving through a campaign|Preserve entity drafts while moving through a campaign|Save session drafts reliably while moving through a campaign|Save rule-note drafts reliably while moving through a campaign|Coordinate campaign deletion with retained drafts|Protect retained drafts during normal window closing"
   ```
 
 - [ ] Run frontend Svelte analysis on every modified `.svelte` file and resolve
@@ -1654,7 +1678,8 @@ reviewer → implementer fixes → test engineer/reviewers again.
 - [ ] Rerun the native close command from Task 5 against this same final working
       tree state. Report any platform/tool limitation exactly.
 - [ ] Confirm no lockfile, secret, generated output, license, or brand asset is
-      in `git diff --name-only`. Confirm the deliberate capability diff is limited
-      to removing unused close permission and retaining main-window destroy. Final report lists what
+      in `git diff --name-only`. Confirm the deliberate capability diff removes
+      both unused main-window close and destroy permissions and retains neither
+      grant. Final report lists what
       is safe now, in-memory lifetime/close policy, shared design, exact checks,
       review findings/resolutions, and any concrete unverified native limitation.

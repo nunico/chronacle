@@ -125,7 +125,7 @@ the expected acceptance red state:
 ```text
 pnpm -C apps/desktop e2e:backend -- --grep "App shell smoke|Compiled rules browsing"
 Result: failed during bddgen with 94 missing steps from
-draft-save-reliability.feature.
+the then-combined draft/save reliability feature.
 ```
 
 That failure is behavioral test scaffolding, not a regression in the prior
@@ -815,7 +815,7 @@ campaign or collection selects a different draft set while the shared
 | Close dialog, write settles with risk               | Save acknowledgment/failure                                                           | Keep the original close request prevented; enable Discard and close for any remaining unsaved/failed draft                                                                                                                                                                        |
 | Close dialog, all risk settles clean                | Save acknowledgment                                                                   | Keep the original close prevented; announce **Saving finished. It is safe to close.** and replace the destructive action with **Close**                                                                                                                                           |
 | Close dialog                                        | Escape/Cancel                                                                         | Keep drafts; restore focus to opener                                                                                                                                                                                                                                              |
-| Close dialog, no active write                       | Discard and close                                                                     | Clear coordinator, call forced native destroy; start no save                                                                                                                                                                                                                      |
+| Close dialog, no active write                       | Discard and close                                                                     | Invoke the typed `confirm_app_exit` authorization without clearing drafts first; successful process teardown releases the in-memory coordinator; start no save                                                                                                                    |
 
 ### Sequence diagram
 
@@ -1302,122 +1302,18 @@ and synthesized unavailable presentation rows without persisting them.
 
 ## Acceptance Criteria
 
-The executable Gherkin files under
-`apps/desktop/tests/e2e/features/draft-save-reliability/` are the canonical
-observable contract. They are split by Oracle, entities, automatic saves, and
-native close; step definitions mirror those editor boundaries. This document
-does not embed the complete executable suite. The corrective scenarios below
-are written before implementation; Task 1 transfers them verbatim and replaces
-this block with links to the resulting feature files so there is one maintained
-copy.
+The six flat executable Gherkin files are the canonical observable contract:
 
-```gherkin
-Feature: Close Chronacle without losing retained work
+- [Oracle drafts](../../../apps/desktop/tests/e2e/features/draft-save-reliability-oracle.feature)
+- [Entity drafts](../../../apps/desktop/tests/e2e/features/draft-save-reliability-entities.feature)
+- [Session drafts](../../../apps/desktop/tests/e2e/features/draft-save-reliability-sessions.feature)
+- [Rule-note drafts](../../../apps/desktop/tests/e2e/features/draft-save-reliability-rules.feature)
+- [Campaign deletion](../../../apps/desktop/tests/e2e/features/draft-save-reliability-campaigns.feature)
+- [Normal closing](../../../apps/desktop/tests/e2e/features/draft-save-reliability-close.feature)
 
-  @native-close-contract
-  Scenario Outline: Intercept every normal application termination path
-    Given I have an unsent Oracle question
-    When I request normal termination with <exit path>
-    Then termination is paused by the unsaved-work dialog
-    And my question remains in the composer
-    And it has not been submitted
-
-    Examples:
-      | exit path          |
-      | the window close   |
-      | application Quit   |
-
-  @native-close-contract
-  Scenario: Preserve drafts when native destruction fails
-    Given I have an unsent Oracle question
-    And native destruction will fail
-    When I choose "Discard and close"
-    Then Chronacle remains open
-    And my question remains in the composer
-    And I see an actionable close failure
-    When native destruction becomes available
-    And I retry closing with the keyboard
-    Then the window closes
-    And no question was submitted
-
-  @native-close-contract
-  Scenario: Wait for an active save before closing
-    Given a save of an earlier session draft revision is in progress
-    And I have made a newer unsaved edit to the session
-    When I request normal application termination
-    Then termination is paused
-    And Discard and close is unavailable
-    When the earlier save completes
-    Then my newer session edit remains unsaved
-    And Discard and close becomes available
-
-Feature: Coordinate destructive actions with retained drafts
-
-  Scenario: Delete the entity captured by confirmation
-    Given NPC "Mira" and location "Mira" both exist
-    When I open deletion confirmation for NPC "Mira"
-    And I try to navigate to locations with the keyboard
-    And I confirm deletion
-    Then the NPC "Mira" is deleted
-    And the location "Mira" remains
-    And only the NPC draft is removed
-
-  Scenario: Wait for an entity save before deletion
-    Given a save for NPC "Mira" is in progress
-    When I try to delete NPC "Mira"
-    Then deletion is unavailable
-    And I am told to wait for saving to finish
-    When saving succeeds
-    And I delete NPC "Mira"
-    Then the entity and only its retained draft are removed
-
-  Scenario: Preserve campaign drafts when campaign deletion fails
-    Given campaign A contains retained unsaved and failed drafts
-    When I explicitly confirm deleting campaign A
-    And campaign deletion fails
-    Then campaign A's drafts remain available
-    And no campaign B draft changes
-
-Feature: Keep asynchronous work in its captured scope
-
-  Scenario: Finish creating a session after switching campaigns
-    Given creating a session for campaign A is in progress
-    When I switch to campaign B
-    And session creation succeeds
-    Then the new session is not shown in campaign B
-    When I return to campaign A
-    Then the new session is shown in campaign A
-
-  Scenario: Recover a missing session after a failed save
-    Given saving my changed session failed
-    And the next session list no longer contains its target
-    When I navigate away and return
-    Then my changed session remains available as unavailable
-    And Retry still targets the missing session
-    When I discard that session draft with the keyboard
-    Then only its recovery row disappears
-    And focus moves to a stable session control
-
-  Scenario: Reject a rule-note acknowledgment for another rule
-    Given I changed notes for rule "Initiative"
-    When saving returns an acknowledgment for rule "Surprise"
-    Then the Initiative note remains available
-    And Initiative shows an actionable save failure
-    And Surprise is unchanged
-
-  Scenario Outline: Retain drafts during keyboard navigation
-    Given I am editing <editor> without saving
-    When I navigate to Oracle with the keyboard
-    And I return with the keyboard
-    Then the exact <editor> draft is restored
-    And navigation did not start a save
-
-    Examples:
-      | editor         |
-      | an entity      |
-      | a session      |
-      | a rule note    |
-```
+Their matching flat step modules mirror those editor and lifecycle boundaries.
+This design retains the lifecycle rationale and scenario inventory, while the
+feature files remain the single maintained source for executable scenario bodies.
 
 The established acceptance inventory remains: campaign-scoped Oracle retention
 without submission; existing/new entity retention and promotion; explicit
@@ -1514,7 +1410,7 @@ serialization; the frontend adapter test covers wrong-target rejection.
   the canonical `notes` value—and reject a missing ID; the Tauri command smoke
   test and frontend wrapper typecheck verify the return type reaches the adapter.
 - A Linux `tauri-driver` check exercises window close, application Quit,
-  destroy rejection/retry, and an already-running save. It uses a temporary
+  exit-authorization rejection/retry, and an already-running save. It uses a temporary
   application data/config/cache root and a fresh database; it never reads or
   mutates developer state. The active-save test is executed, not skipped.
   Mocked browser/component coverage does not substitute for it.

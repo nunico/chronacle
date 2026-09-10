@@ -27,6 +27,8 @@ headings:
     level: 2
 ---
 
+<!-- German proofreading requested -->
+
 Chronacle ordnet jeden Entwurf der jeweiligen Kampagne und genau dem Eintrag zu, in dem du ihn begonnen hast. Die Navigation selbst sendet, speichert oder verwirft diese Arbeit nicht.
 
 <h2 id="speicherstatus-lesen">Speicherstatus lesen</h2>
