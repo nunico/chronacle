@@ -5,12 +5,46 @@
 // and Windows (Edge driver) ONLY — there is no macOS support, so this harness
 // runs in Linux CI, not on a dev Mac. See README.md.
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Builder } from 'selenium-webdriver';
 
 const DRIVER_PORT = 4444;
-const DRIVER_URL = `http://127.0.0.1:${DRIVER_PORT}/`;
+function driverUrl(port) {
+  return `http://127.0.0.1:${port}/`;
+}
+
+/**
+ * Create an app-only XDG environment for one native journey.
+ *
+ * tauri-driver and the application inherit these paths, so RocksDB, settings,
+ * WebKit configuration, and caches cannot read or mutate the developer's
+ * profile. HOME is deliberately left untouched.
+ */
+export function createIsolatedAppEnvironment() {
+  const root = mkdtempSync(join(tmpdir(), 'chronacle-native-e2e-'));
+  const dataHome = join(root, 'data');
+  const configHome = join(root, 'config');
+  const cacheHome = join(root, 'cache');
+  for (const directory of [dataHome, configHome, cacheHome]) {
+    mkdirSync(directory, { recursive: true });
+  }
+
+  return {
+    root,
+    env: {
+      ...process.env,
+      XDG_DATA_HOME: dataHome,
+      XDG_CONFIG_HOME: configHome,
+      XDG_CACHE_HOME: cacheHome,
+    },
+    cleanup() {
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
 
 /** Absolute path to the built release binary the driver should launch. */
 export function appBinary() {
@@ -33,9 +67,10 @@ export function appBinary() {
 }
 
 /** Spawn `tauri-driver`. Returns the child process; kill it in teardown. */
-export function startTauriDriver() {
-  const child = spawn('tauri-driver', ['--port', String(DRIVER_PORT)], {
+export function startTauriDriver({ port = DRIVER_PORT, env = process.env } = {}) {
+  const child = spawn('tauri-driver', ['--port', String(port)], {
     stdio: 'inherit',
+    env,
   });
   child.on('error', (e) => {
     throw new Error(
@@ -47,14 +82,61 @@ export function startTauriDriver() {
 }
 
 /** Build a WebDriver session against the launched app. */
-export async function buildDriver() {
+export async function buildDriver({ port = DRIVER_PORT } = {}) {
   return new Builder()
     .withCapabilities({
       browserName: 'wry',
       'tauri:options': { application: appBinary() },
     })
-    .usingServer(DRIVER_URL)
+    .usingServer(driverUrl(port))
     .build();
+}
+
+async function stopTauriDriver(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const stopped = new Promise((resolve) => child.once('exit', resolve));
+  child.kill();
+  const didStop = await Promise.race([
+    stopped.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), 5000)),
+  ]);
+  if (didStop || child.exitCode !== null || child.signalCode !== null) return;
+  child.kill('SIGKILL');
+  await stopped;
+}
+
+/** Launch one driver/application pair with a fresh profile and reliable cleanup. */
+export async function createNativeTestSession({ port = DRIVER_PORT } = {}) {
+  const isolated = createIsolatedAppEnvironment();
+  const tauriDriver = startTauriDriver({ port, env: isolated.env });
+  let driver;
+  let closed = false;
+
+  async function close() {
+    if (closed) return;
+    closed = true;
+    if (driver) {
+      try {
+        await driver.quit();
+      } catch {
+        // A journey may intentionally destroy the native window first.
+      }
+    }
+    try {
+      await stopTauriDriver(tauriDriver);
+    } finally {
+      isolated.cleanup();
+    }
+  }
+
+  try {
+    driver = await buildDriver({ port });
+    await waitForWebviewReady(driver);
+    return { driver, appEnvironment: isolated, close };
+  } catch (error) {
+    await close();
+    throw error;
+  }
 }
 
 /**
