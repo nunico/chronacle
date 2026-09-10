@@ -1,3 +1,40 @@
+<script module lang="ts">
+  interface ActiveSessionLoad {
+    request: number;
+    campaignId: string;
+    acknowledgedCreates: Set<string>;
+  }
+
+  export class SessionLoadFence {
+    private active: ActiveSessionLoad | undefined;
+
+    get trackedCount() {
+      return this.active?.acknowledgedCreates.size ?? 0;
+    }
+
+    begin(request: number, campaignId: string) {
+      this.active = { request, campaignId, acknowledgedCreates: new Set() };
+    }
+
+    acknowledge(campaignId: string, scope: string) {
+      if (this.active?.campaignId === campaignId) this.active.acknowledgedCreates.add(scope);
+    }
+
+    forget(scope: string) {
+      this.active?.acknowledgedCreates.delete(scope);
+    }
+
+    settle(request: number, campaignId: string) {
+      if (this.active?.request !== request || this.active.campaignId !== campaignId) {
+        return new Set<string>();
+      }
+      const acknowledgedCreates = this.active.acknowledgedCreates;
+      this.active = undefined;
+      return acknowledgedCreates;
+    }
+  }
+</script>
+
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
@@ -43,8 +80,7 @@
   let mounted = true;
   let sessionRequest = 0;
   let entityRequest = 0;
-  let createAcknowledgmentGeneration = 0;
-  const acknowledgedCreates = new Map<string, number>();
+  const sessionLoadFence = new SessionLoadFence();
 
   onDestroy(() => {
     mounted = false;
@@ -81,8 +117,8 @@
   $effect(() => {
     const requestedCampaign = campaignId;
     const request = ++sessionRequest;
-    const createGenerationAtStart = createAcknowledgmentGeneration;
     const prefix = `session:${requestedCampaign}:`;
+    sessionLoadFence.begin(request, requestedCampaign);
     const acknowledgmentsAtStart = untrack(
       () =>
         new Map(
@@ -98,8 +134,7 @@
         if (!mounted || request !== sessionRequest || campaignId !== requestedCampaign) return;
         const reconciled = [...loaded];
         const loadedIds = new Set(loaded.map(({ id }) => id));
-        for (const [scope, generation] of acknowledgedCreates) {
-          if (generation <= createGenerationAtStart || !scope.startsWith(prefix)) continue;
+        for (const scope of sessionLoadFence.settle(request, requestedCampaign)) {
           const createdId = scope.slice(prefix.length);
           const session = backendSessions.find(
             ({ id, campaign_id }) => id === createdId && campaign_id === requestedCampaign,
@@ -121,21 +156,16 @@
             'authoritative-list',
           );
         }
-        for (const [scope, generation] of acknowledgedCreates) {
-          if (scope.startsWith(prefix) && generation <= createGenerationAtStart) {
-            acknowledgedCreates.delete(scope);
-          }
-        }
         backendSessions = reconciled;
         loading = false;
       },
       (error: unknown) => {
         if (!mounted || request !== sessionRequest || campaignId !== requestedCampaign) return;
         console.error('Failed to load sessions:', error);
+        const acknowledgedCreates = sessionLoadFence.settle(request, requestedCampaign);
         backendSessions = backendSessions.filter((session) => {
           if (session.campaign_id !== requestedCampaign) return false;
-          const generation = acknowledgedCreates.get(sessionScope(requestedCampaign, session.id));
-          return generation !== undefined && generation > createGenerationAtStart;
+          return acknowledgedCreates.has(sessionScope(requestedCampaign, session.id));
         });
         loading = false;
       },
@@ -182,8 +212,7 @@
         sessionDraftValue(created),
         'authoritative-list',
       );
-      createAcknowledgmentGeneration += 1;
-      acknowledgedCreates.set(scope, createAcknowledgmentGeneration);
+      sessionLoadFence.acknowledge(requestedCampaign, scope);
       backendSessions = [
         ...backendSessions.filter((session) => session.campaign_id === requestedCampaign),
         created,
@@ -200,7 +229,7 @@
   }
 
   function handleDelete(id: string) {
-    acknowledgedCreates.delete(sessionScope(campaignId, id));
+    sessionLoadFence.forget(sessionScope(campaignId, id));
     backendSessions = backendSessions.filter((session) => session.id !== id);
   }
 </script>
