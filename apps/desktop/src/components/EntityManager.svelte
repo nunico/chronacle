@@ -137,8 +137,14 @@
   let formPanel = $state<HTMLDivElement>();
   let consumedOpenKey = $state<string | null>(null);
   let mounted = true;
+  let activeExistingProjectionPrefix: string | null = null;
+  let activeNewProjectionPrefix: string | null = null;
   onDestroy(() => {
     mounted = false;
+    if (activeExistingProjectionPrefix) {
+      draftCoordinator.releasePrefix(activeExistingProjectionPrefix);
+    }
+    if (activeNewProjectionPrefix) draftCoordinator.releasePrefix(activeNewProjectionPrefix);
   });
   let resolvedActiveDraftScope = $derived(
     activeDraftScope ? draftCoordinator.resolveScope(activeDraftScope) : null,
@@ -330,6 +336,14 @@
           draftFromNode(node),
           'authoritative-list',
         );
+      }
+      const loadedScopes = new Set(
+        loaded.map((node) => entityScope(requestCampaignId, requestKind, node.id)),
+      );
+      for (const draft of draftCoordinator.listByPrefix<EntityDraftValue>(
+        `entity:${requestCampaignId}:${requestKind}:`,
+      )) {
+        if (!loadedScopes.has(draft.scope)) draftCoordinator.release(draft.scope);
       }
       entities = loaded;
     } catch (e) {
@@ -798,6 +812,14 @@
   $effect(() => {
     const scope = `${campaignId}:${kind}`;
     if (scope === loadedScope) return;
+    untrack(() => {
+      if (activeExistingProjectionPrefix) {
+        draftCoordinator.releasePrefix(activeExistingProjectionPrefix);
+      }
+      if (activeNewProjectionPrefix) draftCoordinator.releasePrefix(activeNewProjectionPrefix);
+    });
+    activeExistingProjectionPrefix = `entity:${campaignId}:${kind}:`;
+    activeNewProjectionPrefix = `entity-new:${campaignId}:${kind}:`;
     loadedScope = scope;
     showForm = false;
     formNode = null;

@@ -80,10 +80,12 @@
   let mounted = true;
   let sessionRequest = 0;
   let entityRequest = 0;
+  let activeProjectionPrefix: string | null = null;
   const sessionLoadFence = new SessionLoadFence();
 
   onDestroy(() => {
     mounted = false;
+    if (activeProjectionPrefix) draftCoordinator.releasePrefix(activeProjectionPrefix);
   });
 
   let sessionPrefix = $derived(`session:${campaignId}:`);
@@ -118,6 +120,11 @@
     const requestedCampaign = campaignId;
     const request = ++sessionRequest;
     const prefix = `session:${requestedCampaign}:`;
+    if (activeProjectionPrefix && activeProjectionPrefix !== prefix) {
+      const previousPrefix = activeProjectionPrefix;
+      untrack(() => draftCoordinator.releasePrefix(previousPrefix));
+    }
+    activeProjectionPrefix = prefix;
     sessionLoadFence.begin(request, requestedCampaign);
     const acknowledgmentsAtStart = untrack(
       () =>
@@ -155,6 +162,12 @@
             sessionDraftValue(session),
             'authoritative-list',
           );
+        }
+        const reconciledScopes = new Set(
+          reconciled.map((session) => sessionScope(requestedCampaign, session.id)),
+        );
+        for (const draft of draftCoordinator.listByPrefix<SessionDraftValue>(prefix)) {
+          if (!reconciledScopes.has(draft.scope)) draftCoordinator.release(draft.scope);
         }
         backendSessions = reconciled;
         loading = false;

@@ -100,6 +100,19 @@ describe('EntityManager', () => {
     expect(commands.getEntities).toHaveBeenCalledWith('camp1', 'npc');
   });
 
+  it('releases clean entity projections when the manager unmounts', async () => {
+    const coordinator = new DraftCoordinator();
+    const scope = entityScope('camp1', 'npc', 'npc1');
+    vi.mocked(commands.getEntities).mockResolvedValue([mockNpc()]);
+    const rendered = renderManager(coordinator);
+
+    await screen.findByText('Torvin');
+    expect(coordinator.get(scope)).toBeDefined();
+    rendered.unmount();
+
+    expect(coordinator.get(scope)).toBeUndefined();
+  });
+
   it('shows form when New button is clicked', async () => {
     render(EntityManager, { props: { campaignId: 'camp1', kind: 'npc' } });
     await waitFor(() => screen.getByRole('button', { name: /new npc/i }));

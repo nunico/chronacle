@@ -5,6 +5,7 @@ import * as commands from '../lib/commands';
 import { toasts, clearToasts } from '../lib/toast.svelte';
 import { i18n } from '../lib/locale.svelte';
 import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
+import { oracleScope } from '../lib/drafts/draft-state';
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -336,6 +337,16 @@ describe('OracleView', () => {
       expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
       expect(screen.getByRole('status')).toHaveTextContent('Retained for this session only.');
       expect(m.chatSend).not.toHaveBeenCalled();
+    });
+
+    it('releases an empty composer projection after unmount', async () => {
+      const coordinator = new DraftCoordinator();
+      const rendered = renderOracle(coordinator, 'camp-1');
+      await waitFor(() => expect(coordinator.get(oracleScope('camp-1'))).toBeDefined());
+
+      rendered.unmount();
+
+      expect(coordinator.get(oracleScope('camp-1'))).toBeUndefined();
     });
 
     it('keeps Campaign A, Campaign B, and no-campaign questions isolated', async () => {
