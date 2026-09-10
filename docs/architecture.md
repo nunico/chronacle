@@ -1691,11 +1691,20 @@ method remains inherited from Tauri's delegate class.
 An unauthorized AppKit termination request is synchronously deferred with
 `NSTerminateLater`, enters the same `ExitAuthorization` nonce state used by the
 Tauri run callback, and emits the same targeted `app-exit-requested` event to
-the main webview. Concurrent requests coalesce. The frontend resolves the
-decision through `confirm_app_exit`; after nonce validation, `app.exit(0)` uses
-Tauri's existing authorized exit path. Chronacle does not call AppKit's
-`replyToApplicationShouldTerminate:` and therefore cannot accidentally start a
-second native termination sequence.
+the main webview. Concurrent requests coalesce, including a native request that
+attaches its deferred AppKit transaction to an existing window-close nonce. The
+nonce records whether it owns an AppKit transaction so its resolution follows
+the correct platform path: native cancellation and confirmation schedule
+exactly one `replyToApplicationShouldTerminate(false|true)` on the main thread,
+while non-native confirmation continues through Tauri's authorized
+`app.exit(0)` path.
+
+The nonce is cleared only after the scheduled AppKit reply runs. If main-thread
+scheduling fails, the reservation rolls back to a pending, retryable state. If
+publishing a newly-created native request fails, the adapter cancels that
+AppKit termination synchronously and rolls back only the intent and attachment
+it just created; it never returns `NSTerminateLater` without a reachable
+decision path.
 
 Installation fails closed: if no delegate is available or the subclass cannot
 be installed, application startup returns an error instead of presenting an
@@ -1709,6 +1718,8 @@ private API or delegate replacement is used.
 
 - Cmd-Q, Dock Quit, AppleScript `quit`, window close, and Tauri application exit
   share one authorization state and user decision.
+- Each `NSTerminateLater` transaction receives one matching AppKit reply;
+  confirmation does not recurse through a second native termination request.
 - Tauri delegate upgrades remain a compatibility surface; macOS release checks
   must exercise all three AppKit Quit initiators plus Cancel and confirmed exit.
 - Linux and Windows do not compile or link the adapter or its dependencies.
