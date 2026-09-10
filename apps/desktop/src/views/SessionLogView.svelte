@@ -345,9 +345,10 @@
 
   async function focusSessionHeader(sessionId: string): Promise<void> {
     await tick();
-    const index = sessions.findIndex((session) => session.id === sessionId);
-    if (index < 0) return;
-    sessionLogElement?.querySelectorAll<HTMLButtonElement>('.session-header').item(index).focus();
+    const header = Array.from(
+      sessionLogElement?.querySelectorAll<HTMLButtonElement>('.session-header') ?? [],
+    ).find((candidate) => candidate.dataset.sessionId === sessionId);
+    header?.focus();
   }
 
   async function retryNewSession(event: MouseEvent): Promise<void> {
@@ -390,9 +391,17 @@
     );
   }
 
-  function handleDelete(id: string) {
+  async function handleDelete(id: string): Promise<void> {
+    const deletedIndex = sessions.findIndex((session) => session.id === id);
+    const nextFocusId = sessions[deletedIndex + 1]?.id ?? sessions[deletedIndex - 1]?.id ?? null;
     sessionLoadFence.forget(sessionScope(campaignId, id));
     backendSessions = backendSessions.filter((session) => session.id !== id);
+    if (nextFocusId) {
+      await focusSessionHeader(nextFocusId);
+    } else {
+      await tick();
+      sessionLogElement?.querySelector<HTMLButtonElement>('.new-session-button')?.focus();
+    }
   }
 
   async function handleDiscardUnavailable(id: string) {

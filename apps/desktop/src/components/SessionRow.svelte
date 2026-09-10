@@ -57,7 +57,7 @@
     session: Session;
     entityMap: Map<string, { id: string; kind: string }>;
     onUpdate: (session: Session) => void;
-    onDelete: (id: string) => void;
+    onDelete: (id: string) => void | Promise<void>;
     onDiscardUnavailable?: (id: string) => void | Promise<void>;
     campaignId?: string;
     draftCoordinator?: DraftCoordinator;
@@ -236,7 +236,7 @@
         console.error(`Failed to remove deleted session draft: ${cleanup}`);
         return;
       }
-      onDelete(deleteSessionId);
+      await onDelete(deleteSessionId);
     } catch (e) {
       deletionPending = false;
       console.error('Failed to delete session:', e);
@@ -258,6 +258,7 @@
   <button
     type="button"
     class="session-header"
+    data-session-id={session.id}
     onclick={toggleExpand}
     aria-expanded={expanded}
     bind:this={headerButton}
