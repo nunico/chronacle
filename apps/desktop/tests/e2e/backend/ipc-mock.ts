@@ -19,7 +19,7 @@ export interface DraftReliabilityControls {
   removeSession(id: string): void;
   removeRule(id: string): void;
   setEntityCanonical(id: string, changes: Record<string, unknown>): void;
-  holdNextEntityList(campaignId: string, kind: string): void;
+  holdNextEntityList(campaignId: string, kind: string, omitId?: string): void;
   resolveNextEntityList(): void;
   pendingEntityLists(): number;
   holdNextSessionList(campaignId: string): void;
@@ -261,7 +261,7 @@ export async function installIpcMock(
             const maximum = new Map<string, number>();
             const observed = new Map<string, Array<Record<string, unknown>>>();
             const chatSubmissions: Array<Record<string, unknown>> = [];
-            let heldEntityList: { campaignId: string; kind: string } | null = null;
+            let heldEntityList: { campaignId: string; kind: string; omitId?: string } | null = null;
             const pendingEntityLists: PendingEntityList[] = [];
             let heldSessionListCampaign: string | null = null;
             const pendingSessionLists: PendingSessionList[] = [];
@@ -435,17 +435,17 @@ export async function installIpcMock(
             }
 
             function invokeEntityList(args: Record<string, unknown>): Promise<unknown> {
+              const holdMatches =
+                heldEntityList?.campaignId === args.campaignId && heldEntityList.kind === args.kind;
               const value = copy(
                 entities.filter(
-                  (entity) => entity.campaign_id === args.campaignId && entity.kind === args.kind,
+                  (entity) =>
+                    entity.campaign_id === args.campaignId &&
+                    entity.kind === args.kind &&
+                    (!holdMatches || entity.id !== heldEntityList?.omitId),
                 ),
               );
-              if (
-                heldEntityList?.campaignId !== args.campaignId ||
-                heldEntityList.kind !== args.kind
-              ) {
-                return Promise.resolve(value);
-              }
+              if (!holdMatches) return Promise.resolve(value);
               heldEntityList = null;
               return new Promise((resolve) => {
                 pendingEntityLists.push({ resolve, value });
@@ -513,9 +513,9 @@ export async function installIpcMock(
                 if (!entity) throw new Error(`No entity ${id} to update.`);
                 Object.assign(entity, copy(changes));
               },
-              holdNextEntityList(campaignId: string, kind: string) {
+              holdNextEntityList(campaignId: string, kind: string, omitId?: string) {
                 if (heldEntityList) throw new Error('An entity list hold is already armed.');
-                heldEntityList = { campaignId, kind };
+                heldEntityList = { campaignId, kind, omitId };
               },
               resolveNextEntityList() {
                 const next = pendingEntityLists.shift();
