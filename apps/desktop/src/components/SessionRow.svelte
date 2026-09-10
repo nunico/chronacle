@@ -174,10 +174,15 @@
   }
 
   function shouldSaveFromBlur(event?: FocusEvent): boolean {
-    return shouldAutoSaveAfterBlur(rowElement, event?.relatedTarget ?? null, [
-      rowElement?.querySelector('.session-save-status'),
-      rowElement?.querySelector('.session-actions'),
-    ]);
+    return shouldAutoSaveAfterBlur(
+      rowElement,
+      event?.relatedTarget ?? null,
+      [
+        rowElement?.querySelector('.session-save-status'),
+        rowElement?.querySelector('.session-actions'),
+      ],
+      document.hasFocus(),
+    );
   }
 
   async function saveFromBlur(event?: FocusEvent) {

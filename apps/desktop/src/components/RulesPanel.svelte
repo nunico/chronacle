@@ -302,9 +302,12 @@
 
   function shouldSaveFromBlur(entry: RuleEntry, event?: FocusEvent): boolean {
     const editingScope = elementFor<HTMLElement>('[data-rule-id]', entry.id);
-    return shouldAutoSaveAfterBlur(editingScope, event?.relatedTarget ?? null, [
-      editingScope?.querySelector('.rule-save-status'),
-    ]);
+    return shouldAutoSaveAfterBlur(
+      editingScope,
+      event?.relatedTarget ?? null,
+      [editingScope?.querySelector('.rule-save-status')],
+      document.hasFocus(),
+    );
   }
 
   async function handleNotesBlur(entry: RuleEntry, event?: FocusEvent): Promise<void> {

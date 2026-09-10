@@ -69,6 +69,7 @@ async function expandRow(title = 'The Battle of Ashfields') {
 describe('SessionRow', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     i18n.setLocale('en');
     vi.mocked(commands.getSessionEntities).mockResolvedValue([]);
   });
@@ -210,6 +211,33 @@ describe('SessionRow', () => {
     expect(commands.updateSession).toHaveBeenCalledOnce();
     expect(title).toHaveValue('Newer retained revision');
     expect(coordinator.canDiscard(sessionScope('camp1', 'sess1'))).toBe(true);
+  });
+
+  it('does not queue a newer revision when window deactivation blurs the active field', async () => {
+    const firstSave = deferred<Session>();
+    vi.mocked(commands.updateSession).mockReturnValue(firstSave.promise);
+    const coordinator = new DraftCoordinator();
+    renderRow(coordinator);
+    const title = await expandRow();
+    const hasFocus = vi.spyOn(document, 'hasFocus');
+
+    try {
+      await fireEvent.input(title, { target: { value: 'Earlier revision' } });
+      await fireEvent.blur(title);
+      await waitFor(() => expect(commands.updateSession).toHaveBeenCalledOnce());
+      await fireEvent.input(title, { target: { value: 'Newer retained revision' } });
+
+      hasFocus.mockReturnValue(false);
+      await fireEvent.blur(title, { relatedTarget: null });
+      firstSave.resolve({ ...mockSession(), title: 'Earlier revision' });
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes'));
+
+      expect(commands.updateSession).toHaveBeenCalledOnce();
+      expect(title).toHaveValue('Newer retained revision');
+      expect(coordinator.canDiscard(sessionScope('camp1', 'sess1'))).toBe(true);
+    } finally {
+      hasFocus.mockRestore();
+    }
   });
 
   it('retains a focused edit when navigation unmounts it without a related target', async () => {

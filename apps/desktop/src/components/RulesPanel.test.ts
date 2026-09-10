@@ -62,6 +62,7 @@ async function openNotes(name = 'Initiative') {
 describe('RulesPanel', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     i18n.setLocale('en');
     m.getRuleEntries.mockResolvedValue([]);
     m.updateRuleNotes.mockResolvedValue(undefined as never);
@@ -494,6 +495,30 @@ describe('RulesPanel', () => {
     expect(m.updateRuleNotes).not.toHaveBeenCalled();
     expect(notes).toHaveValue('Retained for close decision.');
     expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+  });
+
+  it('does not autosave when window deactivation blurs a rule note', async () => {
+    const coordinator = new DraftCoordinator();
+    m.getRuleEntries.mockResolvedValue([
+      { ...rule('r1', 'Initiative', 'mechanic'), notes: 'Saved rule note.' },
+    ]);
+    renderPanel(coordinator);
+    const notes = await openNotes();
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+
+    try {
+      await fireEvent.input(notes, { target: { value: 'Retained while the window closes.' } });
+      await fireEvent.blur(notes, { relatedTarget: null });
+
+      expect(m.updateRuleNotes).not.toHaveBeenCalled();
+      expect(notes).toHaveValue('Retained while the window closes.');
+      expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+      const retained = coordinator.get<{ notes: string }>(ruleScope('camp-a', 'c-1', 'r1'));
+      if (!retained) throw new Error('Expected the deactivated rule draft to remain retained');
+      expect(statusOf(retained)).toBe('pending');
+    } finally {
+      hasFocus.mockRestore();
+    }
   });
 
   it('retains a focused note when navigation unmounts it without a related target', async () => {
