@@ -110,6 +110,20 @@
   });
 
   let sessionPrefix = $derived(`session:${campaignId}:`);
+  let unavailableSessionIds = $derived(
+    new Set(
+      draftCoordinator
+        .listByPrefix<SessionDraftValue>(sessionPrefix)
+        .filter(
+          (draft) =>
+            statusOf(draft) !== 'saved' &&
+            !backendSessions.some(
+              (session) => sessionScope(campaignId, session.id) === draft.scope,
+            ),
+        )
+        .map((draft) => draft.scope.slice(sessionPrefix.length)),
+    ),
+  );
   let sessions = $derived.by(() => {
     const retained = draftCoordinator.listByPrefix<SessionDraftValue>(sessionPrefix);
     const byScope = new Map(retained.map((draft) => [draft.scope, draft]));
@@ -269,6 +283,10 @@
     sessionLoadFence.forget(sessionScope(campaignId, id));
     backendSessions = backendSessions.filter((session) => session.id !== id);
   }
+
+  function handleDiscardUnavailable(id: string) {
+    releaseProjection(sessionScope(campaignId, id));
+  }
 </script>
 
 <div class="session-log">
@@ -290,6 +308,8 @@
       {entityMap}
       onUpdate={handleUpdate}
       onDelete={handleDelete}
+      onDiscardUnavailable={handleDiscardUnavailable}
+      {unavailableSessionIds}
       {draftCoordinator}
     />
   {/if}
