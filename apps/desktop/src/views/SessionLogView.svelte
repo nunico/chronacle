@@ -43,6 +43,8 @@
   let mounted = true;
   let sessionRequest = 0;
   let entityRequest = 0;
+  let createAcknowledgmentGeneration = 0;
+  const acknowledgedCreates = new Map<string, number>();
 
   onDestroy(() => {
     mounted = false;
@@ -79,6 +81,7 @@
   $effect(() => {
     const requestedCampaign = campaignId;
     const request = ++sessionRequest;
+    const createGenerationAtStart = createAcknowledgmentGeneration;
     const prefix = `session:${requestedCampaign}:`;
     const acknowledgmentsAtStart = untrack(
       () =>
@@ -93,7 +96,19 @@
     getSessions(requestedCampaign).then(
       (loaded) => {
         if (!mounted || request !== sessionRequest || campaignId !== requestedCampaign) return;
-        for (const session of loaded) {
+        const reconciled = [...loaded];
+        const loadedIds = new Set(loaded.map(({ id }) => id));
+        for (const [scope, generation] of acknowledgedCreates) {
+          if (generation <= createGenerationAtStart || !scope.startsWith(prefix)) continue;
+          const createdId = scope.slice(prefix.length);
+          const session = backendSessions.find(
+            ({ id, campaign_id }) => id === createdId && campaign_id === requestedCampaign,
+          );
+          if (session && !loadedIds.has(session.id)) {
+            reconciled.push(session);
+          }
+        }
+        for (const session of reconciled) {
           const scope = sessionScope(requestedCampaign, session.id);
           const currentAcknowledgment =
             draftCoordinator.get<SessionDraftValue>(scope)?.lastAcknowledgedAttemptId ?? 0;
@@ -106,7 +121,12 @@
             'authoritative-list',
           );
         }
-        backendSessions = loaded;
+        for (const [scope, generation] of acknowledgedCreates) {
+          if (scope.startsWith(prefix) && generation <= createGenerationAtStart) {
+            acknowledgedCreates.delete(scope);
+          }
+        }
+        backendSessions = reconciled;
         loading = false;
       },
       (error: unknown) => {
@@ -151,13 +171,19 @@
         notes: '',
       });
       if (!mounted || campaignId !== requestedCampaign) return;
+      const scope = sessionScope(requestedCampaign, created.id);
       draftCoordinator.open(
-        sessionScope(requestedCampaign, created.id),
+        scope,
         `session:${created.id}`,
         sessionDraftValue(created),
         'authoritative-list',
       );
-      backendSessions = [...backendSessions, created];
+      createAcknowledgmentGeneration += 1;
+      acknowledgedCreates.set(scope, createAcknowledgmentGeneration);
+      backendSessions = [
+        ...backendSessions.filter((session) => session.campaign_id === requestedCampaign),
+        created,
+      ];
     } catch (e) {
       console.error('Failed to create session:', e);
     }
@@ -170,6 +196,7 @@
   }
 
   function handleDelete(id: string) {
+    acknowledgedCreates.delete(sessionScope(campaignId, id));
     backendSessions = backendSessions.filter((session) => session.id !== id);
   }
 </script>
