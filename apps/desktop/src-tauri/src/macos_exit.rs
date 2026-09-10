@@ -1,22 +1,21 @@
-use crate::exit_guard::{ExitAuthorization, ExitRequestDecision};
+use crate::exit_guard::ExitAuthorization;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NativeTerminationReply {
-    Now,
     Later,
+    Cancel,
 }
 
 fn intercept_native_exit(
     authorization: &ExitAuthorization,
-    publish: impl FnOnce(u64),
+    publish: impl FnOnce(u64) -> Result<(), ()>,
 ) -> NativeTerminationReply {
-    match authorization.intercept_exit() {
-        ExitRequestDecision::Authorized => NativeTerminationReply::Now,
-        ExitRequestDecision::Prevent { intent } => {
-            publish(intent);
-            NativeTerminationReply::Later
-        }
+    let request = authorization.intercept_native_exit();
+    if request.should_emit() && publish(request.intent()).is_err() {
+        authorization.rollback_native_request(request.intent());
+        return NativeTerminationReply::Cancel;
     }
+    NativeTerminationReply::Later
 }
 
 #[cfg(all(target_os = "macos", feature = "rocksdb"))]
@@ -43,19 +42,41 @@ mod platform {
             .map(|app| {
                 let authorization = app.state::<ExitAuthorization>();
                 intercept_native_exit(&authorization, |intent| {
-                    if let Err(error) =
-                        app.emit_to("main", "app-exit-requested", ExitRequestPayload { intent })
-                    {
-                        eprintln!("failed to publish macOS application exit request: {error}");
-                    }
+                    app.emit_to("main", "app-exit-requested", ExitRequestPayload { intent })
+                        .map_err(|error| {
+                            eprintln!("failed to publish macOS application exit request: {error}");
+                        })
                 })
             })
-            .unwrap_or(NativeTerminationReply::Later);
+            .unwrap_or(NativeTerminationReply::Cancel);
 
         match reply {
-            NativeTerminationReply::Now => NSApplicationTerminateReply::TerminateNow,
             NativeTerminationReply::Later => NSApplicationTerminateReply::TerminateLater,
+            NativeTerminationReply::Cancel => NSApplicationTerminateReply::TerminateCancel,
         }
+    }
+
+    pub(crate) fn schedule_reply(
+        app: &tauri::AppHandle,
+        intent: u64,
+        terminate: bool,
+    ) -> Result<(), String> {
+        let app_handle = app.clone();
+        app.run_on_main_thread(move || {
+            let Some(main_thread) = objc2::MainThreadMarker::new() else {
+                let authorization = app_handle.state::<ExitAuthorization>();
+                authorization.rollback_native_resolution(intent, terminate);
+                eprintln!("macOS exit reply did not run on the main thread");
+                return;
+            };
+            let application = NSApplication::sharedApplication(main_thread);
+            application.replyToApplicationShouldTerminate(terminate);
+            let authorization = app_handle.state::<ExitAuthorization>();
+            if !authorization.complete_native_reply(intent, terminate) {
+                eprintln!("macOS exit reply state changed before completion");
+            }
+        })
+        .map_err(|error| format!("Could not schedule the macOS close reply: {error}"))
     }
 
     pub(super) fn install(app: &tauri::AppHandle) -> Result<(), String> {
@@ -111,6 +132,8 @@ mod platform {
 
 #[cfg(all(target_os = "macos", feature = "rocksdb"))]
 pub(crate) use platform::install;
+#[cfg(all(target_os = "macos", feature = "rocksdb"))]
+pub(crate) use platform::schedule_reply;
 
 #[cfg(test)]
 mod tests {
@@ -122,7 +145,10 @@ mod tests {
         let authorization = ExitAuthorization::default();
         let mut published = Vec::new();
 
-        let reply = intercept_native_exit(&authorization, |intent| published.push(intent));
+        let reply = intercept_native_exit(&authorization, |intent| {
+            published.push(intent);
+            Ok(())
+        });
 
         assert_eq!(reply, NativeTerminationReply::Later);
         assert_eq!(published, vec![authorization.pending().unwrap()]);
@@ -134,29 +160,30 @@ mod tests {
         let mut published = Vec::new();
 
         assert_eq!(
-            intercept_native_exit(&authorization, |intent| published.push(intent)),
+            intercept_native_exit(&authorization, |intent| {
+                published.push(intent);
+                Ok(())
+            }),
             NativeTerminationReply::Later
         );
         assert_eq!(
-            intercept_native_exit(&authorization, |intent| published.push(intent)),
+            intercept_native_exit(&authorization, |intent| {
+                published.push(intent);
+                Ok(())
+            }),
             NativeTerminationReply::Later
         );
 
-        assert_eq!(published.len(), 2);
-        assert_eq!(published[0], published[1]);
+        assert_eq!(published.len(), 1);
     }
 
     #[test]
-    fn authorized_native_exit_is_not_deferred_or_republished() {
+    fn failed_emission_cancels_instead_of_leaving_appkit_deferred() {
         let authorization = ExitAuthorization::default();
-        let intent = authorization.request();
-        assert!(authorization.authorize(intent));
-        let mut published = Vec::new();
 
-        let reply = intercept_native_exit(&authorization, |intent| published.push(intent));
+        let reply = intercept_native_exit(&authorization, |_intent| Err(()));
 
-        assert_eq!(reply, NativeTerminationReply::Now);
-        assert!(published.is_empty());
+        assert_eq!(reply, NativeTerminationReply::Cancel);
         assert_eq!(authorization.pending(), None);
     }
 
@@ -175,6 +202,10 @@ mod tests {
         assert!(source.contains("ClassBuilder::new("));
         assert!(source.contains("AnyObject::set_class(delegate, guarded_class)"));
         assert!(source.contains("NSApplicationTerminateReply::TerminateLater"));
+        assert!(source.contains("NSApplicationTerminateReply::TerminateCancel"));
+        assert!(source.contains("replyToApplicationShouldTerminate(terminate)"));
+        assert!(source.contains("run_on_main_thread"));
+        assert!(source.contains("rollback_native_request"));
         assert!(!source.contains(&["set", "Delegate"].concat()));
         assert!(!source.contains(&["add", "_ivar"].concat()));
     }
