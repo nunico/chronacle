@@ -81,11 +81,32 @@
   let sessionRequest = 0;
   let entityRequest = 0;
   let activeProjectionPrefix: string | null = null;
+  const projectionLeases = new Map<string, () => void>();
   const sessionLoadFence = new SessionLoadFence();
+
+  function leaseProjection(scope: string): void {
+    if (!projectionLeases.has(scope)) {
+      projectionLeases.set(scope, draftCoordinator.acquireLease(scope));
+    }
+  }
+
+  function releaseProjection(scope: string): void {
+    const releaseLease = projectionLeases.get(scope);
+    if (!releaseLease) return;
+    draftCoordinator.release(scope);
+    releaseLease();
+    projectionLeases.delete(scope);
+  }
+
+  function releaseProjectionPrefix(prefix: string): void {
+    for (const scope of [...projectionLeases.keys()]) {
+      if (scope.startsWith(prefix)) releaseProjection(scope);
+    }
+  }
 
   onDestroy(() => {
     mounted = false;
-    if (activeProjectionPrefix) draftCoordinator.releasePrefix(activeProjectionPrefix);
+    for (const scope of [...projectionLeases.keys()]) releaseProjection(scope);
   });
 
   let sessionPrefix = $derived(`session:${campaignId}:`);
@@ -122,18 +143,15 @@
     const prefix = `session:${requestedCampaign}:`;
     if (activeProjectionPrefix && activeProjectionPrefix !== prefix) {
       const previousPrefix = activeProjectionPrefix;
-      untrack(() => draftCoordinator.releasePrefix(previousPrefix));
+      untrack(() => releaseProjectionPrefix(previousPrefix));
     }
     activeProjectionPrefix = prefix;
     sessionLoadFence.begin(request, requestedCampaign);
-    const acknowledgmentsAtStart = untrack(
-      () =>
-        new Map(
-          draftCoordinator
-            .listByPrefix<SessionDraftValue>(prefix)
-            .map((draft) => [draft.scope, draft.lastAcknowledgedAttemptId]),
-        ),
-    );
+    const acknowledgmentsAtStart = untrack(() => {
+      const retained = draftCoordinator.listByPrefix<SessionDraftValue>(prefix);
+      for (const draft of retained) leaseProjection(draft.scope);
+      return new Map(retained.map((draft) => [draft.scope, draft.lastAcknowledgedAttemptId]));
+    });
     loading = true;
 
     getSessions(requestedCampaign).then(
@@ -162,12 +180,15 @@
             sessionDraftValue(session),
             'authoritative-list',
           );
+          leaseProjection(scope);
         }
         const reconciledScopes = new Set(
           reconciled.map((session) => sessionScope(requestedCampaign, session.id)),
         );
         for (const draft of draftCoordinator.listByPrefix<SessionDraftValue>(prefix)) {
-          if (!reconciledScopes.has(draft.scope)) draftCoordinator.release(draft.scope);
+          if (!reconciledScopes.has(draft.scope) && statusOf(draft) === 'saved') {
+            releaseProjection(draft.scope);
+          }
         }
         backendSessions = reconciled;
         loading = false;
@@ -225,6 +246,7 @@
         sessionDraftValue(created),
         'authoritative-list',
       );
+      leaseProjection(scope);
       sessionLoadFence.acknowledge(requestedCampaign, scope);
       backendSessions = [
         ...backendSessions.filter(

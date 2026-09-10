@@ -83,15 +83,23 @@
   let atBottom = $state(true);
   let hasSources = $state(true);
   let openedComposerScope: string | null = null;
+  let releaseComposerLease: (() => void) | null = null;
+
+  function releaseComposerProjection(): void {
+    if (!openedComposerScope || !releaseComposerLease) return;
+    draftCoordinator.release(openedComposerScope);
+    releaseComposerLease();
+    releaseComposerLease = null;
+  }
 
   $effect(() => {
     const nextScope = oracleScope(activeCampaignId);
     if (openedComposerScope && openedComposerScope !== nextScope) {
-      const previousScope = openedComposerScope;
-      untrack(() => draftCoordinator.release(previousScope));
+      untrack(releaseComposerProjection);
     }
     composerDraft = untrack(() => draftCoordinator.open(nextScope, null, ''));
     openedComposerScope = nextScope;
+    releaseComposerLease = untrack(() => draftCoordinator.acquireLease(nextScope));
   });
 
   type ExtractionStatus = 'running' | 'done' | 'empty' | 'cancelled' | 'error';
@@ -214,7 +222,7 @@
   onDestroy(() => {
     if (unlistenListener) unlistenListener();
     if (unlistenExtract) unlistenExtract();
-    if (openedComposerScope) draftCoordinator.release(openedComposerScope);
+    releaseComposerProjection();
   });
 
   async function sendMessage(text?: string) {

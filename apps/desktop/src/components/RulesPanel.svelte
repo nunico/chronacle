@@ -72,6 +72,22 @@
   let loadGeneration = 0;
   let destroyed = false;
   let activeProjectionPrefix: string | null = null;
+  const projectionLeases = new Map<string, () => void>();
+
+  function leaseProjection(scope: string): void {
+    if (!projectionLeases.has(scope)) {
+      projectionLeases.set(scope, draftCoordinator.acquireLease(scope));
+    }
+  }
+
+  function releaseProjection(scope: string): void {
+    const releaseLease = projectionLeases.get(scope);
+    if (!releaseLease) return;
+    draftCoordinator.release(scope);
+    releaseLease();
+    projectionLeases.delete(scope);
+    if (!draftCoordinator.get(scope)) forgetRuleRecovery(draftCoordinator, scope);
+  }
 
   function targetFor(ruleId: string): string {
     return `rule:${ruleId}`;
@@ -139,13 +155,14 @@
             current.lastAcknowledgedAttemptId === startAcknowledgment)
         ) {
           draftCoordinator.open(scope, targetFor(entry.id), valueFrom(entry), 'authoritative-list');
+          leaseProjection(scope);
         }
       }
       for (const previous of entries) {
         if (loaded.some(({ id }) => id === previous.id)) continue;
         const scope = ruleScope(requestCampaignId, requestCollectionId, previous.id);
-        if (draftCoordinator.release(scope) === 'released')
-          forgetRuleRecovery(draftCoordinator, scope);
+        const draft = draftCoordinator.get<RuleNoteDraftValue>(scope);
+        if (draft && statusOf(draft) === 'saved') releaseProjection(scope);
       }
       entries = loaded;
       error = null;
@@ -157,10 +174,8 @@
   }
 
   function releaseCleanProjection(prefix: string): void {
-    for (const draft of draftCoordinator.listByPrefix<RuleNoteDraftValue>(prefix)) {
-      if (draftCoordinator.release(draft.scope) === 'released') {
-        forgetRuleRecovery(draftCoordinator, draft.scope);
-      }
+    for (const scope of [...projectionLeases.keys()]) {
+      if (scope.startsWith(prefix)) releaseProjection(scope);
     }
   }
 
@@ -172,6 +187,9 @@
       if (activeProjectionPrefix && activeProjectionPrefix !== requestPrefix) {
         releaseCleanProjection(activeProjectionPrefix);
       }
+      for (const draft of draftCoordinator.listByPrefix<RuleNoteDraftValue>(requestPrefix)) {
+        leaseProjection(draft.scope);
+      }
       activeProjectionPrefix = requestPrefix;
       void load(requestCampaignId, requestCollectionId);
     });
@@ -180,7 +198,7 @@
   onDestroy(() => {
     destroyed = true;
     loadGeneration += 1;
-    if (activeProjectionPrefix) releaseCleanProjection(activeProjectionPrefix);
+    for (const scope of [...projectionLeases.keys()]) releaseProjection(scope);
   });
 
   let filtered = $derived(
@@ -203,10 +221,11 @@
 
   function ensureDraft(entry: RuleEntry): DraftRecord<RuleNoteDraftValue> {
     const scope = ruleScope(campaignId, collectionId, entry.id);
-    return (
+    const draft =
       draftCoordinator.get<RuleNoteDraftValue>(scope) ??
-      draftCoordinator.open(scope, targetFor(entry.id), valueFrom(entry), 'authoritative-list')
-    );
+      draftCoordinator.open(scope, targetFor(entry.id), valueFrom(entry), 'authoritative-list');
+    leaseProjection(scope);
+    return draft;
   }
 
   function toggleExpand(entry: RuleEntry) {
@@ -328,7 +347,7 @@
     const scope = ruleScope(campaignId, collectionId, entry.id);
     if (draftCoordinator.discard(scope) !== 'discarded') return;
     forgetRuleRecovery(draftCoordinator, scope);
-    if (unavailable) draftCoordinator.release(scope);
+    if (unavailable) releaseProjection(scope);
     await tick();
     if (unavailable) {
       focusStableRulesTab();

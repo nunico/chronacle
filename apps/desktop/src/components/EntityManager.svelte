@@ -139,12 +139,31 @@
   let mounted = true;
   let activeExistingProjectionPrefix: string | null = null;
   let activeNewProjectionPrefix: string | null = null;
+  const projectionLeases = new Map<string, () => void>();
+
+  function leaseProjection(scope: string): void {
+    if (!projectionLeases.has(scope)) {
+      projectionLeases.set(scope, draftCoordinator.acquireLease(scope));
+    }
+  }
+
+  function releaseProjection(scope: string): void {
+    const releaseLease = projectionLeases.get(scope);
+    if (!releaseLease) return;
+    draftCoordinator.release(scope);
+    releaseLease();
+    projectionLeases.delete(scope);
+  }
+
+  function releaseProjectionPrefix(prefix: string): void {
+    for (const scope of [...projectionLeases.keys()]) {
+      if (scope.startsWith(prefix)) releaseProjection(scope);
+    }
+  }
+
   onDestroy(() => {
     mounted = false;
-    if (activeExistingProjectionPrefix) {
-      draftCoordinator.releasePrefix(activeExistingProjectionPrefix);
-    }
-    if (activeNewProjectionPrefix) draftCoordinator.releasePrefix(activeNewProjectionPrefix);
+    for (const scope of [...projectionLeases.keys()]) releaseProjection(scope);
   });
   let resolvedActiveDraftScope = $derived(
     activeDraftScope ? draftCoordinator.resolveScope(activeDraftScope) : null,
@@ -336,6 +355,7 @@
           draftFromNode(node),
           'authoritative-list',
         );
+        leaseProjection(entityScope(requestCampaignId, requestKind, node.id));
       }
       const loadedScopes = new Set(
         loaded.map((node) => entityScope(requestCampaignId, requestKind, node.id)),
@@ -343,7 +363,9 @@
       for (const draft of draftCoordinator.listByPrefix<EntityDraftValue>(
         `entity:${requestCampaignId}:${requestKind}:`,
       )) {
-        if (!loadedScopes.has(draft.scope)) draftCoordinator.release(draft.scope);
+        if (!loadedScopes.has(draft.scope) && statusOf(draft) === 'saved') {
+          releaseProjection(draft.scope);
+        }
       }
       entities = loaded;
     } catch (e) {
@@ -419,6 +441,7 @@
     }
     const scope = newEntityScope(campaignId, kind, allocateNewDraftId());
     const draft = draftCoordinator.open(scope, scope, emptyDraft());
+    leaseProjection(scope);
     showNewDraft(draft);
   }
 
@@ -426,6 +449,7 @@
     const retained = oneRetainedNewDraft(campaignId, request.kind);
     const scope = retained?.scope ?? newEntityScope(campaignId, request.kind, allocateNewDraftId());
     const draft = retained ?? draftCoordinator.open(scope, scope, emptyDraft());
+    leaseProjection(scope);
     if (draft.value.name === '' && request.name !== '') {
       draftCoordinator.revise(scope, { ...emptyDraft(), name: request.name });
     }
@@ -478,6 +502,7 @@
     const draft =
       draftCoordinator.get<EntityDraftValue>(scope) ??
       draftCoordinator.open(scope, `entity:${kind}:${node.id}`, draftFromNode(node));
+    leaseProjection(scope);
     formNode = nodeWithDraftValue(node, draft.value);
     pendingInitialName = null;
     pendingSourceFindingId = null;
@@ -814,9 +839,19 @@
     if (scope === loadedScope) return;
     untrack(() => {
       if (activeExistingProjectionPrefix) {
-        draftCoordinator.releasePrefix(activeExistingProjectionPrefix);
+        releaseProjectionPrefix(activeExistingProjectionPrefix);
       }
-      if (activeNewProjectionPrefix) draftCoordinator.releasePrefix(activeNewProjectionPrefix);
+      if (activeNewProjectionPrefix) releaseProjectionPrefix(activeNewProjectionPrefix);
+      for (const draft of draftCoordinator.listByPrefix<EntityDraftValue>(
+        `entity:${campaignId}:${kind}:`,
+      )) {
+        leaseProjection(draft.scope);
+      }
+      for (const draft of draftCoordinator.listByPrefix<EntityDraftValue>(
+        `entity-new:${campaignId}:${kind}:`,
+      )) {
+        leaseProjection(draft.scope);
+      }
     });
     activeExistingProjectionPrefix = `entity:${campaignId}:${kind}:`;
     activeNewProjectionPrefix = `entity-new:${campaignId}:${kind}:`;
