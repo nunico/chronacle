@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
 import { tick } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SessionLogView, * as sessionLogViewModule from './SessionLogView.svelte';
@@ -414,6 +415,7 @@ describe('SessionLogView draft coordination', () => {
     const coordinator = new DraftCoordinator();
     const missingScope = sessionScope('camp-a', 'session-a');
     const unrelatedScope = oracleScope('camp-a');
+    const user = userEvent.setup();
     coordinator.open(unrelatedScope, null, 'Unsent unrelated Oracle question');
     vi.mocked(commands.getSessions)
       .mockResolvedValueOnce([session('camp-a', 'Ashes at Dawn')])
@@ -469,7 +471,9 @@ describe('SessionLogView draft coordination', () => {
     ]);
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retry' }));
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    const discard = screen.getByRole('button', { name: 'Discard changes' });
+    discard.focus();
+    await user.keyboard('{Enter}');
     await waitFor(() =>
       expect(
         screen.queryByRole('button', { name: /Ashes retained locally/ }),
@@ -477,5 +481,6 @@ describe('SessionLogView draft coordination', () => {
     );
     expect(coordinator.get(missingScope)).toBeUndefined();
     expect(coordinator.get<string>(unrelatedScope)?.value).toBe('Unsent unrelated Oracle question');
+    expect(screen.getByRole('button', { name: /New session/i })).toHaveFocus();
   });
 });

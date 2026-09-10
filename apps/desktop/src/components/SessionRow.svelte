@@ -58,7 +58,7 @@
     entityMap: Map<string, { id: string; kind: string }>;
     onUpdate: (session: Session) => void;
     onDelete: (id: string) => void;
-    onDiscardUnavailable?: (id: string) => void;
+    onDiscardUnavailable?: (id: string) => void | Promise<void>;
     campaignId?: string;
     draftCoordinator?: DraftCoordinator;
   }
@@ -207,9 +207,9 @@
     if (deletionPending) return;
     const releaseUnavailable = onDiscardUnavailable;
     if (draftCoordinator.discard(scope) !== 'discarded') return;
-    releaseUnavailable?.(session.id);
+    await releaseUnavailable?.(session.id);
     await tick();
-    headerButton?.focus();
+    if (headerButton?.isConnected) headerButton.focus();
   }
 
   async function handleDelete() {
