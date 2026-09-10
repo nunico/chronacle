@@ -214,7 +214,9 @@
       );
       sessionLoadFence.acknowledge(requestedCampaign, scope);
       backendSessions = [
-        ...backendSessions.filter((session) => session.campaign_id === requestedCampaign),
+        ...backendSessions.filter(
+          (session) => session.campaign_id === requestedCampaign && session.id !== created.id,
+        ),
         created,
       ];
     } catch (e) {
