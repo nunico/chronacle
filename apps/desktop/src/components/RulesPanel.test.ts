@@ -7,6 +7,7 @@ import type { RuleEntry } from '../lib/commands';
 import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
 import { ruleScope, statusOf } from '../lib/drafts/draft-state';
 import { i18n } from '../lib/locale.svelte';
+import { rememberedRuleRecovery } from '../lib/drafts/rule-note-presentation';
 
 vi.mock('../lib/commands', () => ({
   getRuleEntries: vi.fn().mockResolvedValue([]),
@@ -210,6 +211,35 @@ describe('RulesPanel', () => {
     renderPanel(coordinator, { campaignId: 'camp-b' });
     expect(await openNotes()).toHaveValue('Saved rule note.');
     expect(screen.queryByText('Campaign A local rule.')).not.toBeInTheDocument();
+  });
+
+  it('retains only minimal presentation metadata once a rule note becomes at risk', async () => {
+    const coordinator = new DraftCoordinator();
+    m.getRuleEntries.mockResolvedValue([rule('r1', 'Initiative', 'mechanic')]);
+    renderPanel(coordinator);
+    const notes = await openNotes();
+
+    expect(rememberedRuleRecovery(coordinator, ruleScope('camp-a', 'c-1', 'r1'))).toBeUndefined();
+    await fireEvent.input(notes, { target: { value: 'A local ruling.' } });
+
+    expect(rememberedRuleRecovery(coordinator, ruleScope('camp-a', 'c-1', 'r1'))).toEqual({
+      ruleId: 'r1',
+      title: 'Initiative',
+      collectionId: 'c-1',
+    });
+  });
+
+  it('releases clean rule projections when the panel unmounts', async () => {
+    const coordinator = new DraftCoordinator();
+    const scope = ruleScope('camp-a', 'c-1', 'r1');
+    m.getRuleEntries.mockResolvedValue([rule('r1', 'Initiative', 'mechanic')]);
+    const rendered = renderPanel(coordinator);
+
+    await screen.findByRole('button', { name: 'Initiative' });
+    expect(coordinator.get(scope)).toBeDefined();
+    rendered.unmount();
+
+    expect(coordinator.get(scope)).toBeUndefined();
   });
 
   it('keeps a newer note pending when an older acknowledgment equals it', async () => {
@@ -510,9 +540,8 @@ describe('RulesPanel', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Initiative' })).not.toBeInTheDocument();
     });
-    const discardedInitiative = coordinator.get<{ notes: string }>(initiativeScope);
-    if (!discardedInitiative) throw new Error('Expected targeted discard to retain its baseline');
-    expect(statusOf(discardedInitiative)).toBe('saved');
+    expect(coordinator.get(initiativeScope)).toBeUndefined();
+    expect(rememberedRuleRecovery(coordinator, initiativeScope)).toBeUndefined();
     expect(coordinator.get<{ notes: string }>(surpriseScope)?.value.notes).toBe(
       'Unrelated retained surprise ruling.',
     );
@@ -651,7 +680,7 @@ describe('RulesPanel', () => {
     retrySave.resolve({ ...campaignARule, notes: 'Campaign A retry content.' });
     await waitFor(() => {
       const campaignADraft = coordinator.get<{ notes: string }>(ruleScope('camp-a', 'c-1', 'r1'));
-      expect(campaignADraft && statusOf(campaignADraft)).toBe('saved');
+      expect(campaignADraft).toBeUndefined();
     });
     expect(campaignBFocusTarget).toHaveFocus();
     expect(campaignBNotes).toHaveValue('Campaign B saved ruling.');
