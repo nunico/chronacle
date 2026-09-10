@@ -527,6 +527,44 @@ describe('DraftCoordinator bounded retention', () => {
     expect(coordinator.get(unrelatedScope)?.value).toEqual({ notes: 'elsewhere' });
   });
 
+  it('defers requested release until an active save settles without an owner', async () => {
+    const coordinator = new DraftCoordinator();
+    const completion = deferred<{ notes: string }>();
+    const scope = entityScope('camp-a', 'npc', 'mira');
+    coordinator.open(scope, 'entity:npc:mira', { notes: 'Saved' });
+    const releaseLease = coordinator.acquireLease(scope);
+    coordinator.revise(scope, { notes: 'Saving' });
+    const save = coordinator.requestSave(scope, () => completion.promise);
+
+    expect(coordinator.release(scope)).toBe('retained-at-risk');
+    releaseLease();
+    completion.resolve({ notes: 'Saving' });
+    await save;
+
+    expect(coordinator.get(scope)).toBeUndefined();
+  });
+
+  it('keeps a settled draft while a replacement adapter owns its lease', async () => {
+    const coordinator = new DraftCoordinator();
+    const completion = deferred<{ notes: string }>();
+    const scope = entityScope('camp-a', 'npc', 'mira');
+    coordinator.open(scope, 'entity:npc:mira', { notes: 'Saved' });
+    const releaseOldLease = coordinator.acquireLease(scope);
+    coordinator.revise(scope, { notes: 'Saving' });
+    const save = coordinator.requestSave(scope, () => completion.promise);
+    const releaseReplacementLease = coordinator.acquireLease(scope);
+
+    expect(coordinator.release(scope)).toBe('retained-at-risk');
+    releaseOldLease();
+    completion.resolve({ notes: 'Saving' });
+    await save;
+    expect(coordinator.get(scope)).toBeDefined();
+
+    expect(coordinator.release(scope)).toBe('retained-at-risk');
+    releaseReplacementLease();
+    expect(coordinator.get(scope)).toBeUndefined();
+  });
+
   it('never releases saving, queued, or failed scopes', async () => {
     const coordinator = new DraftCoordinator();
     const writer = new ControlledWriter<{ notes: string }>();
