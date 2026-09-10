@@ -89,6 +89,8 @@ export class DraftCoordinator {
   private readonly redirects = new SvelteMap<string, string>();
   private readonly createPromotionIssues = new SvelteMap<string, CreatePromotionIssue>();
   private readonly authoritativeListScopes = new SvelteSet<string>();
+  private readonly leaseCounts = new Map<string, number>();
+  private readonly deferredReleases = new Set<string>();
   private nextAttemptId = 1;
 
   open<T extends DraftValue>(
@@ -168,6 +170,24 @@ export class DraftCoordinator {
     return draft !== undefined && draft.inFlight === null;
   }
 
+  acquireLease(scope: string): () => void {
+    const resolvedScope = this.resolveScope(scope);
+    if (!this.drafts.has(resolvedScope)) {
+      throw new Error(`Cannot lease a draft scope that is not open: ${scope}`);
+    }
+    this.leaseCounts.set(resolvedScope, (this.leaseCounts.get(resolvedScope) ?? 0) + 1);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      const currentScope = this.resolveScope(scope);
+      const count = this.leaseCounts.get(currentScope) ?? 0;
+      if (count <= 1) this.leaseCounts.delete(currentScope);
+      else this.leaseCounts.set(currentScope, count - 1);
+      this.maybeReleaseDeferred(currentScope);
+    };
+  }
+
   discard(scope: string): DiscardResult {
     const resolvedScope = this.resolveScope(scope);
     const draft = this.drafts.get(resolvedScope);
@@ -180,6 +200,7 @@ export class DraftCoordinator {
     this.createPromotionIssues.delete(scope);
     this.createPromotionIssues.delete(resolvedScope);
     this.removeRedirectsFor(resolvedScope);
+    this.maybeReleaseDeferred(resolvedScope);
     return 'discarded';
   }
 
@@ -192,6 +213,8 @@ export class DraftCoordinator {
     this.cancelQueued(resolvedScope);
     this.drafts.delete(resolvedScope);
     this.authoritativeListScopes.delete(resolvedScope);
+    this.leaseCounts.delete(resolvedScope);
+    this.deferredReleases.delete(resolvedScope);
     this.createPromotionIssues.delete(scope);
     this.createPromotionIssues.delete(resolvedScope);
     this.removeRedirectsFor(resolvedScope);
@@ -202,11 +225,12 @@ export class DraftCoordinator {
     const resolvedScope = this.resolveScope(scope);
     const draft = this.drafts.get(resolvedScope);
     if (!draft) return 'missing';
-    if (!this.isReleaseEligible(draft)) return 'retained-at-risk';
+    if (!this.isReleaseEligible(draft) || (this.leaseCounts.get(resolvedScope) ?? 0) > 0) {
+      this.deferredReleases.add(resolvedScope);
+      return 'retained-at-risk';
+    }
 
-    this.drafts.delete(resolvedScope);
-    this.authoritativeListScopes.delete(resolvedScope);
-    this.removeRedirectsFor(resolvedScope);
+    this.removeReleasedScope(resolvedScope);
     return 'released';
   }
 
@@ -239,6 +263,8 @@ export class DraftCoordinator {
     for (const scope of matchingScopes) {
       this.drafts.delete(scope);
       this.authoritativeListScopes.delete(scope);
+      this.leaseCounts.delete(scope);
+      this.deferredReleases.delete(scope);
     }
     for (const [source, destination] of this.redirects) {
       if (this.matchesAnyPrefix(source, prefixes) || this.matchesAnyPrefix(destination, prefixes)) {
@@ -278,6 +304,8 @@ export class DraftCoordinator {
     this.redirects.clear();
     this.createPromotionIssues.clear();
     this.authoritativeListScopes.clear();
+    this.leaseCounts.clear();
+    this.deferredReleases.clear();
     return 'discarded';
   }
 
@@ -548,6 +576,7 @@ export class DraftCoordinator {
     } else {
       this.lanes.delete(request.target);
     }
+    this.maybeReleaseDeferred(request.scope);
   }
 
   private resolve(request: SaveRequest): void {
@@ -599,6 +628,7 @@ export class DraftCoordinator {
     );
     this.drafts.delete(sourceScope);
     this.drafts.set(destinationScope, remapped as DraftRecord<DraftValue>);
+    this.moveLeaseState(sourceScope, destinationScope);
     this.authoritativeListScopes.delete(sourceScope);
     this.authoritativeListScopes.add(destinationScope);
     this.redirects.set(sourceScope, destinationScope);
@@ -612,6 +642,7 @@ export class DraftCoordinator {
     destination: DraftRecord<DraftValue>,
   ): CreatePromotionResult<T> {
     this.drafts.delete(sourceScope);
+    this.moveLeaseState(sourceScope, destinationScope);
     this.authoritativeListScopes.delete(sourceScope);
     this.redirects.set(sourceScope, destinationScope);
     this.createPromotionIssues.delete(sourceScope);
@@ -673,6 +704,38 @@ export class DraftCoordinator {
       if (issue.sourceScope === draft.scope || issue.destinationScope === draft.scope) return false;
     }
     return true;
+  }
+
+  private maybeReleaseDeferred(scope: string): void {
+    const resolvedScope = this.resolveScope(scope);
+    if (!this.deferredReleases.has(resolvedScope)) return;
+    const draft = this.drafts.get(resolvedScope);
+    if (!draft) {
+      this.deferredReleases.delete(resolvedScope);
+      return;
+    }
+    if ((this.leaseCounts.get(resolvedScope) ?? 0) > 0 || !this.isReleaseEligible(draft)) return;
+    this.removeReleasedScope(resolvedScope);
+  }
+
+  private removeReleasedScope(scope: string): void {
+    this.drafts.delete(scope);
+    this.authoritativeListScopes.delete(scope);
+    this.leaseCounts.delete(scope);
+    this.deferredReleases.delete(scope);
+    this.removeRedirectsFor(scope);
+  }
+
+  private moveLeaseState(sourceScope: string, destinationScope: string): void {
+    const sourceLeases = this.leaseCounts.get(sourceScope) ?? 0;
+    if (sourceLeases > 0) {
+      this.leaseCounts.set(
+        destinationScope,
+        (this.leaseCounts.get(destinationScope) ?? 0) + sourceLeases,
+      );
+    }
+    this.leaseCounts.delete(sourceScope);
+    if (this.deferredReleases.delete(sourceScope)) this.deferredReleases.add(destinationScope);
   }
 
   private matchesAnyPrefix(scope: string, prefixes: readonly string[]): boolean {
