@@ -37,6 +37,7 @@ export const sourceCatalog = {
     discardAndClose: 'Discard and close',
     waitForSavingBeforeClose: 'Wait for saving to finish before discarding and closing.',
     safeToClose: 'Saving finished. It is safe to close.',
+    closeFailed: "Chronacle couldn't close. Your drafts are still available. Try again or cancel.",
     closeProtectionUnavailable:
       'Window-close protection is unavailable. Retry before editing so unsaved work cannot be lost.',
     retainedThisSession: 'Retained for this session only.',
