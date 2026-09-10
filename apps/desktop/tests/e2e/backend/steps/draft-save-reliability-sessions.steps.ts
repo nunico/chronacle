@@ -532,6 +532,83 @@ Then('the created session is still shown once in campaign A', async ({ page }) =
   );
 });
 
+Given('creating a default new session for campaign A fails', async ({ page }) => {
+  await openRailView(page, 'Sessions');
+  await rejectNext(page, 'create_session', {
+    code: 'DATABASE',
+    message: 'Session create failed.',
+  });
+  await page.getByRole('button', { name: /New session/i }).click();
+});
+
+Then('the session view keeps an actionable creation failure', async ({ page }) => {
+  const failure = page.getByRole('alert');
+  await expect(failure).toContainText("Couldn't create session.");
+  await expect(failure).toContainText('Session create failed.');
+  await expect(failure.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await expect(failure.getByRole('button', { name: 'Discard changes' })).toBeVisible();
+});
+
+When('I switch to campaign B and return to campaign A sessions', async ({ page }) => {
+  await openCampaign(page, 'Campaign B');
+  await openRailView(page, 'Sessions');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await openCampaign(page, 'Campaign A');
+  await openRailView(page, 'Sessions');
+});
+
+Then('the failed creation is restored only in campaign A', async ({ page }) => {
+  await expect(page.getByRole('alert')).toContainText("Couldn't create session.");
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+});
+
+When(
+  'I retry the failed creation twice with the keyboard while it is pending',
+  async ({ page }) => {
+    await hold(page, 'create_session');
+    const retry = page.getByRole('button', { name: 'Retry' });
+    await retry.focus();
+    await retry.press('Enter');
+    await retry.press('Enter');
+    await expect.poll(() => activeWrites(page, 'create_session')).toBe(1);
+  },
+);
+
+Then('only one retry uses the original Campaign A session details', async ({ page }) => {
+  const writes = await observations(page, 'create_session');
+  expect(writes).toHaveLength(2);
+  expect(writes[0]).toEqual(writes[1]);
+  expect(writes[1]).toMatchObject({
+    campaignId: 'camp-a',
+    input: {
+      sessionNumber: 2,
+      title: CREATED_SESSION_TITLE,
+      notes: '',
+    },
+  });
+});
+
+When('the retried session creation succeeds', async ({ page }) => {
+  await resolveNext(page, 'create_session');
+  await expect.poll(() => activeWrites(page, 'create_session')).toBe(0);
+});
+
+Then('the session is created once in campaign A', async ({ page }) => {
+  await expect(page.getByRole('button', { name: new RegExp(CREATED_SESSION_TITLE) })).toHaveCount(
+    1,
+  );
+  const created = await persisted<{ campaign_id: string; title: string }>(
+    page,
+    'update_session',
+    'created-session-3',
+  );
+  expect(created).toMatchObject({ campaign_id: 'camp-a', title: CREATED_SESSION_TITLE });
+});
+
+Then('the creation failure is cleared', async ({ page }) => {
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
 Given('saving a changed session failed before its target was deleted', async ({ page }) => {
   const { title } = await openSession(page);
   await title.fill(MISSING_SESSION_TITLE);
