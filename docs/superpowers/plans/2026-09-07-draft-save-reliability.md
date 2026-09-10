@@ -12,8 +12,11 @@ normal close from silently discarding at-risk work.
 **Architecture:** Add a pure revisioned draft state module and an app-scoped
 Svelte coordinator with one save lane per persistence target. Editor components
 remain adapters for explicit or blur-save interaction, while shared status and
-close components provide localized accessible feedback. Rust changes only make
-the existing rule-note command return a truthful saved-record acknowledgment.
+close components provide localized accessible feedback. Rust makes the existing
+rule-note command return a truthful saved-record acknowledgment and adds the
+portable nonce-based exit-authorization protocol. On macOS, an AppKit delegate
+adapter uses the target-specific `objc2` 0.6 and `objc2-app-kit` 0.3 dependencies
+approved by ADR-013 to route native Quit through that protocol.
 
 **Tech Stack:** Svelte 5 runes, TypeScript, Tauri 2 IPC/window API, Vitest,
 Testing Library, Playwright + playwright-bdd, Rust, SurrealDB in-memory tests,
@@ -1663,7 +1666,8 @@ reviewer → implementer fixes → test engineer/reviewers again.
       exact-target/value Create promotion, no-work convergence, explicit
       two-authority conflict resolution, campaign/record isolation, truthful backend
       acknowledgment, active-write discard/close blocking, safe dialog defaults,
-      recovery focus/live regions, privacy, and absence of new dependencies.
+      recovery focus/live regions, privacy, only the approved target-specific
+      ADR-013 dependencies, and no unapproved general dependency.
 - [ ] Implementer resolves every substantiated finding without weakening tests.
       Test engineer reruns affected commands and both reviewers explicitly re-review
       the final diff.

@@ -34,8 +34,10 @@ Not included:
 - Durable crash/restart recovery.
 - Changes to chat submission, citations, onboarding, search, Codex compilation,
   vault conflict semantics, or campaign ownership.
-- A generic workflow engine, event sourcing, new dependency, database table, or
-  backend draft service.
+- A generic workflow engine, event sourcing, database table, backend draft
+  service, or general-purpose dependency for shared draft state or persistence.
+  ADR-013 deliberately adds target-specific `objc2` 0.6 and `objc2-app-kit` 0.3
+  dependencies solely for the macOS native Quit adapter.
 - Redesigning existing explicit entity Save into autosave.
 - Changing pull-request topology. The corrective work is designed as separable
   commits and review slices, but splitting the already-published PR requires
@@ -1266,11 +1268,11 @@ limit. Saved SurrealDB content remains durable as before.
 
 ## Approach Comparison
 
-| Approach                                         | Benefits                                                                                                                    | Costs / risks                                                                                                                       | Decision                |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| Keep every view mounted and add local flags      | Small apparent code change                                                                                                  | Hidden views still run effects/listeners; campaign and record isolation remains scattered; races and close behavior remain unsolved | Rejected                |
-| Persist every draft in localStorage or SurrealDB | Crash/restart recovery                                                                                                      | Private campaign text at rest, versioning/cleanup/migration/security policy, stale-record recovery UX, and a new backend concept    | Rejected for this scope |
-| App-scoped in-memory coordinator + close guard   | One lifecycle policy, precise scope/revision rules, no new dependency or private plaintext persistence, deterministic tests | Drafts do not survive crashes; normal close needs native integration                                                                | Chosen                  |
+| Approach                                         | Benefits                                                                                                                            | Costs / risks                                                                                                                                      | Decision                |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| Keep every view mounted and add local flags      | Small apparent code change                                                                                                          | Hidden views still run effects/listeners; campaign and record isolation remains scattered; races and close behavior remain unsolved                | Rejected                |
+| Persist every draft in localStorage or SurrealDB | Crash/restart recovery                                                                                                              | Private campaign text at rest, versioning/cleanup/migration/security policy, stale-record recovery UX, and a new backend concept                   | Rejected for this scope |
+| App-scoped in-memory coordinator + close guard   | One lifecycle policy, precise scope/revision rules, no draft-state dependency or private plaintext persistence, deterministic tests | Drafts do not survive crashes; normal close needs native integration; ADR-013 adds two approved target-specific dependencies for the macOS adapter | Chosen                  |
 
 The chosen approach fits Chronacle's Tauri IPC architecture: transient editing
 rules remain frontend-local, Rust continues to own persisted aggregates, and IPC
