@@ -28,6 +28,8 @@
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import { i18n } from '../lib/locale.svelte';
   import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
+  import { statusOf } from '../lib/drafts/draft-state';
+  import { forgetRuleRecoveryPrefix } from '../lib/drafts/rule-note-presentation';
 
   let {
     activeCampaignId,
@@ -227,22 +229,66 @@
     }
   }
 
-  let deleteTarget = $state<Campaign | null>(null);
+  interface CampaignDeletionIntent {
+    readonly campaign: Campaign;
+    readonly prefixes: readonly string[];
+    readonly rulePrefix: string;
+  }
+
+  let deleteTarget = $state<CampaignDeletionIntent | null>(null);
+  let campaignDeleteInProgress = $state(false);
+
+  function deletionIntent(campaign: Campaign): CampaignDeletionIntent {
+    return Object.freeze({
+      campaign,
+      prefixes: Object.freeze([
+        `oracle:${campaign.id}`,
+        `entity:${campaign.id}:`,
+        `entity-new:${campaign.id}:`,
+        `session:${campaign.id}:`,
+        `rule:${campaign.id}:`,
+      ]),
+      rulePrefix: `rule:${campaign.id}:`,
+    });
+  }
+
+  let campaignDeleteBlocked = $derived(
+    deleteTarget !== null && draftCoordinator.hasActiveWritesByPrefixes(deleteTarget.prefixes),
+  );
+  let campaignDraftCount = $derived.by(() => {
+    if (!deleteTarget) return 0;
+    const [oracleScope, ...nestedPrefixes] = deleteTarget.prefixes;
+    const drafts = [
+      ...(oracleScope ? [draftCoordinator.get(oracleScope)].filter(Boolean) : []),
+      ...nestedPrefixes.flatMap((prefix) => draftCoordinator.listByPrefix(prefix)),
+    ];
+    return drafts.filter(
+      (draft) =>
+        draft !== undefined &&
+        (statusOf(draft) !== 'saved' ||
+          draftCoordinator.getCreatePromotionIssue(draft.scope) !== undefined),
+    ).length;
+  });
 
   function removeCampaign(c: Campaign) {
-    deleteTarget = c;
+    deleteTarget = deletionIntent(c);
   }
 
   async function confirmDelete(mode: OnOwnedCollection) {
-    if (!deleteTarget) return;
+    if (!deleteTarget || campaignDeleteBlocked || campaignDeleteInProgress) return;
     const target = deleteTarget;
-    deleteTarget = null;
+    campaignDeleteInProgress = true;
     try {
-      await deleteCampaign(target.id, mode);
-      if (activeCampaignId === target.id) setActiveCampaignId(null);
+      await deleteCampaign(target.campaign.id, mode);
+      draftCoordinator.removeAfterDeletePrefixes(target.prefixes);
+      forgetRuleRecoveryPrefix(draftCoordinator, target.rulePrefix);
+      deleteTarget = null;
+      if (activeCampaignId === target.campaign.id) setActiveCampaignId(null);
       await refreshCampaigns();
     } catch (e) {
       error = String(e);
+    } finally {
+      campaignDeleteInProgress = false;
     }
   }
 
@@ -254,7 +300,7 @@
 
 <svelte:window
   onkeydown={(e) => {
-    if (e.key === 'Escape' && deleteTarget) deleteTarget = null;
+    if (e.key === 'Escape' && deleteTarget && !campaignDeleteInProgress) deleteTarget = null;
   }}
 />
 
@@ -561,23 +607,42 @@
       class="modal-overlay"
       role="presentation"
       onclick={(e) => {
-        if (e.target === e.currentTarget) deleteTarget = null;
+        if (e.target === e.currentTarget && !campaignDeleteInProgress) deleteTarget = null;
       }}
     >
       <div class="modal" role="dialog" aria-label={i18n.t('campaign.deleteCampaign')} tabindex="-1">
-        <h3>{i18n.t('campaign.deleteCampaignQuestion', { name: deleteTarget.name })}</h3>
+        <h3>{i18n.t('campaign.deleteCampaignQuestion', { name: deleteTarget.campaign.name })}</h3>
         <p>
           {i18n.t('campaign.deleteCampaignHint')}
         </p>
+        {#if campaignDeleteBlocked}
+          <p class="delete-draft-warning" role="status">
+            {i18n.t('campaign.deleteCampaignSavingBlocked')}
+          </p>
+        {:else if campaignDraftCount > 0}
+          <p class="delete-draft-warning">
+            {i18n.t('campaign.deleteCampaignDrafts', { count: campaignDraftCount })}
+          </p>
+        {/if}
         <div class="modal-actions">
-          <button class="m-btn danger" onclick={() => confirmDelete('delete')}>
+          <button
+            class="m-btn danger"
+            disabled={campaignDeleteBlocked || campaignDeleteInProgress}
+            onclick={() => confirmDelete('delete')}
+          >
             {i18n.t('campaign.deleteCampaignNotes')}
           </button>
-          <button class="m-btn" onclick={() => confirmDelete('convert_to_regular')}>
+          <button
+            class="m-btn"
+            disabled={campaignDeleteBlocked || campaignDeleteInProgress}
+            onclick={() => confirmDelete('convert_to_regular')}
+          >
             {i18n.t('campaign.keepNotes')}
           </button>
-          <button class="m-btn" onclick={() => (deleteTarget = null)}
-            >{i18n.t('common.cancel')}</button
+          <button
+            class="m-btn"
+            disabled={campaignDeleteInProgress}
+            onclick={() => (deleteTarget = null)}>{i18n.t('common.cancel')}</button
           >
         </div>
       </div>

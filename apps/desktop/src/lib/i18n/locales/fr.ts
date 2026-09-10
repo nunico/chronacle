@@ -273,6 +273,10 @@ const fr = {
     deleteCampaignQuestion: 'Supprimer « {name} » ?',
     deleteCampaignHint:
       'Si cette campagne possède sa propre collection de notes et d’entités, choisissez ce qui lui arrive.',
+    deleteCampaignSavingBlocked:
+      'Attendez la fin de l’enregistrement de la campagne avant de la supprimer.',
+    deleteCampaignDrafts:
+      'La suppression de cette campagne abandonnera {count} brouillon(s) conservé(s).',
     deleteCampaignNotes: 'Supprimer la campagne et ses notes',
     keepNotes: 'Conserver les notes comme collection régulière',
     systemDash: '—',

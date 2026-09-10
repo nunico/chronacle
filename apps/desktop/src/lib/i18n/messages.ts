@@ -268,6 +268,8 @@ export const sourceCatalog = {
     deleteCampaignQuestion: 'Delete "{name}"?',
     deleteCampaignHint:
       'If this campaign has its own collection of notes and entities, choose what happens to it.',
+    deleteCampaignSavingBlocked: 'Wait for campaign saves to finish before deleting.',
+    deleteCampaignDrafts: 'Deleting this campaign will discard {count} retained draft(s).',
     deleteCampaignNotes: 'Delete campaign and its notes',
     keepNotes: 'Keep notes as a regular collection',
     systemDash: '—',

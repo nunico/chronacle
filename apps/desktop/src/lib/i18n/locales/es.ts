@@ -270,6 +270,9 @@ const es = {
     deleteCampaignQuestion: '¿Eliminar «{name}»?',
     deleteCampaignHint:
       'Si esta campaña tiene su propia colección de notas y entidades, elige qué hacer con ella.',
+    deleteCampaignSavingBlocked:
+      'Espera a que termine el guardado de la campaña antes de eliminarla.',
+    deleteCampaignDrafts: 'Al eliminar esta campaña se descartarán {count} borradores conservados.',
     deleteCampaignNotes: 'Eliminar campaña y sus notas',
     keepNotes: 'Conservar notas como colección normal',
     systemDash: '—',
