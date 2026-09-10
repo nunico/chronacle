@@ -69,7 +69,6 @@ async function expandRow(title = 'The Battle of Ashfields') {
 describe('SessionRow', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     i18n.setLocale('en');
     vi.mocked(commands.getSessionEntities).mockResolvedValue([]);
   });
