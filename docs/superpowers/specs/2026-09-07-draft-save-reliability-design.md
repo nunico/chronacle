@@ -1411,11 +1411,14 @@ serialization; the frontend adapter test covers wrong-target rejection.
 - Rust service tests make rule-note update return the updated record—including
   the canonical `notes` value—and reject a missing ID; the Tauri command smoke
   test and frontend wrapper typecheck verify the return type reaches the adapter.
-- A Linux `tauri-driver` check exercises window close, application Quit,
-  exit-authorization rejection/retry, and an already-running save. It uses a temporary
-  application data/config/cache root and a fresh database; it never reads or
-  mutates developer state. The active-save test is executed, not skipped.
-  Mocked browser/component coverage does not substitute for it.
+- A Linux `tauri-driver` check exercises two real window-manager Alt+F4 journeys:
+  an Oracle close decision and closing while a session save is already running.
+  It uses a temporary application data/config/cache root and a fresh database;
+  it never reads or mutates developer state. Both journeys execute without a
+  skip. Portable application-Quit authorization, rejection/Retry, and concurrent
+  request behavior are covered by frontend component, state-machine, Rust unit,
+  and static adapter tests rather than Linux native UI. The macOS AppKit adapter
+  has no runtime verification in this Linux environment.
 - Final verification is `scripts/ci/local-pr.sh`, plus the focused native close
   check after a RocksDB Tauri build. Evidence and both independent reviews must
   refer to the same final `git rev-parse HEAD` plus dirty diff state.
