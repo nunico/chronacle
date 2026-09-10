@@ -1,11 +1,5 @@
-import { Given, Then, When, test } from './fixtures';
-
-function skipNativeCloseContract(): void {
-  test.skip(
-    true,
-    'Native Tauri close requests cannot be exercised by the mocked browser suite; Task 5 binds this contract in tauri-driver.',
-  );
-}
+import { skipNativeCloseContract } from './draft-reliability-support';
+import { Given, Then, When } from './fixtures';
 
 Given('an unsent Oracle question has focus', async () => {
   skipNativeCloseContract();
