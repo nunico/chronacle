@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/svelte';
 import Shell from './Shell.svelte';
 import { open } from '@tauri-apps/plugin-dialog';
 import { clearToasts } from '../lib/toast.svelte';
@@ -519,6 +519,107 @@ describe('Shell native close protection', () => {
     expect(port.destroy).not.toHaveBeenCalled();
     rendered.unmount();
     expect(port.unlisten).toHaveBeenCalledOnce();
+  });
+
+  it('does not expose an editor until native close protection is registered', async () => {
+    let resolveRegistration!: (unlisten: () => void) => void;
+    const port: WindowClosePort = {
+      onCloseRequested: vi.fn(
+        () =>
+          new Promise<() => void>((resolve) => {
+            resolveRegistration = resolve;
+          }),
+      ),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    };
+
+    render(Shell, { props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() } });
+
+    expect(screen.queryByRole('button', { name: /^Oracle$/ })).toBeNull();
+    expect(screen.queryByPlaceholderText('Ask a rule, a name, a place…')).toBeNull();
+
+    resolveRegistration(vi.fn());
+
+    expect(await screen.findByRole('button', { name: /^Oracle$/ })).toBeInTheDocument();
+    expect(screen.getAllByPlaceholderText('Ask a rule, a name, a place…')).toHaveLength(1);
+  });
+
+  it.each([
+    [
+      'en',
+      'Window-close protection is unavailable. Retry before editing so unsaved work cannot be lost.',
+      'Retry',
+    ],
+    [
+      'de',
+      'Der Schutz beim Schließen des Fensters ist nicht verfügbar. Versuche es erneut, bevor du etwas bearbeitest, damit ungespeicherte Arbeit nicht verloren geht.',
+      'Erneut versuchen',
+    ],
+    [
+      'fr',
+      'La protection à la fermeture de la fenêtre est indisponible. Réessayez avant de modifier du contenu afin de ne pas perdre votre travail.',
+      'Réessayer',
+    ],
+    [
+      'es',
+      'La protección al cerrar la ventana no está disponible. Reintenta antes de editar para no perder el trabajo sin guardar.',
+      'Reintentar',
+    ],
+  ] as const)(
+    'fails closed with localized keyboard recovery in %s',
+    async (locale, message, retryLabel) => {
+      i18n.setLocale(locale);
+      const coordinator = new DraftCoordinator();
+      const port: WindowClosePort = {
+        onCloseRequested: vi.fn().mockRejectedValue(new Error('native listener unavailable')),
+        destroy: vi.fn().mockResolvedValue(undefined),
+      };
+
+      render(Shell, { props: { windowClosePort: port, draftCoordinator: coordinator } });
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(message);
+      const retry = within(alert).getByRole('button', { name: retryLabel });
+      expect(document.activeElement).toBe(retry);
+      expect(screen.queryByRole('button', { name: /^Oracle$/ })).toBeNull();
+      expect(screen.queryByPlaceholderText('Ask a rule, a name, a place…')).toBeNull();
+      expect(coordinator.atRiskCount()).toBe(0);
+    },
+  );
+
+  it('coalesces duplicate Retry while registration is in flight and renders the app once', async () => {
+    let attempts = 0;
+    let resolveRetry!: (unlisten: () => void) => void;
+    const retryUnlisten = vi.fn();
+    const port: WindowClosePort = {
+      onCloseRequested: vi.fn(() => {
+        attempts += 1;
+        if (attempts === 1) return Promise.reject(new Error('native listener unavailable'));
+        return new Promise<() => void>((resolve) => {
+          resolveRetry = resolve;
+        });
+      }),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    };
+    const rendered = render(Shell, {
+      props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() },
+    });
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+
+    await fireEvent.click(retry);
+    await fireEvent.click(retry);
+
+    expect(port.onCloseRequested).toHaveBeenCalledTimes(2);
+    expect(retry).toBeDisabled();
+    expect(screen.queryByPlaceholderText('Ask a rule, a name, a place…')).toBeNull();
+
+    resolveRetry(retryUnlisten);
+    expect(await screen.findByRole('button', { name: /^Oracle$/ })).toBeInTheDocument();
+    expect(screen.getAllByPlaceholderText('Ask a rule, a name, a place…')).toHaveLength(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    rendered.unmount();
+    expect(retryUnlisten).toHaveBeenCalledOnce();
   });
 
   it('unlistens if asynchronous registration finishes after Shell is destroyed', async () => {

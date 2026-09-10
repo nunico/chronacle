@@ -8,6 +8,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn().mockResolvedValue([]),
+  isTauri: vi.fn(() => false),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -102,9 +103,7 @@ describe('App — model-download gate', () => {
       // Oracle nav item is present
       expect(screen.getByRole('button', { name: /Oracle/i })).toBeTruthy();
       // Campaign & sources footer button
-      expect(
-        screen.getByRole('button', { name: /Campaign.*&.*sources/i }),
-      ).toBeTruthy();
+      expect(screen.getByRole('button', { name: /Campaign.*&.*sources/i })).toBeTruthy();
       // Settings icon-only button by aria-label
       expect(screen.getByRole('button', { name: /^Settings$/i })).toBeTruthy();
       expect(errorSpy).not.toHaveBeenCalled();

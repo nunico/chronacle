@@ -92,6 +92,31 @@ describe('i18n', () => {
     },
   );
 
+  it.each([
+    [
+      'en',
+      'Window-close protection is unavailable. Retry before editing so unsaved work cannot be lost.',
+    ],
+    [
+      'de',
+      'Der Schutz beim Schließen des Fensters ist nicht verfügbar. Versuche es erneut, bevor du etwas bearbeitest, damit ungespeicherte Arbeit nicht verloren geht.',
+    ],
+    [
+      'fr',
+      'La protection à la fermeture de la fenêtre est indisponible. Réessayez avant de modifier du contenu afin de ne pas perdre votre travail.',
+    ],
+    [
+      'es',
+      'La protección al cerrar la ventana no está disponible. Reintenta antes de editar para no perder el trabajo sin guardar.',
+    ],
+  ] as const)('ships close-protection recovery copy in %s', (locale, expected) => {
+    const catalog = localeCatalogs[locale] as unknown as {
+      drafts: { closeProtectionUnavailable?: string };
+    };
+
+    expect(catalog.drafts.closeProtectionUnavailable).toBe(expected);
+  });
+
   it('interpolates named placeholders and falls back to English when a message is absent', () => {
     const germanCatalog = localeCatalogs.de as unknown as {
       progress: { source?: string };
