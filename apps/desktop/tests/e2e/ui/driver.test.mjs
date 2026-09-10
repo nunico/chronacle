@@ -14,6 +14,7 @@ describe('native UI test environment', () => {
       assert.equal(dirname(isolated.env.XDG_DATA_HOME), isolated.root);
       assert.equal(dirname(isolated.env.XDG_CONFIG_HOME), isolated.root);
       assert.equal(dirname(isolated.env.XDG_CACHE_HOME), isolated.root);
+      assert.equal(isolated.env.MESA_SHADER_CACHE_DISABLE, 'true');
       assert.notEqual(isolated.env.XDG_DATA_HOME, isolated.env.XDG_CONFIG_HOME);
       assert.notEqual(isolated.env.XDG_DATA_HOME, isolated.env.XDG_CACHE_HOME);
       assert.notEqual(isolated.env.XDG_CONFIG_HOME, isolated.env.XDG_CACHE_HOME);
