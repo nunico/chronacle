@@ -1,5 +1,9 @@
 import { type Locator, type Page } from '@playwright/test';
 import { type DraftReliabilityControls, type DraftWriteCommand } from '../ipc-mock';
+import { test } from './fixtures';
+
+export const CAMPAIGN_A_QUESTION = 'Campaign A secret question';
+export const SESSION_REVISION_TWO_TITLE = 'Session draft revision two';
 
 export interface DraftWindow extends Window {
   __draftReliability: DraftReliabilityControls;
@@ -230,4 +234,11 @@ export async function openCampaign(page: Page, name: string): Promise<void> {
 }
 export async function dispatchBlurWithoutMovingFocus(locator: Locator): Promise<void> {
   await locator.evaluate((element) => element.dispatchEvent(new FocusEvent('blur')));
+}
+
+export function skipNativeCloseContract(): void {
+  test.skip(
+    true,
+    'Native Tauri close requests cannot be exercised by the mocked browser suite; Task 5 binds this contract in tauri-driver.',
+  );
 }

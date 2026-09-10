@@ -1,6 +1,9 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { Given, Then, When } from './fixtures';
 import {
+  CAMPAIGN_A_QUESTION,
+  type DraftWindow,
+  SESSION_REVISION_TWO_TITLE,
   activeWrites,
   commitPending,
   composer,

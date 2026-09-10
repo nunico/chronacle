@@ -1,9 +1,16 @@
 import { expect } from '@playwright/test';
+import { resetDraftReliabilityIpcMock } from '../ipc-mock';
 import { Given, Then, When } from './fixtures';
-import { composer, openCampaign, openRailView, submissions } from './draft-reliability-support';
+import {
+  CAMPAIGN_A_QUESTION,
+  type DraftWindow,
+  composer,
+  openCampaign,
+  openRailView,
+  submissions,
+} from './draft-reliability-support';
 
 const QUESTION = 'Where is the Moon Gate?';
-const CAMPAIGN_A_QUESTION = 'Campaign A secret question';
 const CAMPAIGN_B_QUESTION = 'Campaign B separate question';
 const NO_CAMPAIGN_QUESTION = 'A question without a campaign';
 

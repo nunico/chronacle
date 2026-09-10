@@ -1,6 +1,8 @@
 import { expect, type Locator, type Page } from '@playwright/test';
-import { Given, Then, When } from './fixtures';
+import { Given, Then, When, test } from './fixtures';
 import {
+  CAMPAIGN_A_QUESTION,
+  SESSION_REVISION_TWO_TITLE,
   activeWrites,
   composer,
   dispatchBlurWithoutMovingFocus,
@@ -18,6 +20,7 @@ import {
   resolveNextSessionList,
   resolveNextWithCanonicalInput,
   setSessionCanonical,
+  skipNativeCloseContract,
 } from './draft-reliability-support';
 
 const SESSION_TITLE = 'Ashes at Dawn';
@@ -25,7 +28,6 @@ const CHANGED_SESSION_TITLE = 'Ashes after the Storm';
 const EARLIER_SESSION_TITLE = 'Earlier session revision';
 const NEWER_SESSION_TITLE = 'Newer unsaved session revision';
 const SESSION_REVISION_ONE_TITLE = 'Session draft revision one';
-const SESSION_REVISION_TWO_TITLE = 'Session draft revision two';
 const LATER_SESSION_TITLE = 'Later authoritative session title';
 const RAPID_TITLES = ['First rapid title', 'Second rapid title', 'Newest rapid title'];
 
