@@ -1,9 +1,14 @@
-import type { RuleEntry } from '../commands';
 import type { DraftCoordinator } from './draft-coordinator.svelte';
 
-const entriesByCoordinator = new WeakMap<DraftCoordinator, Map<string, RuleEntry>>();
+export interface RuleRecoveryPresentation {
+  readonly ruleId: string;
+  readonly title: string;
+  readonly collectionId: string;
+}
 
-function entriesFor(coordinator: DraftCoordinator): Map<string, RuleEntry> {
+const entriesByCoordinator = new WeakMap<DraftCoordinator, Map<string, RuleRecoveryPresentation>>();
+
+function entriesFor(coordinator: DraftCoordinator): Map<string, RuleRecoveryPresentation> {
   let entries = entriesByCoordinator.get(coordinator);
   if (!entries) {
     entries = new Map();
@@ -12,22 +17,39 @@ function entriesFor(coordinator: DraftCoordinator): Map<string, RuleEntry> {
   return entries;
 }
 
-/** Retain non-editable row presentation while an app-lifetime rule-note draft is at risk. */
-export function rememberRuleEntry(
+/** Retain only the identity and label needed to present an at-risk rule-note draft. */
+export function rememberRuleRecovery(
   coordinator: DraftCoordinator,
   scope: string,
-  entry: RuleEntry,
+  recovery: RuleRecoveryPresentation,
 ): void {
-  entriesFor(coordinator).set(scope, {
-    ...entry,
-    page_refs: entry.page_refs.map((reference) => ({ ...reference })),
-  });
+  entriesFor(coordinator).set(scope, Object.freeze({ ...recovery }));
 }
 
-/** Recover the last presentation for a rule that disappeared from a later list response. */
-export function rememberedRuleEntry(
+/** Recover the minimal presentation for a rule that disappeared from a later list response. */
+export function rememberedRuleRecovery(
   coordinator: DraftCoordinator,
   scope: string,
-): RuleEntry | undefined {
+): RuleRecoveryPresentation | undefined {
   return entriesByCoordinator.get(coordinator)?.get(scope);
+}
+
+/** Remove minimal recovery presentation after exact-scope deletion or release. */
+export function forgetRuleRecovery(coordinator: DraftCoordinator, scope: string): boolean {
+  return entriesByCoordinator.get(coordinator)?.delete(scope) ?? false;
+}
+
+/** Remove minimal recovery presentation after collection or campaign teardown. */
+export function forgetRuleRecoveryPrefix(coordinator: DraftCoordinator, prefix: string): number {
+  if (prefix.length === 0) throw new Error('Rule recovery prefix cannot be empty');
+  const entries = entriesByCoordinator.get(coordinator);
+  if (!entries) return 0;
+  let removed = 0;
+  for (const scope of [...entries.keys()]) {
+    if (!scope.startsWith(prefix)) continue;
+    entries.delete(scope);
+    removed += 1;
+  }
+  if (entries.size === 0) entriesByCoordinator.delete(coordinator);
+  return removed;
 }
