@@ -90,8 +90,9 @@ async function openPicker() {
 class FakeWindowClosePort implements WindowClosePort {
   private handlers = new Set<(request: CloseRequest) => void>();
   readonly unlisten = vi.fn();
+  readonly requestExitIntent = vi.fn().mockResolvedValue(17);
   readonly confirmExit = vi.fn().mockResolvedValue(undefined);
-  readonly cancelExit = vi.fn().mockResolvedValue(undefined);
+  readonly cancelExit = vi.fn().mockResolvedValue(true);
   readonly registerCloseRequests = vi.fn(async (handler: (request: CloseRequest) => void) => {
     this.handlers.add(handler);
     return () => {
@@ -109,6 +110,10 @@ class FakeWindowClosePort implements WindowClosePort {
 
   requestApplicationExit() {
     for (const handler of this.handlers) handler({ intent: 29, source: 'application' });
+  }
+
+  requestFailure() {
+    for (const handler of this.handlers) handler({ intent: null, source: 'window' });
   }
 }
 
@@ -559,6 +564,40 @@ describe('Shell native close protection', () => {
     resolveConfirmation();
   });
 
+  it('shows actionable recovery when clean exit confirmation is rejected', async () => {
+    const port = new FakeWindowClosePort();
+    port.confirmExit.mockRejectedValueOnce(new Error('native exit rejected'));
+    render(Shell, {
+      props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() },
+    });
+    await waitFor(() => expect(port.registerCloseRequests).toHaveBeenCalledOnce());
+
+    port.requestClose();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Chronacle couldn't close. Your drafts are still available. Try again or cancel.",
+    );
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retry' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(port.confirmExit).toHaveBeenCalledTimes(2));
+    expect(port.confirmExit).toHaveBeenLastCalledWith(17, 'keep');
+  });
+
+  it('recovers when establishing the window exit intent fails', async () => {
+    const port = new FakeWindowClosePort();
+    render(Shell, {
+      props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() },
+    });
+    await waitFor(() => expect(port.registerCloseRequests).toHaveBeenCalledOnce());
+
+    port.requestFailure();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Chronacle couldn't close. Your drafts are still available. Try again or cancel.",
+    );
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retry' }));
+  });
+
   it('does not expose an editor until native close protection is registered', async () => {
     let resolveRegistration!: (unlisten: () => void) => void;
     const port: WindowClosePort = {
@@ -568,8 +607,9 @@ describe('Shell native close protection', () => {
             resolveRegistration = resolve;
           }),
       ),
+      requestExitIntent: vi.fn().mockResolvedValue(17),
       confirmExit: vi.fn().mockResolvedValue(undefined),
-      cancelExit: vi.fn().mockResolvedValue(undefined),
+      cancelExit: vi.fn().mockResolvedValue(true),
     };
 
     render(Shell, { props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() } });
@@ -611,8 +651,9 @@ describe('Shell native close protection', () => {
       const coordinator = new DraftCoordinator();
       const port: WindowClosePort = {
         registerCloseRequests: vi.fn().mockRejectedValue(new Error('native listener unavailable')),
+        requestExitIntent: vi.fn().mockResolvedValue(17),
         confirmExit: vi.fn().mockResolvedValue(undefined),
-        cancelExit: vi.fn().mockResolvedValue(undefined),
+        cancelExit: vi.fn().mockResolvedValue(true),
       };
 
       render(Shell, { props: { windowClosePort: port, draftCoordinator: coordinator } });
@@ -639,8 +680,9 @@ describe('Shell native close protection', () => {
           resolveRetry = resolve;
         });
       }),
+      requestExitIntent: vi.fn().mockResolvedValue(17),
       confirmExit: vi.fn().mockResolvedValue(undefined),
-      cancelExit: vi.fn().mockResolvedValue(undefined),
+      cancelExit: vi.fn().mockResolvedValue(true),
     };
     const rendered = render(Shell, {
       props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() },
@@ -673,8 +715,9 @@ describe('Shell native close protection', () => {
             resolveRegistration = resolve;
           }),
       ),
+      requestExitIntent: vi.fn().mockResolvedValue(17),
       confirmExit: vi.fn().mockResolvedValue(undefined),
-      cancelExit: vi.fn().mockResolvedValue(undefined),
+      cancelExit: vi.fn().mockResolvedValue(true),
     };
     const rendered = render(Shell, {
       props: { windowClosePort: port, draftCoordinator: new DraftCoordinator() },
@@ -793,4 +836,37 @@ describe('Shell native close protection', () => {
     expect(updateSession).not.toHaveBeenCalled();
     expect(updateRuleNotes).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['stale', (port: FakeWindowClosePort) => port.cancelExit.mockResolvedValue(false)],
+    [
+      'rejected',
+      (port: FakeWindowClosePort) =>
+        port.cancelExit.mockRejectedValue(new Error('IPC unavailable')),
+    ],
+  ] as const)(
+    'keeps %s cancellation fail-closed with actionable recovery',
+    async (_label, fail) => {
+      const port = new FakeWindowClosePort();
+      fail(port);
+      const coordinator = new DraftCoordinator();
+      coordinator.open('oracle:camp-1', null, '');
+      coordinator.revise('oracle:camp-1', 'Retain this question');
+      render(Shell, { props: { windowClosePort: port, draftCoordinator: coordinator } });
+      await screen.findByPlaceholderText('Ask a rule, a name, a place…');
+      await waitFor(() => expect(port.registerCloseRequests).toHaveBeenCalledOnce());
+
+      port.requestClose();
+      await fireEvent.keyDown(screen.getByRole('dialog', { name: 'Unsaved changes' }), {
+        key: 'Escape',
+      });
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        "Chronacle couldn't close. Your drafts are still available. Try again or cancel.",
+      );
+      expect(screen.getByRole('dialog', { name: 'Unsaved changes' })).toBeInTheDocument();
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retry' }));
+      expect(coordinator.get<string>('oracle:camp-1')?.value).toBe('Retain this question');
+    },
+  );
 });
