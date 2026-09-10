@@ -40,7 +40,234 @@ agents write the same file concurrently. Every slice follows this gate:
    checks; both reviewers re-review. Repeat until accepted.
 
 Every report includes changed files, exact commands/results, unresolved concerns,
-and `git diff --stat`. Do not commit, push, merge, or create a PR.
+and `git diff --stat`. Commit each accepted red-green-refactor slice with a small
+conventional commit. Do not push, merge, rewrite remote history, or create/split
+a PR unless separately authorized.
+
+## Corrective Review Execution (PR #45)
+
+This section supersedes conflicting details in the original tasks below. It
+addresses adversarial findings 1–20; disputed finding 21 is intentionally
+excluded. The already-published PR is larger than the repository's preferred
+review size. The commits below remain separable, but turning them into stacked
+PRs requires remote branch/PR operations and is a maintainer handoff unless the
+user grants that authority.
+
+### Corrective Slice A: Modular executable acceptance contract
+
+**Owner:** Test engineer. Production and design files are read-only.
+
+**Files:**
+
+- Split `apps/desktop/tests/e2e/features/draft-save-reliability.feature` into
+  `apps/desktop/tests/e2e/features/draft-save-reliability/{oracle,entities,autosave,close}.feature`.
+- Split `apps/desktop/tests/e2e/backend/steps/draft-save-reliability.steps.ts`
+  into matching focused modules plus a shared fixture/control module.
+- Modify `apps/desktop/tests/e2e/backend/ipc-mock.ts` only for deterministic
+  delete, create, wrong-target, and exit controls.
+
+- [ ] Copy the corrective Gherkin from the design verbatim before production
+      changes. Preserve every established scenario while moving it; do not
+      weaken assertions or duplicate step registration.
+- [ ] Add scenarios for session failure followed by NOT_FOUND list omission,
+      navigation, same-target Retry and targeted Discard; keyboard navigation
+      with unsaved entity/session/rule drafts; immutable entity deletion target;
+      campaign delete failure; delayed session Create across campaigns; and
+      wrong-rule acknowledgment.
+- [ ] Generate specs and run the focused contract with the correct Playwright
+      argument forwarding:
+
+  ```bash
+  pnpm -C apps/desktop e2e:backend --grep "Preserve work|Close Chronacle|Coordinate destructive|Keep asynchronous"
+  ```
+
+  Expected red: new scenarios fail for the reported behavior, while generation
+  has no missing or duplicate steps. Record one behavioral failure per finding.
+
+- [ ] Commit only acceptance changes:
+
+  ```bash
+  git commit -m "test: cover adversarial draft lifecycle cases"
+  ```
+
+### Corrective Slice B: Release clean state and coordinate record deletion
+
+**Owner:** Implementation subagent after Slice A red evidence.
+
+**Files:**
+
+- Modify `apps/desktop/src/lib/drafts/draft-coordinator.svelte.ts` and its test.
+- Modify `apps/desktop/src/lib/drafts/rule-note-presentation.ts` and
+  `apps/desktop/src/components/RulesPanel.test.ts`.
+- Modify `apps/desktop/src/components/EntityManager.svelte` and its test.
+- Modify `apps/desktop/src/views/CampaignView.svelte` and its test.
+
+- [ ] Write focused failing coordinator tests: `release(scope)` removes only a
+      clean inactive unreferenced record; pending, queued, saving, failed,
+      unavailable, redirected, or promotion-conflicted records remain.
+      `releasePrefix` applies the same predicate and never performs persistence.
+- [ ] Write failing entity tests that open NPC deletion, attempt `g l`, and
+      confirm while a location has the same raw ID. Assert only the captured NPC
+      is deleted. Add an active-save case where Delete is disabled, then assert
+      successful deletion calls exact-scope cleanup and late settlement cannot
+      restore the row.
+- [ ] Write failing campaign tests for active-write blocking, explicit
+      campaign-prefix discard, exact captured campaign deletion, success cleanup,
+      and failure preserving all drafts.
+- [ ] Write a failing rule presentation test proving retained recovery metadata
+      is exactly rule ID/title/collection plus the coordinator note; compiled
+      body, references, objections, and complete `RuleEntry` are absent.
+- [ ] Implement the minimum coordinator release API, immutable deletion-intent
+      capture, modal shortcut suppression, save/delete mutual exclusion, and
+      minimal rule recovery projection. Reuse the coordinator and existing
+      Dialog; add no cache, timer, dependency, or Rust draft concept.
+- [ ] Run focused green:
+
+  ```bash
+  pnpm -C apps/desktop test:run src/lib/drafts/draft-coordinator.svelte.test.ts \
+    src/components/EntityManager.test.ts src/views/CampaignView.test.ts \
+    src/components/RulesPanel.test.ts src/shell/Shell.test.ts
+  ```
+
+- [ ] Commit:
+
+  ```bash
+  git commit -m "fix: coordinate draft deletion and release"
+  ```
+
+### Corrective Slice C: Keep delayed session and rule writes in scope
+
+**Owner:** Implementation subagent after test-engineer red evidence.
+
+**Files:**
+
+- Modify `apps/desktop/src/views/SessionLogView.svelte` and its test.
+- Modify `apps/desktop/src/components/RulesPanel.svelte` and its test.
+- Modify `apps/desktop/src/lib/commands.ts` tests as needed.
+- Add a Rust command-boundary integration test under
+  `apps/desktop/src-tauri/tests/` without changing persistence architecture.
+
+- [ ] Write a failing deferred-promise session test: start Create in campaign A,
+      switch to B, settle, assert B is unchanged, return to A, reload, and assert
+      the new session is there. Capture campaign and component liveness at
+      request start; never read the live campaign after `await`.
+- [ ] Write the failed-save/omitted-target recovery integration test from Slice A
+      with visible content, target identity, Retry persistence, targeted Discard,
+      and keyboard focus assertions.
+- [ ] Write a failing rule adapter test where an `update_rule_notes` request for
+      Initiative returns a canonical `RuleEntry` for Surprise. Assert a retained
+      actionable failure and no mutation of either target.
+- [ ] Write a real Tauri command integration test that exercises the Rust command
+      adapter with in-memory persistence and asserts serialized canonical
+      `RuleEntry` success plus stable `{ code: "NOT_FOUND", message }` failure.
+- [ ] Implement only captured-context settlement and exact-rule target
+      validation. Keep rule identity validation at the adapter boundary; do not
+      add disputed entity campaign/kind acknowledgment validation.
+- [ ] Run focused green and Rust integration tests, then commit:
+
+  ```bash
+  pnpm -C apps/desktop test:run src/views/SessionLogView.test.ts \
+    src/components/RulesPanel.test.ts src/lib/commands.test.ts
+  cargo test -p Chronacle --test rule_note_command_boundary -- --nocapture
+  git commit -m "fix: keep delayed saves in their captured scope"
+  ```
+
+### Corrective Slice D: Protect window close and application Quit
+
+**Owner:** Implementation subagent; native file remains test-engineer-owned.
+
+**Files:**
+
+- Modify `apps/desktop/src-tauri/src/lib.rs`; create a focused
+  `exit_authorization.rs` module and unit tests so decisions do not require a
+  WebView.
+- Add a macOS `applicationShouldTerminate` adapter only if it can forward Tauri
+  delegate behavior using public APIs from already-approved dependencies.
+- Modify `apps/desktop/src/lib/drafts/window-close.ts` and its test.
+- Modify `apps/desktop/src/components/CloseDraftsDialog.svelte` and its test.
+- Modify `apps/desktop/src/shell/Shell.svelte` and its test with a surgical diff;
+  separate formatting-only churn before review.
+- Modify `apps/desktop/src-tauri/capabilities/default.json`.
+- Modify localized close-error messages in the established locale catalogs.
+
+- [ ] Write failing tests for application `ExitRequested`, coalesced concurrent
+      exit/window intents, nonce validation, revocation, one acknowledged clean
+      exit, and no double termination. Assert the macOS native adapter receives
+      menu/Dock `applicationShouldTerminate`, returns terminate-later, and feeds
+      the same `ExitAuthorization` state.
+- [ ] Write failing dialog tests where `destroy()` rejects. Assert drafts remain
+      byte-for-byte intact, persistent localized failure appears, Retry is
+      keyboard-operable, Cancel restores exact focus, and no writer/chat command
+      runs. `discardAll()` must not run before native destruction succeeds.
+- [ ] Implement a narrow Tauri exit handshake: native adapters publish one
+      intent/nonce, frontend Cancel revokes it, and the typed
+      `confirm_app_exit` command validates it before allowing one native exit.
+      Extract a small Shell-facing controller/module if needed so Shell changes
+      contain lifecycle wiring rather than another large nested block. Do not add
+      a service, event-sourcing, or generic workflow engine.
+- [ ] Perform the macOS adapter spike before claiming green. Tauri's public
+      `RunEvent::ExitRequested` is insufficient for Cmd-Q/Dock Quit. Use only
+      public APIs already present in approved dependencies and preserve Tauri's
+      delegate chain. If that is not maintainable, stop this slice as a concrete
+      blocker and request an ADR/dependency decision; do not ship or document
+      partial macOS protection as complete.
+- [ ] Remove both `core:window:allow-close` and
+      `core:window:allow-destroy`. Add a capability test that rejects wildcard or
+      unused window grants; production exit must flow through
+      `confirm_app_exit`.
+- [ ] Run focused TypeScript/Rust green, `svelte-check`, and `git diff --check`.
+      Commit native handshake and two-phase destruction separately if both diffs
+      are independently green:
+
+  ```bash
+  git commit -m "fix: guard application exit with retained drafts"
+  git commit -m "fix: preserve drafts when native exit fails"
+  ```
+
+### Corrective Slice E: Native and integrated verification
+
+**Owner sequence:** Test engineer → specification reviewer → code reviewer →
+implementation fixes → rerun and re-review.
+
+**Files:**
+
+- Modify `apps/desktop/tests/e2e/ui/draft-close.e2e.mjs`.
+- Modify focused acceptance modules from Slice A only when behavior requires
+  additional observable assertions; never weaken the contract.
+
+- [ ] Make the active-save native journey executable; remove `it.skip`. Add
+      window close, application Quit, destroy-failure/retry, and concurrent
+      request journeys. Use deterministic test-only IPC controls, not sleeps.
+- [ ] Start the native app with an isolated temporary application data/config/
+      cache root and fresh RocksDB path. Assert teardown removes the temporary
+      directory; never read or mutate the developer profile or assume empty
+      global history.
+- [ ] Exercise keyboard shortcuts in real retention journeys, not only Shell
+      unit tests. Assert exact restored text, no navigation blur-save, modal focus
+      suppression, and focus restoration.
+- [ ] Run the real native command:
+
+  ```bash
+  pnpm -C apps/desktop exec tauri build --no-bundle --features rocksdb
+  xvfb-run -a pnpm -C apps/desktop exec mocha --timeout 180000 \
+    tests/e2e/ui/draft-close.e2e.mjs
+  ```
+
+  Expected: all journeys pass; no intentional pending/skip remains. If the
+  environment cannot provide Tauri driver/WebKit, record the exact limitation
+  and do not claim native completion.
+
+- [ ] Replace the corrective Gherkin block in the design with direct links to
+      the four executable feature files. The feature files become the only
+      maintained scenario bodies; the spec keeps only the scenario inventory and
+      lifecycle rationale.
+- [ ] Run focused tests, complete desktop/website checks, then
+      `scripts/ci/local-pr.sh`. Record `git rev-parse HEAD`, clean/dirty state,
+      and native evidence so reviewers inspect the identical state.
+- [ ] Specification reviewer checks all findings 1–20 and explicitly confirms
+      finding 21 was not implemented. Code reviewer then assesses DDD boundaries,
+      accessibility, least privilege, cleanup, private-text retention, Shell diff
+      reviewability, and regression risk. Fix and repeat both gates until approved.
 
 ## File Map and Ownership
 
@@ -190,7 +417,7 @@ and `git diff --stat`. Do not commit, push, merge, or create a PR.
 - [ ] Run the red contract:
 
   ```bash
-  pnpm -C apps/desktop e2e:backend -- --grep "Preserve work"
+  pnpm -C apps/desktop e2e:backend --grep "Preserve work"
   ```
 
   Expected red: scenarios fail because drafts disappear/leak, status/retry is
@@ -1015,7 +1242,7 @@ No two owners edit the same file concurrently.
   pnpm -C apps/desktop test:run src/views/SessionLogView.test.ts \
     src/components/SessionList.test.ts
   pnpm -C apps/desktop exec bddgen
-  pnpm -C apps/desktop e2e:backend -- --grep "Preserve work"
+  pnpm -C apps/desktop e2e:backend --grep "Preserve work"
   ```
 
   Expected: focused journeys fail because the current adapters lose drafts,
@@ -1258,7 +1485,7 @@ No two owners edit the same file concurrently.
   Assert clean close is not prevented; dirty/saving/failed Oracle/entity/session/
   rule states are prevented; Cancel initially has focus; Tab is trapped; Escape
   cancels and restores composer focus. With no active write, Discard and close
-  clears all and calls destroy. With any active backend write, it is disabled with
+  requests the typed Rust exit command without clearing drafts first. With any active backend write, it is disabled with
   a polite localized reason, `discardAll` reports `blocked-active-save`, and destroy
   is not called. After settlement, keep the original close prevented: enable
   Discard and close if a newer/failed draft remains, or replace it with an enabled
@@ -1292,8 +1519,8 @@ No two owners edit the same file concurrently.
       Cancel and Discard and close. Derive the destructive action's disabled state from
       `coordinator.hasActiveWrites()`, expose the localized wait-for-saving message
       in a polite live region, and preserve focus on Cancel/the dialog as state
-      changes. When all writes are settled, Discard clears the coordinator before
-      forced destroy. If settlement removes all risk, announce that it is safe to
+      changes. When all writes are settled, Discard invokes `confirm_app_exit`
+      without clearing the coordinator first. If settlement removes all risk, announce that it is safe to
       close and replace the destructive action with Close; do not replay the
       prevented close or steal focus. The close path starts no save.
 - [ ] Run focused green, typecheck, and Svelte autofixer.
@@ -1390,7 +1617,7 @@ reviewer → implementer fixes → test engineer/reviewers again.
     src/views/SessionLogView.test.ts src/components/SessionRow.test.ts \
     src/components/RulesPanel.test.ts src/shell/Shell.test.ts
   cargo test -p chronacle-extraction update_rule_notes -- --nocapture
-  pnpm -C apps/desktop e2e:backend -- --grep "Preserve work"
+  pnpm -C apps/desktop e2e:backend --grep "Preserve work"
   ```
 
 - [ ] Run frontend Svelte analysis on every modified `.svelte` file and resolve
@@ -1426,7 +1653,8 @@ reviewer → implementer fixes → test engineer/reviewers again.
 
 - [ ] Rerun the native close command from Task 5 against this same final working
       tree state. Report any platform/tool limitation exactly.
-- [ ] Confirm no lockfile, secret, generated output, capability manifest,
-      license, or brand asset is in `git diff --name-only`. Final report lists what
+- [ ] Confirm no lockfile, secret, generated output, license, or brand asset is
+      in `git diff --name-only`. Confirm the deliberate capability diff is limited
+      to removing unused close permission and retaining main-window destroy. Final report lists what
       is safe now, in-memory lifetime/close policy, shared design, exact checks,
       review findings/resolutions, and any concrete unverified native limitation.
