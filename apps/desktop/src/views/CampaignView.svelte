@@ -251,6 +251,7 @@
         `oracle:${campaign.id}`,
         `entity:${campaign.id}:`,
         `entity-new:${campaign.id}:`,
+        `session-new:${campaign.id}:`,
         `session:${campaign.id}:`,
         `rule:${campaign.id}:`,
       ]),

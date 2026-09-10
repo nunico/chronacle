@@ -339,6 +339,7 @@ const fr = {
     title: 'Sessions',
     subtitle: 'La chronologie de votre campagne',
     newSession: 'Nouvelle session',
+    createFailed: 'Impossible de créer la session.',
     loading: 'Chargement…',
     empty: 'Aucune session pour le moment. Commencez-en une ci-dessus.',
     defaultTitle: 'Session {number}',
