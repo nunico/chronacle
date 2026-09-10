@@ -609,6 +609,74 @@ Then('the creation failure is cleared', async ({ page }) => {
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
+Then('focus moves to the created session', async ({ page }) => {
+  await expect(page.getByRole('button', { name: new RegExp(CREATED_SESSION_TITLE) })).toBeFocused();
+});
+
+Given('I navigate away and return to campaign A sessions', async ({ page }) => {
+  await openRailView(page, 'Oracle');
+  await openRailView(page, 'Sessions');
+  await expect(page.getByRole('button', { name: new RegExp(CREATED_SESSION_TITLE) })).toBeVisible();
+});
+
+Given('I make unsaved changes to the listed created session', async ({ page }) => {
+  await page.getByRole('button', { name: new RegExp(CREATED_SESSION_TITLE) }).click();
+  const title = page.getByRole('textbox', { name: 'Name', exact: true });
+  await title.fill('Listed created session edit');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+});
+
+Then('the listed created session changes remain unsaved', async ({ page }) => {
+  await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(
+    'Listed created session edit',
+  );
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+});
+
+Then('the created session needs attention with Retry', async ({ page }) => {
+  const failure = page.getByRole('alert');
+  await expect(failure).toContainText('Created, but needs attention');
+  await expect(failure).toContainText(
+    "The session was saved, but Chronacle couldn't finish opening it.",
+  );
+  await expect(failure.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /New session/i })).toBeDisabled();
+});
+
+Then('only one session has been created', async ({ page }) => {
+  expect(await observations(page, 'create_session')).toHaveLength(1);
+});
+
+When('I retry finishing the created session with the keyboard', async ({ page }) => {
+  const retry = page.getByRole('alert').getByRole('button', { name: 'Retry' });
+  await retry.focus();
+  await retry.press('Enter');
+});
+
+Then('the promotion failure remains focused and actionable', async ({ page }) => {
+  const failure = page.getByRole('alert');
+  await expect(failure).toContainText('Created, but needs attention');
+  await expect(failure.getByRole('button', { name: 'Retry' })).toBeFocused();
+});
+
+Then('no additional session is created', async ({ page }) => {
+  expect(await observations(page, 'create_session')).toHaveLength(1);
+});
+
+When('I explicitly discard the listed created session changes', async ({ page }) => {
+  await page.getByRole('button', { name: 'Discard changes' }).click();
+  await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(
+    CREATED_SESSION_TITLE,
+  );
+});
+
+Then('the created session is available once in campaign A', async ({ page }) => {
+  await expect(page.getByRole('button', { name: new RegExp(CREATED_SESSION_TITLE) })).toHaveCount(
+    1,
+  );
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
 Given('saving a changed session failed before its target was deleted', async ({ page }) => {
   const { title } = await openSession(page);
   await title.fill(MISSING_SESSION_TITLE);

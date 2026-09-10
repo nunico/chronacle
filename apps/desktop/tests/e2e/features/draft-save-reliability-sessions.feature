@@ -169,6 +169,25 @@ Feature: Save session drafts reliably while moving through a campaign
     When the retried session creation succeeds
     Then the session is created once in campaign A
     And the creation failure is cleared
+    And focus moves to the created session
+
+  Scenario: Recover when a listed created session has unsaved work
+    Given creating a new session for campaign A is in progress
+    And the backend commits the session without acknowledging creation
+    And I navigate away and return to campaign A sessions
+    And I make unsaved changes to the listed created session
+    When the delayed session creation acknowledgment arrives
+    Then the listed created session changes remain unsaved
+    And the created session needs attention with Retry
+    And only one session has been created
+    When I retry finishing the created session with the keyboard
+    Then the promotion failure remains focused and actionable
+    And no additional session is created
+    When I explicitly discard the listed created session changes
+    And I retry finishing the created session with the keyboard
+    Then the created session is available once in campaign A
+    And no additional session is created
+    And focus moves to the created session
 
   Scenario: Recover and discard a session omitted after a failed save
     Given saving a changed session failed before its target was deleted
