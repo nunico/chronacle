@@ -29,4 +29,3 @@ Feature: Preserve work while moving through a campaign
     And I return to Oracle
     Then my no-campaign question is still in the composer
     And it has not been submitted
-
