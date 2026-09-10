@@ -64,12 +64,13 @@ describe('CloseDraftsDialog', () => {
     opener.remove();
   });
 
-  it('discards every retained draft through coordinator policy before destroying exactly once', async () => {
+  it('leaves retained drafts untouched while native exit is requested', async () => {
     const coordinator = dirtyCoordinator();
     coordinator.open('entity:camp-a:npc:mira', 'entity:npc:mira', { name: 'Mira' });
     coordinator.revise('entity:camp-a:npc:mira', { name: 'Mira the Bold' });
     const discardAll = vi.spyOn(coordinator, 'discardAll');
-    const ondestroy = vi.fn().mockResolvedValue(undefined);
+    const exit = deferred<undefined>();
+    const ondestroy = vi.fn(() => exit.promise);
     renderDialog(coordinator, { ondestroy });
 
     const close = screen.getByRole('button', { name: 'Discard and close' });
@@ -77,8 +78,88 @@ describe('CloseDraftsDialog', () => {
     await fireEvent.click(close);
 
     await waitFor(() => expect(ondestroy).toHaveBeenCalledOnce());
-    expect(discardAll).toHaveBeenCalledOnce();
-    expect(coordinator.atRiskCount()).toBe(0);
+    expect(discardAll).not.toHaveBeenCalled();
+    expect(coordinator.get<string>('oracle:camp-a')?.value).toBe('Where is the silver key?');
+    expect(coordinator.get<{ name: string }>('entity:camp-a:npc:mira')?.value).toEqual({
+      name: 'Mira the Bold',
+    });
+    expect(coordinator.atRiskCount()).toBe(2);
+
+    exit.resolve(undefined);
+  });
+
+  it.each([
+    [
+      'en',
+      "Chronacle couldn't close. Your drafts are still available. Try again or cancel.",
+      'Retry',
+    ],
+    [
+      'de',
+      'Chronacle konnte nicht geschlossen werden. Deine Entwürfe sind weiterhin verfügbar. Versuche es erneut oder brich ab.',
+      'Erneut versuchen',
+    ],
+    [
+      'fr',
+      'Chronacle n’a pas pu se fermer. Vos brouillons sont toujours disponibles. Réessayez ou annulez.',
+      'Réessayer',
+    ],
+    [
+      'es',
+      'Chronacle no se pudo cerrar. Tus borradores siguen disponibles. Reinténtalo o cancela.',
+      'Reintentar',
+    ],
+  ] as const)(
+    'preserves work and offers keyboard retry after native exit fails in %s',
+    async (locale, failureMessage, retryLabel) => {
+      i18n.setLocale(locale);
+      const coordinator = dirtyCoordinator();
+      const originalDraft = coordinator.get<string>('oracle:camp-a');
+      const discardAll = vi.spyOn(coordinator, 'discardAll');
+      const ondestroy = vi
+        .fn<() => Promise<void>>()
+        .mockRejectedValueOnce(new Error('native exit rejected'))
+        .mockResolvedValueOnce(undefined);
+      renderDialog(coordinator, { ondestroy });
+
+      await fireEvent.click(screen.getByRole('button', { name: /close|schließen|fermer|cerrar/i }));
+
+      const failure = await screen.findByRole('alert');
+      expect(failure).toHaveTextContent(failureMessage);
+      expect(coordinator.get<string>('oracle:camp-a')).toEqual(originalDraft);
+      expect(discardAll).not.toHaveBeenCalled();
+      const retry = screen.getByRole('button', { name: retryLabel });
+      expect(document.activeElement).toBe(retry);
+
+      await fireEvent.keyDown(retry, { key: 'Enter' });
+
+      await waitFor(() => expect(ondestroy).toHaveBeenCalledTimes(2));
+      expect(discardAll).not.toHaveBeenCalled();
+      expect(coordinator.get<string>('oracle:camp-a')).toEqual(originalDraft);
+    },
+  );
+
+  it('keeps drafts and restores the opener when canceling after native exit fails', async () => {
+    const opener = document.createElement('textarea');
+    document.body.append(opener);
+    opener.focus();
+    const coordinator = dirtyCoordinator();
+    const originalDraft = coordinator.get<string>('oracle:camp-a');
+    const oncancel = vi.fn();
+    const { unmount } = renderDialog(coordinator, {
+      oncancel,
+      ondestroy: vi.fn().mockRejectedValue(new Error('native exit rejected')),
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Discard and close' }));
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+    await fireEvent.keyDown(retry, { key: 'Escape' });
+
+    expect(oncancel).toHaveBeenCalledOnce();
+    expect(coordinator.get<string>('oracle:camp-a')).toEqual(originalDraft);
+    unmount();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
   });
 
   it('blocks destructive close while a write is active and never starts another writer', async () => {

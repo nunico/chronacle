@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { i18n } from '../lib/locale.svelte';
   import type { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
   import Dialog from './ui/Dialog.svelte';
@@ -11,6 +12,8 @@
 
   let { draftCoordinator, oncancel, ondestroy }: Props = $props();
   let closing = $state(false);
+  let closeFailed = $state(false);
+  let retryButton: HTMLButtonElement | undefined = $state();
   let hasActiveWrites = $derived(draftCoordinator.hasActiveWrites());
   let hasAtRiskDrafts = $derived(draftCoordinator.atRiskCount() > 0);
   let safeToClose = $derived(!hasActiveWrites && !hasAtRiskDrafts);
@@ -18,15 +21,15 @@
   async function closeWindow(): Promise<void> {
     if (closing || hasActiveWrites) return;
 
-    if (hasAtRiskDrafts && draftCoordinator.discardAll() !== 'discarded') return;
-
     closing = true;
+    closeFailed = false;
     try {
       await ondestroy();
     } catch {
-      // Native destruction can fail. Keep the prevented window open and allow
-      // the GM to explicitly try Close again without leaking a rejection.
       closing = false;
+      closeFailed = true;
+      await tick();
+      retryButton?.focus();
     }
   }
 
@@ -39,7 +42,11 @@
 
 {#snippet closeBody()}
   <p>{i18n.t('drafts.retainedThisSession')}</p>
-  {#if hasActiveWrites}
+  {#if closeFailed}
+    <p id="window-close-error" class="close-error" role="alert">
+      {i18n.t('drafts.closeFailed')}
+    </p>
+  {:else if hasActiveWrites}
     <p id="window-close-status" class="close-status" role="status" aria-live="polite">
       {i18n.t('drafts.waitForSavingBeforeClose')}
     </p>
@@ -60,7 +67,17 @@
   >
     {i18n.t('common.cancel')}
   </button>
-  {#if safeToClose}
+  {#if closeFailed}
+    <button
+      bind:this={retryButton}
+      type="button"
+      class="dialog-button danger"
+      disabled={closing}
+      aria-describedby="window-close-error"
+      onclick={closeWindow}
+      onkeydown={handleCloseKey}>{i18n.t('drafts.retry')}</button
+    >
+  {:else if safeToClose}
     <button
       type="button"
       class="dialog-button primary"
@@ -96,6 +113,11 @@
   .close-status {
     margin-top: var(--s-3);
     color: var(--rune-gold, var(--fg-1));
+  }
+
+  .close-error {
+    margin-top: var(--s-3);
+    color: var(--danger);
   }
 
   .dialog-button {

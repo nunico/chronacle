@@ -39,6 +39,8 @@ const fr = {
     waitForSavingBeforeClose:
       'Attendez la fin de l’enregistrement avant d’abandonner et de fermer.',
     safeToClose: 'L’enregistrement est terminé. Vous pouvez fermer en toute sécurité.',
+    closeFailed:
+      'Chronacle n’a pas pu se fermer. Vos brouillons sont toujours disponibles. Réessayez ou annulez.',
     closeProtectionUnavailable:
       'La protection à la fermeture de la fenêtre est indisponible. Réessayez avant de modifier du contenu afin de ne pas perdre votre travail.',
     retainedThisSession: 'Conservé uniquement pour cette session.',
