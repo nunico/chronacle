@@ -3,6 +3,8 @@ use std::sync::{Arc, RwLock};
 
 pub mod commands;
 mod exit_guard;
+#[cfg(any(test, all(target_os = "macos", feature = "rocksdb")))]
+mod macos_exit;
 #[cfg(test)]
 mod runtime_downloads;
 pub mod services;
@@ -417,6 +419,9 @@ pub async fn run() {
         .manage(state.clone())
         .manage(ExitAuthorization::default())
         .setup(move |app| {
+            #[cfg(target_os = "macos")]
+            macos_exit::install(app.handle()).map_err(std::io::Error::other)?;
+
             // ADR-003: warn if any indexed sources were embedded with a different
             // model than the active embedding provider. Mock provider is treated
             // as "no active model" (pre-download placeholder, not a real
