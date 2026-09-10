@@ -62,6 +62,7 @@
     readonly entityId: string;
     readonly scope: string;
     readonly name: string;
+    readonly rowIndex: number;
   }
 
   interface Props {
@@ -132,6 +133,7 @@
   let activeRecordId = $state<string | null>(null);
   let discardConfirm = $state(false);
   let activeTargetUnavailable = $state(false);
+  let managerElement = $state<HTMLDivElement>();
   let formPanel = $state<HTMLDivElement>();
   let consumedOpenKey = $state<string | null>(null);
   let mounted = true;
@@ -718,11 +720,24 @@
       entityId: node.id,
       scope,
       name: node.name,
+      rowIndex: presentationRows.findIndex((row) => row.recordId === node.id),
     });
   }
 
   function suppressNavigationWhileModal(event: KeyboardEvent): void {
     if (anyModalOpen) event.stopPropagation();
+  }
+
+  async function focusAfterDelete(intent: EntityDeletionIntent): Promise<void> {
+    await tick();
+    if (!managerElement?.isConnected) return;
+    const rows = Array.from(managerElement.querySelectorAll<HTMLButtonElement>('.entity-name'));
+    const sameContext = campaignId === intent.campaignId && kind === intent.kind;
+    const row = sameContext
+      ? rows[Math.min(Math.max(intent.rowIndex, 0), rows.length - 1)]
+      : rows[0];
+    const fallback = managerElement.querySelector<HTMLButtonElement>('[data-testid="entity-new"]');
+    (row ?? fallback)?.focus();
   }
 
   async function confirmDelete(intent: EntityDeletionIntent) {
@@ -731,6 +746,7 @@
     deletingScope = intent.scope;
     await tick();
     deleteProgress?.focus();
+    let deleted = false;
     try {
       await softDeleteEntity(intent.entityId, intent.kind);
       const cleanup = draftCoordinator.removeAfterDelete(intent.scope);
@@ -742,12 +758,14 @@
         entities = entities.filter((entity) => entity.id !== intent.entityId);
         if (resolvedActiveDraftScope === intent.scope) closeForm();
       }
+      deleted = true;
     } catch (e) {
       showToastMsg((e as EntityError).message ?? i18n.t('entityUi.failedDeleteEntity'));
     } finally {
       if (deleteConfirm?.scope === intent.scope) deleteConfirm = null;
       deletingScope = null;
     }
+    if (deleted) await focusAfterDelete(intent);
   }
 
   async function handleRecompile() {
@@ -837,12 +855,12 @@
 
 <svelte:document onkeydown={suppressNavigationWhileModal} />
 
-<div class="entity-manager">
+<div class="entity-manager" bind:this={managerElement}>
   <div class="content">
     <!-- List panel -->
     <div class="list-panel">
       <div class="list-header">
-        <Button onclick={openCreate}
+        <Button testId="entity-new" onclick={openCreate}
           >{i18n.t('entityUi.newEntity', { kind: i18n.t(KIND_LABEL[kind]) })}</Button
         >
       </div>
