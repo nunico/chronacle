@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { flushSync, onMount } from 'svelte';
+  import { flushSync, onMount, tick } from 'svelte';
+  import { isTauri } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { open } from '@tauri-apps/plugin-dialog';
   import {
@@ -59,10 +60,11 @@
     windowClosePort?: WindowClosePort;
   }
 
-  let {
-    draftCoordinator = new DraftCoordinator(),
-    windowClosePort = createTauriWindowClosePort(),
-  }: Props = $props();
+  let { draftCoordinator = new DraftCoordinator(), windowClosePort }: Props = $props();
+
+  function currentClosePort(): WindowClosePort {
+    return windowClosePort ?? createTauriWindowClosePort();
+  }
 
   const ENTITY_KIND_MAP: Partial<Record<NoteCategoryId, EntityKind>> = {
     npcs: 'npc',
@@ -83,6 +85,12 @@
   // this coordinator at the shell boundary makes navigation a presentation
   // concern instead of a destructive editing event.
   let closeDialogOpen = $state(false);
+  type CloseRegistrationStatus = 'idle' | 'registering' | 'ready' | 'failed';
+  let closeRegistrationStatus = $state<CloseRegistrationStatus>('idle');
+  let closeRegistrationHasFailed = $state(false);
+  let closeRegistrationRetryButton = $state<HTMLButtonElement | null>(null);
+  let shellDestroyed = false;
+  let closeUnlisten: (() => void) | null = null;
 
   function handleNativeClose(event: WindowCloseEvent): void {
     if (!closeDialogOpen && draftCoordinator.atRiskCount() === 0) return;
@@ -95,24 +103,46 @@
     }
   }
 
+  async function completeCloseRegistration(): Promise<void> {
+    try {
+      const registeredUnlisten = await currentClosePort().onCloseRequested(handleNativeClose);
+      if (shellDestroyed) {
+        registeredUnlisten();
+        return;
+      }
+      closeUnlisten = registeredUnlisten;
+      closeRegistrationHasFailed = false;
+      closeRegistrationStatus = 'ready';
+    } catch {
+      if (shellDestroyed) return;
+      closeRegistrationHasFailed = true;
+      closeRegistrationStatus = 'failed';
+      await tick();
+      if (!shellDestroyed && closeRegistrationStatus === 'failed') {
+        closeRegistrationRetryButton?.focus();
+      }
+    }
+  }
+
+  function registerCloseProtection(): void {
+    if (
+      shellDestroyed ||
+      closeRegistrationStatus === 'registering' ||
+      closeRegistrationStatus === 'ready'
+    ) {
+      return;
+    }
+    closeRegistrationStatus = 'registering';
+    void completeCloseRegistration();
+  }
+
   onMount(() => {
-    let destroyed = false;
-    let unlisten: (() => void) | null = null;
-
-    void windowClosePort
-      .onCloseRequested(handleNativeClose)
-      .then((registeredUnlisten) => {
-        if (destroyed) registeredUnlisten();
-        else unlisten = registeredUnlisten;
-      })
-      .catch(() => {
-        // Keep startup usable if the native listener boundary is unavailable.
-        // Native verification covers the supported Tauri runtime path.
-      });
-
+    if (windowClosePort === undefined && !isTauri()) {
+      closeRegistrationStatus = 'ready';
+    } else registerCloseProtection();
     return () => {
-      destroyed = true;
-      unlisten?.();
+      shellDestroyed = true;
+      closeUnlisten?.();
     };
   });
 
@@ -218,6 +248,7 @@
   }
 
   function handleWindowKey(e: KeyboardEvent) {
+    if (closeRegistrationStatus !== 'ready') return;
     // Escape always cancels a pending chord and closes the help overlay.
     if (e.key === 'Escape') {
       clearLeader();
@@ -564,328 +595,395 @@
 
 <svelte:window onkeydown={handleWindowKey} />
 
-<div class="app">
-  <CampaignRail
-    {view}
-    {activeCampaign}
-    counts={railCounts}
-    {maintenanceCount}
-    setView={(v) => (view = v)}
-    onOpenSwitcher={() => (switcherOpen = true)}
-    onOpenUpload={() => openFilePicker()}
-  />
-
-  {#if switcherOpen}
-    <CampaignSwitcher
-      {campaigns}
-      {activeCampaignId}
-      onSelect={setActiveCampaignId}
-      onManage={() => (view = 'campaign')}
-      onClose={() => (switcherOpen = false)}
-    />
-  {/if}
-
-  {#if showHelp}
-    <div
-      class="help-backdrop"
-      role="button"
-      tabindex="-1"
-      aria-label={i18n.t('shell.closeShortcuts')}
-      onclick={() => (showHelp = false)}
-      onkeydown={(e) => e.key === 'Enter' && (showHelp = false)}
-    >
-      <div
-        class="help-card"
-        role="dialog"
-        aria-label={i18n.t('shell.keyboardShortcuts')}
-        onclick={(e) => e.stopPropagation()}
-        onkeydown={() => {
-          /* swallow so backdrop key handler doesn't double-fire */
-        }}
-        tabindex="-1"
+{#if closeRegistrationHasFailed}
+  <main class="close-protection-gate">
+    <section class="close-protection-alert" role="alert">
+      <p>{i18n.t('drafts.closeProtectionUnavailable')}</p>
+      <button
+        bind:this={closeRegistrationRetryButton}
+        type="button"
+        data-autofocus
+        disabled={closeRegistrationStatus === 'registering'}
+        onclick={registerCloseProtection}>{i18n.t('drafts.retry')}</button
       >
-        <h2>{i18n.t('shell.keyboardShortcuts')}</h2>
-        <dl class="help-list">
-          {#each SHORTCUT_HELP as row (row.keys)}
-            <div class="help-row">
-              <dt><kbd>{row.keys}</kbd></dt>
-              <dd>{i18n.t(row.labelKey)}</dd>
-            </div>
-          {/each}
-        </dl>
-        <p class="help-hint">{i18n.t('shell.shortcutHint', { question: '?', escape: 'Esc' })}</p>
-      </div>
-    </div>
-  {/if}
-
-  <main class="main">
-    <Topbar title={head.title} sub={head.sub} />
-    {#if mismatch && !mismatchDismissed}
-      <div class="mismatch-banner" role="status" data-testid="mismatch-banner">
-        <div class="mismatch-text">
-          <strong>{i18n.t('shell.embeddingChanged')}</strong>
-          {i18n.t('shell.staleSources', {
-            count: totalStaleSources,
-            models: mismatch.stale.map((s) => s.embed_model).join(', '),
-            activeModel: mismatch.active_model,
-          })}
-          {#if reindexProgress}
-            <div class="mismatch-progress">
-              <ProgressBar
-                value={reindexProgress.total > 0
-                  ? Math.round((reindexProgress.current / reindexProgress.total) * 100)
-                  : 0}
-                label={i18n.t('shell.reindexingProgress', reindexProgress)}
-                locale={i18n.locale}
-              />
-            </div>
-          {/if}
-          {#if reindexError}
-            <div class="mismatch-error">{reindexError}</div>
-          {/if}
-        </div>
-        <div class="mismatch-actions">
-          <button
-            class="mismatch-reindex-btn"
-            onclick={handleReindex}
-            disabled={reindexing}
-            data-testid="mismatch-reindex"
-          >
-            {reindexing ? i18n.t('settingsPage.reindexing') : i18n.t('shell.reindexNow')}
-          </button>
-          <button
-            class="mismatch-dismiss-btn"
-            onclick={() => (mismatchDismissed = true)}
-            disabled={reindexing}
-            data-testid="mismatch-dismiss"
-          >
-            {i18n.t('common.dismiss')}
-          </button>
-        </div>
-      </div>
-    {/if}
-    {#if view === 'oracle'}
-      <OracleView
-        {activeCampaignId}
-        {draftCoordinator}
-        onOpenUpload={() => openFilePicker()}
-        focusNonce={chatFocusNonce}
-        onSavedToCodex={() => refreshMaintenanceCount()}
-      />
-    {:else if view === 'campaign'}
-      <CampaignView
-        {activeCampaignId}
-        {draftCoordinator}
-        {campaigns}
-        {setActiveCampaignId}
-        onOpenUpload={(colId) => openFilePicker(colId)}
-        {refreshCampaigns}
-      />
-    {:else if view === 'settings'}
-      <SettingsView />
-    {:else if view === 'timeline' && activeCampaignId}
-      <TimelineView
-        campaignId={activeCampaignId}
-        onOpenEntity={(e) => openEntity(e.id, e.kind as EntityKind)}
-      />
-    {:else if view === 'timeline'}
-      <div class="no-campaign-msg">
-        <p>{i18n.t('shell.noCampaignTimeline')}</p>
-      </div>
-    {:else if view === 'maintenance'}
-      <MaintenanceView
-        onCountsChanged={refreshMaintenanceCount}
-        {activeCampaignId}
-        onOpenEntity={(id, kind) => openEntity(id, kind as EntityKind)}
-        onCreateMissingArticle={(name, findingId) => openCreateKindChooser(name, findingId)}
-      />
-    {:else if typeof view === 'object' && view.category === 'sessions' && activeCampaignId}
-      <SessionLogView campaignId={activeCampaignId} {draftCoordinator} />
-    {:else if typeof view === 'object' && view.category === 'sessions'}
-      <div class="no-campaign-msg">
-        <p>{i18n.t('shell.noCampaignSessions')}</p>
-      </div>
-    {:else if ENTITY_KIND_MAP[view.category] && activeCampaignId}
-      <EntityManager
-        campaignId={activeCampaignId}
-        kind={ENTITY_KIND_MAP[view.category] as EntityKind}
-        {draftCoordinator}
-        createNonce={entityCreateNonce}
-        openId={pendingOpen && pendingOpen.kind === ENTITY_KIND_MAP[view.category]
-          ? pendingOpen.id
-          : null}
-        onOpenIdConsumed={() => (pendingOpen = null)}
-        pendingCreate={pendingCreate && pendingCreate.kind === ENTITY_KIND_MAP[view.category]
-          ? pendingCreate
-          : null}
-        onPendingCreateConsumed={() => (pendingCreate = null)}
-        onPendingCreateSaved={async (findingId) => {
-          await resolveLintFinding(findingId);
-          await refreshMaintenanceCount();
-        }}
-        onViewGraph={(n) => (graphFor = { id: n.id, kind: n.kind })}
-        onOpenEntity={(id, kind) => openEntity(id, kind as EntityKind)}
-        onMissingLinkClick={(name) => openCreateKindChooser(name)}
-      />
-    {:else if ENTITY_KIND_MAP[view.category]}
-      <div class="no-campaign-msg">
-        <p>{i18n.t('shell.noCampaignEntities')}</p>
-      </div>
-    {:else}
-      <NotesView category={view.category} />
-    {/if}
-
-    <UploadProgress
-      phase={uploadPhase}
-      filename={uploadedSourceName}
-      status={uploadStatus}
-      progress={uploadProgress}
-      onDismiss={resetUpload}
-    />
+    </section>
   </main>
-
-  <Toast />
-
-  {#if closeDialogOpen}
-    <CloseDraftsDialog
-      {draftCoordinator}
-      oncancel={() => (closeDialogOpen = false)}
-      ondestroy={() => windowClosePort.destroy()}
+{:else if closeRegistrationStatus !== 'ready'}
+  <main class="close-protection-gate" aria-busy="true">
+    <p role="status">{i18n.t('common.loading')}</p>
+  </main>
+{:else}
+  <div class="app">
+    <CampaignRail
+      {view}
+      {activeCampaign}
+      counts={railCounts}
+      {maintenanceCount}
+      setView={(v) => (view = v)}
+      onOpenSwitcher={() => (switcherOpen = true)}
+      onOpenUpload={() => openFilePicker()}
     />
-  {/if}
 
-  {#if createChooser}
-    <div class="picker-overlay">
+    {#if switcherOpen}
+      <CampaignSwitcher
+        {campaigns}
+        {activeCampaignId}
+        onSelect={setActiveCampaignId}
+        onManage={() => (view = 'campaign')}
+        onClose={() => (switcherOpen = false)}
+      />
+    {/if}
+
+    {#if showHelp}
       <div
-        class="picker-dialog"
-        data-testid="create-entity-chooser"
+        class="help-backdrop"
+        role="button"
+        tabindex="-1"
+        aria-label={i18n.t('shell.closeShortcuts')}
+        onclick={() => (showHelp = false)}
+        onkeydown={(e) => e.key === 'Enter' && (showHelp = false)}
+      >
+        <div
+          class="help-card"
+          role="dialog"
+          aria-label={i18n.t('shell.keyboardShortcuts')}
+          onclick={(e) => e.stopPropagation()}
+          onkeydown={() => {
+            /* swallow so backdrop key handler doesn't double-fire */
+          }}
+          tabindex="-1"
+        >
+          <h2>{i18n.t('shell.keyboardShortcuts')}</h2>
+          <dl class="help-list">
+            {#each SHORTCUT_HELP as row (row.keys)}
+              <div class="help-row">
+                <dt><kbd>{row.keys}</kbd></dt>
+                <dd>{i18n.t(row.labelKey)}</dd>
+              </div>
+            {/each}
+          </dl>
+          <p class="help-hint">{i18n.t('shell.shortcutHint', { question: '?', escape: 'Esc' })}</p>
+        </div>
+      </div>
+    {/if}
+
+    <main class="main">
+      <Topbar title={head.title} sub={head.sub} />
+      {#if mismatch && !mismatchDismissed}
+        <div class="mismatch-banner" role="status" data-testid="mismatch-banner">
+          <div class="mismatch-text">
+            <strong>{i18n.t('shell.embeddingChanged')}</strong>
+            {i18n.t('shell.staleSources', {
+              count: totalStaleSources,
+              models: mismatch.stale.map((s) => s.embed_model).join(', '),
+              activeModel: mismatch.active_model,
+            })}
+            {#if reindexProgress}
+              <div class="mismatch-progress">
+                <ProgressBar
+                  value={reindexProgress.total > 0
+                    ? Math.round((reindexProgress.current / reindexProgress.total) * 100)
+                    : 0}
+                  label={i18n.t('shell.reindexingProgress', reindexProgress)}
+                  locale={i18n.locale}
+                />
+              </div>
+            {/if}
+            {#if reindexError}
+              <div class="mismatch-error">{reindexError}</div>
+            {/if}
+          </div>
+          <div class="mismatch-actions">
+            <button
+              class="mismatch-reindex-btn"
+              onclick={handleReindex}
+              disabled={reindexing}
+              data-testid="mismatch-reindex"
+            >
+              {reindexing ? i18n.t('settingsPage.reindexing') : i18n.t('shell.reindexNow')}
+            </button>
+            <button
+              class="mismatch-dismiss-btn"
+              onclick={() => (mismatchDismissed = true)}
+              disabled={reindexing}
+              data-testid="mismatch-dismiss"
+            >
+              {i18n.t('common.dismiss')}
+            </button>
+          </div>
+        </div>
+      {/if}
+      {#if view === 'oracle'}
+        <OracleView
+          {activeCampaignId}
+          {draftCoordinator}
+          onOpenUpload={() => openFilePicker()}
+          focusNonce={chatFocusNonce}
+          onSavedToCodex={() => refreshMaintenanceCount()}
+        />
+      {:else if view === 'campaign'}
+        <CampaignView
+          {activeCampaignId}
+          {draftCoordinator}
+          {campaigns}
+          {setActiveCampaignId}
+          onOpenUpload={(colId) => openFilePicker(colId)}
+          {refreshCampaigns}
+        />
+      {:else if view === 'settings'}
+        <SettingsView />
+      {:else if view === 'timeline' && activeCampaignId}
+        <TimelineView
+          campaignId={activeCampaignId}
+          onOpenEntity={(e) => openEntity(e.id, e.kind as EntityKind)}
+        />
+      {:else if view === 'timeline'}
+        <div class="no-campaign-msg">
+          <p>{i18n.t('shell.noCampaignTimeline')}</p>
+        </div>
+      {:else if view === 'maintenance'}
+        <MaintenanceView
+          onCountsChanged={refreshMaintenanceCount}
+          {activeCampaignId}
+          onOpenEntity={(id, kind) => openEntity(id, kind as EntityKind)}
+          onCreateMissingArticle={(name, findingId) => openCreateKindChooser(name, findingId)}
+        />
+      {:else if typeof view === 'object' && view.category === 'sessions' && activeCampaignId}
+        <SessionLogView campaignId={activeCampaignId} {draftCoordinator} />
+      {:else if typeof view === 'object' && view.category === 'sessions'}
+        <div class="no-campaign-msg">
+          <p>{i18n.t('shell.noCampaignSessions')}</p>
+        </div>
+      {:else if ENTITY_KIND_MAP[view.category] && activeCampaignId}
+        <EntityManager
+          campaignId={activeCampaignId}
+          kind={ENTITY_KIND_MAP[view.category] as EntityKind}
+          {draftCoordinator}
+          createNonce={entityCreateNonce}
+          openId={pendingOpen && pendingOpen.kind === ENTITY_KIND_MAP[view.category]
+            ? pendingOpen.id
+            : null}
+          onOpenIdConsumed={() => (pendingOpen = null)}
+          pendingCreate={pendingCreate && pendingCreate.kind === ENTITY_KIND_MAP[view.category]
+            ? pendingCreate
+            : null}
+          onPendingCreateConsumed={() => (pendingCreate = null)}
+          onPendingCreateSaved={async (findingId) => {
+            await resolveLintFinding(findingId);
+            await refreshMaintenanceCount();
+          }}
+          onViewGraph={(n) => (graphFor = { id: n.id, kind: n.kind })}
+          onOpenEntity={(id, kind) => openEntity(id, kind as EntityKind)}
+          onMissingLinkClick={(name) => openCreateKindChooser(name)}
+        />
+      {:else if ENTITY_KIND_MAP[view.category]}
+        <div class="no-campaign-msg">
+          <p>{i18n.t('shell.noCampaignEntities')}</p>
+        </div>
+      {:else}
+        <NotesView category={view.category} />
+      {/if}
+
+      <UploadProgress
+        phase={uploadPhase}
+        filename={uploadedSourceName}
+        status={uploadStatus}
+        progress={uploadProgress}
+        onDismiss={resetUpload}
+      />
+    </main>
+
+    <Toast />
+
+    {#if closeDialogOpen}
+      <CloseDraftsDialog
+        {draftCoordinator}
+        oncancel={() => (closeDialogOpen = false)}
+        ondestroy={() => currentClosePort().destroy()}
+      />
+    {/if}
+
+    {#if createChooser}
+      <div class="picker-overlay">
+        <div
+          class="picker-dialog"
+          data-testid="create-entity-chooser"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="create-link-title"
+          use:modalBehavior={{
+            onClose: () => {
+              createChooser = null;
+            },
+          }}
+        >
+          <h3 id="create-link-title">
+            {i18n.t('shell.createArticle', { name: createChooser.name })}
+          </h3>
+          <div class="kind-grid">
+            {#each Object.entries(KIND_TO_CATEGORY) as [kind] (kind)}
+              <button
+                type="button"
+                class="kind-choice"
+                data-entity-kind={kind}
+                onclick={() =>
+                  createFromWikilink(
+                    createChooser?.name ?? '',
+                    kind as EntityKind,
+                    createChooser?.sourceFindingId,
+                  )}
+              >
+                {entityKindLabel(kind as EntityKind)}
+              </button>
+            {/each}
+          </div>
+          <button
+            type="button"
+            class="picker-cancel-btn"
+            onclick={() => {
+              createChooser = null;
+            }}>{i18n.t('common.cancel')}</button
+          >
+        </div>
+      </div>
+    {/if}
+
+    {#if graphFor}
+      <div
+        class="graph-overlay"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="create-link-title"
-        use:modalBehavior={{
-          onClose: () => {
-            createChooser = null;
-          },
+        aria-label={i18n.t('shell.entityRelationships')}
+        tabindex="-1"
+        onclick={(e) => {
+          if (e.target === e.currentTarget) graphFor = null;
+        }}
+        onkeydown={() => {
+          /* Esc is handled by modalBehavior on the inner panel */
         }}
       >
-        <h3 id="create-link-title">
-          {i18n.t('shell.createArticle', { name: createChooser.name })}
-        </h3>
-        <div class="kind-grid">
-          {#each Object.entries(KIND_TO_CATEGORY) as [kind] (kind)}
-            <button
-              type="button"
-              class="kind-choice"
-              data-entity-kind={kind}
-              onclick={() =>
-                createFromWikilink(
-                  createChooser?.name ?? '',
-                  kind as EntityKind,
-                  createChooser?.sourceFindingId,
-                )}
-            >
-              {entityKindLabel(kind as EntityKind)}
-            </button>
-          {/each}
+        <div class="graph-panel" use:modalBehavior={{ onClose: () => (graphFor = null) }}>
+          <EntityGraph
+            entityId={graphFor.id}
+            entityKind={graphFor.kind}
+            onClose={() => (graphFor = null)}
+            onOpenEntity={(n) => {
+              graphFor = null;
+              openEntity(n.id, n.kind as EntityKind);
+            }}
+            onMissingLinkClick={(name) => {
+              graphFor = null;
+              openCreateKindChooser(name);
+            }}
+          />
         </div>
-        <button
-          type="button"
-          class="picker-cancel-btn"
-          onclick={() => {
-            createChooser = null;
-          }}>{i18n.t('common.cancel')}</button
+      </div>
+    {/if}
+
+    {#if showPicker}
+      <div class="picker-overlay">
+        <div
+          class="picker-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="picker-title"
+          use:modalBehavior={{ onClose: cancelPicker }}
         >
-      </div>
-    </div>
-  {/if}
-
-  {#if graphFor}
-    <div
-      class="graph-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label={i18n.t('shell.entityRelationships')}
-      tabindex="-1"
-      onclick={(e) => {
-        if (e.target === e.currentTarget) graphFor = null;
-      }}
-      onkeydown={() => {
-        /* Esc is handled by modalBehavior on the inner panel */
-      }}
-    >
-      <div class="graph-panel" use:modalBehavior={{ onClose: () => (graphFor = null) }}>
-        <EntityGraph
-          entityId={graphFor.id}
-          entityKind={graphFor.kind}
-          onClose={() => (graphFor = null)}
-          onOpenEntity={(n) => {
-            graphFor = null;
-            openEntity(n.id, n.kind as EntityKind);
-          }}
-          onMissingLinkClick={(name) => {
-            graphFor = null;
-            openCreateKindChooser(name);
-          }}
-        />
-      </div>
-    </div>
-  {/if}
-
-  {#if showPicker}
-    <div class="picker-overlay">
-      <div
-        class="picker-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="picker-title"
-        use:modalBehavior={{ onClose: cancelPicker }}
-      >
-        <h3 id="picker-title">{i18n.t('shell.addToCollection', { name: pendingName ?? '' })}</h3>
-        {#if pickerError}
-          <div class="picker-error">{pickerError}</div>
-        {/if}
-        {#if collections.length > 0}
-          <select bind:value={pickerCollectionId} class="picker-select" data-autofocus>
-            {#each collections as col (col.id)}
-              <option value={col.id}>{col.name}</option>
-            {/each}
-          </select>
-        {:else}
-          <p class="picker-hint">{i18n.t('shell.noCollections')}</p>
-        {/if}
-        {#if showNewCollectionInput}
-          <div class="picker-new">
-            <input
-              bind:value={pickerNewName}
-              placeholder={i18n.t('shell.newCollectionName')}
-              onkeydown={(e) => e.key === 'Enter' && handlePickerCreateNew()}
-            />
-            <button class="picker-create-btn" onclick={handlePickerCreateNew}
-              >{i18n.t('shell.create')}</button
+          <h3 id="picker-title">{i18n.t('shell.addToCollection', { name: pendingName ?? '' })}</h3>
+          {#if pickerError}
+            <div class="picker-error">{pickerError}</div>
+          {/if}
+          {#if collections.length > 0}
+            <select bind:value={pickerCollectionId} class="picker-select" data-autofocus>
+              {#each collections as col (col.id)}
+                <option value={col.id}>{col.name}</option>
+              {/each}
+            </select>
+          {:else}
+            <p class="picker-hint">{i18n.t('shell.noCollections')}</p>
+          {/if}
+          {#if showNewCollectionInput}
+            <div class="picker-new">
+              <input
+                bind:value={pickerNewName}
+                placeholder={i18n.t('shell.newCollectionName')}
+                onkeydown={(e) => e.key === 'Enter' && handlePickerCreateNew()}
+              />
+              <button class="picker-create-btn" onclick={handlePickerCreateNew}
+                >{i18n.t('shell.create')}</button
+              >
+              <button class="picker-cancel-btn" onclick={() => (showNewCollectionInput = false)}
+                >{i18n.t('common.cancel')}</button
+              >
+            </div>
+          {:else}
+            <button class="picker-new-btn" onclick={() => (showNewCollectionInput = true)}
+              >+ {i18n.t('shell.createCollection')}</button
             >
-            <button class="picker-cancel-btn" onclick={() => (showNewCollectionInput = false)}
+          {/if}
+          <div class="picker-actions">
+            <button class="picker-cancel-btn" data-testid="picker-cancel" onclick={cancelPicker}
               >{i18n.t('common.cancel')}</button
             >
+            <button
+              class="picker-confirm-btn"
+              disabled={!pickerCollectionId}
+              onclick={confirmUpload}>{i18n.t('common.upload')}</button
+            >
           </div>
-        {:else}
-          <button class="picker-new-btn" onclick={() => (showNewCollectionInput = true)}
-            >+ {i18n.t('shell.createCollection')}</button
-          >
-        {/if}
-        <div class="picker-actions">
-          <button class="picker-cancel-btn" data-testid="picker-cancel" onclick={cancelPicker}
-            >{i18n.t('common.cancel')}</button
-          >
-          <button class="picker-confirm-btn" disabled={!pickerCollectionId} onclick={confirmUpload}
-            >{i18n.t('common.upload')}</button
-          >
         </div>
       </div>
-    </div>
-  {/if}
-</div>
+    {/if}
+  </div>
+{/if}
 
 <style>
+  .close-protection-gate {
+    display: grid;
+    min-height: 100%;
+    place-items: center;
+    padding: var(--s-5);
+    background:
+      radial-gradient(70% 80% at 100% 0%, rgba(123, 92, 255, 0.1), transparent 55%),
+      var(--bg-void) var(--tex-starfield);
+    background-size: auto, 900px;
+    color: var(--fg-1);
+    font-family: var(--font-sans);
+  }
+
+  .close-protection-alert {
+    width: min(100%, 34rem);
+    padding: var(--s-5);
+    border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
+    border-radius: var(--r-lg);
+    background: var(--bg-panel);
+    box-shadow: var(--shadow-3);
+  }
+
+  .close-protection-alert p {
+    margin: 0;
+    color: var(--fg-2);
+    line-height: 1.5;
+  }
+
+  .close-protection-alert button {
+    min-height: 36px;
+    margin-top: var(--s-4);
+    padding: var(--s-2) var(--s-3);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    background: var(--grad-arcane);
+    color: var(--fg-on-accent);
+    box-shadow: var(--glow-arcane);
+    font: 600 0.875rem/1.2 var(--font-sans);
+    cursor: pointer;
+  }
+
+  .close-protection-alert button:disabled {
+    cursor: progress;
+    opacity: 0.55;
+  }
+
   /* ── Keyboard-shortcuts help overlay ─────────────────────────────────── */
   .help-backdrop {
     position: fixed;

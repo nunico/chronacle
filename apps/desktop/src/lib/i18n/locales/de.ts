@@ -39,6 +39,8 @@ const de = {
     waitForSavingBeforeClose:
       'Warte, bis das Speichern abgeschlossen ist, bevor du Änderungen verwirfst und schließt.',
     safeToClose: 'Speichern abgeschlossen. Du kannst jetzt sicher schließen.',
+    closeProtectionUnavailable:
+      'Der Schutz beim Schließen des Fensters ist nicht verfügbar. Versuche es erneut, bevor du etwas bearbeitest, damit ungespeicherte Arbeit nicht verloren geht.',
     retainedThisSession: 'Nur für diese Sitzung aufbewahrt.',
     targetUnavailable: 'Dieser Eintrag ist nicht mehr verfügbar.',
     createdNeedsAttention: 'Erstellt, aber Eingriff erforderlich',

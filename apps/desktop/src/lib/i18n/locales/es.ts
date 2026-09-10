@@ -37,6 +37,8 @@ const es = {
     discardAndClose: 'Descartar y cerrar',
     waitForSavingBeforeClose: 'Espera a que termine el guardado antes de descartar y cerrar.',
     safeToClose: 'El guardado ha finalizado. Ya puedes cerrar de forma segura.',
+    closeProtectionUnavailable:
+      'La protección al cerrar la ventana no está disponible. Reintenta antes de editar para no perder el trabajo sin guardar.',
     retainedThisSession: 'Conservado solo durante esta sesión.',
     targetUnavailable: 'Este registro ya no está disponible.',
     createdNeedsAttention: 'Creado, pero requiere atención',

@@ -37,6 +37,8 @@ export const sourceCatalog = {
     discardAndClose: 'Discard and close',
     waitForSavingBeforeClose: 'Wait for saving to finish before discarding and closing.',
     safeToClose: 'Saving finished. It is safe to close.',
+    closeProtectionUnavailable:
+      'Window-close protection is unavailable. Retry before editing so unsaved work cannot be lost.',
     retainedThisSession: 'Retained for this session only.',
     targetUnavailable: 'This record is no longer available.',
     createdNeedsAttention: 'Created, but needs attention',
