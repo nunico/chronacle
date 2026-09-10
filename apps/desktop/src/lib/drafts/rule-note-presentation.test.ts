@@ -28,6 +28,27 @@ describe('rule-note recovery presentation', () => {
     expect(Object.isFrozen(recovery)).toBe(true);
   });
 
+  it('projects only allowed metadata from an object with forbidden runtime fields', () => {
+    const coordinator = new DraftCoordinator();
+    const scope = 'rule:camp-a:book-a:initiative';
+    const untrustedPresentation = {
+      ruleId: 'initiative',
+      title: 'Initiative',
+      collectionId: 'book-a',
+      body: 'Private compiled text',
+      notes: 'Private GM note',
+      pageRefs: [{ source: 'Secret source', page: 42 }],
+    };
+
+    rememberRuleRecovery(coordinator, scope, untrustedPresentation);
+
+    expect(rememberedRuleRecovery(coordinator, scope)).toEqual({
+      ruleId: 'initiative',
+      title: 'Initiative',
+      collectionId: 'book-a',
+    });
+  });
+
   it('forgets exact and prefixed metadata without touching neighboring scopes', () => {
     const coordinator = new DraftCoordinator();
     const first = 'rule:camp-a:book-a:initiative';
@@ -49,5 +70,28 @@ describe('rule-note recovery presentation', () => {
     expect(rememberedRuleRecovery(coordinator, second)).toBeUndefined();
     expect(rememberedRuleRecovery(coordinator, otherCollection)).toBeDefined();
     expect(rememberedRuleRecovery(coordinator, otherCampaign)).toBeDefined();
+  });
+
+  it('uses a delimiter boundary when forgetting a non-delimited prefix', () => {
+    const coordinator = new DraftCoordinator();
+    const intended = 'rule:camp-a:book-a:initiative';
+    const longerCampaign = 'rule:camp-ab:book-a:initiative';
+    const suffixedCampaign = 'rule:camp-a-long:book-a:initiative';
+    for (const [scope, campaign] of [
+      [intended, 'camp-a'],
+      [longerCampaign, 'camp-ab'],
+      [suffixedCampaign, 'camp-a-long'],
+    ]) {
+      rememberRuleRecovery(coordinator, scope, {
+        ruleId: 'initiative',
+        title: campaign,
+        collectionId: 'book-a',
+      });
+    }
+
+    expect(forgetRuleRecoveryPrefix(coordinator, 'rule:camp-a')).toBe(1);
+    expect(rememberedRuleRecovery(coordinator, intended)).toBeUndefined();
+    expect(rememberedRuleRecovery(coordinator, longerCampaign)).toBeDefined();
+    expect(rememberedRuleRecovery(coordinator, suffixedCampaign)).toBeDefined();
   });
 });

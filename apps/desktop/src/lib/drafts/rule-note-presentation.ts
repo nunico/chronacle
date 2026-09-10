@@ -23,7 +23,14 @@ export function rememberRuleRecovery(
   scope: string,
   recovery: RuleRecoveryPresentation,
 ): void {
-  entriesFor(coordinator).set(scope, Object.freeze({ ...recovery }));
+  entriesFor(coordinator).set(
+    scope,
+    Object.freeze({
+      ruleId: recovery.ruleId,
+      title: recovery.title,
+      collectionId: recovery.collectionId,
+    }),
+  );
 }
 
 /** Recover the minimal presentation for a rule that disappeared from a later list response. */
@@ -46,7 +53,10 @@ export function forgetRuleRecoveryPrefix(coordinator: DraftCoordinator, prefix: 
   if (!entries) return 0;
   let removed = 0;
   for (const scope of [...entries.keys()]) {
-    if (!scope.startsWith(prefix)) continue;
+    const matches =
+      scope === prefix ||
+      (prefix.endsWith(':') ? scope.startsWith(prefix) : scope.startsWith(`${prefix}:`));
+    if (!matches) continue;
     entries.delete(scope);
     removed += 1;
   }

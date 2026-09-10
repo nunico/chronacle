@@ -199,13 +199,14 @@ export class DraftCoordinator {
   }
 
   release(scope: string): ReleaseResult {
-    if (this.redirects.has(scope)) return 'retained-at-risk';
-    const draft = this.drafts.get(scope);
+    const resolvedScope = this.resolveScope(scope);
+    const draft = this.drafts.get(resolvedScope);
     if (!draft) return 'missing';
     if (!this.isReleaseEligible(draft)) return 'retained-at-risk';
 
-    this.drafts.delete(scope);
-    this.authoritativeListScopes.delete(scope);
+    this.drafts.delete(resolvedScope);
+    this.authoritativeListScopes.delete(resolvedScope);
+    this.removeRedirectsFor(resolvedScope);
     return 'released';
   }
 
@@ -668,7 +669,6 @@ export class DraftCoordinator {
 
   private isReleaseEligible(draft: DraftRecord<DraftValue>): boolean {
     if (!this.isFullyClean(draft)) return false;
-    if (this.redirects.has(draft.scope) || this.hasRedirectTo(draft.scope)) return false;
     for (const issue of this.createPromotionIssues.values()) {
       if (issue.sourceScope === draft.scope || issue.destinationScope === draft.scope) return false;
     }
