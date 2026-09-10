@@ -132,7 +132,11 @@
       (error: unknown) => {
         if (!mounted || request !== sessionRequest || campaignId !== requestedCampaign) return;
         console.error('Failed to load sessions:', error);
-        backendSessions = [];
+        backendSessions = backendSessions.filter((session) => {
+          if (session.campaign_id !== requestedCampaign) return false;
+          const generation = acknowledgedCreates.get(sessionScope(requestedCampaign, session.id));
+          return generation !== undefined && generation > createGenerationAtStart;
+        });
         loading = false;
       },
     );

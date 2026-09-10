@@ -19,10 +19,12 @@ import * as commands from '../lib/commands';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function session(campaignId: string, title: string): Session {
@@ -169,6 +171,55 @@ describe('SessionLogView draft coordination', () => {
       coordinator.get<{ title: string }>(sessionScope('camp-a', createdForCampaignA.id))?.value
         .title,
     ).toBe('Created after reload started');
+  });
+
+  it('keeps a created session when an older list rejects, until a later list omits it', async () => {
+    const pendingCreate = deferred<Session>();
+    const staleCampaignAList = deferred<Session[]>();
+    const createdForCampaignA: Session = {
+      ...session('camp-a', 'Created before reload failure'),
+      id: 'session-created-before-failure',
+    };
+    let campaignARequests = 0;
+    vi.mocked(commands.getSessions).mockImplementation((campaignId) => {
+      if (campaignId === 'camp-a') {
+        campaignARequests += 1;
+        if (campaignARequests === 1 || campaignARequests === 3) return Promise.resolve([]);
+        return staleCampaignAList.promise;
+      }
+      return Promise.resolve([session('camp-b', 'Campaign B session')]);
+    });
+    vi.mocked(commands.createSession).mockReturnValue(pendingCreate.promise);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const coordinator = new DraftCoordinator();
+    const rendered = renderLog('camp-a', coordinator);
+
+    await waitFor(() => expect(commands.getSessions).toHaveBeenCalledWith('camp-a'));
+    await fireEvent.click(screen.getByRole('button', { name: /New Session/i }));
+    await rendered.rerender({ campaignId: 'camp-b', draftCoordinator: coordinator } as never);
+    expect(await screen.findByText('Campaign B session')).toBeVisible();
+
+    await rendered.rerender({ campaignId: 'camp-a', draftCoordinator: coordinator } as never);
+    await waitFor(() => expect(commands.getSessions).toHaveBeenCalledTimes(3));
+    pendingCreate.resolve(createdForCampaignA);
+    await waitFor(() =>
+      expect(
+        coordinator.get<{ title: string }>(sessionScope('camp-a', createdForCampaignA.id))?.value
+          .title,
+      ).toBe('Created before reload failure'),
+    );
+
+    staleCampaignAList.reject(new Error('stale list failed'));
+    await expect(staleCampaignAList.promise).rejects.toThrow('stale list failed');
+    await tick();
+    expect(screen.getByText('Created before reload failure')).toBeVisible();
+
+    await rendered.rerender({ campaignId: 'camp-b', draftCoordinator: coordinator } as never);
+    expect(await screen.findByText('Campaign B session')).toBeVisible();
+    await rendered.rerender({ campaignId: 'camp-a', draftCoordinator: coordinator } as never);
+    await waitFor(() => expect(commands.getSessions).toHaveBeenCalledTimes(5));
+    expect(screen.queryByText('Created before reload failure')).not.toBeInTheDocument();
+    consoleError.mockRestore();
   });
 
   it('restores a retained session draft after view unmount and an older list reload', async () => {
