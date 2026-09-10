@@ -569,9 +569,15 @@
 
     await draftCoordinator.requestSave<EntityDraftValue>(saveScope, async (value) => {
       try {
-        acknowledgedNode = recordId
-          ? await updateEntity(recordId, saveKind, inputFromDraft(value))
-          : await createEntity(saveCampaignId, saveKind, inputFromDraft(value));
+        if (recordId) {
+          const updated = await updateEntity(recordId, saveKind, inputFromDraft(value));
+          if (updated.id !== recordId) {
+            throw new Error(`Entity save acknowledged the wrong target: ${updated.id}`);
+          }
+          acknowledgedNode = updated;
+        } else {
+          acknowledgedNode = await createEntity(saveCampaignId, saveKind, inputFromDraft(value));
+        }
         return draftFromNode(acknowledgedNode);
       } catch (error) {
         adapterError = error as EntityError;

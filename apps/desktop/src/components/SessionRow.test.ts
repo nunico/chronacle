@@ -438,6 +438,48 @@ describe('SessionRow', () => {
     expect(title).toHaveValue('Letzter lokaler Titel');
   });
 
+  it('rejects a mismatched session acknowledgment and retries the original target', async () => {
+    const coordinator = new DraftCoordinator();
+    vi.mocked(commands.updateSession)
+      .mockResolvedValueOnce(
+        mockSession({
+          id: 'sess2',
+          title: 'Wrong-record canonical title must not be acknowledged',
+        }),
+      )
+      .mockResolvedValueOnce(mockSession({ title: 'Identity-safe session title' }));
+    renderRow(coordinator);
+    const title = await expandRow();
+    await fireEvent.input(title, { target: { value: 'Identity-safe session title' } });
+    await fireEvent.blur(title);
+
+    const failure = await screen.findByRole('alert');
+    expect(failure).toHaveTextContent("Couldn't save");
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
+    expect(title).toHaveValue('Identity-safe session title');
+    expect(screen.queryByText('Saved', { exact: true })).not.toBeInTheDocument();
+    const scope = sessionScope('camp1', 'sess1');
+    const failedDraft = coordinator.get<{ title: string }>(scope);
+    if (!failedDraft) throw new Error('Expected the original session draft to remain open');
+    expect(failedDraft.target).toBe('session:sess1');
+    expect(failedDraft.value.title).toBe('Identity-safe session title');
+    expect(statusOf(failedDraft)).toBe('failed');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(commands.updateSession).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(commands.updateSession).mock.calls[1]).toEqual([
+      'sess1',
+      {
+        sessionNumber: 3,
+        title: 'Identity-safe session title',
+        datePlayed: '2026-06-05',
+        notes: 'The party fought bravely.',
+      },
+    ]);
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saved'));
+    expect(title).toHaveValue('Identity-safe session title');
+  });
+
   it('prevents editing and recovery writes while confirmed deletion is pending', async () => {
     const deletion = deferred<undefined>();
     vi.mocked(commands.updateSession).mockRejectedValueOnce({

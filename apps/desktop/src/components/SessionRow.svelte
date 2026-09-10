@@ -157,6 +157,9 @@
           datePlayed: attempt.datePlayed,
           notes: attempt.notes,
         });
+        if (updated.id !== saveSessionId) {
+          throw new Error(`Session save acknowledged the wrong target: ${updated.id}`);
+        }
         onUpdate(updated);
         return sessionDraftValue(updated);
       } catch (error) {
