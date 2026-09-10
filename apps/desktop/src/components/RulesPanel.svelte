@@ -71,6 +71,7 @@
   let panelElement = $state<HTMLDivElement>();
   let loadGeneration = 0;
   let destroyed = false;
+  let activeProjectionPrefix: string | null = null;
 
   function targetFor(ruleId: string): string {
     return `rule:${ruleId}`;
@@ -155,20 +156,31 @@
     }
   }
 
+  function releaseCleanProjection(prefix: string): void {
+    for (const draft of draftCoordinator.listByPrefix<RuleNoteDraftValue>(prefix)) {
+      if (draftCoordinator.release(draft.scope) === 'released') {
+        forgetRuleRecovery(draftCoordinator, draft.scope);
+      }
+    }
+  }
+
   $effect(() => {
     const requestCampaignId = campaignId;
     const requestCollectionId = collectionId;
-    untrack(() => void load(requestCampaignId, requestCollectionId));
+    const requestPrefix = ruleScope(requestCampaignId, requestCollectionId, '');
+    untrack(() => {
+      if (activeProjectionPrefix && activeProjectionPrefix !== requestPrefix) {
+        releaseCleanProjection(activeProjectionPrefix);
+      }
+      activeProjectionPrefix = requestPrefix;
+      void load(requestCampaignId, requestCollectionId);
+    });
   });
 
   onDestroy(() => {
     destroyed = true;
     loadGeneration += 1;
-    for (const draft of draftCoordinator.listByPrefix<RuleNoteDraftValue>(scopePrefix)) {
-      if (draftCoordinator.release(draft.scope) === 'released') {
-        forgetRuleRecovery(draftCoordinator, draft.scope);
-      }
-    }
+    if (activeProjectionPrefix) releaseCleanProjection(activeProjectionPrefix);
   });
 
   let filtered = $derived(

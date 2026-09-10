@@ -245,6 +245,23 @@ describe('RulesPanel', () => {
     expect(coordinator.get(scope)).toBeUndefined();
   });
 
+  it('releases the prior clean rule projection when the panel changes scope', async () => {
+    const coordinator = new DraftCoordinator();
+    const priorScope = ruleScope('camp-a', 'c-1', 'r1');
+    m.getRuleEntries.mockResolvedValue([rule('r1', 'Initiative', 'mechanic')]);
+    const rendered = renderPanel(coordinator);
+    await screen.findByRole('button', { name: 'Initiative' });
+
+    await rendered.rerender({
+      campaignId: 'camp-b',
+      collectionId: 'c-2',
+      draftCoordinator: coordinator,
+    } as never);
+
+    await waitFor(() => expect(coordinator.get(priorScope)).toBeUndefined());
+    expect(coordinator.get(ruleScope('camp-b', 'c-2', 'r1'))).toBeDefined();
+  });
+
   it('keeps a newer note pending when an older acknowledgment equals it', async () => {
     const first = deferred<RuleEntry>();
     const second = deferred<RuleEntry>();
