@@ -9,6 +9,7 @@ export interface ModalBehaviorOptions {
 }
 
 const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+const activeModalNodes = new WeakSet<HTMLElement>();
 
 function focusables(node: HTMLElement): HTMLElement[] {
   return Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
@@ -18,6 +19,7 @@ function focusables(node: HTMLElement): HTMLElement[] {
 
 export function modalBehavior(node: HTMLElement, options: ModalBehaviorOptions) {
   let opts = options;
+  activeModalNodes.add(node);
   const previouslyFocused =
     document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
@@ -26,8 +28,14 @@ export function modalBehavior(node: HTMLElement, options: ModalBehaviorOptions) 
   (initial ?? node).focus();
 
   function handleKeydown(e: KeyboardEvent) {
+    if (!(e.target instanceof HTMLElement) || !node.contains(e.target)) return;
+    let owner: HTMLElement | null = e.target;
+    while (owner && !activeModalNodes.has(owner)) owner = owner.parentElement;
+    if (owner !== node) return;
+
     // A modal owns keyboard interaction while it is open. In particular, do not
-    // let application-level navigation shortcuts run behind the dialog.
+    // let application-level window shortcuts run behind the dialog. Listening at
+    // document lets Svelte's delegated component handlers run first.
     e.stopPropagation();
     if (e.key === 'Escape') {
       opts.onClose();
@@ -47,14 +55,15 @@ export function modalBehavior(node: HTMLElement, options: ModalBehaviorOptions) 
     }
   }
 
-  node.addEventListener('keydown', handleKeydown);
+  document.addEventListener('keydown', handleKeydown);
 
   return {
     update(newOptions: ModalBehaviorOptions) {
       opts = newOptions;
     },
     destroy() {
-      node.removeEventListener('keydown', handleKeydown);
+      document.removeEventListener('keydown', handleKeydown);
+      activeModalNodes.delete(node);
       previouslyFocused?.focus();
     },
   };
