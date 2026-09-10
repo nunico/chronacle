@@ -574,6 +574,7 @@ describe('EntityManager', () => {
       expect(confirm).toBeDisabled();
       expect(screen.getByLabelText('Notes')).toBeDisabled();
       expect(screen.getByTestId('entity-form-submit')).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Recompile article' })).toBeDisabled();
       expect(commands.softDeleteEntity).toHaveBeenCalledTimes(1);
       expect(commands.updateEntity).toHaveBeenCalledTimes(1);
 

@@ -748,7 +748,7 @@
   }
 
   async function handleRecompile() {
-    if (!formNode || recompiling) return;
+    if (!formNode || recompiling || activeDeletionPending) return;
     recompiling = true;
     try {
       const ok = await compileEntity(kind, formNode.id);
@@ -937,7 +937,7 @@
               <Button
                 variant="ghost"
                 class="btn-recompile"
-                disabled={recompiling}
+                disabled={recompiling || activeDeletionPending}
                 loading={recompiling}
                 loadingText={i18n.t('status.processing')}
                 onclick={handleRecompile}
