@@ -606,6 +606,44 @@ describe('EntityManager', () => {
       await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete' })).toBeNull());
     });
 
+    it('moves focus to the next entity row after successful deletion', async () => {
+      const coordinator = new DraftCoordinator();
+      vi.mocked(commands.softDeleteEntity).mockResolvedValue(undefined);
+      renderManager(coordinator);
+      const opener = await screen.findByRole('button', { name: /delete mira/i });
+      opener.focus();
+      await fireEvent.click(opener);
+      await fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Delete' })).getByRole('button', {
+          name: 'Delete',
+        }),
+      );
+
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Torvin' })).toHaveFocus());
+      expect(opener).not.toBeInTheDocument();
+    });
+
+    it('moves focus to New when deletion leaves the entity list empty', async () => {
+      const coordinator = new DraftCoordinator();
+      vi.mocked(commands.getEntities).mockImplementation(async (campaignId, kind) => {
+        if (campaignId === 'camp1' && kind === 'npc') return [mira()];
+        return [];
+      });
+      vi.mocked(commands.softDeleteEntity).mockResolvedValue(undefined);
+      renderManager(coordinator);
+      const opener = await screen.findByRole('button', { name: /delete mira/i });
+      opener.focus();
+      await fireEvent.click(opener);
+      await fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Delete' })).getByRole('button', {
+          name: 'Delete',
+        }),
+      );
+
+      await waitFor(() => expect(screen.getByRole('button', { name: 'New NPC' })).toHaveFocus());
+      expect(opener).not.toBeInTheDocument();
+    });
+
     it('restores existing drafts after switching records and remounting the view', async () => {
       const coordinator = new DraftCoordinator();
       const first = renderManager(coordinator);
