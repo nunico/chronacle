@@ -527,7 +527,7 @@ describe('DraftCoordinator bounded retention', () => {
     expect(coordinator.get(unrelatedScope)?.value).toEqual({ notes: 'elsewhere' });
   });
 
-  it('never releases saving, queued, failed, redirected, or conflicted scopes', async () => {
+  it('never releases saving, queued, or failed scopes', async () => {
     const coordinator = new DraftCoordinator();
     const writer = new ControlledWriter<{ notes: string }>();
     const queuedWriter = new ControlledWriter<{ notes: string }>();
@@ -548,24 +548,42 @@ describe('DraftCoordinator bounded retention', () => {
     required(queuedWriter.attempts[0], 'the queued write').completion.reject(new Error('offline'));
     await queued;
     expect(coordinator.release(queuedScope)).toBe('retained-at-risk');
-
-    const clientScope = newEntityScope('camp-a', 'npc', 'client');
-    const destinationScope = entityScope('camp-a', 'npc', 'saved-id');
-    const createWriter = new ControlledWriter<{ name: string; notes: string }>();
-    coordinator.open(clientScope, clientScope, { name: '', notes: '' });
-    coordinator.revise(clientScope, { name: 'Sable', notes: '' });
-    const create = coordinator.requestSave(clientScope, createWriter.write);
-    required(createWriter.attempts[0], 'the create write').completion.resolve({
-      name: 'Sable',
-      notes: '',
-    });
-    await create;
-    coordinator.remapAfterCreate(clientScope, destinationScope, 'entity:npc:saved-id');
-
-    expect(coordinator.release(destinationScope)).toBe('retained-at-risk');
-    expect(coordinator.resolveScope(clientScope)).toBe(destinationScope);
-    expect(coordinator.get(destinationScope)).toBeDefined();
   });
+
+  it.each(['source alias', 'destination scope'] as const)(
+    'releases a clean promoted lifecycle unit through its %s',
+    async (releaseThrough) => {
+      const coordinator = new DraftCoordinator();
+      const firstWriter = new ControlledWriter<{ name: string; notes: string }>();
+      const secondWriter = new ControlledWriter<{ name: string; notes: string }>();
+      const firstSource = newEntityScope('camp-a', 'npc', 'first-client');
+      const firstDestination = entityScope('camp-a', 'npc', 'first-saved');
+      const secondSource = newEntityScope('camp-b', 'npc', 'second-client');
+      const secondDestination = entityScope('camp-b', 'npc', 'second-saved');
+
+      for (const [source, destination, target, name, writer] of [
+        [firstSource, firstDestination, 'entity:npc:first-saved', 'Sable', firstWriter],
+        [secondSource, secondDestination, 'entity:npc:second-saved', 'Mira', secondWriter],
+      ] as const) {
+        coordinator.open(source, source, { name: '', notes: '' });
+        coordinator.revise(source, { name, notes: '' });
+        const create = coordinator.requestSave(source, writer.write);
+        required(writer.attempts[0], `${name} create write`).completion.resolve({
+          name,
+          notes: '',
+        });
+        await create;
+        coordinator.remapAfterCreate(source, destination, target);
+      }
+
+      const requestedScope = releaseThrough === 'source alias' ? firstSource : firstDestination;
+      expect(coordinator.release(requestedScope)).toBe('released');
+      expect(coordinator.get(firstDestination)).toBeUndefined();
+      expect(coordinator.resolveScope(firstSource)).toBe(firstSource);
+      expect(coordinator.get(secondDestination)).toBeDefined();
+      expect(coordinator.resolveScope(secondSource)).toBe(secondDestination);
+    },
+  );
 
   it('releases only eligible clean records under the exact prefix', () => {
     const coordinator = new DraftCoordinator();
