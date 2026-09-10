@@ -33,6 +33,17 @@ Feature: Preserve entity drafts while moving through a campaign
     Then the acknowledged canonical name and notes are shown in the row, preview, and editor
     And the acknowledged entity is shown as saved
 
+  Scenario: Ignore an entity list that finishes after a newer save acknowledgment
+    Given saving my changed entity "Mira" is held in progress
+    And the next NPC list load is held with Mira's earlier saved content
+    When I navigate away and return to NPCs
+    And the held save completes with its canonical content
+    And the pre-acknowledgment entity list completes
+    And I open entity "Mira Moonshadow"
+    Then the acknowledged canonical name and notes are shown in the row, preview, and editor
+    And the acknowledged entity is shown as saved
+    And Mira's canonical changes remain persisted in campaign A's NPC record
+
   Scenario: Preserve a new entity draft
     Given I have started creating an NPC
     And I have entered its name and notes

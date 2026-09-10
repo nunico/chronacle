@@ -176,6 +176,11 @@ When('the old NPC list completes after that save acknowledgment', async ({ page 
   );
 });
 
+When('the pre-acknowledgment entity list completes', async ({ page }) => {
+  await resolveNextEntityList(page);
+  await expect.poll(() => pendingEntityLists(page)).toBe(0);
+});
+
 Given('saving my changed entity {string} is held in progress', async ({ page }, name: string) => {
   const form = await openEntity(page, name);
   await form.getByRole('textbox', { name: 'Notes', exact: true }).fill(MIRA_DRAFT_NOTES);
@@ -224,6 +229,21 @@ Then(
 Then('the acknowledged entity is shown as saved', async ({ page }) => {
   await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await expect(page.getByText('Unsaved changes', { exact: true })).toHaveCount(0);
+});
+
+Then("Mira's canonical changes remain persisted in campaign A's NPC record", async ({ page }) => {
+  const mira = await persisted<{
+    campaign_id: string;
+    kind: string;
+    name: string;
+    notes: string;
+  }>(page, 'update_entity', 'mira');
+  expect(mira).toMatchObject({
+    campaign_id: 'camp-a',
+    kind: 'npc',
+    name: MIRA_CANONICAL_NAME,
+    notes: MIRA_CANONICAL_NOTES,
+  });
 });
 
 When('a later entity list completes with newer canonical content', async ({ page }) => {

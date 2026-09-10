@@ -824,6 +824,77 @@ describe('EntityManager', () => {
       expect(commands.updateEntity).toHaveBeenCalledTimes(1);
     });
 
+    it('fences a list started before an acknowledgment even when it settles afterward', async () => {
+      const coordinator = new DraftCoordinator();
+      const updateWrite = deferred<GraphNode>();
+      const staleListLoad = deferred<GraphNode[]>();
+      const acknowledged = mira({
+        name: 'Mira Moonshadow',
+        notes: 'Canonical acknowledged content',
+      });
+      let npcListRequests = 0;
+      let holdNpcLists = false;
+      vi.mocked(commands.getEntities).mockImplementation((campaignId, entityKind) => {
+        if (campaignId !== 'camp1' || entityKind !== 'npc') return Promise.resolve([]);
+        npcListRequests += 1;
+        if (holdNpcLists) return staleListLoad.promise;
+        return Promise.resolve([mira(), torvin()]);
+      });
+      vi.mocked(commands.updateEntity).mockReturnValue(updateWrite.promise);
+
+      const manager = renderManager(coordinator);
+      await fireEvent.click(await screen.findByRole('button', { name: 'Mira' }));
+      await fireEvent.input(screen.getByLabelText('Name', { exact: true }), {
+        target: { value: acknowledged.name },
+      });
+      await fireEvent.input(screen.getByLabelText('Notes'), {
+        target: { value: acknowledged.notes },
+      });
+      await fireEvent.submit(screen.getByRole('form'));
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saving…'));
+
+      const requestCountBeforeReload = npcListRequests;
+      holdNpcLists = true;
+      await manager.rerender({
+        campaignId: 'camp1',
+        kind: 'location',
+        openId: null,
+        draftCoordinator: coordinator,
+      });
+      await manager.rerender({
+        campaignId: 'camp1',
+        kind: 'npc',
+        openId: null,
+        draftCoordinator: coordinator,
+      });
+      await waitFor(() => expect(npcListRequests).toBeGreaterThan(requestCountBeforeReload));
+
+      updateWrite.resolve(acknowledged);
+      await waitFor(() =>
+        expect(coordinator.get(entityScope('camp1', 'npc', 'mira'))).toMatchObject({
+          baseline: expect.objectContaining({
+            name: acknowledged.name,
+            notes: acknowledged.notes,
+          }),
+          value: expect.objectContaining({
+            name: acknowledged.name,
+            notes: acknowledged.notes,
+          }),
+        }),
+      );
+
+      staleListLoad.resolve([mira(), torvin()]);
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: acknowledged.name })).toBeVisible(),
+      );
+      await fireEvent.click(screen.getByRole('button', { name: acknowledged.name }));
+
+      expect(screen.getByLabelText('Name', { exact: true })).toHaveValue(acknowledged.name);
+      expect(screen.getByLabelText('Notes')).toHaveValue(acknowledged.notes);
+      expect(screen.getByRole('status')).toHaveTextContent('Saved');
+      expect(commands.updateEntity).toHaveBeenCalledTimes(1);
+    });
+
     it('ignores a stale list response from an unmounted manager after a newer save acknowledgment', async () => {
       const coordinator = new DraftCoordinator();
       const staleManagerLoad = deferred<GraphNode[]>();
