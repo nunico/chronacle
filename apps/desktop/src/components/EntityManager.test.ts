@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import EntityManager from './EntityManager.svelte';
 import type { GraphNode } from '../lib/commands';
 import { DraftCoordinator } from '../lib/drafts/draft-coordinator.svelte';
-import { entityScope, oracleScope } from '../lib/drafts/draft-state';
+import { entityScope, oracleScope, statusOf } from '../lib/drafts/draft-state';
 
 vi.mock('../lib/commands', () => ({
   getEntities: vi.fn().mockResolvedValue([]),
@@ -788,6 +788,48 @@ describe('EntityManager', () => {
       });
       expect(screen.queryByText("Couldn't save")).not.toBeInTheDocument();
       expect(screen.getByRole('status')).toHaveTextContent('Saved');
+    });
+
+    it('rejects a mismatched entity acknowledgment and retries the original target', async () => {
+      const coordinator = new DraftCoordinator();
+      vi.mocked(commands.updateEntity)
+        .mockResolvedValueOnce(
+          torvin({
+            notes: 'Wrong-record canonical content must not be acknowledged.',
+          }),
+        )
+        .mockResolvedValueOnce(mira({ notes: 'Identity-safe local content' }));
+      renderManager(coordinator);
+      await fireEvent.click(await screen.findByText('Mira'));
+      await fireEvent.input(screen.getByLabelText('Notes'), {
+        target: { value: 'Identity-safe local content' },
+      });
+      await fireEvent.submit(screen.getByRole('form'));
+
+      const failure = await screen.findByRole('alert');
+      expect(failure).toHaveTextContent("Couldn't save");
+      expect(within(failure).getByRole('button', { name: 'Retry' })).toBeEnabled();
+      expect(screen.getByLabelText('Notes')).toHaveValue('Identity-safe local content');
+      expect(screen.queryByText('Saved', { exact: true })).not.toBeInTheDocument();
+      const scope = entityScope('camp1', 'npc', 'mira');
+      const failedDraft = coordinator.get<{ notes: string }>(scope);
+      if (!failedDraft) throw new Error('Expected the original entity draft to remain open');
+      expect(failedDraft.target).toBe('entity:npc:mira');
+      expect(failedDraft.value.notes).toBe('Identity-safe local content');
+      expect(statusOf(failedDraft)).toBe('failed');
+
+      await fireEvent.click(within(failure).getByRole('button', { name: 'Retry' }));
+      await waitFor(() => expect(commands.updateEntity).toHaveBeenCalledTimes(2));
+      expect(vi.mocked(commands.updateEntity).mock.calls[1]).toEqual([
+        'mira',
+        'npc',
+        expect.objectContaining({
+          name: 'Mira',
+          notes: 'Identity-safe local content',
+        }),
+      ]);
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saved'));
+      expect(screen.getByLabelText('Notes')).toHaveValue('Identity-safe local content');
     });
 
     it('serializes rapid explicit saves and preserves a newer edit after an older acknowledgment', async () => {
