@@ -14,7 +14,7 @@ FROM rust:1-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
       libayatana-appindicator3-dev webkit2gtk-driver \
-      xvfb xauth dbus dbus-x11 curl ca-certificates \
+      xvfb xauth dbus dbus-x11 openbox xdotool curl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 # Node 22 (matches CI's lts/*) + the pnpm version pinned in package.json.

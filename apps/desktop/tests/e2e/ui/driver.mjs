@@ -39,9 +39,12 @@ export function createIsolatedAppEnvironment() {
       XDG_DATA_HOME: dataHome,
       XDG_CONFIG_HOME: configHome,
       XDG_CACHE_HOME: cacheHome,
+      // Mesa's asynchronous shader-cache writers can outlive WebKit teardown
+      // briefly and race removal of the journey's temporary XDG tree.
+      MESA_SHADER_CACHE_DISABLE: 'true',
     },
     cleanup() {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     },
   };
 }

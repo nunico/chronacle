@@ -16,4 +16,5 @@ else
   set -- pnpm e2e:ui
 fi
 
-exec dbus-run-session -- xvfb-run -a --server-args="-screen 0 1280x1024x24" "$@"
+exec dbus-run-session -- xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+  bash -c 'openbox >/tmp/openbox.log 2>&1 & exec "$@"' bash "$@"
