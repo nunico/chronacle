@@ -2446,6 +2446,7 @@ describe('EntityManager', () => {
 
     it('requires clear intent to discard one dirty entity and preserves unrelated drafts', async () => {
       const coordinator = new DraftCoordinator();
+      const user = userEvent.setup();
       coordinator.open(oracleScope('camp1'), null, '');
       coordinator.revise(oracleScope('camp1'), 'Unsent Oracle question');
       renderManager(coordinator);
@@ -2473,17 +2474,39 @@ describe('EntityManager', () => {
       expect(screen.getByLabelText('Notes')).toHaveValue('Mira local note');
 
       await fireEvent.click(cancelOpener);
-      await fireEvent.click(
-        within(await screen.findByRole('dialog', { name: 'Unsaved changes' })).getByRole('button', {
-          name: 'Discard changes',
-        }),
-      );
+      const discard = within(
+        await screen.findByRole('dialog', { name: 'Unsaved changes' }),
+      ).getByRole('button', { name: 'Discard changes' });
+      discard.focus();
+      await user.keyboard('{Enter}');
       expect(screen.queryByLabelText('Notes')).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Mira' })).toHaveFocus());
+      expect(document.activeElement?.isConnected).toBe(true);
       await fireEvent.click(screen.getByText('Mira'));
       expect(screen.getByLabelText('Notes')).toHaveValue('Saved Mira note');
       await fireEvent.click(screen.getByText('Torvin'));
       expect(screen.getByLabelText('Notes')).toHaveValue('Torvin local note');
       expect(coordinator.get<string>(oracleScope('camp1'))?.value).toBe('Unsent Oracle question');
+    });
+
+    it('focuses New after keyboard discard closes the only new entity draft', async () => {
+      const coordinator = new DraftCoordinator();
+      const user = userEvent.setup();
+      vi.mocked(commands.getEntities).mockResolvedValue([]);
+      renderManager(coordinator);
+
+      await user.click(screen.getByRole('button', { name: 'New NPC' }));
+      await user.type(screen.getByLabelText('Name', { exact: true }), 'Unsaved NPC');
+      await user.click(screen.getByTestId('entity-form-cancel'));
+      const discard = within(
+        await screen.findByRole('dialog', { name: 'Unsaved changes' }),
+      ).getByRole('button', { name: 'Discard changes' });
+      discard.focus();
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => expect(screen.getByRole('button', { name: 'New NPC' })).toHaveFocus());
+      expect(screen.queryByLabelText('Name', { exact: true })).not.toBeInTheDocument();
+      expect(document.activeElement?.isConnected).toBe(true);
     });
 
     it('closes a clean form immediately without opening a discard dialog', async () => {
