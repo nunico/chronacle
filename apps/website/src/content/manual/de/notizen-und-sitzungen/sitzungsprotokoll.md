@@ -16,6 +16,9 @@ headings:
   - id: speicherstatus-beobachten
     text: Speicherstatus beobachten
     level: 2
+  - id: neue-sitzung-wiederherstellen
+    text: Neue Sitzung wiederherstellen
+    level: 2
   - id: beispiel
     text: Beispiel
     level: 2
@@ -42,6 +45,12 @@ Sitzungen erscheinen aufsteigend nach Sitzungsnummer. Ihr Text wird mit der Kamp
 <h2 id="speicherstatus-beobachten">Speicherstatus beobachten</h2>
 
 Wenn du den Fokus zu einem anderen Bedienelement derselben Sitzung bewegst, fordert Chronacle automatisch das Speichern an. Wechselst du direkt zu einer anderen Sitzung oder Ansicht, bleibt die Änderung als **Ungespeicherte Änderungen** erhalten, ohne dass die Navigation als Speicheranforderung gilt. **Wird gespeichert…**, **Gespeichert** und **Speichern nicht möglich** zeigen den weiteren Fortschritt. Scheitert das Speichern, bleibt dein Text in dieser Sitzung erhalten und **Erneut versuchen** wiederholt den Vorgang für denselben Eintrag. Du kannst während des Speicherns weiterarbeiten; der Abschluss eines früheren Vorgangs kennzeichnet neueren Text nicht als gespeichert. Unter [Entwürfe behalten und Speichervorgänge wiederholen](/de/handbuch/notizen-und-sitzungen/speichern-und-wiederherstellen) findest du Hinweise zu Navigation und Schließen.
+
+<h2 id="neue-sitzung-wiederherstellen">Neue Sitzung wiederherstellen</h2>
+
+Wenn **Neue Sitzung** die Sitzung nicht erstellen kann, bleibt der fehlgeschlagene Versuch bei der Kampagne, in der du ihn begonnen hast. **Erneut versuchen** verwendet dieselbe vorgesehene Sitzungsnummer, denselben Titel, dasselbe Datum und dieselben Notizen. Wiederholtes Auslösen kann weder parallele Erstellungen starten noch eine doppelte Sitzung anlegen. **Änderungen verwerfen** gibt nur diesen fehlgeschlagenen Versuch auf.
+
+Wurde die Sitzung erstellt, aber Chronacle zeigt **Erstellt, aber Eingriff erforderlich**, enthält die aufgelistete gespeicherte Sitzung bereits Änderungen, die du zuerst klären musst. Speichere oder verwirf diese widersprüchlichen Änderungen und wähle danach **Erneut versuchen** in der Meldung. Dadurch verbindet Chronacle den aufbewahrten Versuch mit der bereits erstellten Sitzung; es wird keine weitere Sitzung erstellt.
 
 <h2 id="beispiel">Beispiel</h2>
 

@@ -521,6 +521,7 @@ change is to make rule-note persistence provide a truthful acknowledgment.
 | Oracle          | `oracle:{campaign-id}` or `oracle:no-campaign`                | none                                       |
 | Existing entity | `entity:{campaign-id}:{kind}:{record-id}`                     | `entity:{kind}:{record-id}`                |
 | New entity      | `entity-new:{campaign-id}:{kind}:{client-draft-id}`           | the draft scope until Create returns an ID |
+| New session     | `session-new:{campaign-id}:{client-draft-id}`                 | the draft scope until Create returns an ID |
 | Session         | `session:{campaign-id}:{session-id}`                          | `session:{session-id}`                     |
 | Rule note       | `rule:{campaign-id-or-no-campaign}:{collection-id}:{rule-id}` | `rule:{rule-id}`                           |
 
@@ -549,6 +550,19 @@ derives an acknowledged provisional row from the destination draft. That row is
 an existing saved-domain record, not an unavailable or unsaved-new row; it is
 used only for selection/form presentation and is never inserted into the
 backend `entities` result or wikilink map.
+
+A new session likewise receives a stable client identity before Create begins.
+The attempt captures campaign ownership, its provisional target, and the exact
+session details before IPC. Failure retains that `session-new:` scope in its
+original campaign as at-risk work for Retry, targeted Discard, and normal-close
+protection. Retry reuses the retained attempt and never starts a duplicate
+Create. A successful acknowledgment promotes it to
+`session:{campaign-id}:{backend-id}` with target `session:{backend-id}`. If a
+listed destination already carries at-risk work, promotion remains blocked and
+visible; after the destination is resolved or discarded, Retry completes only
+the local promotion without another backend Create. Successful campaign deletion
+removes both `session:{campaign-id}:` and `session-new:{campaign-id}:` scopes;
+failed deletion preserves them.
 
 Rule notes include the active campaign—or the explicit `no-campaign` context—in
 the editing scope because CampaignView permits collection browsing without an
@@ -755,6 +769,12 @@ campaign or collection selects a different draft set while the shared
 46. Production exit is initiated by the typed Rust `confirm_app_exit` command.
     The frontend receives neither `core:window:allow-close` nor
     `core:window:allow-destroy`; wildcard window permissions are absent.
+47. A new-session draft has a stable client scope before Create, remains owned by
+    its captured campaign through failure and Retry, and promotes only to the
+    acknowledged backend session identity. Retry never duplicates Create;
+    targeted Discard or successful campaign deletion removes only the applicable
+    retained scope, while blocked promotion and failed campaign deletion remain
+    at-risk and recoverable.
 
 ## Draft and Save Lifecycle
 
@@ -1131,12 +1151,25 @@ re-enables the fields and recovery actions.
 
 The existing New Session button continues to create a default backend session
 immediately; designing a separate new-session form is outside this draft-loss
-scope. Its click handler captures `campaignId` before IPC. Settlement may update
-presentation only when that campaign remains current and the issuing view is
-live. If the GM switched campaigns, the created record remains solely in its
-original campaign and appears on the next authoritative load there; it is never
-registered, selected, or rendered under the campaign that is current when the
-promise settles. Creation failure uses persistent local error feedback.
+scope. Before IPC, its click handler allocates a stable client draft and captures
+`campaignId`, the provisional target, and the complete default session value.
+Settlement may update presentation only when that campaign remains current and
+the issuing view is live. If the GM switched campaigns, the created record
+remains solely in its original campaign and appears on the next authoritative
+load there; it is never registered, selected, or rendered under the campaign
+that is current when the promise settles.
+
+Creation failure remains inline and persistent in the original campaign. Retry
+uses the retained immutable details and cannot queue a second Create; targeted
+Discard removes only that failed new-session scope. An applicable acknowledgment
+promotes the draft to `session:{campaign-id}:{backend-id}` and
+`session:{backend-id}`. If an at-risk destination already exists for that ID,
+the visible **Created, but needs attention** issue retains both scopes and blocks
+another New Session. Resolving or discarding the destination followed by Retry
+reattempts only local promotion, with no backend I/O. The promotion issue remains
+close risk until Retry promotes after destination resolution, or successful
+campaign deletion removes it. Successful deletion releases both saved-session
+and `session-new:` prefixes; deletion failure preserves them.
 
 ### Rule-entry table notes
 
