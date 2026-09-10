@@ -24,6 +24,8 @@ headings:
     level: 2
 ---
 
+<!-- German proofreading requested -->
+
 Die Ansicht **Sitzungen** führt ein nummeriertes Kampagnenprotokoll; Titel, Datum und Notizen werden nach einem gewöhnlichen Fokuswechsel innerhalb der jeweiligen Sitzung automatisch gespeichert.
 
 <h2 id="sitzung-festhalten">Sitzung festhalten</h2>
