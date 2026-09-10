@@ -1224,6 +1224,7 @@ These are first-party library crates in the Cargo workspace. They are not extern
 | Mocking in tests                                      | `mockall`                                                                                                              |
 | YAML frontmatter (vault sync)                         | `yaml_serde` (the YAML org's maintained successor; `serde_yaml` is archived and `serde_yml` carries RUSTSEC-2025-0068) |
 | Filesystem watcher (vault sync)                       | `notify`                                                                                                               |
+| macOS application Quit interception                   | `objc2` + `objc2-app-kit` (target-specific; ADR-013)                                                                   |
 | Coverage                                              | `cargo-llvm-cov`                                                                                                       |
 | Audit                                                 | `cargo-audit`, `cargo-deny`                                                                                            |
 
@@ -1660,3 +1661,56 @@ tables and `rule_entry`, plus `backfill_unset_fields` coverage (see the
 lint finding kinds alongside the existing `duplicate_entity` and
 `broken_wikilink` kinds (the latter two gain, respectively, a real
 `similarity` value and a `candidates` array).
+
+---
+
+## ADR-013: macOS Application Quit Interception
+
+**Status:** Accepted (2026-09-10).
+
+### Context
+
+Tauri's `RunEvent::ExitRequested` and the webview window-close callback cover
+normal process and window exit on most paths, but AppKit asks its application
+delegate directly for Cmd-Q, Dock Quit, and `terminate:`. Tauri 2 does not
+surface that delegate question through its public run event. Relying on the run
+event alone would let macOS discard Chronacle's in-memory drafts without the
+shared close decision.
+
+Replacing Tauri's application delegate is not acceptable: it owns unrelated
+application lifecycle behavior. A frontend permission to destroy or close the
+window would also bypass the typed exit authorization command.
+
+### Decision
+
+On macOS only, Chronacle uses the public `objc2` and `objc2-app-kit` bindings to
+install a runtime subclass of the delegate Tauri has already registered. The
+subclass overrides only `applicationShouldTerminate:`; every other delegate
+method remains inherited from Tauri's delegate class.
+
+An unauthorized AppKit termination request is synchronously deferred with
+`NSTerminateLater`, enters the same `ExitAuthorization` nonce state used by the
+Tauri run callback, and emits the same targeted `app-exit-requested` event to
+the main webview. Concurrent requests coalesce. The frontend resolves the
+decision through `confirm_app_exit`; after nonce validation, `app.exit(0)` uses
+Tauri's existing authorized exit path. Chronacle does not call AppKit's
+`replyToApplicationShouldTerminate:` and therefore cannot accidentally start a
+second native termination sequence.
+
+Installation fails closed: if no delegate is available or the subclass cannot
+be installed, application startup returns an error instead of presenting an
+editor whose normal Quit path is unprotected.
+
+The direct dependencies are target-specific and version-aligned with Tauri's
+existing dependency graph: `objc2` 0.6 and `objc2-app-kit` 0.3. No Objective-C
+private API or delegate replacement is used.
+
+### Consequences
+
+- Cmd-Q, Dock Quit, AppleScript `quit`, window close, and Tauri application exit
+  share one authorization state and user decision.
+- Tauri delegate upgrades remain a compatibility surface; macOS release checks
+  must exercise all three AppKit Quit initiators plus Cancel and confirmed exit.
+- Linux and Windows do not compile or link the adapter or its dependencies.
+- Forced termination, crashes, and power loss remain outside the in-memory
+  draft guarantee.
