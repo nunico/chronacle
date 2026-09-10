@@ -20,6 +20,7 @@ pub(crate) enum ExitRequestDecision {
 pub(crate) struct NativeExitRequest {
     intent: u64,
     should_emit: bool,
+    authorized: bool,
 }
 
 impl NativeExitRequest {
@@ -29,6 +30,10 @@ impl NativeExitRequest {
 
     pub(crate) fn should_emit(self) -> bool {
         self.should_emit
+    }
+
+    pub(crate) fn is_authorized(self) -> bool {
+        self.authorized
     }
 }
 
@@ -87,6 +92,7 @@ impl ExitAuthorization {
         if state.authorized {
             state.authorized = false;
             state.pending_intent = None;
+            state.native_reply = None;
             state.native_created_intent = false;
             return ExitRequestDecision::Authorized;
         }
@@ -106,6 +112,18 @@ impl ExitAuthorization {
 
     pub(crate) fn intercept_native_exit(&self) -> NativeExitRequest {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if state.authorized {
+            let intent = state.pending_intent.unwrap_or_default();
+            state.authorized = false;
+            state.pending_intent = None;
+            state.native_reply = None;
+            state.native_created_intent = false;
+            return NativeExitRequest {
+                intent,
+                should_emit: false,
+                authorized: true,
+            };
+        }
         let should_emit = state.pending_intent.is_none();
         let intent = if let Some(intent) = state.pending_intent {
             intent
@@ -123,6 +141,7 @@ impl ExitAuthorization {
         NativeExitRequest {
             intent,
             should_emit,
+            authorized: false,
         }
     }
 
@@ -333,6 +352,25 @@ mod tests {
         assert!(matches!(
             authorization.intercept_exit(),
             ExitRequestDecision::Prevent { .. }
+        ));
+    }
+
+    #[test]
+    fn authorized_tauri_exit_passes_through_a_racing_native_termination() {
+        let authorization = ExitAuthorization::default();
+        let intent = authorization.request();
+        assert_eq!(
+            authorization.begin_resolution(intent, true),
+            ExitResolution::TauriExit
+        );
+
+        let native = authorization.intercept_native_exit();
+
+        assert!(native.is_authorized());
+        assert_eq!(authorization.pending(), None);
+        assert!(matches!(
+            authorization.intercept_exit(),
+            ExitRequestDecision::Prevent { intent: next } if next > intent
         ));
     }
 

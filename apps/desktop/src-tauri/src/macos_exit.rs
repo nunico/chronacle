@@ -2,6 +2,7 @@ use crate::exit_guard::ExitAuthorization;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NativeTerminationReply {
+    Now,
     Later,
     Cancel,
 }
@@ -11,6 +12,9 @@ fn intercept_native_exit(
     publish: impl FnOnce(u64) -> Result<(), ()>,
 ) -> NativeTerminationReply {
     let request = authorization.intercept_native_exit();
+    if request.is_authorized() {
+        return NativeTerminationReply::Now;
+    }
     if request.should_emit() && publish(request.intent()).is_err() {
         authorization.rollback_native_request(request.intent());
         return NativeTerminationReply::Cancel;
@@ -51,6 +55,7 @@ mod platform {
             .unwrap_or(NativeTerminationReply::Cancel);
 
         match reply {
+            NativeTerminationReply::Now => NSApplicationTerminateReply::TerminateNow,
             NativeTerminationReply::Later => NSApplicationTerminateReply::TerminateLater,
             NativeTerminationReply::Cancel => NSApplicationTerminateReply::TerminateCancel,
         }
@@ -138,7 +143,24 @@ pub(crate) use platform::schedule_reply;
 #[cfg(test)]
 mod tests {
     use super::{intercept_native_exit, NativeTerminationReply};
-    use crate::exit_guard::ExitAuthorization;
+    use crate::exit_guard::{ExitAuthorization, ExitResolution};
+
+    #[test]
+    fn authorized_native_quit_passes_through_without_republishing() {
+        let authorization = ExitAuthorization::default();
+        let intent = authorization.request();
+        assert_eq!(
+            authorization.begin_resolution(intent, true),
+            ExitResolution::TauriExit
+        );
+
+        let reply = intercept_native_exit(&authorization, |_intent| {
+            panic!("an authorized exit must not publish another request")
+        });
+
+        assert_eq!(reply, NativeTerminationReply::Now);
+        assert_eq!(authorization.pending(), None);
+    }
 
     #[test]
     fn unauthorized_native_quit_is_deferred_and_publishes_the_shared_intent() {
@@ -202,6 +224,7 @@ mod tests {
         assert!(source.contains("ClassBuilder::new("));
         assert!(source.contains("AnyObject::set_class(delegate, guarded_class)"));
         assert!(source.contains("NSApplicationTerminateReply::TerminateLater"));
+        assert!(source.contains("NSApplicationTerminateReply::TerminateNow"));
         assert!(source.contains("NSApplicationTerminateReply::TerminateCancel"));
         assert!(source.contains("replyToApplicationShouldTerminate(terminate)"));
         assert!(source.contains("run_on_main_thread"));
