@@ -139,7 +139,7 @@
   let mounted = true;
   let activeExistingProjectionPrefix: string | null = null;
   let activeNewProjectionPrefix: string | null = null;
-  const projectionLeases = new Map<string, () => void>();
+  const projectionLeases = new SvelteMap<string, () => void>();
 
   function leaseProjection(scope: string): void {
     if (!projectionLeases.has(scope)) {

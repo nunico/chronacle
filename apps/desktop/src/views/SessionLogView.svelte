@@ -81,7 +81,7 @@
   let sessionRequest = 0;
   let entityRequest = 0;
   let activeProjectionPrefix: string | null = null;
-  const projectionLeases = new Map<string, () => void>();
+  const projectionLeases = new SvelteMap<string, () => void>();
   const sessionLoadFence = new SessionLoadFence();
 
   function leaseProjection(scope: string): void {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { flushSync, onDestroy, tick, untrack } from 'svelte';
+  import { SvelteMap } from 'svelte/reactivity';
   import { getRuleEntries, updateRuleNotes, redoRuleEntry, type RuleEntry } from '../lib/commands';
   import { i18n } from '../lib/locale.svelte';
   import type { MessageKey } from '../lib/i18n/messages';
@@ -72,7 +73,7 @@
   let loadGeneration = 0;
   let destroyed = false;
   let activeProjectionPrefix: string | null = null;
-  const projectionLeases = new Map<string, () => void>();
+  const projectionLeases = new SvelteMap<string, () => void>();
 
   function leaseProjection(scope: string): void {
     if (!projectionLeases.has(scope)) {
