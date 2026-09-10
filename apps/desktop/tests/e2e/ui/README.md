@@ -15,13 +15,14 @@ Xvfb. To run locally, use a Linux machine or container.
 
 ## What's here
 
-| File | Purpose |
-|------|---------|
-| `enrichment-flow.e2e.mjs` | Full flow: index a lore PDF, extract an entity, assert the related-entity summary is rewritten by the second-pass enrichment. |
-| `settings-toggle.e2e.mjs` | UI-driven: clicks the "Enrich related entities" checkbox in Settings and confirms it persists through IPC + reload. |
-| `stub-llm.mjs` | Deterministic OpenAI-compatible SSE server. Returns canned extraction/profile JSON, branching on the prompt. No API key, fully reproducible. |
-| `driver.mjs` | tauri-driver + selenium-webdriver lifecycle and an `invoke()` bridge over the live webview IPC. |
-| `fixtures/lore-iron-fist.pdf` | Lore PDF naming a seed NPC ("Commander Varn") and a related faction ("The Iron Fist"). Regenerate with `node fixtures/make-pdf.mjs`. |
+| File                          | Purpose                                                                                                                                      |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enrichment-flow.e2e.mjs`     | Full flow: index a lore PDF, extract an entity, assert the related-entity summary is rewritten by the second-pass enrichment.                |
+| `settings-toggle.e2e.mjs`     | UI-driven: clicks the "Enrich related entities" checkbox in Settings and confirms it persists through IPC + reload.                          |
+| `draft-close.e2e.mjs`         | Sends a real window-manager close request and verifies retained drafts, active saves, and keyboard close decisions.                          |
+| `stub-llm.mjs`                | Deterministic OpenAI-compatible SSE server. Returns canned extraction/profile JSON, branching on the prompt. No API key, fully reproducible. |
+| `driver.mjs`                  | tauri-driver + selenium-webdriver lifecycle and an `invoke()` bridge over the live webview IPC.                                              |
+| `fixtures/lore-iron-fist.pdf` | Lore PDF naming a seed NPC ("Commander Varn") and a related faction ("The Iron Fist"). Regenerate with `node fixtures/make-pdf.mjs`.         |
 
 ## How the enrichment test proves the feature
 
@@ -29,8 +30,8 @@ Xvfb. To run locally, use a Linux machine or container.
    `extraction_enrich_neighbors = true`.
 2. Indexes the lore PDF (real chunking + embeddings) via `upload_source`.
 3. Runs `extract_entity_by_name("Commander Varn")`. The stub's **first** pass
-   returns the faction with a *relational* summary ("The militia that Commander
-   Varn commands."); the **second** (profile) pass returns an *entity-centric*
+   returns the faction with a _relational_ summary ("The militia that Commander
+   Varn commands."); the **second** (profile) pass returns an _entity-centric_
    summary ("A militant guild controlling the eastern docks of Varrowmoor.").
 4. Asserts the persisted faction ends up with the entity-centric summary — i.e.
    the second pass overwrote the relational one. With the setting off, it
@@ -44,12 +45,17 @@ does NOT embed the frontend (`frontendDist`) and the SPA will not serve.
 
 ```bash
 cargo install tauri-driver --locked       # once
-sudo apt-get install -y webkit2gtk-driver xvfb   # WebKitWebDriver + headless X
+sudo apt-get install -y webkit2gtk-driver xvfb openbox xdotool
+# WebKitWebDriver + headless X + window manager/native close input
 
 pnpm install
 pnpm exec tauri build --no-bundle --features rocksdb # embeds dist/ + persistent database
-xvfb-run -a pnpm e2e:ui                  # or omit xvfb-run on a real display
+dbus-run-session -- xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+  bash -c 'openbox >/tmp/openbox.log 2>&1 & exec "$@"' bash pnpm e2e:ui
 ```
+
+On a real display with an existing window manager and session bus, run
+`pnpm e2e:ui` directly. The close tests require `xdotool` in either setup.
 
 The first run downloads the embedding model (`nomic-embed-text-v1.5`), so allow
 extra time.
